@@ -12,12 +12,17 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Plan.BinderPlan.Alias
   ( AliasEnv (..),
     boundMentionsSelfAliasFor,
   )
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo (..))
+import MLF.Constraint.Presolution.Plan.BinderPlan.Predicate (isTargetSchemeBinderFor)
 import MLF.Constraint.Presolution.Plan.BinderPlan.Types (BinderPlan (..), BinderPlanInput (..))
+import MLF.Constraint.Presolution.Plan.Requirements (RequiredGammaBinder (..))
+import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Presolution.Plan.BinderPlan.Util
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
@@ -30,13 +35,15 @@ import MLF.Reify.Type (reifyTypeWithNamedSetRefs)
 import MLF.Reify.TypeOps (freeTypeVarRefsType)
 import MLF.Types.Elab
   ( Ty (..),
+    TypeBinderRef,
     typeBinderIdentityFromNode,
     typeBinderRefFromIdentity,
-    typeBinderRefName,
+    typeBinderRefIdentity,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
   )
-import MLF.Util.ElabError (ElabError)
+import MLF.Types.Identity (typeBinderIdentityGeneratedUnique)
+import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Graph (reachableFrom)
 import MLF.Util.Names (alphaName)
 import MLF.Util.Trace (traceWhen)
@@ -48,6 +55,92 @@ traceBinderPlanEnabledM :: Bool -> String -> Either ElabError ()
 traceBinderPlanEnabledM enabled msg =
   traceBinderPlanEnabled enabled msg (Right ())
 
+-- | Binder candidates proved to belong to a descendant scheme whose root is
+-- inside the selected result.  They are not selected eagerly: the body reify
+-- step below must still prove that their exact identities survive free in the
+-- selected root.  Keeping this as an explicit plan prevents finalization from
+-- inventing quantifiers after it encounters an escaped child reference.
+newtype RootBodyClosurePlan = RootBodyClosurePlan
+  { rootBodyClosureCandidateNodes :: [NodeId]
+  }
+
+-- | Quotient dependency-ordered graph binders by semantic identity while
+-- retaining a route for every graph key.  The first key in dependency order
+-- owns the declaration; later keys with the same identity reuse its named ref.
+buildBinderIdentityQuotient ::
+  (Int -> TypeBinderRef) ->
+  [Int] ->
+  ([(Int, TypeBinderRef)], IntMap.IntMap TypeBinderRef)
+buildBinderIdentityQuotient refForKey =
+  go Map.empty 0 [] IntMap.empty
+  where
+    go _ _ declarations routes [] =
+      (reverse declarations, routes)
+    go refsByIdentity declarationIndex declarations routes (key : rest) =
+      let sourceRef = refForKey key
+          identity = typeBinderRefIdentity sourceRef
+       in case Map.lookup identity refsByIdentity of
+            Just declarationRef ->
+              go
+                refsByIdentity
+                declarationIndex
+                declarations
+                (IntMap.insert key declarationRef routes)
+                rest
+            Nothing ->
+              let declarationRef =
+                    typeBinderRefFromIdentity
+                      identity
+                      (alphaName declarationIndex key)
+               in go
+                    (Map.insert identity declarationRef refsByIdentity)
+                    (declarationIndex + 1)
+                    ((key, declarationRef) : declarations)
+                    (IntMap.insert key declarationRef routes)
+                    rest
+
+validateBinderIdentityQuotient ::
+  (Int -> TypeBinderRef) ->
+  [Int] ->
+  [(Int, TypeBinderRef)] ->
+  IntMap.IntMap TypeBinderRef ->
+  [String]
+validateBinderIdentityQuotient refForKey orderedKeys declarations routes =
+  duplicateDeclarationErrors ++ routeErrors ++ unexpectedRouteErrors
+  where
+    declarationIdentityCounts =
+      Map.fromListWith
+        (+)
+        [ (typeBinderRefIdentity ref, 1 :: Int)
+        | (_, ref) <- declarations
+        ]
+    duplicateDeclarationErrors =
+      [ "semantic binder identity declared more than once: " ++ show identity
+      | (identity, count) <- Map.toList declarationIdentityCounts
+      , count > 1
+      ]
+    routeErrors =
+      concatMap validateRoute orderedKeys
+    validateRoute key =
+      case IntMap.lookup key routes of
+        Nothing -> ["missing semantic binder route for graph key " ++ show key]
+        Just routeRef
+          | typeBinderRefsSameIdentity routeRef (refForKey key) -> []
+          | otherwise ->
+              [ "semantic binder route changed identity for graph key "
+                  ++ show key
+                  ++ ": expected "
+                  ++ show (typeBinderRefIdentity (refForKey key))
+                  ++ ", got "
+                  ++ show (typeBinderRefIdentity routeRef)
+              ]
+    expectedRouteKeys = IntSet.fromList orderedKeys
+    unexpectedRouteErrors =
+      [ "unexpected semantic binder route for graph key " ++ show key
+      | key <- IntMap.keys routes
+      , not (IntSet.member key expectedRouteKeys)
+      ]
+
 buildBinderPlan :: BinderPlanInput p -> Either ElabError BinderPlan
 buildBinderPlan BinderPlanInput {..} = do
   let traceGeneralize = traceBinderPlanEnabled bpiDebugEnabled
@@ -56,7 +149,6 @@ buildBinderPlan BinderPlanInput {..} = do
       nodes = bpiNodes
       canonical = bpiCanonical
       canonKey = bpiCanonKey
-      isTyVarKey = bpiIsTyVarKey
       bindParents = bpiBindParents
       mbBindParentsGa = bpiBindParentsGa
       scopeRootC = bpiScopeRootC
@@ -81,7 +173,6 @@ buildBinderPlan BinderPlanInput {..} = do
       typeRoot0 = bpiTypeRoot0
       typeRoot = bpiTypeRoot
       typeRootFromBoundVar = bpiTypeRootFromBoundVar
-      typeRootIsForall = bpiTypeRootIsForall
       liftToForall = bpiLiftToForall
       reachableFromWithBounds = bpiReachableFromWithBounds
       resForReify = bpiResForReify
@@ -96,6 +187,14 @@ buildBinderPlan BinderPlanInput {..} = do
       schemeRootByBodyBase = bpiSchemeRootByBodyBase
       aliasBinderBases = bpiAliasBinderBases
       orderCandidates = bpiOrderBinderCandidates
+      requiredGamma = bpiRequiredGamma
+      sourceBinderRefs = bpiSourceBinderRefs
+      sourceRefForLiveKey k =
+        case IntMap.lookup k sourceBinderRefs of
+          Just ref -> Just ref
+          Nothing -> do
+            baseNode <- IntMap.lookup k solvedToBasePref
+            IntMap.lookup (getNodeId baseNode) sourceBinderRefs
 
   let binders0Adjusted =
         let freeVarsFromBound =
@@ -127,13 +226,8 @@ buildBinderPlan BinderPlanInput {..} = do
         ++ " reachable="
         ++ show (IntSet.toList reachableForBinders)
     )
-  let isTargetSchemeBinder v
-        | targetIsBaseLike = False
-        | canonical v == canonical target0 = True
-        | otherwise =
-            case VarStore.lookupVarBound constraint (canonical v) of
-              Just bnd -> canonical bnd == canonical target0
-              Nothing -> False
+  let isTargetSchemeBinder =
+        isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike
   let extraReachable =
         case (scopeGen, lookupNodeInMap nodes typeRoot0) of
           (Just _, _) -> []
@@ -149,7 +243,78 @@ buildBinderPlan BinderPlanInput {..} = do
                   Just (GenRef _, _) -> False
                   _ -> True
             ]
-      bindersCandidates = binders0Adjusted ++ extraReachable ++ namedUnderGa
+      locallyClosedGammaKeys =
+        IntSet.fromList
+          [ canonKey (NodeId key)
+          | key <- IntSet.toList bpiLocallyClosedGammaNodes
+          ]
+      ownerWithinCurrentScope ownerGen =
+        case
+          Binding.bindingPathToRootLocal
+            bindParents
+            (GenRef ownerGen)
+        of
+          Right path -> scopeRootC `elem` path
+          Left _ -> False
+      rootBodyCandidateRef child =
+        case sourceRefForLiveKey (canonKey child) of
+          Just sourceRef -> sourceRef
+          Nothing ->
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode child)
+              ("t" ++ show (getNodeId child))
+      rootBodyClosurePlan =
+        RootBodyClosurePlan
+          { rootBodyClosureCandidateNodes =
+              [ canonical child
+              | (child, TyVar {}) <- toListNode (cNodes constraint)
+              , let childKey = canonKey child
+              , IntSet.member childKey reachableType
+              , not (VarStore.isEliminatedVar constraint (canonical child))
+              , Just (GenRef ownerGen, BindFlex) <-
+                  [IntMap.lookup (nodeRefKey (typeRef child)) bindParents]
+              , ownerWithinCurrentScope ownerGen
+              -- Candidate collection deliberately includes nested-scheme
+              -- interiors.  The provisional body reification below selects
+              -- only identities that actually survive free in the chosen
+              -- result, so a nested forall still closes its own declarations
+              -- while an escaped @alpha > S(operated)@ remains constructible.
+              -- A nested node that already carries a source-binder route is
+              -- different: its enclosing source scheme owns that identity,
+              -- so treating the graph occurrence as a local declaration
+              -- would create a spurious cycle between the scheme wrapper and
+              -- its routed occurrence.
+              , not
+                  ( IntSet.member childKey nestedSchemeInteriorSet
+                      && case sourceRefForLiveKey childKey of
+                        Just sourceRef ->
+                          case
+                            typeBinderIdentityGeneratedUnique
+                              (typeBinderRefIdentity sourceRef)
+                          of
+                            Just _ -> True
+                            Nothing -> False
+                        Nothing -> False
+                  )
+              , not (IntSet.member childKey locallyClosedGammaKeys)
+              , not
+                  ( any
+                      ( typeBinderRefsSameIdentity
+                          (rootBodyCandidateRef child)
+                      )
+                      bpiAmbientBinderRefs
+                  )
+              ]
+          }
+      bindersCandidates =
+        [ binder
+        | binder <-
+            binders0Adjusted
+              ++ extraReachable
+              ++ namedUnderGa
+              ++ rootBodyClosureCandidateNodes rootBodyClosurePlan
+        , not (IntSet.member (canonKey binder) locallyClosedGammaKeys)
+        ]
       canonicalBinder v =
         let vC = canonical v
          in case lookupNodeInMap nodes vC of
@@ -163,6 +328,8 @@ buildBinderPlan BinderPlanInput {..} = do
             vKey = getNodeId vC
          in case IntMap.lookup vKey gammaAlias of
               Just repKey
+                | IntMap.member repKey requiredGamma ->
+                    canonicalBinder (NodeId repKey)
                 | IntSet.member vKey baseGammaRepSet -> vC
                 | otherwise ->
                     canonicalBinder (NodeId repKey)
@@ -176,7 +343,32 @@ buildBinderPlan BinderPlanInput {..} = do
           IntMap.fromList
             [ (getNodeId v, v)
               | v <- normalizedBinders
+              , not (IntSet.member (canonKey v) locallyClosedGammaKeys)
             ]
+      locallyClosedRequiredGammaKeys =
+        [ (key, rgbExteriorNode requirement)
+        | (key, requirement) <- IntMap.toList requiredGamma
+        , IntSet.member (canonKey (NodeId key)) locallyClosedGammaKeys
+            || IntSet.member
+                (canonKey (rgbExteriorNode requirement))
+                locallyClosedGammaKeys
+        ]
+  traceGeneralizeM
+    ( "generalizeAt: rootBodyClosureCandidates="
+        ++ show (rootBodyClosureCandidateNodes rootBodyClosurePlan)
+        ++ " reachableType="
+        ++ show (IntSet.toList reachableType)
+    )
+  case locallyClosedRequiredGammaKeys of
+    [] -> pure ()
+    _ ->
+      Left
+        ( ValidationFailed
+            [ "a root Gamma requirement is already closed by a nested construction"
+            , "  locally closed Gamma keys: " ++ show (IntSet.toList locallyClosedGammaKeys)
+            , "  conflicting required Gamma keys: " ++ show locallyClosedRequiredGammaKeys
+            ]
+        )
   let typeRootForScheme = liftToForall typeRoot
       aliasEnv =
         AliasEnv { aeCanonical = canonical,
@@ -215,6 +407,14 @@ buildBinderPlan BinderPlanInput {..} = do
           _ -> False
       boundIsTypeRootAlias v =
         boundIsSchemeBodyAlias v
+      isUnselectedStructuralRootCarrier v =
+        case lookupNodeInMap nodes (canonical target0) of
+          Just TyVar {} -> False
+          _ ->
+            canonical v /= canonical target0
+              && case VarStore.lookupVarBound constraint (canonical v) of
+                Just bnd -> canonical bnd == canonical typeRoot
+                Nothing -> False
       boundHasNamedOutsideGammaFor v =
         case mbBindParentsGa of
           Just ga
@@ -327,25 +527,75 @@ buildBinderPlan BinderPlanInput {..} = do
           ]
         where
           inReachableType x = IntSet.member (getNodeId (canonical x)) reachableType
-  let forallBoundBinders =
+  let isStructuralBinderOwner node =
+        case node of
+          TyForall {} -> True
+          TyMu {} -> True
+          _ -> False
+      leadingForallOwners = collectLeadingForallOwners IntSet.empty typeRoot
+        where
+          collectLeadingForallOwners seen root0 =
+            let root = canonical root0
+                rootKey = canonKey root
+             in if IntSet.member rootKey seen
+                  then IntSet.empty
+                  else
+                    let seen' = IntSet.insert rootKey seen
+                     in case lookupNodeInMap nodes root of
+                          Just TyVar {} ->
+                            case VarStore.lookupVarBound constraint root of
+                              Just bnd -> collectLeadingForallOwners seen' bnd
+                              Nothing -> IntSet.empty
+                          Just TyForall {tnBody = body} ->
+                            IntSet.insert rootKey (collectLeadingForallOwners seen' body)
+                          Just TyExp {tnBody = body} ->
+                            collectLeadingForallOwners seen' body
+                          _ -> IntSet.empty
+      structuralOwnerForBinder v =
+        let vC = canonical v
+            lookupParent node =
+              IntMap.lookup (nodeRefKey (typeRef node)) bindParents
+            mbParent =
+              case lookupParent vC of
+                Just parent -> Just parent
+                Nothing -> lookupParent v
+         in case mbParent of
+              Just (TypeRef parent0, _) ->
+                let parent = canonical parent0
+                    parentKey = canonKey parent
+                 in case lookupNodeInMap nodes parent of
+                      Just owner
+                        | isStructuralBinderOwner owner
+                        , IntSet.member parentKey reachableType ->
+                            Just parentKey
+                      _ -> Nothing
+              _ -> Nothing
+      nestedStructuralBinders =
         IntSet.fromList
           [ canonKey child
-            | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents,
-              TypeRef parent <- [parentRef],
-              IntSet.member (canonKey parent) reachableType,
-              case lookupNodeInMap nodes (canonical parent) of
-                Just TyForall {} -> True
-                _ -> False,
-              IntSet.member (canonKey parent) schemeRootKeySet,
-              TypeRef child <- [nodeRefFromKey childKey],
-              isTyVarKey (canonKey child)
+            | child <- bindersCandidatesCanonical,
+              Just ownerKey <- [structuralOwnerForBinder child],
+              not (IntSet.member ownerKey leadingForallOwners)
           ]
+      nestedSourceStructuralRefs =
+        [ ownerRef
+          | ownerKey <- IntSet.toList reachableType,
+            not (IntSet.member ownerKey leadingForallOwners),
+            Just owner <- [lookupNodeInMap nodes (NodeId ownerKey)],
+            isStructuralBinderOwner owner,
+            Just ownerRef <- [sourceRefForLiveKey ownerKey]
+        ]
+      isNestedSourceStructuralBinder v =
+        case sourceRefForLiveKey (canonKey v) of
+          Nothing -> False
+          Just ref -> any (typeBinderRefsSameIdentity ref) nestedSourceStructuralRefs
   let binderCandidateKeys =
         IntSet.fromList [canonKey v | v <- bindersCandidatesCanonical]
   let binders =
         [ canonicalBinder v
           | v <- bindersCandidatesCanonical,
             let vKey = canonKey v,
+            not (IntSet.member vKey locallyClosedGammaKeys),
             let gammaKey =
                   case IntMap.lookup vKey gammaAlias of
                     Just repKey -> repKey
@@ -423,7 +673,9 @@ buildBinderPlan BinderPlanInput {..} = do
             not (aliasBoundIsBottomOrNone v && not inGamma),
             not (aliasBinderIsTrivial v),
             not (aliasBinderIsRedundant v inGamma),
-            not (IntSet.member (canonKey v) forallBoundBinders && not typeRootIsForall)
+            not (isUnselectedStructuralRootCarrier v),
+            not (IntSet.member (canonKey v) nestedStructuralBinders),
+            not (isNestedSourceStructuralBinder v)
         ]
   traceGeneralizeM
     ( "generalizeAt: binder filters="
@@ -454,7 +706,7 @@ buildBinderPlan BinderPlanInput {..} = do
                   boundIsSchemeRootAll v,
                   boundIsTypeRootAlias v,
                   boundUnderOtherGen,
-                  IntSet.member vKey forallBoundBinders,
+                  IntSet.member vKey nestedStructuralBinders || isNestedSourceStructuralBinder v,
                   inGammaDbg,
                   IntMap.lookup (nodeRefKey (typeRef (canonical v))) bindParents
                 )
@@ -462,7 +714,10 @@ buildBinderPlan BinderPlanInput {..} = do
           ]
     )
   let requiredGammaBinders :: [NodeId]
-      requiredGammaBinders = []
+      requiredGammaBinders =
+        [ NodeId liveKey
+          | liveKey <- IntMap.keys requiredGamma
+        ]
       binders' =
         traceGeneralize
           ( "generalizeAt: bindersFiltered="
@@ -472,7 +727,10 @@ buildBinderPlan BinderPlanInput {..} = do
               ++ " typeRoot="
               ++ show typeRoot
           )
-          binders
+          [ binder
+          | binder <- binders ++ requiredGammaBinders
+          , not (IntSet.member (canonKey binder) locallyClosedGammaKeys)
+          ]
       bindersCanon =
         IntMap.elems $
           IntMap.fromList
@@ -480,32 +738,78 @@ buildBinderPlan BinderPlanInput {..} = do
               | v <- binders'
             ]
   let binderIds = map getNodeId bindersCanon
-      candidateSet = IntSet.fromList binderIds
+      -- The selected binders seed dependency closure, but a selected
+      -- binder's bound may mention a candidate filtered out of that seed.
+      -- Keep the complete construction-time candidate domain available so
+      -- closure can recover those dependencies (for example paper K's
+      -- @c >= forall e. e -> a@ must pull @a@ back in through @c@'s bound).
+      -- This is deliberately not a free-variable repair on the final type:
+      -- every admitted dependency still comes from a binder candidate or a
+      -- required Gamma construction.
+      dependencyCandidateSet =
+        IntSet.union
+          binderCandidateKeys
+          ( IntSet.fromList
+              [ liveKey
+              | liveKey <- IntMap.keys requiredGamma
+              , not
+                  ( IntSet.member
+                      (canonKey (NodeId liveKey))
+                      locallyClosedGammaKeys
+                  )
+              ]
+          )
+      dependencyCandidateIds = IntSet.toList dependencyCandidateSet
       nameForDep k = "t" ++ show k
-      refForDep k = typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId k)) (nameForDep k)
+      refForDep k =
+        case IntMap.lookup k requiredGamma of
+          Just requirement ->
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode (rgbExteriorNode requirement))
+              (nameForDep k)
+          Nothing ->
+            maybe
+              (typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId k)) (nameForDep k))
+              (\ref -> typeBinderRefFromIdentity (typeBinderRefIdentity ref) (nameForDep k))
+              (sourceRefForLiveKey k)
       depFromRef ref =
-        case typeBinderRefNode ref of
-          Just node -> Just (getNodeId node)
-          Nothing -> Nothing
+        case
+          [ key
+            | (key, candidateRef) <- IntMap.toList substDeps,
+              typeBinderRefsSameIdentity candidateRef ref
+          ]
+        of
+          key : _ -> Just key
+          [] -> getNodeId <$> typeBinderRefNode ref
       depsFromRefs k allowed refs =
         [ dep
           | ref <- refs,
             Just dep <- [depFromRef ref],
             dep /= k,
+            not
+              ( typeBinderRefsSameIdentity
+                  (refForDep k)
+                  (refForDep dep)
+              ),
             IntSet.member dep allowed
         ]
       substDeps =
         IntMap.fromList
           [ (k, refForDep k)
-            | k <- binderIds
+            | k <- dependencyCandidateIds
           ]
       substDepsBase =
         case mbBindParentsGa of
           Just _ ->
             IntMap.fromListWith
               (\_ old -> old)
-              [ (getNodeId baseN, typeBinderRefFromIdentity (typeBinderIdentityFromNode baseN) (nameForDep k))
-                | k <- binderIds,
+              [ ( getNodeId baseN
+                , maybe
+                    (typeBinderRefFromIdentity (typeBinderIdentityFromNode baseN) (nameForDep k))
+                    (\ref -> typeBinderRefFromIdentity (typeBinderRefIdentity ref) (nameForDep k))
+                    (IntMap.lookup (getNodeId baseN) sourceBinderRefs)
+                )
+                | k <- dependencyCandidateIds,
                   Just baseN <- [IntMap.lookup k solvedToBasePref]
               ]
           Nothing -> IntMap.empty
@@ -534,8 +838,29 @@ buildBinderPlan BinderPlanInput {..} = do
                     Just repKey -> repKey == k
                     Nothing -> False
                 Nothing -> False
-         in case mbBindParentsGa of
-              Just ga
+         in case (IntMap.lookup k requiredGamma, mbBindParentsGa) of
+              (Just requirement, Just _) -> do
+                let boundTy = rgbOperatedType requirement
+                let freeRefs = freeTypeVarRefsType boundTy
+                    deps = depsFromRefs k dependencyCandidateSet freeRefs
+                traceGeneralizeM
+                  ( "generalizeAt: required Gamma boundDeps k="
+                      ++ show k
+                      ++ " sourceRoot="
+                      ++ show (rgbOperatedRoot requirement)
+                      ++ " boundTy="
+                      ++ show boundTy
+                      ++ " deps="
+                      ++ show deps
+                  )
+                pure deps
+              (Just requirement, Nothing) ->
+                Left
+                  (ValidationFailed
+                    [ "root RaiseMerge binder ordering requires the frozen base graph"
+                    , "  requirement: " ++ show requirement
+                    ])
+              (Nothing, Just ga)
                 | Just baseK <- IntMap.lookup k solvedToBasePref,
                   isBaseRep ->
                     let baseConstraint = gbiBaseConstraint ga
@@ -553,7 +878,7 @@ buildBinderPlan BinderPlanInput {..} = do
                           Nothing -> do
                             let boundTy = TVarRef (refForDep k)
                                 freeRefs = freeTypeVarRefsType boundTy
-                                deps = depsFromRefs k candidateSet freeRefs
+                                deps = depsFromRefs k dependencyCandidateSet freeRefs
                             pure deps
                           Just bnd -> do
                             let bndRoot = boundRootForDepsBase bnd
@@ -569,7 +894,7 @@ buildBinderPlan BinderPlanInput {..} = do
                                     (TBottom, Just TyVar {}, Nothing) ->
                                       [refForDep bndRootKey]
                                     _ -> freeRefs0
-                                deps = depsFromRefs k candidateSet freeRefs
+                                deps = depsFromRefs k dependencyCandidateSet freeRefs
                             traceGeneralizeM
                               ( "generalizeAt: boundDeps k="
                                   ++ show k
@@ -589,7 +914,7 @@ buildBinderPlan BinderPlanInput {..} = do
                   Nothing -> do
                     let boundTy = TVarRef (refForDep k)
                         freeRefs = freeTypeVarRefsType boundTy
-                        deps = depsFromRefs k candidateSet freeRefs
+                        deps = depsFromRefs k dependencyCandidateSet freeRefs
                     pure deps
                   Just bnd -> do
                     let bndRoot = boundRootForDeps bnd
@@ -606,7 +931,7 @@ buildBinderPlan BinderPlanInput {..} = do
                             (TBottom, Just TyVar {}, Nothing) ->
                               [refForDep bndRootKey]
                             _ -> freeRefs0
-                        deps = depsFromRefs k candidateSet freeRefs
+                        deps = depsFromRefs k dependencyCandidateSet freeRefs
                     traceGeneralizeM
                       ( "generalizeAt: boundDeps k="
                           ++ show k
@@ -622,14 +947,23 @@ buildBinderPlan BinderPlanInput {..} = do
                     pure deps
       orderBinders candidates =
         orderCandidates
-          candidates
+          [ key
+          | key <- candidates
+          , not (IntSet.member (canonKey (NodeId key)) locallyClosedGammaKeys)
+          ]
           boundDepsForCandidate
 
   let binderCandidateMap =
         IntMap.fromList
-          [ (getNodeId (canonicalBinder v), canonicalBinder v)
-            | v <- bindersCandidatesCanonical
-          ]
+          ( [ (getNodeId (canonicalBinder v), canonicalBinder v)
+              | v <- bindersCandidatesCanonical
+              , not (IntSet.member (canonKey v) locallyClosedGammaKeys)
+            ]
+              ++ [ (liveKey, NodeId liveKey)
+                   | liveKey <- IntMap.keys requiredGamma
+                   , not (IntSet.member (canonKey (NodeId liveKey)) locallyClosedGammaKeys)
+                 ]
+          )
       closeBinderSet current = do
         deps <- fmap concat $ mapM boundDepsForCandidate (IntSet.toList current)
         let next = IntSet.union current (IntSet.fromList deps)
@@ -639,23 +973,27 @@ buildBinderPlan BinderPlanInput {..} = do
   let provisionalIds = IntSet.toList closedBinderSet
       provisionalSubst = IntMap.fromList [(key, refForDep key) | key <- provisionalIds]
   bodyClosureIds <- do
-    targetNamedSet <- namedNodes resForReify
-    targetTy <-
-      reifyTypeWithNamedSetRefs
-        resForReify
-        provisionalSubst
-        targetNamedSet
-        (canonical target0)
-    pure
-      [ dep
-        | ref <- freeTypeVarRefsType targetTy,
-          Just dep <-
-            [ case [bid | (bid, provisionalRef) <- IntMap.toList provisionalSubst, typeBinderRefsSameIdentity provisionalRef ref] of
-                (bid : _) -> Just bid
-                [] -> depFromRef ref
-            ],
-          IntSet.member dep binderCandidateKeys
-      ]
+    let liveTypeRoot = canonical typeRoot
+    case lookupNodeIn (cNodes (pvCanonicalConstraint resForReify)) liveTypeRoot of
+      Nothing -> pure []
+      Just _ -> do
+        targetNamedSet <- namedNodes resForReify
+        targetTy <-
+          reifyTypeWithNamedSetRefs
+            resForReify
+            provisionalSubst
+            targetNamedSet
+            liveTypeRoot
+        pure
+          [ dep
+            | ref <- freeTypeVarRefsType targetTy,
+              Just dep <-
+                [ case [bid | (bid, provisionalRef) <- IntMap.toList provisionalSubst, typeBinderRefsSameIdentity provisionalRef ref] of
+                    (bid : _) -> Just bid
+                    [] -> depFromRef ref
+                ],
+              IntSet.member dep binderCandidateKeys
+          ]
   closedBinderSet' <- closeBinderSet (IntSet.union closedBinderSet (IntSet.fromList bodyClosureIds))
   let bindersCanonClosed =
         [ binder
@@ -671,19 +1009,26 @@ buildBinderPlan BinderPlanInput {..} = do
         ++ " ordered0="
         ++ show ordered0
     )
-  let names = zipWith alphaName [0 ..] ordered0
-      refs =
-        [ typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
-          | (key, name) <- zip ordered0 names
-        ]
-      subst0 = IntMap.fromList (zip ordered0 refs)
+  let (orderedBinders, binderRefRoutes) =
+        buildBinderIdentityQuotient refForDep ordered0
+      identityQuotientErrors =
+        validateBinderIdentityQuotient
+          refForDep
+          ordered0
+          orderedBinders
+          binderRefRoutes
+  case identityQuotientErrors of
+    [] -> pure ()
+    errors ->
+      Left
+        ( ValidationFailed
+            ("invalid semantic binder identity quotient" : errors)
+        )
   pure
     BinderPlan
-      { bpBindersCanon = bindersCanonClosed,
-        bpBinderIds = binderIdsClosed,
-        bpOrderedBinderIds = ordered0,
-        bpBinderNames = map typeBinderRefName refs,
-        bpSubst0 = subst0,
+      { bpOrderedBinders = orderedBinders,
+        bpBinderRefRoutes = binderRefRoutes,
+        bpLocallyClosedGammaKeys = locallyClosedGammaKeys,
         bpNestedSchemeInteriorSet = nestedSchemeInteriorSet,
         bpGammaAlias = gammaAlias,
         bpBaseGammaSet = baseGammaSet,
@@ -692,7 +1037,10 @@ buildBinderPlan BinderPlanInput {..} = do
         bpSolvedToBasePref = solvedToBasePref,
         bpReachableForBinders = reachableForBinders,
         bpAliasBinderBases = aliasBinderBases,
-        bpOrderBinders = orderBinders
+        bpOrderBinders = orderBinders,
+        bpRequiredGamma = requiredGamma,
+        bpSourceBinderRefs = sourceBinderRefs,
+        bpAmbientBinderRefs = bpiAmbientBinderRefs
       }
   where
     hasExplicitBound v =

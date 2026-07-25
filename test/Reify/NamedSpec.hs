@@ -4,6 +4,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import MLF.Constraint.Types.Graph
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.Named (namedNodes, softenedBindParentsUnder)
 import SpecUtil (emptyConstraint, nodeMapFromList)
 import Test.Hspec
@@ -96,6 +97,44 @@ spec = describe "MLF.Reify.Named" $ do
        in case namedNodes pv of
             Right s -> IntSet.member (getNodeId childVarN) s `shouldBe` False
             Left err -> expectationFailure ("namedNodes failed: " ++ show err)
+
+    it "keeps a weakened ground-bound variable flexible and named" $
+      let varN = NodeId 1
+          baseN = NodeId 2
+          genId = GenNodeId 0
+          nodes =
+            nodeMapFromList
+              [ (getNodeId varN, TyVar {tnId = varN, tnBound = Just baseN}),
+                ( getNodeId baseN,
+                  TyBase
+                    { tnId = baseN,
+                      tnBaseIdentity = PrimitiveIdentity.builtinTypeIdentity "Bool",
+                      tnBase = BaseTy "Bool"
+                    }
+                )
+              ]
+          genNodes = fromListGen [(genId, GenNode genId [varN])]
+          bindParents =
+            IntMap.fromList
+              [ (nodeRefKey (typeRef varN), (genRef genId, BindRigid)),
+                (nodeRefKey (typeRef baseN), (typeRef varN, BindRigid))
+              ]
+          c =
+            emptyConstraint
+              { cNodes = nodes,
+                cBindParents = bindParents,
+                cGenNodes = genNodes,
+                cWeakenedVars = IntSet.singleton (getNodeId varN)
+              }
+          pv = presolutionViewFromSnapshot c IntMap.empty
+       in do
+            namedNodes pv `shouldBe` Right (IntSet.singleton (getNodeId varN))
+            case softenedBindParentsUnder id c of
+              Right bp ->
+                case IntMap.lookup (nodeRefKey (typeRef varN)) bp of
+                  Just (_, flag) -> flag `shouldBe` BindFlex
+                  Nothing -> expectationFailure "Expected entry in bind parents"
+              Left err -> expectationFailure ("softenedBindParentsUnder failed: " ++ show err)
 
   describe "softenedBindParentsUnder" $ do
     it "leaves non-weakened bind flags unchanged" $

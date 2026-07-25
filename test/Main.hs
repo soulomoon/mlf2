@@ -15,8 +15,6 @@ import Constraint.NodeAccessSpec qualified
 import Constraint.SolvedSpec qualified
 import ConstraintGenSpec qualified
 import Control.Exception (finally)
-import Control.Monad (unless)
-import Data.IORef (newIORef, readIORef, writeIORef)
 import Elab.ResultTypeUtilSpec qualified
 import ElaborationSpec qualified
 import ExpansionMinimalitySpec qualified
@@ -34,6 +32,7 @@ import InertSpec qualified
 import NormalizeSpec qualified
 import PrimitiveInventorySpec qualified
 import Phi.AlignmentSpec qualified
+import Phi.ComputationSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
@@ -62,7 +61,6 @@ import Presolution.MergeEmissionSpec qualified
 import Presolution.RaiseSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import Presolution.WitnessSpec qualified
-import PresolutionSpec qualified
 import Property.QuickCheckPropertySpec qualified
 import PublicSurfaceSpec qualified
 import PhaseSingletonsSpec qualified
@@ -80,7 +78,6 @@ import Research.SameLaneRetainedChildRepresentativeGapSpec qualified
 import ScopeSpec qualified
 import SolveSpec qualified
 import System.Environment (lookupEnv)
-import System.Exit (die)
 import System.IO (hPutStrLn, stderr)
 import Test.Hspec
 import ThesisFixDirectionSpec qualified
@@ -97,16 +94,13 @@ _programParserParitySpecDisabled :: Spec
 _programParserParitySpecDisabled = ProgramParserParitySpec.spec >> pure ()
 
 main :: IO ()
-main = do
-  presolutionMarker <- newIORef False
+main =
   hspec $ do
     timedSpec "PhaseSingletonsSpec" PhaseSingletonsSpec.spec
     timedSpec "Constraint.NodeAccessSpec" Constraint.NodeAccessSpec.spec
     timedSpec "ConstraintGenSpec" ConstraintGenSpec.spec
     timedSpec "NormalizeSpec" NormalizeSpec.spec
     timedSpec "AcyclicitySpec" AcyclicitySpec.spec
-    runIO (writeIORef presolutionMarker True)
-    timedSpec "PresolutionSpec" PresolutionSpec.spec
     timedSpec "Presolution.UnificationClosureSpec" Presolution.UnificationClosureSpec.spec
     timedSpec "Presolution.EdgeInterpreterSpec" Presolution.EdgeInterpreterSpec.spec
     timedSpec "Presolution.EdgePlannerSpec" Presolution.EdgePlannerSpec.spec
@@ -117,10 +111,6 @@ main = do
     timedSpec "Presolution.MergeEmissionSpec" Presolution.MergeEmissionSpec.spec
     timedSpec "Presolution.RaiseSpec" Presolution.RaiseSpec.spec
     timedSpec "Presolution.WitnessSpec" Presolution.WitnessSpec.spec
-    runIO $ do
-      wasPresolutionWired <- readIORef presolutionMarker
-      unless wasPresolutionWired $
-        die "PresolutionSpec was not wired into the test harness."
     timedSpec "SolveSpec" SolveSpec.spec
     timedSpec "ScopeSpec" ScopeSpec.spec
     timedSpec "PrimitiveInventorySpec" PrimitiveInventorySpec.spec
@@ -172,6 +162,7 @@ main = do
     timedSpec "XMLFPrettySpec" XMLFPrettySpec.spec
     timedSpec "FrozenParitySpec" FrozenParitySpec.spec
     timedSpec "Phi.WitnessDomainSpec" Phi.WitnessDomainSpec.spec
+    timedSpec "Phi.ComputationSpec" Phi.ComputationSpec.spec
     timedSpec "Phi.AlignmentSpec" Phi.AlignmentSpec.spec
     timedSpec "TranslatablePresolutionSpec" TranslatablePresolutionSpec.spec
     timedSpec "PhiSoundnessSpec" PhiSoundnessSpec.spec

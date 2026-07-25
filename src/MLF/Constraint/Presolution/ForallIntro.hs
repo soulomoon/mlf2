@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Presolution.ForallIntro
 Description : Materialize ∀-introductions during presolution
@@ -8,6 +9,9 @@ It keeps binder surgery localized so the public presolution entrypoint can stay
 focused on orchestration.
 -}
 module MLF.Constraint.Presolution.ForallIntro (
+    DestinationOwnedRoot,
+    destinationOwnedRootNode,
+    requireDestinationOwnedRoot,
     introduceForallFromSpec,
     bindForallBindersFromSpec
 ) where
@@ -24,9 +28,14 @@ import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Presolution.Base (MonadPresolution(..), PresolutionM, PresolutionError(..))
+import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..))
+import MLF.Constraint.Presolution.Copy (copyForallBoundProjectionAtBinder)
 import MLF.Constraint.Presolution.Ops (createFreshNodeId, registerNode, setBindParentM, setVarBound)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)
+import MLF.Constraint.Presolution.StateAccess
+    ( getBindingSnapshot
+    , getConstraintAndCanonical
+    , liftBindingError
+    )
 
 {- Note [ExpForall materialization]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,47 +52,74 @@ binders (which would violate the binding-tree invariant that term-DAG roots
 have no binding parent).
 -}
 
-introduceForallFromSpec :: ForallSpec -> NodeId -> PresolutionM p NodeId
-introduceForallFromSpec spec bodyRoot = do
+-- | A root whose binding parent has already been constructed at the expansion
+-- destination.  Keep the constructor private: forall introduction may only
+-- wrap a destination-owned copy, never acquire ownership by rebinding a shared
+-- source node after the fact.
+data DestinationOwnedRoot = DestinationOwnedRoot NodeRef NodeId
+
+destinationOwnedRootNode :: DestinationOwnedRoot -> NodeId
+destinationOwnedRootNode (DestinationOwnedRoot _ root) = root
+
+requireDestinationOwnedRoot
+    :: NodeRef
+    -> NodeId
+    -> PresolutionM p DestinationOwnedRoot
+requireDestinationOwnedRoot expectedOwner root = do
     (c0, canonical) <- getConstraintAndCanonical
-    let bodyC = canonical bodyRoot
-        oldParent = Binding.lookupBindParent c0 (typeRef bodyC)
+    requireDestinationOwner c0 canonical expectedOwner root
+
+introduceForallFromSpec
+    :: ForallSpec
+    -> DestinationOwnedRoot
+    -> PresolutionM p DestinationOwnedRoot
+introduceForallFromSpec spec (DestinationOwnedRoot expectedOwner bodyRoot) = do
+    (c0, canonical) <- getConstraintAndCanonical
+    DestinationOwnedRoot expectedOwnerC bodyC <-
+        requireDestinationOwner c0 canonical expectedOwner bodyRoot
     newId <- createFreshNodeId
     let node = TyForall newId bodyC
     registerNode newId node
-    rewireStructuralParents canonical bodyC newId
-    -- The body is now inside the binder.
+    -- Preserve the body's destination parent on the new binder.
+    -- Attach the new binder first so moving a bounded body never passes
+    -- through a disconnected temporary scope.
+    setBindParentM (typeRef newId) (expectedOwnerC, BindFlex)
+    -- The body is now inside the fully attached binder.
     setBindParentM (typeRef bodyC) (typeRef newId, BindFlex)
-    -- Preserve the body's former binding parent (if any) on the new binder.
-    case oldParent of
-        Just parentInfo -> setBindParentM (typeRef newId) parentInfo
-        Nothing -> pure ()
     bindForallBindersFromSpec newId bodyC spec
-    pure newId
+    pure (DestinationOwnedRoot expectedOwnerC newId)
 
-rewireStructuralParents :: (NodeId -> NodeId) -> NodeId -> NodeId -> PresolutionM p ()
-rewireStructuralParents canonical old new =
-    modifyConstraint $ \c0 ->
-        let nodes0 = cNodes c0
-            oldC = canonical old
-            rep nid =
-                if canonical nid == oldC
-                    then new
-                    else nid
-            updateNode node = case node of
-                TyArrow{ tnDom = d, tnCod = c } ->
-                    node { tnDom = rep d, tnCod = rep c }
-                TyForall{ tnBody = b } ->
-                    node { tnBody = rep b }
-                TyExp{} ->
-                    node
-                _ -> node
-            nodes1 =
-                fromListNode
-                    [ (nid, if nid == new then node else updateNode node)
-                    | (nid, node) <- toListNode nodes0
-                    ]
-        in c0 { cNodes = nodes1 }
+requireDestinationOwner
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> NodeRef
+    -> NodeId
+    -> PresolutionM p DestinationOwnedRoot
+requireDestinationOwner c0 canonical expectedOwner root =
+    let rootC = canonical root
+        canonicalRef ref =
+            case ref of
+                TypeRef node -> typeRef (canonical node)
+                GenRef gen -> genRef gen
+        expectedOwnerC = canonicalRef expectedOwner
+    in case Binding.lookupBindParent c0 (typeRef rootC) of
+        Nothing ->
+            throwError
+                (BindingTreeError (MissingBindParent (typeRef rootC)))
+        Just (actualOwner, actualFlag)
+            | canonicalRef actualOwner == expectedOwnerC
+            , actualFlag == BindFlex ->
+                pure (DestinationOwnedRoot expectedOwnerC rootC)
+            | otherwise ->
+                throwError $
+                    BindingTreeError $
+                        InvalidBindingTree $
+                            "destination-owned expansion root "
+                                ++ show rootC
+                                ++ " expected flexible parent "
+                                ++ show expectedOwnerC
+                                ++ ", got "
+                                ++ show (canonicalRef actualOwner, actualFlag)
 
 bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM p ()
 bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBounds = bounds } = do
@@ -91,12 +127,17 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBounds = bounds } = do
     let nodes0 = cNodes c0
         bodyC = canonical bodyRoot
 
+        -- Lower bounds are part of the quantified type.  In particular, a
+        -- destination-owned wrapper @alpha >= tau@ exposes the binders in
+        -- @tau@ to Q(n), even though ordinary term-DAG reachability stops at
+        -- alpha.  Binder discovery and paper-order keys must use the same
+        -- bound-aware projection as 'Binding.orderedBinders'.
         reachable =
-            Traversal.reachableFromUnderLenient
+            Traversal.reachableFromWithBounds
                 canonical
                 (lookupNodeIn nodes0)
                 bodyC
-        orderKeys = Order.orderKeysFromRootWith canonical nodes0 bodyC Nothing
+        orderKeys = Order.orderKeysFromConstraintWith canonical c0 bodyC Nothing
 
     bp <- liftBindingError $ Binding.canonicalizeBindParentsUnder canonical c0
 
@@ -161,20 +202,60 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBounds = bounds } = do
             InternalError $
                 "bindForallBindersFromSpec: missing order keys for " ++ show missing
 
-    let binders = take (length bounds) candidates
+    let binderCount = length bounds
+        availableCount = length candidates
+
+    unless (availableCount >= binderCount) $
+        throwError $
+            ArityMismatch
+                "bindForallBindersFromSpec"
+                binderCount
+                availableCount
+
+    -- The target-derived Q(n) shape selects the binders introduced by this
+    -- wrapper.  Additional live variables in the copied body remain owned by
+    -- the destination projection; they are not an arity error.
+    let binders = take binderCount candidates
         binderByIndex = IntMap.fromList (zip [0..] binders)
 
     forM_ binders $ \bv ->
         setBindParentM (typeRef bv) (typeRef forallId, BindFlex)
 
-    forM_ (zip [0..] bounds) $ \(i, mbRef) ->
-        case IntMap.lookup i binderByIndex of
-            Nothing -> pure ()  -- arity mismatch: defer to later unification
-            Just bv ->
-                case mbRef of
-                    Nothing -> setVarBound bv Nothing
-                    Just (BoundNode bnd) -> setVarBound bv (Just (canonical bnd))
-                    Just (BoundBinder j) ->
-                        case IntMap.lookup j binderByIndex of
-                            Nothing -> pure ()  -- arity mismatch: defer to later unification
-                            Just bnd -> setVarBound bv (Just bnd)
+    snapshot <- getBindingSnapshot
+    let resolveBound destinationBinder = \case
+            Nothing -> pure Nothing
+            Just (BoundNode bnd) -> pure (Just (canonical bnd))
+            Just (BoundProjection sourceForall0 bnd0) -> do
+                let sourceForall = canonical sourceForall0
+                    bnd = canonical bnd0
+                sourceBinders <-
+                    case Binding.orderedBinders canonical c0 (typeRef sourceForall) of
+                        Left err -> throwError (BindingTreeError err)
+                        Right ordered -> pure ordered
+                unless (length sourceBinders == binderCount) $
+                    throwError $
+                        ArityMismatch
+                            "bindForallBindersFromSpec/source projection"
+                            binderCount
+                            (length sourceBinders)
+                copiedBound <-
+                    copyForallBoundProjectionAtBinder
+                        snapshot
+                        (typeRef destinationBinder)
+                        bnd
+                        (zip sourceBinders binders)
+                pure (Just copiedBound)
+            Just (BoundBinder j) ->
+                case IntMap.lookup j binderByIndex of
+                    Nothing ->
+                        throwError $
+                            InternalError $
+                                "bindForallBindersFromSpec: invalid BoundBinder index "
+                                    ++ show j
+                                    ++ " for binder count "
+                                    ++ show binderCount
+                    Just bnd -> pure (Just bnd)
+
+    forM_ (zip binders bounds) $ \(binder, boundRef) -> do
+        mbBound <- resolveBound binder boundRef
+        setVarBound binder mbBound

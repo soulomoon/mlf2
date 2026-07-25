@@ -19,6 +19,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , buildEdgeWorklist
     , buildIndexedEdgeWorklist
     , buildIndexedEdgeWorklistWithRootOwnership
+    , validateExpansionDestinations
     , popEdgeWorkItem
     , notePlannedEdge
     , noteProcessedEdge
@@ -42,11 +43,15 @@ module MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , rootOwnersForPlan
     ) where
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_)
+import Control.Monad.Except (throwError)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
+import Data.Maybe (catMaybes)
 
-import MLF.Constraint.Presolution.Base (PresolutionM)
+import qualified MLF.Binding.Path as BindingPath
+import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
     ( EdgePlan(..)
     , ResolvedTyExp(..)
@@ -55,6 +60,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.StateAccess
     ( PresolutionBindingSnapshot(..)
     , bindingSnapshotFindSchemeIntroducer
+    , getConstraintAndCanonical
     , getBindingSnapshot
     )
 import MLF.Constraint.Types.Graph
@@ -126,8 +132,93 @@ buildIndexedEdgeWorklist =
 buildIndexedEdgeWorklistWithRootOwnership :: RootOwnershipIndex -> [InstEdge] -> PresolutionM p EdgeWorklist
 buildIndexedEdgeWorklistWithRootOwnership ownership edges = do
     snapshot <- getBindingSnapshot
+    validateExpansionDestinationsWithSnapshot snapshot edges
     items <- forM edges (workItemFromSnapshot ownership snapshot)
     pure (buildEdgeWorklistFromItemsWithRootOwnership ownership items)
+
+-- | Enforce the destination-ownership invariant for expansion assignments.
+--
+-- Definition 10.3.2 applies an edge expansion at the nearest gen node binding
+-- the edge destination.  'ExpInstantiate' retains concrete argument nodes, so
+-- one ExpVar assignment cannot safely propagate at two such gen nodes: the
+-- retained arguments would otherwise be rebound according to edge execution
+-- order.  Validate the complete edge set at the loop boundary, and recheck the
+-- snapshot used to construct an indexed worklist.  This makes the rejection
+-- order-independent without adding an O(E) graph scan to every expansion
+-- merge.
+validateExpansionDestinations :: [InstEdge] -> PresolutionM p ()
+validateExpansionDestinations edges = do
+    (constraint0, canonical) <- getConstraintAndCanonical
+    validateExpansionDestinationsUnder constraint0 canonical edges
+
+validateExpansionDestinationsWithSnapshot
+    :: PresolutionBindingSnapshot p
+    -> [InstEdge]
+    -> PresolutionM p ()
+validateExpansionDestinationsWithSnapshot snapshot =
+    validateExpansionDestinationsUnder
+        (pbsConstraint snapshot)
+        (pbsCanonical snapshot)
+
+validateExpansionDestinationsUnder
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> [InstEdge]
+    -> PresolutionM p ()
+validateExpansionDestinationsUnder constraint0 canonical edges = do
+    destinations <- fmap catMaybes $ forM edges $ \edge ->
+        case lookupNode (instLeft edge) (cNodes constraint0) >>= mkResolvedTyExp of
+            Nothing -> pure Nothing
+            Just leftTyExp -> do
+                destination <- edgeDestinationGenUnder constraint0 canonical edge
+                pure (Just (rteExpVar leftTyExp, destination))
+    let byExpansion =
+            IntMap.fromListWith
+                IntSet.union
+                [ ( getExpVarId expVar
+                  , IntSet.singleton (getGenNodeId destination)
+                  )
+                | (expVar, destination) <- destinations
+                ]
+    forM_ (IntMap.toAscList byExpansion) $ \(expVarKey, destinationIds) ->
+        case IntSet.toAscList destinationIds of
+            [_] -> pure ()
+            gids ->
+                throwError
+                    ( ExpansionDestinationConflict
+                        (ExpVarId expVarKey)
+                        (map GenNodeId gids)
+                    )
+
+edgeDestinationGenUnder
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> InstEdge
+    -> PresolutionM p GenNodeId
+edgeDestinationGenUnder constraint0 canonical edge =
+    case BindingPath.bindingPathToRootLocal bindParents start of
+        Left err -> throwError (BindingTreeError err)
+        Right path ->
+            case [gid | GenRef gid <- path] of
+                (gid : _) -> pure gid
+                [] ->
+                    throwError
+                        ( InternalError
+                            ( "instantiation-edge destination has no gen binder: "
+                                ++ show edge
+                            )
+                        )
+  where
+    bindParents = cBindParents constraint0
+    target = instRight edge
+    targetRef = typeRef target
+    targetCanonicalRef = typeRef (canonical target)
+    -- Keep the producer's raw destination provenance when it is present.
+    -- Falling through to only the quotient representative can erase the fact
+    -- that two compatible targets are owned by distinct destination gens.
+    start
+        | IntMap.member (nodeRefKey targetRef) bindParents = targetRef
+        | otherwise = targetCanonicalRef
 
 buildEdgeWorklistFromItems :: [EdgeWorkItem] -> EdgeWorklist
 buildEdgeWorklistFromItems =
@@ -169,6 +260,13 @@ workItemFromSnapshot ownership snapshot edge = do
         mbLeftTyExp = lookupNode leftId (cNodes constraint0) >>= mkResolvedTyExp
     seed <- case mbLeftTyExp of
         Nothing -> pure Nothing
+        -- Annotation ownership is carried by the TyExp wrapper rather than by
+        -- its body.  Leave these items unseeded so 'planEdge' remains the one
+        -- authority that interprets 'cAnnEdges'; otherwise the normal body
+        -- seed would bypass the planner on the first worklist pass.
+        Just _
+            | IntSet.member (getEdgeId (instEdgeId edge)) (cAnnEdges constraint0) ->
+                pure Nothing
         Just leftTyExp -> do
             owner <- bindingSnapshotFindSchemeIntroducer snapshot (rteBodyId leftTyExp)
             pure $

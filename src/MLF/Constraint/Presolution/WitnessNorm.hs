@@ -13,13 +13,14 @@ module MLF.Constraint.Presolution.WitnessNorm
   )
 where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.State
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (find)
 import Data.Maybe (mapMaybe)
+import qualified Data.Set as Set
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
@@ -31,10 +32,16 @@ import MLF.Constraint.Presolution.StateAccess
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (OmegaNormalizeEnv, oneRoot),
-    normalizeInstanceOpsCore,
     validateNormalizedWitness,
   )
 import qualified MLF.Constraint.Presolution.Witness as Witness
+import qualified MLF.Constraint.Presolution.WitnessValidation as WitnessValidation
+import MLF.Constraint.Presolution.WitnessCanon
+  ( ProvenancedInstanceOp (..),
+    ProvenancedNode (..),
+    forgetInstanceOpProvenance,
+    normalizeInstanceOpsCoreWithProvenanceBy,
+  )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
     ( InstanceOp(..)
@@ -57,6 +64,40 @@ data WitnessNormCache = WitnessNormCache
     wncOrderKeys :: IntMap.IntMap (IntMap.IntMap Order.OrderKey),
     wncAbstractBoundShapes :: IntMap.IntMap Bool
   }
+
+data OperandAuthorityDomain
+  = FrozenSourceInterior
+  | FinalDestinationInterior
+  | RetainedFinalDestination
+  deriving (Eq, Ord, Show)
+
+data OperandConstructionCertificate
+  = WeakenIfTerminalTargetBecomesRigid
+  deriving (Eq, Ord, Show)
+
+data OperandProvenance = OperandProvenance
+  { operandSourceCandidates :: IntSet.IntSet,
+    operandAuthorityDomains :: Set.Set OperandAuthorityDomain,
+    operandConstructionCertificates :: Set.Set OperandConstructionCertificate
+  }
+  deriving (Eq, Show)
+
+instance Semigroup OperandProvenance where
+  left <> right =
+    OperandProvenance
+      { operandSourceCandidates =
+          IntSet.union
+            (operandSourceCandidates left)
+            (operandSourceCandidates right),
+        operandAuthorityDomains =
+          Set.union
+            (operandAuthorityDomains left)
+            (operandAuthorityDomains right),
+        operandConstructionCertificates =
+          Set.union
+            (operandConstructionCertificates left)
+            (operandConstructionCertificates right)
+      }
 
 emptyWitnessNormCache :: WitnessNormCache
 emptyWitnessNormCache =
@@ -126,13 +167,12 @@ cachedInteriorExact ::
 cachedInteriorExact snapshot root0 = do
   let c0 = pbsConstraint snapshot
       canonical = pbsCanonical snapshot
-  let rootC = canonical root0
-      key = getNodeId rootC
+      interiorRootRef = traceInteriorRootRef canonical c0 root0
+      key = nodeRefKey interiorRootRef
   cache <- gets wncInteriorExact
   case IntMap.lookup key cache of
     Just interior -> pure interior
     Nothing -> do
-      let interiorRootRef = traceInteriorRootRef canonical c0 root0
       raw <- lift (bindingSnapshotInteriorOf snapshot interiorRootRef)
       let interior =
             IntSet.fromList
@@ -261,8 +301,8 @@ normalizeEdgeWitnessesM = do
   snapshot <- getBindingSnapshot
   let c0 = pbsConstraint snapshot
       canonical = pbsCanonical snapshot
-  traces <- gets psEdgeTraces
-  witnesses0 <- gets psEdgeWitnesses
+  artifacts0 <- gets psEdgeExecutionArtifacts
+  weakenReplayCertificates <- gets psWeakenReplayCertificates
   let allNodes0 = NodeAccess.allNodes c0
       liveNodeKeys =
         IntSet.fromList [getNodeId (tnId node) | node <- allNodes0]
@@ -290,62 +330,172 @@ normalizeEdgeWitnessesM = do
       weakenedOps =
         IntSet.fromList
           [ getNodeId (canonical (rewriteNodeWith copyMap n))
-            | (eid, w0) <- IntMap.toList witnesses0,
-              let copyMap = maybe mempty etCopyMap (IntMap.lookup eid traces),
-              OpWeaken n <- getInstanceOps (ewWitness w0)
+            | artifacts <- IntMap.elems artifacts0,
+              let w0 = eeaWitness artifacts
+                  copyMap = etCopyMap (eeaTrace artifacts),
+            OpWeaken n <- getInstanceOps (ewWitness w0)
           ]
+  weakenedByTranslatability <-
+    either throwError pure (translatableWeakenedNodes c0)
+  let
       weakened =
-        IntSet.union weakenedOps (translatableWeakenedNodes c0)
-  witnessResults <- evalStateT (forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
-    let mbTrace = IntMap.lookup eid traces
-        (edgeRoot, copyMap, binderArgs0, traceInterior) =
+        IntSet.union weakenedOps weakenedByTranslatability
+  witnessResults <- evalStateT (forM (IntMap.toList artifacts0) $ \(eid, artifacts) -> do
+    let w0 = eeaWitness artifacts
+        mbTrace = Just (eeaTrace artifacts)
+        (sourceRoot, resultRoot, copyMap, binderArgs0, traceInterior, producerReplayBinders) =
           case mbTrace of
-            Nothing -> (ewRoot w0, mempty, [], mempty)
+            Nothing -> (ewRoot w0, ewRoot w0, mempty, [], mempty, [])
             Just tr ->
               ( etRoot tr,
+                etResultRoot tr,
                 etCopyMap tr,
                 etBinderArgs tr,
-                etInterior tr
+                etInterior tr,
+                etReplayDomainBinders tr
               )
         rewriteNode = rewriteNodeWith copyMap
-        binderArgs =
-          IntMap.fromList
-            [ ( getNodeId (canonical (rewriteNode bv)),
-                canonical (rewriteNode arg)
-              )
-              | (bv, arg) <- binderArgs0
-            ]
-        -- Trace source entries still drive replay-contract completeness below,
-        -- but Ω normalization may only widen I(r) with binders that survived
-        -- into the finalized graph.
-        normalizationBinderArgs =
-          IntMap.filterWithKey
-            ( \binderKey _arg ->
-                IntSet.member binderKey liveNodeKeys
+        binderArgEntries =
+          [ ( getNodeId (canonical (rewriteNode bv)),
+              canonical (rewriteNode arg)
             )
-            binderArgs
-        copyToOriginal =
+            | (bv, arg) <- binderArgs0
+          ]
+        sourcesByExactCopy =
           IntMap.fromListWith
-            min
-            [ (getNodeId copy, NodeId orig)
+            IntSet.union
+            [ ( getNodeId copy,
+                IntSet.singleton orig
+              )
               | (orig, copy) <- IntMap.toList (getCopyMapping copyMap)
             ]
-        restoreNode nid =
-          IntMap.findWithDefault nid (getNodeId nid) copyToOriginal
-        rewriteOp op =
+        sourcesByDestination =
+          IntMap.fromListWith
+            IntSet.union
+            [ ( copyKey,
+                IntSet.singleton orig
+              )
+              | (orig, copy) <- IntMap.toList (getCopyMapping copyMap),
+                copyKey <- [getNodeId copy, getNodeId (canonical copy)]
+            ]
+        sourceCandidates raw =
+          case IntMap.lookup (getNodeId raw) sourcesByExactCopy of
+            Just candidates | not (IntSet.null candidates) -> candidates
+            _ ->
+              let destination = canonical raw
+               in case IntMap.lookup (getNodeId destination) sourcesByDestination of
+                    Just candidates | not (IntSet.null candidates) -> candidates
+                    _ ->
+                      -- This helper is used only for an operation tagged as
+                      -- destination-origin.  Copy provenance therefore wins
+                      -- even when a destination representative happens to
+                      -- reuse a frozen source key.
+                      IntSet.singleton (getNodeId raw)
+        sourceProvenancedNode raw =
+          ProvenancedNode
+            { pnNode = rewriteNode raw,
+              pnProvenance =
+                OperandProvenance
+                  { operandSourceCandidates = IntSet.singleton (getNodeId raw),
+                    operandAuthorityDomains = Set.singleton FrozenSourceInterior,
+                    operandConstructionCertificates = Set.empty
+                  }
+            }
+        destinationProvenancedNode raw =
+          ProvenancedNode
+            { pnNode = canonical raw,
+              pnProvenance =
+                OperandProvenance
+                  { operandSourceCandidates = sourceCandidates raw,
+                    operandAuthorityDomains = Set.singleton FinalDestinationInterior,
+                    operandConstructionCertificates = Set.empty
+                }
+            }
+        retainedDestinationProvenancedNode raw =
+          ProvenancedNode
+            { pnNode = canonical raw,
+              pnProvenance =
+                OperandProvenance
+                  { operandSourceCandidates = IntSet.empty,
+                    operandAuthorityDomains = Set.singleton RetainedFinalDestination,
+                    operandConstructionCertificates = Set.empty
+                  }
+            }
+        flexibleTerminalSourceProvenancedNode raw =
+          let sourceNode = sourceProvenancedNode raw
+              provenance = pnProvenance sourceNode
+           in sourceNode
+                { pnProvenance =
+                    provenance
+                      { operandConstructionCertificates =
+                          Set.singleton WeakenIfTerminalTargetBecomesRigid
+                      }
+                }
+        provenancedOpWith provenancedNode op =
           case op of
-            OpGraft sigma n -> OpGraft (rewriteNode sigma) (rewriteNode n)
-            OpMerge n m -> OpMerge (rewriteNode n) (rewriteNode m)
-            OpRaise n -> OpRaise (rewriteNode n)
-            OpWeaken n -> OpWeaken (rewriteNode n)
-            OpRaiseMerge n m -> OpRaiseMerge (rewriteNode n) (rewriteNode m)
-        restoreOp op =
-          case op of
-            OpGraft sigma n -> OpGraft (restoreNode sigma) (restoreNode n)
-            OpMerge n m -> OpMerge (restoreNode n) (restoreNode m)
-            OpRaise n -> OpRaise (restoreNode n)
-            OpWeaken n -> OpWeaken (restoreNode n)
-            OpRaiseMerge n m -> OpRaiseMerge (restoreNode n) (restoreNode m)
+            OpGraft sigma n ->
+              ProvenancedGraft (provenancedNode sigma) (provenancedNode n)
+            OpMerge n m ->
+              ProvenancedMerge (provenancedNode n) (provenancedNode m)
+            OpRaise n -> ProvenancedRaise (provenancedNode n)
+            OpWeaken n -> ProvenancedWeaken (provenancedNode n)
+            OpRaiseMerge n m ->
+              ProvenancedRaiseMerge (provenancedNode n) (provenancedNode m)
+        provenancedOpWithOrigin origin op =
+          case origin of
+            Nothing -> Right (provenancedOpWith sourceProvenancedNode op)
+            Just DestinationEdgeOperation ->
+              Right (provenancedOpWith destinationProvenancedNode op)
+            Just SourceDestinationMergeOperation ->
+              case op of
+                OpMerge operated other ->
+                  Right
+                    ( ProvenancedMerge
+                        (sourceProvenancedNode operated)
+                        (destinationProvenancedNode other)
+                    )
+                _ ->
+                  Left
+                    ( InternalError
+                        ( "source/destination witness origin attached to non-Merge operation: "
+                            ++ show op
+                        )
+                    )
+            Just DestinationSourceGraftOperation ->
+              case op of
+                OpGraft argument binder ->
+                  Right
+                    ( ProvenancedGraft
+                        (retainedDestinationProvenancedNode argument)
+                        (sourceProvenancedNode binder)
+                    )
+                _ ->
+                  Left
+                    ( InternalError
+                        ( "destination/source witness origin attached to non-Graft operation: "
+                            ++ show op
+                        )
+                    )
+            Just FlexibleTerminalSourceOperation ->
+              case op of
+                OpRaise operated ->
+                  Right
+                    ( ProvenancedRaise
+                        (flexibleTerminalSourceProvenancedNode operated)
+                    )
+                OpMerge operated other ->
+                  Right
+                    ( ProvenancedMerge
+                        (flexibleTerminalSourceProvenancedNode operated)
+                        (sourceProvenancedNode other)
+                    )
+                _ ->
+                  Left
+                    ( InternalError
+                        ( "flexible terminal witness certificate attached to unsupported operation: "
+                            ++ show op
+                        )
+                    )
         isExactTyVar nid =
           IntSet.member (getNodeId nid) tyVarNodeKeys
         isLiveNode nid =
@@ -369,25 +519,71 @@ normalizeEdgeWitnessesM = do
             [ getNodeId sourceBinder
               | sourceBinder <- sourceBindersInOrder
             ]
+        rawOps = getInstanceOps (ewWitness w0)
+        edgeRaiseAuthoritySourceKeys =
+          eeaRaiseAuthorityNodes artifacts
+        nonSourceOpOrigins =
+          eeaNonSourceOpOrigins artifacts
+        edgeWeakenReplayCertificates =
+          IntMap.findWithDefault IntMap.empty eid weakenReplayCertificates
         traceInteriorKeys =
           case traceInterior of
-            InteriorNodes s -> s
-        isSchemeRootSourceBinder nid =
-          case Binding.lookupBindParent c0 (typeRef nid) of
-            Just (GenRef gid, _) ->
-              case lookupGen gid (cGenNodes c0) of
-                Just gen -> nid `elem` gnSchemes gen
-                Nothing -> False
-            _ -> False
+            EdgeSourceInterior (InteriorNodes s) -> s
         isReplayDomainBinder nid =
           let targetC = canonical nid
-              restored = restoreNode targetC
+              knownSources =
+                IntMap.findWithDefault
+                  IntSet.empty
+                  (getNodeId targetC)
+                  sourcesByDestination
            in isExactTyVar targetC
-                && (restored == targetC || IntSet.notMember (getNodeId restored) sourceBinderKeySet)
-    let rootC = canonical edgeRoot
-    directBinders <- cachedOrderedBinders snapshot rootC
+                && IntSet.null (IntSet.intersection knownSources sourceBinderKeySet)
+    forM_ (IntMap.toList edgeWeakenReplayCertificates) $ \(sourceKey, certificate) ->
+      let source = NodeId sourceKey
+          mbCopied = lookupCopy source copyMap
+          rawWitnessContainsWeaken = OpWeaken source `elem` rawOps
+          traceContainsSource =
+            any ((== source) . fst) sourceEntriesInOrder
+          artifactMatches =
+            case mbCopied of
+              Nothing -> False
+              Just copied ->
+                weakenReplayCertificateMatches
+                  canonical
+                  source
+                  copied
+                  resultRoot
+                  certificate
+       in when (not rawWitnessContainsWeaken || not traceContainsSource || not artifactMatches) $
+            throwError $
+              InternalError $
+                "invalid construction-time Weaken replay certificate for edge "
+                  ++ show (EdgeId eid)
+                  ++ ", source "
+                  ++ show source
+    let certifiedReplayEntries =
+          [ (sourceEntry, weakenReplayCertificateReplayBinder certificate)
+            | sourceEntry@(sourceBinder, _arg) <- sourceEntriesInOrder,
+              Just certificate <-
+                [ IntMap.lookup
+                    (getNodeId sourceBinder)
+                    edgeWeakenReplayCertificates
+                ]
+          ]
+    let binderArgs = IntMap.fromList binderArgEntries
+        -- Trace source entries still drive replay-contract completeness below.
+        -- Binder arguments are metadata for normalization rules; they never
+        -- enlarge the destination-owned I(etResultRoot).
+        normalizationBinderArgs =
+          IntMap.filterWithKey
+            ( \binderKey _arg ->
+                IntSet.member binderKey liveNodeKeys
+            )
+            binderArgs
+        sourceRootC = canonical sourceRoot
+    directBinders <- cachedOrderedBinders snapshot sourceRootC
     bindersOrdered <-
-      case NodeAccess.lookupNode c0 rootC of
+      case NodeAccess.lookupNode c0 sourceRootC of
         Just TyVar {tnBound = Just bnd} -> do
           viaBound <- cachedOrderedBinders snapshot bnd
           pure (if null directBinders then viaBound else directBinders)
@@ -396,23 +592,24 @@ normalizeEdgeWitnessesM = do
           pure (if null directBinders then viaMu else directBinders)
         _ -> pure directBinders
     let replayBindersAtRoot =
-          [ canonical b
-            | b <- bindersOrdered,
-              isReplayDomainBinder b
-          ]
-    let orderBase = edgeRoot
+          if null producerReplayBinders
+            then
+              [ canonical b
+              | b <- bindersOrdered,
+                isReplayDomainBinder b
+              ]
+            else producerReplayBinders
+    let orderBase = resultRoot
         orderRoot = orderBase
-    interiorExact <-
-      if IntSet.null traceInteriorKeys
-        then cachedInteriorExact snapshot edgeRoot
-        else pure traceInteriorKeys
-    let interiorNorm =
-          -- Rewrite interior through copyMap so it's in the same node-id space
-          -- as the rewritten witness steps (thesis-exact I(r) membership).
+    interiorNorm <- cachedInteriorExact snapshot resultRoot
+    let
+        projectedFrozenSourceInterior =
           IntSet.fromList
-            [ getNodeId (canonical (rewriteNode (NodeId n)))
-              | n <- IntSet.toList interiorExact
+            [ getNodeId (canonical (rewriteNode (NodeId sourceKey)))
+            | sourceKey <- IntSet.toList traceInteriorKeys
             ]
+        normalizationInterior =
+          IntSet.union interiorNorm projectedFrozenSourceInterior
         nSourceBinders = length sourceBindersInOrder
         initialReplayPairs =
           zip sourceBindersInOrder (take nSourceBinders replayBindersAtRoot)
@@ -422,43 +619,263 @@ normalizeEdgeWitnessesM = do
               | (sourceBinder, replayBinder) <- initialReplayPairs
             ]
         sourceReplayBinders =
+          -- Source binders live in the trace's source-id domain and may have
+          -- disappeared from the finalized graph.  The copy map is the
+          -- producer-owned bridge into the replay domain; final binding-tree
+          -- ownership cannot reconstruct that provenance.
           orderedNubNodes
             [ binderC
               | sourceBinder <- sourceBindersInOrder,
-                let binderC = canonical (rewriteNode sourceBinder),
-                isExactTyVar binderC,
-                isSchemeRootSourceBinder sourceBinder
+                Just copiedBinder <-
+                  [IntMap.lookup (getNodeId sourceBinder) (getCopyMapping copyMap)],
+                let binderC = canonical copiedBinder,
+                isExactTyVar binderC
             ]
-    let interiorWithBinders =
-          if IntMap.size normalizationBinderArgs > 1
-            then IntSet.union interiorNorm (IntSet.fromAscList (IntMap.keys normalizationBinderArgs))
-            else interiorNorm
-        isAnnEdge =
+    let isAnnEdge =
           IntSet.member eid (cAnnEdges c0)
-        ops0 = map rewriteOp (getInstanceOps (ewWitness w0))
-        precomputedDescendants0 = precomputedDescendantsForOps snapshot ops0
-    orderKeys <- cachedOrderKeys c0 canonical orderRoot
+        certifiedWeakenSourceKeys =
+          IntSet.fromAscList (IntMap.keys edgeWeakenReplayCertificates)
+        certifiedWeakenTargetKeys =
+          IntSet.fromList
+            [ getNodeId (canonical (weakenReplayCertificateTarget certificate))
+            | certificate <- IntMap.elems edgeWeakenReplayCertificates
+            ]
+        certifiedReplayBinderKeys =
+          IntSet.fromList
+            ( map getNodeId producerReplayBinders
+                ++ [ getNodeId replayBinder
+                   | (_sourceEntry, replayBinder) <- certifiedReplayEntries
+                   ]
+            )
+        certifiedWeakenDescendants =
+          IntMap.fromListWith
+            IntSet.union
+            [ ( getNodeId (canonical (weakenReplayCertificateTarget certificate))
+              , IntSet.fromList
+                  [ getNodeId (canonical (NodeId descendantKey))
+                  | descendantKey <-
+                      IntSet.toList
+                        (weakenReplayCertificateDescendants certificate)
+                  ]
+              )
+            | certificate <- IntMap.elems edgeWeakenReplayCertificates
+            ]
+    ops0 <-
+      either throwError pure $
+        traverse
+          ( \(index, op) ->
+              provenancedOpWithOrigin
+                (IntMap.lookup index nonSourceOpOrigins)
+                op
+          )
+          (zip [0 ..] rawOps)
+    let operandHasFrozenSourceAuthority operand =
+          Set.member
+            FrozenSourceInterior
+            (operandAuthorityDomains (pnProvenance operand))
+        operandIsExplicitSourceBinder operand =
+          not $
+            IntSet.null $
+              IntSet.intersection
+                (operandSourceCandidates (pnProvenance operand))
+                sourceBinderKeySet
+        operandCanBeSourceRoot operand =
+          IntSet.member
+            (getNodeId sourceRoot)
+            (operandSourceCandidates (pnProvenance operand))
+        -- A source-child Merge can become a destination self-merge after
+        -- chi_e quotients the two construction classes.  It remains semantic
+        -- only when the operated source owns a quantifier in S(r); otherwise
+        -- there is no Phi binder to eliminate and the result type has already
+        -- inlined the equality.  Drop that identity before coalescing checks
+        -- whether an exterior Merge has a preceding Raise.
+        collapsedUnboundSourceMergeIsIdentity op =
+          case op of
+            ProvenancedMerge operated other ->
+              operandHasFrozenSourceAuthority operated
+                && operandHasFrozenSourceAuthority other
+                && canonical (pnNode operated) == canonical (pnNode other)
+                && not (operandIsExplicitSourceBinder operated)
+                && not (operandCanBeSourceRoot operated)
+            _ -> False
+        ops0ForNormalization =
+          filter (not . collapsedUnboundSourceMergeIsIdentity) ops0
+        ops0Destination = map forgetInstanceOpProvenance ops0
+        precomputedDescendants0 =
+          IntMap.unionWith
+            IntSet.union
+            certifiedWeakenDescendants
+            ( precomputedDescendantsForOps
+                snapshot
+                (map forgetInstanceOpProvenance ops0ForNormalization)
+            )
+    destinationOrderKeys <- cachedOrderKeys c0 canonical orderRoot
+    let projectedSourceRoot = canonical (rewriteNode sourceRoot)
+        -- The frozen trace stores operation-time source identities, while the
+        -- retained source type tree is indexed by their final quotient
+        -- representatives.  Traverse that source tree in the quotient, but
+        -- publish a certificate for every exact frozen source identity below.
+        -- This is the only lawful bridge from operation authority to <P>:
+        -- destination reachability cannot reconstruct a source occurrence.
+        sourceOrderInterior =
+          IntSet.fromList
+            [ getNodeId (canonical (NodeId sourceKey))
+            | sourceKey <- IntSet.toList traceInteriorKeys
+            ]
+        sourceOrderKeys =
+          Order.orderKeysFromConstraintWith
+            canonical
+            c0
+            sourceRoot
+            (Just sourceOrderInterior)
+        anchoredSourceOrderKeys = do
+          anchor <-
+            IntMap.lookup
+              (getNodeId projectedSourceRoot)
+              destinationOrderKeys
+          pure $
+            IntMap.fromListWith preferEarlierOrderKey
+              [ ( getNodeId (canonical (rewriteNode sourceNode)),
+                  anchorSourceOrderKey anchor sourceKeyOrder
+                )
+                | sourceKey <- IntSet.toList traceInteriorKeys,
+                  let sourceNode = NodeId sourceKey,
+                  Just sourceKeyOrder <-
+                    [ IntMap.lookup
+                        (getNodeId (canonical sourceNode))
+                        sourceOrderKeys
+                    ]
+              ]
+        orderKeys =
+          case anchoredSourceOrderKeys of
+            Nothing -> destinationOrderKeys
+            Just sourceCertificate ->
+              -- Destination occurrences remain authoritative wherever the
+              -- final type tree already supplies one.  The source certificate
+              -- fills only projected operation nodes that final reachability
+              -- cannot see; it must not reorder the destination root or an
+              -- existing destination child that shares its quotient class.
+              IntMap.union destinationOrderKeys sourceCertificate
+        preferEarlierOrderKey left right =
+          case Order.compareOrderKey left right of
+            LT -> left
+            _ -> right
+        anchorSourceOrderKey anchor relative =
+          Order.OrderKey
+            { Order.okDepth = Order.okDepth anchor + Order.okDepth relative,
+              Order.okPath = Order.okPath anchor ++ Order.okPath relative
+            }
+        exactFrozenSource operand =
+          let provenance = pnProvenance operand
+           in if Set.member FrozenSourceInterior (operandAuthorityDomains provenance)
+                then
+                  case IntSet.toList (operandSourceCandidates provenance) of
+                    [sourceKey] -> Just (NodeId sourceKey)
+                    _ -> Nothing
+                else
+                  Nothing
+        collapsedSourceMergeOperands op =
+          case op of
+            ProvenancedMerge operated other
+              | canonical (pnNode operated) == canonical (pnNode other),
+                Just operatedSource <- exactFrozenSource operated,
+                Just otherSource <- exactFrozenSource other,
+                canonical operatedSource /= canonical otherSource ->
+                  Just (operatedSource, otherSource)
+            _ -> Nothing
+        validateCollapsedSourceMergeOrder op =
+          case collapsedSourceMergeOperands op of
+            Nothing -> Right ()
+            Just (operatedSource, otherSource) ->
+              let projected = canonical (rewriteNode operatedSource)
+               in if IntMap.notMember (getNodeId projected) orderKeys
+                    then Left (Witness.MissingOrderKey projected)
+                    else
+                      case
+                        Order.compareNodesByOrderKey
+                          sourceOrderKeys
+                          (canonical otherSource)
+                          (canonical operatedSource)
+                      of
+                        Right LT -> Right ()
+                        Right _ ->
+                          Left
+                            ( Witness.MergeDirectionInvalid
+                                operatedSource
+                                otherSource
+                            )
+                        Left (Order.MissingOrderKey missing) ->
+                          Left (Witness.MissingOrderKey missing)
+                        Left (Order.EqualKeysDistinctNodes left right) ->
+                          Left (Witness.EqualOrderKeysDistinctNodes left right)
     let env =
           OmegaNormalizeEnv
-            { oneRoot = canonical edgeRoot,
-              Witness.interior = interiorWithBinders,
-              Witness.interiorRaw = interiorNorm,
+            { oneRoot = canonical resultRoot,
+              Witness.interior = normalizationInterior,
+              -- Operation authority is frozen before chi_e mutates the
+              -- destination graph.  A Raise may deliberately move its copy
+              -- out of the final destination interior, so projecting this
+              -- set through the finalized quotient would erase its proof.
+              Witness.interiorRaw = traceInteriorKeys,
               Witness.weakened = weakened,
               Witness.orderKeys = orderKeys,
               Witness.canonical = canonical,
               Witness.constraint = c0,
               Witness.binderArgs = normalizationBinderArgs,
               Witness.precomputedDescendants = precomputedDescendants0,
+              Witness.certifiedWeakens = certifiedWeakenTargetKeys,
+              Witness.certifiedRaises = IntSet.empty,
+              Witness.certifiedReplayBinders = certifiedReplayBinderKeys,
               Witness.binderReplayMap = replayMapRewritten,
               Witness.replayContract = ReplayContractNone,
               Witness.replayDomainBinders = replayBindersAtRoot,
               Witness.isAnnotationEdge = isAnnEdge
             }
-    opsNormRaw <- case normalizeInstanceOpsCore env ops0 of
+    let operandInAuthorityInterior operand =
+          let provenance = pnProvenance operand
+              sourceAuthorized =
+                Set.member FrozenSourceInterior (operandAuthorityDomains provenance)
+                  && not
+                    ( IntSet.null
+                        ( IntSet.intersection
+                            (operandSourceCandidates provenance)
+                            traceInteriorKeys
+                        )
+                    )
+              destinationAuthorized =
+                Set.member FinalDestinationInterior (operandAuthorityDomains provenance)
+                  && IntSet.member
+                    (getNodeId (canonical (pnNode operand)))
+                    interiorNorm
+           in sourceAuthorized || destinationAuthorized
+    opsNormRaw <- case normalizeInstanceOpsCoreWithProvenanceBy operandInAuthorityInterior env ops0ForNormalization of
       Right ops' -> pure ops'
       Left err ->
         throwError (WitnessNormalizationError (EdgeId eid) err)
-    let opsNorm = opsNormRaw
+    forM_ opsNormRaw $ \op ->
+      case validateCollapsedSourceMergeOrder op of
+        Right () -> pure ()
+        Left err ->
+          throwError (WitnessNormalizationError (EdgeId eid) err)
+    let provenancedOperands op =
+          case op of
+            ProvenancedGraft sigma target -> [sigma, target]
+            ProvenancedMerge operated other -> [operated, other]
+            ProvenancedRaise target -> [target]
+            ProvenancedWeaken target -> [target]
+            ProvenancedRaiseMerge operated other -> [operated, other]
+    let checkedSource operand =
+          case IntSet.toList (operandSourceCandidates (pnProvenance operand)) of
+            [source] -> NodeId source
+            _ -> pnNode operand
+        isCertifiedReplayWeaken operand =
+          IntSet.member
+            (getNodeId (checkedSource operand))
+            certifiedWeakenSourceKeys
+            && IntSet.member
+              (getNodeId (canonical (pnNode operand)))
+              certifiedWeakenTargetKeys
+        opsNorm = map forgetInstanceOpProvenance opsNormRaw
     abstractShapes <-
       IntMap.fromList <$> do
         let targets =
@@ -487,48 +904,155 @@ normalizeEdgeWitnessesM = do
             [ getNodeId replayBinder
               | replayBinder <- replayBindersAtRoot
             ]
-        keepFinalizedOp op =
+        normalizedWeakenTargets =
+          IntSet.fromList
+            [ getNodeId (canonical target)
+              | OpWeaken target <- opsNorm
+            ]
+        sameWitnessWeakenTargets =
+          IntSet.fromList
+            [ getNodeId (canonical target)
+              | OpWeaken target <- ops0Destination
+            ]
+        copyTargetIsRigidIdentity target =
+          let targetC = canonical (pnNode target)
+              restored = canonical (checkedSource target)
+           in restored /= targetC
+                && IntSet.notMember (getNodeId targetC) normalizedWeakenTargets
+                && IntSet.notMember (getNodeId targetC) sameWitnessWeakenTargets
+                && case Binding.lookupBindParent c0 (typeRef targetC) of
+                  Just (_, BindRigid) -> True
+                  _ -> False
+        -- Expansion/replay domains may be copied under rigid binding edges.
+        -- Raise and merge operations whose operated copy node is already
+        -- directly rigid denote identity computations (thesis Figure 15.3.4).
+        -- Eliminate them while copy provenance is still available: restoring
+        -- only the node id can map that restricted copy onto a source node
+        -- locked below a rigid ancestor and turn an identity into an invalid
+        -- semantic Raise.
+        copyRigidOperationIsIdentity op =
           case op of
-            OpWeaken target ->
-              let targetC = canonical target
-                  targetKey = getNodeId targetC
-                  rootKey = getNodeId (canonical edgeRoot)
-               in targetKey == rootKey
-                    || IntSet.member targetKey sourceKeySetSeed
-                    || IntSet.member targetKey replayKeySetSeed
-                    || abstractBoundShape target
-            _ ->
-              True
+            ProvenancedRaise target -> copyTargetIsRigidIdentity target
+            ProvenancedMerge operated _ -> copyTargetIsRigidIdentity operated
+            ProvenancedRaiseMerge operated _ -> copyTargetIsRigidIdentity operated
+            _ -> False
+        -- Inst-Elim-Mono permits a collapsed root transition to be erased only
+        -- for a degenerate source scheme: its frozen expansion domain contains
+        -- the root alone.  For a nondegenerate domain (notably K's outer
+        -- lambda-body edge), the final UF equality is the result of executing
+        -- RaiseMerge itself and therefore cannot be used to prove that the
+        -- construction was identity.  Test the edge/root relation as well as
+        -- the destination representative so distinct frozen child operations
+        -- that share a representative also remain distinct.
+        collapsedRootTransitionIsIdentity op =
+          case op of
+            ProvenancedRaiseMerge operated other ->
+              IntSet.null (IntSet.delete (getNodeId sourceRoot) traceInteriorKeys)
+                && checkedSource operated == sourceRoot
+                && sourceRoot == resultRoot
+                && canonical (ewLeft w0) == canonical (ewRight w0)
+                && canonical (pnNode operated) == canonical (pnNode other)
+            _ -> False
+        keepFinalizedOp op =
+          not (copyRigidOperationIsIdentity op)
+            && not (collapsedRootTransitionIsIdentity op)
+            && case op of
+              ProvenancedWeaken target
+                | isCertifiedReplayWeaken target -> True
+              _ ->
+                case forgetInstanceOpProvenance op of
+                  OpWeaken target ->
+                    let targetC = canonical target
+                        targetKey = getNodeId targetC
+                        rootKey = getNodeId (canonical resultRoot)
+                     in targetKey == rootKey
+                          || IntSet.member targetKey sourceKeySetSeed
+                          || IntSet.member targetKey replayKeySetSeed
+                          || abstractBoundShape target
+                  _ ->
+                    True
+        -- A flexible terminal child is raised and merged while constructing
+        -- chi_e so that graph unification can continue.  Phi only needs that
+        -- transition when the source child is an explicit binder in S(r).
+        -- Otherwise no quantifier exists for the operation to eliminate: the
+        -- transition is already inlined in the result type and is therefore
+        -- the identity computation.  The construction certificate makes this
+        -- distinction before source ids are restored from the final quotient.
+        certifiedTerminalTransitionIsInlined op =
+          let certified operand =
+                Set.member
+                  WeakenIfTerminalTargetBecomesRigid
+                  (operandConstructionCertificates (pnProvenance operand))
+              isExplicitSourceBinder operand =
+                not $
+                  IntSet.null $
+                    IntSet.intersection
+                      (operandSourceCandidates (pnProvenance operand))
+                      sourceBinderKeySet
+           in case op of
+                ProvenancedRaise operated ->
+                  certified operated && not (isExplicitSourceBinder operated)
+                ProvenancedRaiseMerge operated _ ->
+                  certified operated && not (isExplicitSourceBinder operated)
+                _ -> False
+        opsNormPrunedWithProvenance =
+          filter
+            ( \op ->
+                keepFinalizedOp op
+                  && not (certifiedTerminalTransitionIsInlined op)
+            )
+            opsNormRaw
         opsNormPruned =
-          filter keepFinalizedOp opsNorm
+          map forgetInstanceOpProvenance opsNormPrunedWithProvenance
         graftTargetKeys =
           IntSet.fromList
-            [ getNodeId (restoreNode target)
-              | OpGraft _ target <- opsNormFinalized
+            [ getNodeId (checkedSource target)
+              | ProvenancedGraft _ target <- opsNormFinalizedWithProvenance
             ]
         graftTargetCount = IntSet.size graftTargetKeys
-        opsNormFinalized
+        opsNormFinalizedWithProvenance
           | null sourceBindersInOrder,
             null opsNormPruned =
               []
           | otherwise =
-              opsNormPruned
+              opsNormPrunedWithProvenance
+        opsNormFinalized =
+          map forgetInstanceOpProvenance opsNormFinalizedWithProvenance
         isInSourceInterior target =
-          IntSet.member (getNodeId (restoreNode target)) traceInteriorKeys
+          IntSet.member (getNodeId (checkedSource target)) traceInteriorKeys
+        traceProvesRootRaiseMergeNoReplay operated other =
+          case mbTrace of
+            Just tr ->
+              checkedSource operated == sourceRoot
+                && sourceRoot == etRoot tr
+                && IntSet.size (operandSourceCandidates (pnProvenance operated)) == 1
+                && IntSet.size (operandSourceCandidates (pnProvenance other)) == 1
+                && isInSourceInterior operated
+                && not (isInSourceInterior other)
+                && null (etBinderArgs tr)
+                && IntMap.null (etBinderReplayMap tr)
+                && null (etReplayDomainBinders tr)
+                && etReplayContract tr == ReplayContractNone
+            Nothing -> False
+        traceProvesRootWeakenRaiseMerge operated other =
+          maybe
+            False
+            (rootWeakenRaiseMergeTraceAuthority (checkedSource operated) (checkedSource other))
+            mbTrace
         interiorContainsTyMu =
           any
             (`IntSet.member` tyMuNodeKeys)
-            (IntSet.toList interiorWithBinders)
+            (IntSet.toList interiorNorm)
         replayBindersSeededFromInteriorGrafts =
           orderedNubNodes
             [ targetC
-              | OpGraft _ target <- opsNormFinalized,
-                let targetC = canonical target,
+              | ProvenancedGraft _ target <- opsNormFinalizedWithProvenance,
+                let targetC = canonical (pnNode target),
                 isExactTyVar targetC,
-                abstractBoundShape target,
+                abstractBoundShape (pnNode target),
                 isInSourceInterior target,
-                restoreNode target /= edgeRoot,
-                not (IntSet.member (getNodeId (restoreNode target)) sourceKeySet)
+                checkedSource target /= sourceRoot,
+                not (IntSet.member (getNodeId (checkedSource target)) sourceKeySet)
             ]
         sourceEntryForRestored key =
           find
@@ -539,14 +1063,17 @@ normalizeEdgeWitnessesM = do
         replayEntriesSeededFromRaiseMerge =
           orderedNubPairs
             [ (sourceEntry, targetC)
-              | OpRaiseMerge source target <- opsNormFinalized,
-                let sourceKey = getNodeId (restoreNode source),
+              | ProvenancedRaiseMerge source target <- opsNormFinalizedWithProvenance,
+                let sourceKey = getNodeId (checkedSource source),
                 Just sourceEntry <- [sourceEntryForRestored sourceKey],
-                let targetC = canonical target,
+                let targetC = canonical (pnNode target),
                 isExactTyVar targetC,
+                ( null replayBindersAtRoot
+                    || targetC `elem` replayBindersAtRoot
+                  ),
                 not (IntSet.member (getNodeId targetC) sourceKeySet)
             ]
-        replayBinders
+        legacyReplayBinders
           | null replayBindersAtRoot
               && length sourceReplayBinders == length sourceEntriesInOrder
               && any
@@ -565,92 +1092,154 @@ normalizeEdgeWitnessesM = do
               orderedNubNodes (map snd replayEntriesSeededFromRaiseMerge)
           | otherwise =
               replayBindersAtRoot
-        replayBindersWithBoundedGrafts =
-          if null replayBinders
+        legacyReplayBindersWithBoundedGrafts =
+          if null legacyReplayBinders
             then []
             else
               orderedNubNodes
-                ( replayBinders
+                ( legacyReplayBinders
                     ++ [ targetC
-                         | OpGraft _ target <- opsNormFinalized,
-                           let targetC = canonical target,
-                           isExactTyVar targetC,
-                           abstractBoundShape target
-                       ]
+                       | ProvenancedGraft _ target <- opsNormFinalizedWithProvenance,
+                         let targetC = canonical (pnNode target),
+                         isExactTyVar targetC,
+                         abstractBoundShape (pnNode target)
+                     ]
                 )
+        -- A construction certificate proves one source/binder replay pair;
+        -- it does not replace replay evidence inferred for the rest of the
+        -- expansion.  In particular, a certified standalone Weaken must not
+        -- hide an unrelated Graft target that was already tracked by the
+        -- legacy replay domain.
+        replayBindersWithBoundedGrafts =
+          orderedNubNodes
+            ( legacyReplayBindersWithBoundedGrafts
+                ++ map snd certifiedReplayEntries
+            )
+        hasLegacyReplayCodomain =
+          not (null legacyReplayBindersWithBoundedGrafts)
         hasReplayCodomain =
           not (null replayBindersWithBoundedGrafts)
         semanticStrictWithReplayCodomain op =
           case op of
-            OpWeaken target -> canonical target /= canonical edgeRoot
-            OpGraft _ target -> canonical target /= canonical edgeRoot
+            OpWeaken target -> canonical target /= canonical resultRoot
+            OpGraft _ target -> canonical target /= canonical resultRoot
             OpMerge {} -> True
             OpRaiseMerge {} -> True
             OpRaise {} -> False
+        provenancedStrictWithReplayCodomain op =
+          case op of
+            ProvenancedRaiseMerge operated other
+              | traceProvesRootRaiseMergeNoReplay operated other -> False
+            _ -> semanticStrictWithReplayCodomain (forgetInstanceOpProvenance op)
+        replayOperationsRequireCodomain =
+          not (null sourceEntriesInOrder)
+            || any
+              provenancedStrictWithReplayCodomain
+              opsNormFinalizedWithProvenance
+        legacyStrictWithReplayCodomain =
+          hasLegacyReplayCodomain
+            && replayOperationsRequireCodomain
         strictWithReplayCodomain =
           hasReplayCodomain
-            && ( not (null sourceEntriesInOrder)
-                   || any semanticStrictWithReplayCodomain opsNorm
-               )
-        keepNoReplayProjectedOp op =
-          case op of
-            OpGraft {} ->
+            && replayOperationsRequireCodomain
+        rootTransitionWeakenSourceKeys =
+          IntSet.fromList
+            [ getNodeId (checkedSource rootWeakened)
+              | ( ProvenancedWeaken rootWeakened,
+                  ProvenancedRaiseMerge operated other
+                  ) <-
+                  zip
+                    opsNormFinalizedWithProvenance
+                    (drop 1 opsNormFinalizedWithProvenance),
+                checkedSource rootWeakened == checkedSource operated,
+                traceProvesRootWeakenRaiseMerge operated other
+            ]
+        keepNoReplayProjectedOp provenanced =
+          case provenanced of
+            ProvenancedGraft {} ->
               Nothing
-            OpMerge {} ->
-              Just op
-            OpRaiseMerge n m
-              | isLiveNode n && isLiveNode m -> Just op
+            ProvenancedMerge {} ->
+              Just provenanced
+            ProvenancedRaiseMerge n m
+              | traceProvesRootRaiseMergeNoReplay n m -> Just provenanced
+              | isLiveNode (pnNode n) && isLiveNode (pnNode m) -> Just provenanced
               | otherwise -> Nothing
-            OpRaise target
-              | restoreNode target == edgeRoot ->
+            ProvenancedRaise target
+              | checkedSource target == sourceRoot ->
                   Nothing
-              | not (isTypeTreeBound target) ->
+              | not (isTypeTreeBound (pnNode target)) ->
                   Nothing
               | otherwise ->
-                  Just op
-            OpWeaken target
-              | not (abstractBoundShape target) ->
+                  Just provenanced
+            ProvenancedWeaken target
+              | isCertifiedReplayWeaken target ->
+                  Just provenanced
+              | IntSet.member
+                  (getNodeId (checkedSource target))
+                  rootTransitionWeakenSourceKeys ->
+                  Just provenanced
+              | not (abstractBoundShape (pnNode target)) ->
                   Nothing
               | IntSet.size sourceKeySet <= 1 ->
                   Nothing
-              | not (IntSet.member (getNodeId (restoreNode target)) sourceKeySet) ->
+              | not (IntSet.member (getNodeId (checkedSource target)) sourceKeySet) ->
                   Nothing
-              | IntSet.member (getNodeId (restoreNode target)) graftTargetKeys ->
+              | IntSet.member (getNodeId (checkedSource target)) graftTargetKeys ->
                   Nothing
               | graftTargetCount <= 1 ->
                   Nothing
-              | restoreNode target == edgeRoot ->
+              | checkedSource target == sourceRoot ->
                   Nothing
               | otherwise ->
-                  Just op
-        opsNoReplayProjected =
-          mapMaybe keepNoReplayProjectedOp opsNormFinalized
-        disallowedNoReplayOp op =
+                  Just provenanced
+        opsNoReplayProjectedWithProvenance =
+          mapMaybe keepNoReplayProjectedOp opsNormFinalizedWithProvenance
+        disallowedNoReplayProvenanced op =
           case op of
-            OpGraft _ target ->
+            ProvenancedGraft _ target ->
               graftTargetCount <= 1
                 && isInSourceInterior target
-                && restoreNode target /= edgeRoot
-                && not (IntSet.member (getNodeId (restoreNode target)) sourceKeySet)
-            OpMerge {} -> True
-            OpRaiseMerge n m -> isLiveNode n && isLiveNode m
+                && checkedSource target /= sourceRoot
+                && not (IntSet.member (getNodeId (checkedSource target)) sourceKeySet)
+            ProvenancedMerge {} -> True
+            ProvenancedRaiseMerge n m
+              | traceProvesRootRaiseMergeNoReplay n m -> False
+              | sourceInteriorValidRaiseMerge op -> False
+              | otherwise ->
+                  isLiveNode (pnNode n) && isLiveNode (pnNode m)
             _ -> False
-        residualNoReplayOp
+        residualNoReplayOpWithProvenance
+          | traceProvesNoReplay =
+              find
+                disallowedNoReplayProvenanced
+                opsNormFinalizedWithProvenance
           | strictWithReplayCodomain =
               Nothing
           | interiorContainsTyMu =
               Nothing
           | otherwise =
-              find disallowedNoReplayOp opsNormFinalized
+              find
+                disallowedNoReplayProvenanced
+                opsNormFinalizedWithProvenance
+        traceProvesNoReplay =
+          case mbTrace of
+            Just tr ->
+              null (etBinderArgs tr)
+                && IntMap.null (etBinderReplayMap tr)
+                && null (etReplayDomainBinders tr)
+                && etReplayContract tr == ReplayContractNone
+            Nothing -> False
+        residualNoReplayOp =
+          forgetInstanceOpProvenance <$> residualNoReplayOpWithProvenance
         strictNoReplayContract =
           case residualNoReplayOp of
             Nothing ->
               any
                 ( \case
-                    OpWeaken target -> restoreNode target /= edgeRoot
+                    ProvenancedWeaken target -> checkedSource target /= sourceRoot
                     _ -> False
                 )
-                opsNoReplayProjected
+                opsNoReplayProjectedWithProvenance
             Just _ ->
               False
         strictReplayContract =
@@ -659,44 +1248,203 @@ normalizeEdgeWitnessesM = do
           if strictReplayContract
             then ReplayContractStrict
             else ReplayContractNone
-        opsNormContract
+        opsNormContractWithProvenance
           | strictWithReplayCodomain =
-              opsNormFinalized
+              opsNormFinalizedWithProvenance
           | otherwise =
-              filter (not . disallowedNoReplayOp) opsNoReplayProjected
-        activeSourceEntries
-          | not strictWithReplayCodomain = []
+              filter
+                (not . disallowedNoReplayProvenanced)
+                opsNoReplayProjectedWithProvenance
+        opsNormContract =
+          map forgetInstanceOpProvenance opsNormContractWithProvenance
+        raisesByDestination =
+          IntMap.fromListWith
+            (++)
+            [ ( getNodeId (canonical (pnNode operated))
+              , [operated]
+              )
+            | ProvenancedRaise operated <- opsNormContractWithProvenance
+            ]
+        hasExactSemanticRaiseAuthority operated =
+          let provenance = pnProvenance operated
+           in Set.member FrozenSourceInterior (operandAuthorityDomains provenance)
+                && case IntSet.toList (operandSourceCandidates provenance) of
+                  [sourceKey] ->
+                    sourceKey /= getNodeId sourceRoot
+                      && IntSet.member sourceKey edgeRaiseAuthoritySourceKeys
+                  _ -> False
+        -- Validation is destination-indexed after quotienting, so one source
+        -- certificate may exempt a destination only when every retained Raise
+        -- at that destination has one exact, certified frozen source.  This
+        -- prevents a legal source operation from authorizing an unrelated
+        -- source that happened to collapse to the same final representative.
+        certifiedRaiseTargets =
+          IntSet.fromList
+            [ destinationKey
+            | (destinationKey, operatedNodes) <- IntMap.toList raisesByDestination
+            , all hasExactSemanticRaiseAuthority operatedNodes
+            ]
+        contractWeakenTargets =
+          IntSet.fromList
+            [ getNodeId (canonical target)
+              | OpWeaken target <- opsNormContract
+            ]
+        protectedRigidRaiseTargets =
+          IntSet.fromList
+            [ targetKey
+              | op <- opsNormContract,
+                target <-
+                  case op of
+                    OpRaise operated -> [operated]
+                    OpMerge operated _ -> [operated]
+                    OpRaiseMerge operated _ -> [operated]
+                    _ -> [],
+                let targetC = canonical target
+                    targetKey = getNodeId targetC,
+                IntSet.member targetKey sameWitnessWeakenTargets,
+                Just sources <- [IntMap.lookup targetKey sourcesByDestination],
+                any ((/= targetC) . canonical . NodeId) (IntSet.toList sources),
+                Just (_, BindRigid) <- [Binding.lookupBindParent c0 (typeRef targetC)]
+            ]
+        validationWeakens =
+          [ OpWeaken target
+            | OpWeaken target <- ops0Destination,
+              IntSet.member
+                (getNodeId (canonical target))
+                protectedRigidRaiseTargets,
+              IntSet.notMember
+                (getNodeId (canonical target))
+                contractWeakenTargets
+          ]
+        sourceInteriorValidRaiseMerge op =
+          case op of
+            ProvenancedRaiseMerge operated other ->
+              IntSet.size (operandSourceCandidates (pnProvenance operated)) == 1
+                && operandInAuthorityInterior operated
+                && not (operandInAuthorityInterior other)
+            _ -> False
+        -- The plain validator sees only destination I(r).  A RaiseMerge whose
+        -- per-operand construction domains prove operated n inside and other
+        -- m outside already satisfies the paper condition; after UF both
+        -- copies may legitimately share one destination representative,
+        -- which would otherwise look like a spurious
+        -- RaiseMergeInsideInterior.  Likewise, a Merge between exact frozen
+        -- sources can have distinct, correctly ordered source occurrences but
+        -- one destination quotient node.  Its direction was checked above
+        -- against the frozen source certificate; erasing provenance and
+        -- checking one quotient node against itself again would manufacture a
+        -- failure.
+        opsForValidation =
+          map forgetInstanceOpProvenance
+            ( filter
+                ( \op ->
+                    not (sourceInteriorValidRaiseMerge op)
+                      && case collapsedSourceMergeOperands op of
+                        Nothing -> True
+                        Just _ -> False
+                )
+                opsNormContractWithProvenance
+            )
+            ++ validationWeakens
+        deduplicateSourceEntries =
+          reverse
+            . snd
+            . foldl'
+              ( \(seen, acc) entry@(sourceBinder, _arg) ->
+                  let key = getNodeId sourceBinder
+                   in if IntSet.member key seen
+                        then (seen, acc)
+                        else (IntSet.insert key seen, entry : acc)
+              )
+              (IntSet.empty, [])
+        legacyActiveSourceEntries
+          | not legacyStrictWithReplayCodomain = []
           | not (null replayEntriesSeededFromRaiseMerge) =
               map fst replayEntriesSeededFromRaiseMerge
           | otherwise =
-              reverse $
-                snd $
-                  foldl'
-                    ( \(seen, acc) entry@(sourceBinder, _arg) ->
-                        let key = getNodeId (canonical (rewriteNode sourceBinder))
-                         in if IntSet.member key seen
-                              then (seen, acc)
-                              else (IntSet.insert key seen, entry : acc)
-                    )
-                    (IntSet.empty, [])
-                    sourceEntriesInOrder
-        nActive = length activeSourceEntries
+              deduplicateSourceEntries sourceEntriesInOrder
+        activeSourceEntries
+          | not strictWithReplayCodomain = []
+          | otherwise =
+              deduplicateSourceEntries
+                (legacyActiveSourceEntries ++ map fst certifiedReplayEntries)
+        legacyReplayPairs
+          | not legacyStrictWithReplayCodomain = []
+          | not (null replayEntriesSeededFromRaiseMerge) =
+              replayEntriesSeededFromRaiseMerge
+          | otherwise =
+              zip
+                legacyActiveSourceEntries
+                (take (length legacyActiveSourceEntries) legacyReplayBindersWithBoundedGrafts)
+        certifiedSourceKeys =
+          IntSet.fromList
+            [ getNodeId sourceBinder
+              | ((sourceBinder, _arg), _replayBinder) <- certifiedReplayEntries
+            ]
+        legacyReplayPairsWithoutCertifiedSources =
+          [ replayPair
+            | replayPair@((sourceBinder, _arg), _replayBinder) <- legacyReplayPairs,
+              IntSet.notMember
+                (getNodeId sourceBinder)
+                certifiedSourceKeys
+          ]
+        -- A certificate replaces inferred evidence only for its exact frozen
+        -- source.  Preserve every unrelated pair, then prove the resulting
+        -- relation is functional before constructing the replay IntMap.
+        replayPairCandidates =
+          certifiedReplayEntries ++ legacyReplayPairsWithoutCertifiedSources
+        replayTargetsBySource =
+          IntMap.fromListWith
+            IntSet.union
+            [ ( getNodeId sourceBinder,
+                IntSet.singleton (getNodeId replayBinder)
+              )
+              | ((sourceBinder, _arg), replayBinder) <- replayPairCandidates
+            ]
+        nonFunctionalReplaySources =
+          [ (sourceKey, replayTargets)
+            | (sourceKey, replayTargets) <- IntMap.toList replayTargetsBySource,
+              IntSet.size replayTargets > 1
+          ]
         isTypeTreeBound target =
           case Binding.lookupBindParent c0 (typeRef (canonical target)) of
             Just (TypeRef _, _) -> True
             Nothing -> False
             Just _ -> False
-    when (strictReplayContract && length replayBindersWithBoundedGrafts < nActive) $
+    case nonFunctionalReplaySources of
+      (sourceKey, replayTargets) : _ ->
+        throwError $
+          WitnessNormalizationError (EdgeId eid) $
+            Witness.ReplayMapSourceNonFunctional
+              (NodeId sourceKey)
+              (map NodeId (IntSet.toAscList replayTargets))
+      [] -> pure ()
+    let replayTargetBySource =
+          IntMap.mapMaybe
+            (fmap (NodeId . fst) . IntSet.minView)
+            replayTargetsBySource
+        replayPairs
+          | not strictReplayContract = []
+          | otherwise =
+              [ (sourceEntry, replayBinder)
+                | sourceEntry@(sourceBinder, _arg) <- activeSourceEntries,
+                  Just replayBinder <-
+                    [ IntMap.lookup
+                        (getNodeId sourceBinder)
+                        replayTargetBySource
+                    ]
+              ]
+        missingReplaySources =
+          [ sourceEntry
+            | sourceEntry@(sourceBinder, _arg) <- activeSourceEntries,
+              IntMap.notMember
+                (getNodeId sourceBinder)
+                replayTargetBySource
+          ]
+    when (strictReplayContract && not (null missingReplaySources)) $
       throwError $
         WitnessNormalizationError (EdgeId eid) $
-          Witness.ReplayMapIncomplete (map fst (drop (length replayBindersWithBoundedGrafts) activeSourceEntries))
-    let replayPairs =
-          if strictReplayContract
-            then
-              if not (null replayEntriesSeededFromRaiseMerge)
-                then replayEntriesSeededFromRaiseMerge
-                else zip activeSourceEntries (take nActive replayBindersWithBoundedGrafts)
-            else []
+          Witness.ReplayMapIncomplete (map fst missingReplaySources)
     let replayMapSourceFinal =
           IntMap.fromList
             [ (getNodeId sourceBinder, replayBinder)
@@ -720,58 +1468,192 @@ normalizeEdgeWitnessesM = do
               )
               | (sourceBinder, arg) <- activeSourceEntries
             ]
-        activeBinderArgs
-          | strictReplayContract = activeSourceEntries
-          | otherwise = []
         envPost =
           env
             { Witness.binderArgs = activeBinderArgsMap,
+              Witness.certifiedRaises = certifiedRaiseTargets,
               Witness.binderReplayMap = replayMapValidation,
               Witness.replayContract = replayContract,
+              Witness.certifiedReplayBinders = certifiedReplayBinderKeys,
               Witness.replayDomainBinders = replayBindersWithBoundedGrafts
             }
-    -- Validate normalized ops and replay-map contract against the finalized
-    -- producer replay codomain.
-    -- IMPORTANT: Validate BEFORE restoring to original node space, since
-    -- interiorNorm is in the rewritten node space (matching the normalized ops).
+    -- Rewritten operations and `etResultRoot` are both in the destination
+    -- expansion domain.  Source identities are restored only after this
+    -- validation; mixing source operands with the destination root would make
+    -- ownership depend on accidental numeric aliases.
     case residualNoReplayOp of
       Just op ->
         throwError $
-          WitnessNormalizationError (EdgeId eid) $
-            Witness.ReplayContractNoneRequiresReplay op
+          WitnessNormalizationError
+            (EdgeId eid)
+            (Witness.ReplayContractNoneRequiresReplay op)
       Nothing -> pure ()
-    case validateNormalizedWitness envPost opsNormContract of
-      Left valErr -> throwError (WitnessNormalizationError (EdgeId eid) valErr)
+    case validateNormalizedWitness envPost opsForValidation of
+      Left valErr ->
+        let restoreValidationNode node =
+              case IntMap.lookup (getNodeId (canonical node)) sourcesByDestination of
+                Just sources
+                  | [source] <- map NodeId (IntSet.toAscList sources) -> source
+                _ -> node
+            restoreValidationOp op =
+              case op of
+                OpGraft sigma target ->
+                  OpGraft (restoreValidationNode sigma) (restoreValidationNode target)
+                OpMerge operated other ->
+                  OpMerge (restoreValidationNode operated) (restoreValidationNode other)
+                OpRaise target -> OpRaise (restoreValidationNode target)
+                OpWeaken target -> OpWeaken (restoreValidationNode target)
+                OpRaiseMerge operated other ->
+                  OpRaiseMerge (restoreValidationNode operated) (restoreValidationNode other)
+            restoredError =
+              case valErr of
+                Witness.NotTransitivelyFlexBound op target validationRoot ->
+                  Witness.NotTransitivelyFlexBound
+                    (restoreValidationOp op)
+                    (restoreValidationNode target)
+                    (restoreValidationNode validationRoot)
+                _ -> valErr
+         in throwError (WitnessNormalizationError (EdgeId eid) restoredError)
       Right () -> pure ()
     let interiorSourceKeys =
           case traceInterior of
-            InteriorNodes s -> s
+            EdgeSourceInterior (InteriorNodes s) -> s
+        restoreProvenancedNode operand =
+          let provenance = pnProvenance operand
+           in if Set.member RetainedFinalDestination (operandAuthorityDomains provenance)
+                then Right (canonical (pnNode operand))
+                else
+                  case map NodeId (IntSet.toAscList (operandSourceCandidates provenance)) of
+                    [source] -> Right source
+                    sources ->
+                      Left
+                        ( Witness.AmbiguousOperatedSource
+                            (canonical (pnNode operand))
+                            sources
+                        )
         restoreOpFinal op =
           case op of
-            OpWeaken target
-              | strictReplayContract,
-                restoreNode target /= edgeRoot ->
-                  let targetC = canonical target
-                   in case IntMap.lookup (getNodeId targetC) replayMapReplayToSource of
-                        Just sourceBinder -> OpWeaken sourceBinder
-                        Nothing -> OpWeaken (restoreNode target)
-            _ -> restoreOp op
+            ProvenancedGraft sigma target ->
+              OpGraft
+                <$> restoreProvenancedNode sigma
+                <*> restoreProvenancedNode target
+            ProvenancedMerge operated other ->
+              OpMerge
+                <$> restoreProvenancedNode operated
+                <*> restoreProvenancedNode other
+            ProvenancedRaise target ->
+              OpRaise <$> restoreProvenancedNode target
+            -- RaiseMerge is the normalized form of Raise(n); Merge(n,m).
+            -- Restoring copy-domain identities can turn only the Merge part
+            -- into a self-merge; the preceding Raise remains semantic.
+            ProvenancedRaiseMerge operated other -> do
+              operated' <- restoreProvenancedNode operated
+              other' <- restoreProvenancedNode other
+              pure $
+                if operated' == other'
+                  then OpRaise operated'
+                  else OpRaiseMerge operated' other'
+            ProvenancedWeaken target -> do
+              operated <- restoreProvenancedNode target
+              let targetC = canonical (pnNode target)
+                  replaySource =
+                    case IntMap.lookup (getNodeId targetC) replayMapReplayToSource of
+                      Just sourceBinder -> Just sourceBinder
+                      Nothing ->
+                        IntMap.lookup
+                          (getNodeId (canonical operated))
+                          replayMapReplayToSource
+              pure $
+                case replaySource of
+                  Just sourceBinder
+                    | strictReplayContract,
+                      operated /= sourceRoot -> OpWeaken sourceBinder
+                  _ -> OpWeaken operated
+        restoreOpFinalWithDeferredWeaken op = do
+          restored <- restoreOpFinal op
+          let targetIsRigid target =
+                let targetNode = canonical (pnNode target)
+                 in case Binding.lookupBindParent c0 (typeRef targetNode) of
+                      Just (_parent, BindRigid) -> True
+                      _ -> False
+              deferredWeaken =
+                case (op, restored) of
+                  (ProvenancedRaiseMerge operated other, OpRaiseMerge operated' _)
+                    | Set.member
+                        WeakenIfTerminalTargetBecomesRigid
+                        (operandConstructionCertificates (pnProvenance operated)),
+                      targetIsRigid other ->
+                          [OpWeaken operated']
+                  _ -> []
+          pure ([restored] ++ deferredWeaken)
         normalizeRaiseTarget op =
           case op of
             OpRaise n
               | IntSet.member (getNodeId n) interiorSourceKeys ->
                   Just (OpRaise n)
-              | IntSet.member (getNodeId (canonical n)) interiorSourceKeys ->
-                  Just (OpRaise (canonical n))
               | otherwise ->
                   Nothing
             _ -> Just op
-        opsFinal = mapMaybe (normalizeRaiseTarget . restoreOpFinal) opsNormContract
-        trace' =
+    opsRestored <-
+      case concat <$> traverse restoreOpFinalWithDeferredWeaken opsNormContractWithProvenance of
+        Left restoreErr ->
+          throwError (WitnessNormalizationError (EdgeId eid) restoreErr)
+        Right restored -> pure restored
+    let opsFinal = mapMaybe normalizeRaiseTarget opsRestored
+        provenanceDomain =
+          IntSet.unions
+            [ operandSourceCandidates (pnProvenance operand)
+              | op <- opsNormContractWithProvenance,
+                operand <- provenancedOperands op
+            ]
+        retainedDestinationDomain =
+          IntSet.fromList
+            [ getNodeId (canonical (pnNode operand))
+              | op <- opsNormContractWithProvenance,
+                operand <- provenancedOperands op,
+                Set.member
+                  RetainedFinalDestination
+                  (operandAuthorityDomains (pnProvenance operand))
+            ]
+        replaySourceDomain =
+          IntSet.fromList (IntMap.keys replayMapSourceFinal)
+        replayTargetDomain =
+          IntSet.fromList (map getNodeId replayBindersWithBoundedGrafts)
+        finalSourceReplayDomain =
+          IntSet.unions
+            [ provenanceDomain,
+              replaySourceDomain,
+              replayTargetDomain,
+              retainedDestinationDomain
+            ]
+        finalOperands op =
+          case op of
+            OpGraft sigma target -> [sigma, target]
+            OpMerge operated other -> [operated, other]
+            OpRaise target -> [target]
+            OpWeaken target -> [target]
+            OpRaiseMerge operated other -> [operated, other]
+        outsideFinalDomain =
+          [ operand
+            | op <- opsFinal,
+              operand <- finalOperands op,
+              IntSet.notMember (getNodeId operand) finalSourceReplayDomain
+          ]
+    case outsideFinalDomain of
+      operand : _ ->
+        throwError $
+          WitnessNormalizationError (EdgeId eid) $
+            Witness.FinalOperandOutsideSourceReplayDomain operand
+      [] -> pure ()
+    let trace' =
           fmap
             ( \tr ->
                 tr
-                  { etBinderArgs = activeBinderArgs,
+                  { -- The binder/argument bridge is frozen producer
+                    -- provenance.  In particular, an argument may now have a
+                    -- different final representative; solved-graph consumers
+                    -- canonicalize it locally instead of erasing the node
+                    -- chosen while constructing chi_e.
                     etReplayContract = replayContract,
                     etBinderReplayMap = replayMapSourceFinal,
                     etReplayDomainBinders =
@@ -781,6 +1663,24 @@ normalizeEdgeWitnessesM = do
                   }
             )
             mbTrace
+    case trace' of
+      Nothing -> pure ()
+      Just traceInfo ->
+        case
+            WitnessValidation.validateTerminalRootRaiseMerge
+              (etRoot traceInfo)
+              (\operated exterior ->
+                  rootRaiseMergeTraceAuthority operated exterior traceInfo
+              )
+              (\operated exterior ->
+                  rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo
+              )
+              opsFinal
+          of
+          Left validationError ->
+            throwError
+              (WitnessNormalizationError (EdgeId eid) validationError)
+          Right () -> pure ()
     let iw = mkInstanceWitness (Witness.validatedInstanceOpsAfterNormalization opsFinal)
         witness' =
             case mkEdgeWitness (ewEdgeId w0) (ewLeft w0) (ewRight w0) (ewRoot w0) (ewForallIntros w0) iw of
@@ -802,6 +1702,17 @@ normalizeEdgeWitnessesM = do
           ]
   modify' $ \st ->
     st
-      { psEdgeWitnesses = witnessMap,
-        psEdgeTraces = IntMap.union traceUpdates traces
+      { psEdgeExecutionArtifacts =
+          IntMap.mapWithKey
+            (\eid artifacts ->
+              case (IntMap.lookup eid witnessMap, IntMap.lookup eid traceUpdates) of
+                (Just witness, Just trace) ->
+                  artifacts {eeaWitness = witness, eeaTrace = trace}
+                _ ->
+                  error
+                    ( "normalizeEdgeWitnessesM lost a complete artifact for edge "
+                        ++ show (EdgeId eid)
+                    )
+            )
+            (psEdgeExecutionArtifacts st)
       }

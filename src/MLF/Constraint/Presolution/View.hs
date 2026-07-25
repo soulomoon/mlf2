@@ -4,7 +4,6 @@ module MLF.Constraint.Presolution.View (
     SnapshotPreparation(..),
     buildPresolutionView,
     sanitizedViewCanonicalMap,
-    fromPresolutionResult,
     prepareSnapshotPreparation,
     prepareSnapshotPreparationFromParts
 ) where
@@ -14,7 +13,6 @@ import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Canonicalization.Shared (buildCanonicalMap, equivCanonical)
-import MLF.Constraint.Solve (rewriteConstraintWithUF)
 import MLF.Constraint.Types.Graph
     ( BindFlag
     , BindParents
@@ -45,11 +43,6 @@ data SnapshotPreparation p = SnapshotPreparation
     , spCanonicalMap :: IntMap NodeId
     , spCanonical :: NodeId -> NodeId
     }
-
-fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView 'Presolved
-fromPresolutionResult pres =
-    let prepared = prepareSnapshotPreparation pres
-    in buildPresolutionView prepared (rewriteConstraintWithUF (spSanitizedUf prepared) (spConstraint prepared))
 
 prepareSnapshotPreparation :: PresolutionSnapshot a => a -> SnapshotPreparation 'Presolved
 prepareSnapshotPreparation pres =

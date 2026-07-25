@@ -205,6 +205,12 @@ would require gen-ancestor fallback before Φ translation begins.
 checkNoGenFallback :: Constraint p -> Either BindingError ()
 checkNoGenFallback c = do
     let nodes = cNodes c
+        schemeRootKeys =
+            IntSet.fromList
+                [ getNodeId root
+                | gen <- NodeAccess.allGenNodes c
+                , root <- gnSchemes gen
+                ]
         reachableFromWithBounds root0 =
             Traversal.reachableFromWithBounds
                 id
@@ -213,29 +219,49 @@ checkNoGenFallback c = do
 
         firstGenAncestor nid = pure (firstGenAncestorFromPath (bindingPathToRoot c) (typeRef nid))
 
+        -- Presolution may leave an outer forall vacuous after eliminating its
+        -- binder while retaining a nested forall that owns the live binders.
+        -- This is the same transparent-forall rule used by
+        -- instantiationBindersM: the nested quantifier is an explicit owner,
+        -- not evidence that the outer node needs a gen fallback.
+        fallbackBody visited nid
+            | IntSet.member (getNodeId nid) visited = pure (Just nid)
+            | otherwise =
+                case lookupNodeIn nodes nid of
+                    Just TyForall {tnBody = body} -> do
+                        direct <- boundFlexChildren c (typeRef nid)
+                        if null direct
+                            then fallbackBody (IntSet.insert (getNodeId nid) visited) body
+                            else pure Nothing
+                    Just TyVar {tnBound = Just bound} ->
+                        fallbackBody (IntSet.insert (getNodeId nid) visited) bound
+                    _ -> pure (Just nid)
+
     forM_ (map snd (toListNode nodes)) $ \node ->
         case node of
-            TyForall{} -> do
+            TyForall{}
+                | IntSet.member (getNodeId (tnId node)) schemeRootKeys -> do
                 let nid = tnId node
                 direct <- boundFlexChildren c (typeRef nid)
                 when (null direct) $ do
-                    mGen <- firstGenAncestor nid
-                    forM_ mGen $ \gid -> do
-                        genBinders <- boundFlexChildren c (genRef gid)
-                        let orderRoot = tnBody node
-                            reachable = reachableFromWithBounds orderRoot
-                            reachableBinders =
-                                [ b
-                                | b <- genBinders
-                                , IntSet.member (getNodeId b) reachable
-                                ]
-                        unless (null reachableBinders) $
-                            Left $
-                                GenFallbackRequired
-                                    { fallbackBinder = nid
-                                    , fallbackGen = gid
-                                    , fallbackBinders = reachableBinders
-                                    }
+                    mFallbackBody <- fallbackBody IntSet.empty (tnBody node)
+                    forM_ mFallbackBody $ \orderRoot -> do
+                        mGen <- firstGenAncestor nid
+                        forM_ mGen $ \gid -> do
+                            genBinders <- boundFlexChildren c (genRef gid)
+                            let reachable = reachableFromWithBounds orderRoot
+                                reachableBinders =
+                                    [ b
+                                    | b <- genBinders
+                                    , IntSet.member (getNodeId b) reachable
+                                    ]
+                            unless (null reachableBinders) $
+                                Left $
+                                    GenFallbackRequired
+                                        { fallbackBinder = nid
+                                        , fallbackGen = gid
+                                        , fallbackBinders = reachableBinders
+                                        }
             _ -> pure ()
 
 -- | Reject scheme roots that reach named nodes not bound under their gen node.

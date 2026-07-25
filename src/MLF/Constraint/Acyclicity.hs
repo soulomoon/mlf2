@@ -248,25 +248,42 @@ runCycleRewrite c pivotEdge recursiveNodes =
           action = do
             binderId <- freshNodeIdCR
             bodyId <- cloneWithSubstitution originalNodes recursiveNodes binderId originalRhs
-            bodyUsesBinder <- clonedBodyMentionsBinder bodyId binderId
-            if bodyUsesBinder && bodyId /= binderId
+            if bodyId == binderId
               then do
+                -- The entire pivot destination can itself belong to the
+                -- recursive component (for example @a <= b, b <= a@).  In
+                -- that case substitution returns the fresh binder directly,
+                -- so there is no cloned body that would insert it for us.
+                -- Publish the variable before installing the rewritten edge;
+                -- otherwise that edge points at an absent node and loses the
+                -- destination's binding owner.
                 insertNodeCR
                   TyVar
                     { tnId = binderId,
                       tnBound = Nothing
                     }
-                muId <- freshNodeIdCR
-                insertNodeCR
-                  TyMu
-                    { tnId = muId,
-                      tnBody = bodyId
-                    }
-                attachClonedBindParentsWithMu c bodyId binderId muId rhsParent
-                pure muId
-              else do
                 attachClonedBindParentsNoMu c bodyId rhsParent
                 pure bodyId
+              else do
+                bodyUsesBinder <- clonedBodyMentionsBinder bodyId binderId
+                if bodyUsesBinder
+                  then do
+                    insertNodeCR
+                      TyVar
+                        { tnId = binderId,
+                          tnBound = Nothing
+                        }
+                    muId <- freshNodeIdCR
+                    insertNodeCR
+                      TyMu
+                        { tnId = muId,
+                          tnBody = bodyId
+                        }
+                    attachClonedBindParentsWithMu c bodyId binderId muId rhsParent
+                    pure muId
+                  else do
+                    attachClonedBindParentsNoMu c bodyId rhsParent
+                    pure bodyId
        in runState action
 
 clonedBodyMentionsBinder :: NodeId -> NodeId -> CycleRewriteM Bool
@@ -315,17 +332,19 @@ cloneWithSubstitution originalNodes recursiveNodes binderId nid
                         tnDom = dom',
                         tnCod = cod'
                       }
-                TyBase {tnBase = base} ->
+                TyBase {tnBaseIdentity = identity, tnBase = base} ->
                   pure
                     TyBase
                       { tnId = cloneId,
+                        tnBaseIdentity = identity,
                         tnBase = base
                       }
-                TyCon {tnCon = con, tnArgs = args} -> do
+                TyCon {tnConIdentity = identity, tnCon = con, tnArgs = args} -> do
                   args' <- traverse (cloneWithSubstitution originalNodes recursiveNodes binderId) args
                   pure
                     TyCon
                       { tnId = cloneId,
+                        tnConIdentity = identity,
                         tnCon = con,
                         tnArgs = args'
                       }

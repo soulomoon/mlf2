@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Research.C1AuthoritativeSurfaceSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
@@ -13,6 +14,7 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
+    , emptyExpansionConstructionPlacements
     )
 import MLF.Constraint.Presolution.TestSupport
     ( EdgeArtifacts(..)
@@ -33,7 +35,6 @@ import MLF.Elab.Pipeline
     ( applyRedirectsToAnn
     , canonicalizeAnn
     , runPipelineElab
-    , runPipelineElab
     )
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
@@ -52,7 +53,6 @@ import MLF.Types.Elab
     ( BoundType
     , ElabType
     , Ty(..)
-    , tBase
     )
 import SpecUtil
     ( PipelineArtifacts(..)
@@ -68,35 +68,27 @@ spec =
     describe "C1 authoritative-surface harness" $ do
         it "keeps the admitted non-local Int packet visibly non-recursive on the fallback surface" $ do
             fallbackTy <- c1FallbackTypeFor c1IntExpr (BaseTy "Int")
-            fallbackTy `shouldBe` tBase (BaseTy "Int")
+            fallbackTy `shouldBe` TestElab.tBase (BaseTy "Int")
             containsMu fallbackTy `shouldBe` False
 
-        it "keeps the exact Int source packet recursive on both current pipeline entrypoints" $ do
+        it "keeps the exact Int source packet recursive on the canonical pipeline entrypoint" $ do
             let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
-            (_uncheckedTerm, uncheckedTy) <-
+            (_term, ty) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
-            (_checkedTerm, checkedTy) <-
-                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
-            uncheckedTy `shouldNotBe` blocked
-            checkedTy `shouldNotBe` blocked
-            containsMu uncheckedTy `shouldBe` True
-            containsMu checkedTy `shouldBe` True
+            ty `shouldNotBe` blocked
+            containsMu ty `shouldBe` True
 
         it "keeps the admitted non-local Bool packet visibly non-recursive on the fallback surface" $ do
             fallbackTy <- c1FallbackTypeFor c1BoolExpr (BaseTy "Bool")
-            fallbackTy `shouldBe` tBase (BaseTy "Bool")
+            fallbackTy `shouldBe` TestElab.tBase (BaseTy "Bool")
             containsMu fallbackTy `shouldBe` False
 
-        it "keeps the exact Bool source packet recursive on both current pipeline entrypoints" $ do
+        it "keeps the exact Bool source packet recursive on the canonical pipeline entrypoint" $ do
             let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
-            (_uncheckedTerm, uncheckedTy) <-
+            (_term, ty) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
-            (_checkedTerm, checkedTy) <-
-                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
-            uncheckedTy `shouldNotBe` blocked
-            checkedTy `shouldNotBe` blocked
-            containsMu uncheckedTy `shouldBe` True
-            containsMu checkedTy `shouldBe` True
+            ty `shouldNotBe` blocked
+            containsMu ty `shouldBe` True
 
 c1IntExpr :: SurfaceExpr
 c1IntExpr = ELet "k" (ELamAnn "x" recursiveIntAnn (EVar "x")) (EVar "k")
@@ -123,12 +115,11 @@ c1FallbackTypeFor expr expectedBase = do
 
 extractVarBody :: AnnExpr -> AnnExpr
 extractVarBody ann0 = case ann0 of
-    ALet _ _ _ _ _ _ _ (AAnn body _ _) _ -> body
+    ALet _ _ _ _ _ _ _ (ALetScope body _ _) _ -> body
     _ -> error ("unexpected scheme-alias/base-like wrapper shape: " ++ show ann0)
 
 bodyRoot :: AnnExpr -> NodeId
 bodyRoot ann0 = case extractVarBody ann0 of
-    AVar _ nid -> nid
     AResolvedVar _ _ nid -> nid
     other -> error ("expected scheme alias variable body, got " ++ show other)
 
@@ -226,6 +217,8 @@ resultTypeInputsForArtifacts
                 , gaBaseConstraint = c1
                 , gaBaseToSolved = baseToSolved
                 , gaSolvedToBase = solvedToBase
+                , gaRestoredSchemeRootTargets = IntMap.empty
+                , gaExpansionConstructionPlacements = emptyExpansionConstructionPlacements
                 }
         inputs =
             mkResultTypeInputs
@@ -234,6 +227,7 @@ resultTypeInputsForArtifacts
                     { eaEdgeExpansions = edgeExpansions
                     , eaEdgeWitnesses = edgeWitnesses
                     , eaEdgeTraces = edgeTraces
+                    , eaIdentityEdges = prIdentityEdges pres
                     }
                 (Finalize.presolutionViewFromSolved solvedClean)
                 bindParentsGa

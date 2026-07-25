@@ -455,12 +455,11 @@ spec = do
             libInterface <- requireInterface libId packageInterface
             let exports = moduleInterfaceExports libInterface
                 ordinaryExports =
-                    [ (valueIdentity, valueInfo, symbol, runtimeName, constraints, constraintInfos)
+                    [ (valueIdentity, valueInfo, symbol, runtimeName, constraintInfos)
                     | ( valueIdentity,
                         valueInfo@OrdinaryValue
                             { valueInfoSymbol = symbol
                             , valueRuntimeName = runtimeName
-                            , valueConstraints = constraints
                             , valueConstraintInfos = constraintInfos
                             }
                         ) <-
@@ -468,13 +467,12 @@ spec = do
                     ]
             case ordinaryExports of
                 [] -> expectationFailure "expected an ordinary exported value"
-                (valueIdentity, valueInfo, symbol, runtimeName, constraints, constraintInfos) : _ -> do
+                (valueIdentity, valueInfo, symbol, runtimeName, constraintInfos) : _ -> do
                     let conflictingValueInfo =
                             OrdinaryValue
                                 { valueInfoSymbol = symbol
                                 , valueRuntimeName = runtimeName
                                 , valueTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
-                                , valueConstraints = constraints
                                 , valueConstraintInfos = constraintInfos
                                 }
                         ambiguousExports =

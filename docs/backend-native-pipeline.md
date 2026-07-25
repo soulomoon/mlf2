@@ -497,12 +497,11 @@ expected diagnostic fragment.
 ## Coverage Contract
 
 `Parity.ProgramMatrix.NativePolicy` owns the test-support policy that maps the
-shared `programSpecToLLVMParityCases` interpreter-success rows into backend
-parity layers. `BackendLLVMSpec` consumes those policy rows rather than keeping
-its own object-code or native-run string lists. Each policy entry names the
-source-checking result, interpreter/runtime expectation, backend LLVM assembly
-expectation, selected raw object-code smoke coverage, native executable run
-expectation, and required LLVM/native tools.
+shared `programRuntimeSuccessCases` into one merged parity lane.
+`BackendLLVMSpec` constructs one checked artifact per row, asserts the
+interpreter result, and reuses that artifact for backend LLVM assembly,
+selected raw object-code smoke coverage, and native execution. The policy also
+records the required LLVM/native tools.
 
 Every current row is native-run checked with raw LLVM assembly validation,
 native compile/link/run, and result comparison. Selected rows also receive raw

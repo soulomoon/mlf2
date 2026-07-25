@@ -40,6 +40,7 @@ data OmegaExecEnv m = OmegaExecEnv
     , omegaRecordEliminate :: NodeId -> m ()
     , omegaIsEliminated :: NodeId -> m Bool
     , omegaEliminatedBinders :: m [NodeId]
+    , omegaRegisterWeakenMeta :: NodeId -> m ()
     , omegaWeakenMeta :: NodeId -> m ()
     }
 
@@ -67,6 +68,10 @@ executeOmegaBaseOpsPre env ops0 = go ops0
             omegaDropVarBind env meta
             omegaRecordEliminate env bv
             go rest
+        (OpWeaken bv : rest) -> do
+            meta <- omegaMetaFor env bv
+            omegaRegisterWeakenMeta env meta
+            go rest
         (_ : rest) ->
             go rest
 
@@ -81,9 +86,15 @@ executeOmegaBaseOpsPost env ops0 = do
     forM_ ops0 $ \case
         OpWeaken bv -> do
             eliminated <- omegaIsEliminated env bv
+            meta <- omegaMetaFor env bv
+            -- Queue every raw Weaken for owner-boundary finalization.  A
+            -- binder eliminated by an earlier Merge needs no second graph
+            -- mutation, but its source-domain Weaken may still translate to
+            -- a non-root computation context.  The owner-boundary producer
+            -- has the pre/post graph and emits the certificate when valid.
+            omegaWeakenMeta env meta
             when (not eliminated) $ do
-                meta <- omegaMetaFor env bv
-                omegaWeakenMeta env meta
+                omegaRecordEliminate env bv
         _ -> pure ()
 
     -- Drop binder-metas eliminated by merge-like ops *and* weakenings, so they

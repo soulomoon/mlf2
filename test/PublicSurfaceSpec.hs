@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 
 module PublicSurfaceSpec (spec) where
@@ -105,8 +106,8 @@ spec = describe "Public surface contracts" $ do
               "Main"
               "Token"
               Nothing
-      Pipeline.TBaseWithIdentity (Just identity) (Pipeline.BaseTy "$stale_token")
-        `shouldBe` Pipeline.TBaseWithIdentity (Just identity) (Pipeline.BaseTy "Main.Token")
+      Pipeline.TBaseWithIdentity identity (Pipeline.BaseTy "$stale_token")
+        `shouldBe` Pipeline.TBaseWithIdentity identity (Pipeline.BaseTy "Main.Token")
 
     it "owns checked runtime helpers and pipeline diagnostics" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
@@ -217,7 +218,7 @@ spec = describe "Public surface contracts" $ do
             Pipeline.typeBinderRefFromIdentity
               (Pipeline.typeBinderIdentityFromUnique (Pipeline.UniqueIdentity 0))
               "self"
-          recursiveTy = Pipeline.TMuRef self (Pipeline.TArrow (Pipeline.TVarRef self) (Pipeline.tBase (Pipeline.BaseTy "Int")))
+          recursiveTy = Pipeline.TMuRef self (Pipeline.TArrow (Pipeline.TVarRef self) (Pipeline.tBase (Pipeline.builtinTypeIdentity "Int") (Pipeline.BaseTy "Int")))
           term = XMLF.EUnroll (XMLF.ERoll recursiveTy (XMLF.ELit (LInt 1)))
       XMLF.prettyXmlfTerm term `shouldBe` "unroll (roll[μself. self -> Int] 1)"
 
@@ -275,5 +276,23 @@ writePackageFile root relativePath contents = do
 
 hasRecursiveArrow :: Pipeline.ElabType -> Bool
 hasRecursiveArrow ty = case ty of
-  Pipeline.TArrow (Pipeline.TMuRef _ _) (Pipeline.TMuRef _ _) -> True
+  Pipeline.TForallRef resultRef (Just resultBound)
+    (Pipeline.TArrow parameterTy (Pipeline.TVarRef resultUseRef)) ->
+      Pipeline.typeBinderRefsSameIdentity resultRef resultUseRef
+        && case (resultBound, parameterTy) of
+          ( Pipeline.TMuRef boundMuRef
+              ( Pipeline.TArrow
+                  (Pipeline.TVarRef boundMuUseRef)
+                  (Pipeline.TBaseWithIdentity _ (Pipeline.BaseTy "Int"))
+                ),
+            Pipeline.TMuRef parameterMuRef
+              ( Pipeline.TArrow
+                  (Pipeline.TVarRef parameterMuUseRef)
+                  (Pipeline.TBaseWithIdentity _ (Pipeline.BaseTy "Int"))
+                )
+            ) ->
+              Pipeline.typeBinderRefsSameIdentity boundMuRef boundMuUseRef
+                && Pipeline.typeBinderRefsSameIdentity parameterMuRef parameterMuUseRef
+                && Pipeline.typeBinderRefsSameIdentity boundMuRef parameterMuRef
+          _ -> False
   _ -> False

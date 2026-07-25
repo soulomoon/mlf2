@@ -5,7 +5,18 @@ module Parity.ProgramMatrix.NativePolicy
     , ObjectCodePolicy (..)
     , NativeRunPolicy (..)
     , ToolAvailabilityPolicy (..)
-    , ProgramLLVMNativeParityPolicy (..)
+    , ProgramLLVMNativeParityPolicy
+    , parityCaseName
+    , parityCaseSource
+    , parityExpectedRuntime
+    , paritySourceChecking
+    , parityInterpreterRuntime
+    , parityBackendLLVMAssembly
+    , parityBackendLLVMRequiredFragments
+    , parityBackendLLVMForbiddenFragments
+    , parityObjectCode
+    , parityNativeRun
+    , parityToolAvailability
     , programLLVMNativeParityPolicies
     , programLLVMNativeParityPolicyDiagnostics
     , objectCodeParityCaseNames
@@ -19,10 +30,10 @@ import Data.List (group, intercalate, sort)
 import qualified Data.Set as Set
 
 import Parity.ProgramMatrix
-    ( ProgramMatrixSource
+    ( ProgramMatrixSource (..)
     , ProgramRuntimeCase (..)
     , ProgramRuntimeExpectation
-    , programSpecToLLVMParityCases
+    , programRuntimeSuccessCases
     )
 
 data SourceCheckingPolicy
@@ -56,39 +67,125 @@ data ToolAvailabilityPolicy = ToolAvailabilityPolicy
     }
     deriving (Eq, Show)
 
-data ProgramLLVMNativeParityPolicy = ProgramLLVMNativeParityPolicy
-    { parityRuntimeCase :: ProgramRuntimeCase
-    , parityCaseName :: String
-    , parityCaseSource :: ProgramMatrixSource
-    , parityExpectedRuntime :: ProgramRuntimeExpectation
-    , paritySourceChecking :: SourceCheckingPolicy
-    , parityInterpreterRuntime :: InterpreterRuntimePolicy
-    , parityBackendLLVMAssembly :: BackendLLVMAssemblyPolicy
-    , parityObjectCode :: ObjectCodePolicy
-    , parityNativeRun :: NativeRunPolicy
-    , parityToolAvailability :: ToolAvailabilityPolicy
-    }
+newtype ProgramLLVMNativeParityPolicy =
+    ProgramLLVMNativeParityPolicy ProgramRuntimeCase
 
 programLLVMNativeParityPolicies :: [ProgramLLVMNativeParityPolicy]
 programLLVMNativeParityPolicies =
-    map mkProgramLLVMNativeParityPolicy programSpecToLLVMParityCases
+    map ProgramLLVMNativeParityPolicy programRuntimeSuccessCases
 
-mkProgramLLVMNativeParityPolicy :: ProgramRuntimeCase -> ProgramLLVMNativeParityPolicy
-mkProgramLLVMNativeParityPolicy runtimeCase =
-    ProgramLLVMNativeParityPolicy
-        { parityRuntimeCase = runtimeCase
-        , parityCaseName = caseName
-        , parityCaseSource = runtimeCaseSource runtimeCase
-        , parityExpectedRuntime = runtimeCaseExpectation runtimeCase
-        , paritySourceChecking = SourceCheckingSucceeds
-        , parityInterpreterRuntime = InterpreterRuntimeSucceeds
-        , parityBackendLLVMAssembly = BackendLLVMAssemblyRequired
-        , parityObjectCode = objectCodePolicy caseName
-        , parityNativeRun = nativeRunPolicy caseName
-        , parityToolAvailability = toolAvailabilityPolicy (objectCodePolicy caseName) (nativeRunPolicy caseName)
-        }
-  where
-    caseName = runtimeCaseName runtimeCase
+parityCaseName :: ProgramLLVMNativeParityPolicy -> String
+parityCaseName (ProgramLLVMNativeParityPolicy runtimeCase) =
+    runtimeCaseName runtimeCase
+
+parityCaseSource :: ProgramLLVMNativeParityPolicy -> ProgramMatrixSource
+parityCaseSource (ProgramLLVMNativeParityPolicy runtimeCase) =
+    runtimeCaseSource runtimeCase
+
+parityExpectedRuntime :: ProgramLLVMNativeParityPolicy -> ProgramRuntimeExpectation
+parityExpectedRuntime (ProgramLLVMNativeParityPolicy runtimeCase) =
+    runtimeCaseExpectation runtimeCase
+
+paritySourceChecking :: ProgramLLVMNativeParityPolicy -> SourceCheckingPolicy
+paritySourceChecking _ =
+    SourceCheckingSucceeds
+
+parityInterpreterRuntime :: ProgramLLVMNativeParityPolicy -> InterpreterRuntimePolicy
+parityInterpreterRuntime _ =
+    InterpreterRuntimeSucceeds
+
+parityBackendLLVMAssembly :: ProgramLLVMNativeParityPolicy -> BackendLLVMAssemblyPolicy
+parityBackendLLVMAssembly _ =
+    BackendLLVMAssemblyRequired
+
+parityBackendLLVMRequiredFragments :: ProgramLLVMNativeParityPolicy -> [String]
+parityBackendLLVMRequiredFragments =
+    backendLLVMRequiredFragments . parityCaseSource
+
+parityBackendLLVMForbiddenFragments :: ProgramLLVMNativeParityPolicy -> [String]
+parityBackendLLVMForbiddenFragments =
+    backendLLVMForbiddenFragments . parityCaseSource
+
+parityObjectCode :: ProgramLLVMNativeParityPolicy -> ObjectCodePolicy
+parityObjectCode =
+    objectCodePolicy . parityCaseName
+
+parityNativeRun :: ProgramLLVMNativeParityPolicy -> NativeRunPolicy
+parityNativeRun =
+    nativeRunPolicy . parityCaseName
+
+parityToolAvailability :: ProgramLLVMNativeParityPolicy -> ToolAvailabilityPolicy
+parityToolAvailability policy =
+    toolAvailabilityPolicy (parityObjectCode policy) (parityNativeRun policy)
+
+backendLLVMRequiredFragments :: ProgramMatrixSource -> [String]
+backendLLVMRequiredFragments source =
+    case source of
+        ProgramFile path
+            | path == "test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp" ->
+                [ "; mlf2 LLVM backend v0"
+                , "define i64 @\"Core__applyId\"()"
+                , "define i64 @\"User__main\"()"
+                ]
+            | path == "test/programs/unified/authoritative-case-analysis.mlfp" ->
+                [ "; mlf2 LLVM backend v0"
+                , "call ptr @\"malloc\""
+                , "call ptr @\"malloc\"(i64 8)"
+                , "call ptr @\"malloc\"(i64 16)"
+                , "getelementptr i8, ptr %\"__llvm.malloc.0\", i64 0"
+                , "store i64 0, ptr %\"__llvm.tag.ptr.1\""
+                , "getelementptr i8, ptr %\"__llvm.malloc.2\", i64 0"
+                , "store i64 1, ptr %\"__llvm.tag.ptr.3\""
+                , "getelementptr i8, ptr %\"__llvm.malloc.2\", i64 8"
+                , "switch i64"
+                , "switch i64 %\"__llvm.case.tag.6\", label %case.default.2 [ i64 0, label %case.alt.0 i64 1, label %case.alt.1 ]"
+                , "phi i64"
+                ]
+            | path == "test/programs/unified/first-class-polymorphism.mlfp" ->
+                ["define i1 @\"FirstClassPolymorphism__main\"()"]
+            | path == "test/programs/unified/authoritative-recursive-let.mlfp" ->
+                [ "define ptr @\"Main__main$letrec$"
+                , "call ptr @\"Main__main$letrec$"
+                , "switch i64"
+                , "phi ptr"
+                ]
+            | path == "test/programs/recursive-adt/recursive-list-tail.mlfp" ->
+                firstOrderRecursiveFragments
+                    ++ [ "define ptr @\"RecursiveList__tailOrNil\""
+                       , "define i1 @\"RecursiveList__isNil\""
+                       , "phi ptr"
+                       ]
+            | path == "test/programs/recursive-adt/recursive-existential.mlfp" ->
+                firstOrderRecursiveFragments
+                    ++ [ "define i1 @\"RecursiveExistential__unwrapSome\""
+                       , "call i1 @\"RecursiveExistential__unwrapSome\""
+                       ]
+            | path `elem` firstOrderRecursiveFixturePaths ->
+                firstOrderRecursiveFragments
+        _ ->
+            []
+
+backendLLVMForbiddenFragments :: ProgramMatrixSource -> [String]
+backendLLVMForbiddenFragments source =
+    case source of
+        ProgramFile "test/programs/unified/first-class-polymorphism.mlfp" ->
+            ["FirstClassPolymorphism__usePoly"]
+        _ -> []
+
+firstOrderRecursiveFixturePaths :: [FilePath]
+firstOrderRecursiveFixturePaths =
+    [ "test/programs/recursive-adt/plain-recursive-nat.mlfp"
+    , "test/programs/recursive-adt/recursive-list-tail.mlfp"
+    , "test/programs/recursive-adt/recursive-gadt.mlfp"
+    , "test/programs/recursive-adt/recursive-existential.mlfp"
+    , "test/programs/recursive-adt/recursive-tree-first-order.mlfp"
+    ]
+
+firstOrderRecursiveFragments :: [String]
+firstOrderRecursiveFragments =
+    [ "call ptr @\"malloc\""
+    , "switch i64"
+    ]
 
 objectCodePolicy :: String -> ObjectCodePolicy
 objectCodePolicy caseName
@@ -138,6 +235,7 @@ objectCodeParityCaseNames :: [String]
 objectCodeParityCaseNames =
     [ "surface: runs lambda/application"
     , "surface: runs top-level partial application"
+    , "unified fixture: test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp"
     , "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp"
     , "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp"
     , "boundary: runs value-exported constructor when owner type is not exported"
@@ -148,6 +246,11 @@ objectCodeParityCaseNames =
     , "unified fixture: test/programs/unified/higher-order-local-function-flow.mlfp"
     , "unified fixture: test/programs/unified/higher-order-partial-application.mlfp"
     , "unified fixture: test/programs/unified/higher-order-returned-function.mlfp"
+    , "fixture: test/programs/recursive-adt/plain-recursive-nat.mlfp"
+    , "fixture: test/programs/recursive-adt/recursive-list-tail.mlfp"
+    , "fixture: test/programs/recursive-adt/recursive-gadt.mlfp"
+    , "fixture: test/programs/recursive-adt/recursive-existential.mlfp"
+    , "fixture: test/programs/recursive-adt/recursive-tree-first-order.mlfp"
     , "standalone: does not decode typed non-data constructor fields through fallback ADT decoding"
     , "standalone: applies captured function-valued constructor fields"
     ]
@@ -158,14 +261,17 @@ objectCodeParityCaseNameSet =
 
 programLLVMNativeParityPolicyDiagnostics :: [String]
 programLLVMNativeParityPolicyDiagnostics =
-    duplicateDiagnostics "interpreter-success runtime case" expectedCaseNames
+    [ "interpreter-success runtime case matrix is empty"
+    | null expectedCaseNames
+    ]
+        ++ duplicateDiagnostics "interpreter-success runtime case" expectedCaseNames
         ++ duplicateDiagnostics "native parity policy case" policyCaseNames
         ++ mismatchDiagnostics "policy rows" expectedCaseNames policyCaseNames
         ++ unknownNameDiagnostics "object-code parity case" objectCodeParityCaseNames expectedCaseNameSet
         ++ unknownNameDiagnostics "native-run unsupported case" nativeUnsupportedParityCaseNames expectedCaseNameSet
         ++ nativeCoverageDiagnostics
   where
-    expectedCaseNames = map runtimeCaseName programSpecToLLVMParityCases
+    expectedCaseNames = map runtimeCaseName programRuntimeSuccessCases
     expectedCaseNameSet = Set.fromList expectedCaseNames
     policyCaseNames = map parityCaseName programLLVMNativeParityPolicies
     requiredNativeRunNameSet = Set.fromList requiredNativeRunParityCaseNames

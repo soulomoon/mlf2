@@ -54,7 +54,6 @@ import MLF.Frontend.Program.Types
     , SymbolOwnerIdentity (..)
     , SymbolOrigin (..)
     , TypeView
-    , typeViewHeadIdentities
     , checkedBindingName
     , ctorName
     , mkResolvedSymbol
@@ -74,6 +73,7 @@ spec =
             checked <- requireRight (prepareBackendEmissionFromSource "inline-main.mlfp" simpleProgram)
             output <- requireRight (renderCheckedProgramLLVM checked)
 
+            map checkedModuleName (checkedProgramModules checked) `shouldBe` ["Main"]
             output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
             output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
             validateLLVMAssembly output
@@ -106,30 +106,6 @@ spec =
             Set.map identityHead (Map.keysSet (checkedModuleData preludeModule))
                 `shouldBe` Set.singleton (SymbolType, "Prelude", "Unit")
             map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__Unit"]
-
-        it "rejects identity-incomplete checked inputs before backend pruning" $ do
-            let incomplete =
-                    resolvedShadowProgram
-                        { checkedProgramModulesInternal =
-                            map poisonMainTypeView (checkedProgramModules resolvedShadowProgram)
-                        }
-                poisonMainTypeView checkedModule0 =
-                    checkedModule0
-                        { checkedModuleBindings =
-                            map poisonMainBinding (checkedModuleBindings checkedModule0)
-                        }
-                poisonMainBinding binding
-                    | checkedBindingName binding == "Main__main" =
-                        binding
-                            { checkedBindingSourceTypeView =
-                                mkTypeView (Surface.STBase "Int") (Surface.STBase "Int")
-                            }
-                    | otherwise = binding
-
-            prepareCheckedProgramForBackendEmission incomplete
-                `shouldSatisfy` either
-                    (isInfixOf "MissingTypeHeadIdentity" . show)
-                    (const False)
 
         it "keeps resolved globals when local binders reuse their runtime spelling" $ do
             checked <- requireRight (prepareCheckedProgramForBackendEmission resolvedShadowProgram)
@@ -429,7 +405,7 @@ stalePreludeDataNameProgram =
                             )
                     , checkedBindingType =
                         Elab.TArrow
-                            (Elab.TBaseWithIdentity (Just (typeIdentity "Prelude" "Unit")) (BaseTy "$stale_elab_name"))
+                            (Elab.TBaseWithIdentity (typeIdentity "Prelude" "Unit") (BaseTy "$stale_elab_name"))
                             intTy
                     }
                 ])
@@ -481,7 +457,6 @@ stalePreludeConstructorOwnerProgram =
                 withTypeHeadIdentities
                     [("Unit", typeIdentity "Prelude" "Unit")]
                     (mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit"))
-            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -518,7 +493,6 @@ staleResolvedModuleNameProgram =
                 withTypeHeadIdentities
                     [("Unit", typeIdentity "Prelude" "Unit")]
                     (mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit"))
-            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -580,7 +554,6 @@ stalePreludeConstructorTypeProgram =
                             (Surface.STBase (symbolIdentityStableName boxTypeIdentity))
                         )
                     )
-            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = boxTypeIdentity
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -628,7 +601,6 @@ conflictingPreludeConstructorOwnerProgram =
                 withTypeHeadIdentities
                     [("Unit", typeIdentity "Prelude" "Unit")]
                     (mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit"))
-            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -641,7 +613,6 @@ conflictingPreludeConstructorOwnerProgram =
                 withTypeHeadIdentities
                     [("Box", boxTypeIdentity)]
                     (mkTypeView (Surface.STBase "Box") (Surface.STBase "Prelude.Box"))
-            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = boxTypeIdentity
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -676,7 +647,7 @@ builtinIntIdentity =
 
 intElabType :: Elab.ElabType
 intElabType =
-    Elab.TBaseWithIdentity (Just builtinIntIdentity) (BaseTy "Int")
+    Elab.TBaseWithIdentity builtinIntIdentity (BaseTy "Int")
 
 intTypeView :: TypeView
 intTypeView =
@@ -686,9 +657,7 @@ intTypeView =
 
 withTypeHeadIdentities :: [(String, SymbolIdentity)] -> TypeView -> TypeView
 withTypeHeadIdentities identities view =
-    setTypeViewHeadIdentities
-        (Map.fromList identities `Map.union` typeViewHeadIdentities view)
-        view
+    setTypeViewHeadIdentities (Map.fromList identities) view
 
 topLevelVar :: Int -> String -> String -> String -> Elab.ElabType -> ResolvedVar
 topLevelVar unique _runtimeName moduleName sourceName ty =

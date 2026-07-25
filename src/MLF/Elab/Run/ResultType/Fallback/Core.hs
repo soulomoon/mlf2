@@ -46,11 +46,12 @@ import MLF.Elab.Run.ResultType.Util
     collectEdges,
     resultTypeRoots,
     selectUniqueCandidate,
+    selectUniqueCandidateBy,
     stripAnn,
   )
 import qualified MLF.Elab.Run.ResultType.View as View
 import MLF.Elab.Types
-import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import MLF.Frontend.ConstraintGen (AnnExpr (..), instantiationSiteEdgeId)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 
 data RootLocality
@@ -203,12 +204,10 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                 _ -> []
           baseNodeForTy ty =
             case ty of
-              TBaseWithIdentity (Just identity) base@(BaseTy name)
+              TBaseWithIdentity identity base@(BaseTy name)
                 | identity == PrimitiveInventory.builtinTypeIdentity name ->
                     Map.lookup base baseNodeByTy
                 | otherwise -> Nothing
-              TBaseWithIdentity Nothing base ->
-                Map.lookup base baseNodeByTy
               _ -> Nothing
           instAppBasesFromWitness funEid =
             case (phiReadModel, IntMap.lookup (getEdgeId funEid) edgeWitnesses) of
@@ -226,9 +225,9 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
             let argEdgeBases eid =
                   IntMap.findWithDefault IntSet.empty (getEdgeId eid) traceBinderArgBaseBounds
              in case stripAnn rootForTypeAnn of
-                  AApp _ arg funEid argEid _ ->
-                    let fromWitness = instAppBasesFromWitness funEid
-                        fromArgEdge = argEdgeBases argEid
+                  AApp _ arg funSite argSite _ ->
+                    let fromWitness = instAppBasesFromWitness (instantiationSiteEdgeId funSite)
+                        fromArgEdge = argEdgeBases (instantiationSiteEdgeId argSite)
                      in if not (IntSet.null fromWitness)
                           then fromWitness
                           else
@@ -405,10 +404,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
               then viewBase
               else targetView
           retainedChildPresolutionView = View.rtvPresolutionViewOverlay retainedChildView
-          rootBound =
-            case lookupNodeIn nodesFinal rootFinal of
-              Just TyVar {tnBound = Just bnd} -> Just (canonicalFinal bnd)
-              _ -> Nothing
+          rootBound = View.rtvDirectBoundTarget viewFinalBounded rootFinal
           rootBoundIsBase =
             case rootBound of
               Just bnd ->
@@ -677,7 +673,14 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                       selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
                   ]
                 matchingCandidateSelection =
-                  uniqueCandidate matchingCandidates
+                  -- Distinct binding-tree children can carry the same proof.
+                  -- Ambiguity belongs to the identity-bearing target/scope,
+                  -- not to the number of equivalent paths that reach it.
+                  selectUniqueCandidateBy sameRetainedTarget matchingCandidates
+                sameRetainedTarget left right =
+                  retainedChildProofChildTarget left == retainedChildProofChildTarget right
+                    && retainedChildProofChosenTarget left == retainedChildProofChosenTarget right
+                    && retainedChildProofChosenScopeRoot left == retainedChildProofChosenScopeRoot right
                 hasAmbiguousMatchingCandidate =
                   any
                     ( \(_child, _childTarget, _bnd, bndRoot, chosenTargetProof, _hasForall) ->
@@ -758,32 +761,45 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                      || recursiveCandidateAmbiguous
                      || maybe False (const True) sameLaneLocalRetainedChildTarget
                  )
+          {- Note [Close ambiguous recursive results at the enclosing bound]
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+             A result graph root remains a live variable: reifying that node
+             itself must not erase its identity by following the lower bound.
+             The final result-type boundary has a different obligation.  When
+             competing instantiation evidence prevents selecting one child or
+             base target, the root's direct lower bound is the unique enclosing
+             structural target.  Select it before generalization so the output
+             is closed by construction instead of repairing a free TVarRef.
+
+             The bound comes from ResultTypeView, keeping overlays and target
+             generalization in the same owner.  Non-recursive ambiguity keeps
+             the existing fallback behavior. -}
+          ambiguousRecursiveBoundary =
+            rootHasMultiInst
+              || instArgRootMultiBase
+              || recursiveCandidateAmbiguous
+          enclosingRecursiveTarget =
+            case rootBound of
+              Just bnd
+                | rootFinalInvolvesMu -> bnd
+              _ -> View.rtvSchemeBodyTarget targetView rootC
+          keptLocalTarget
+            | rootLocalSchemeAliasBaseLike = rootFinal
+            | ambiguousRecursiveBoundary = enclosingRecursiveTarget
+            | Just retainedTarget <- sameLaneLocalRetainedChildTarget,
+              retainedTarget /= rootFinal = retainedTarget
+            | Just TyVar {} <- lookupNodeIn nodesFinal rootFinal = rootFinal
+            | otherwise = View.rtvSchemeBodyTarget targetView rootC
       let targetC =
             case selectedBaseTargetAdmission of
               Just admission -> baseTargetAdmissionNode admission
-              _ ->
-                if keepTargetFinal
-                  then
-                    if rootLocalSchemeAliasBaseLike
-                      || rootLocalMultiInst
-                      || rootLocalInstArgMultiBase
-                      || recursiveCandidateAmbiguous
-                      then rootFinal
-                      else
-                        case sameLaneLocalRetainedChildTarget of
-                          Just v
-                            | v /= rootFinal -> v
-                          _ ->
-                            case lookupNodeIn nodesFinal rootFinal of
-                              Just TyVar {} -> rootFinal
-                              _ -> View.rtvSchemeBodyTarget targetView rootC
-                  else
-                    if rootBindingIsLocalType
-                      then View.rtvSchemeBodyTarget targetView rootC
-                      else
-                        if rootFinalInvolvesMu
-                          then View.rtvSchemeBodyTarget viewFinalBounded rootC
-                          else rootFinal
+              Nothing
+                | keepTargetFinal -> keptLocalTarget
+                | rootBindingIsLocalType -> View.rtvSchemeBodyTarget targetView rootC
+                | rootFinalInvolvesMu,
+                  ambiguousRecursiveBoundary -> enclosingRecursiveTarget
+                | rootFinalInvolvesMu -> View.rtvSchemeBodyTarget viewFinalBounded rootC
+                | otherwise -> rootFinal
       let useSameLaneLocalRetainedChildScopeRoot =
             case selectedBaseTargetAdmission of
               Just _ -> False

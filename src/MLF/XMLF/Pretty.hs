@@ -2,13 +2,23 @@
 module MLF.XMLF.Pretty (
     prettyXmlfType,
     prettyXmlfComp,
-    prettyXmlfTerm
+    prettyXmlfTerm,
+    prettyCheckedType,
+    prettyCheckedComp
 ) where
 
+import Control.Monad.State.Strict (State, evalState, gets, modify')
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Types.Elab as Checked
+import MLF.Types.Identity
+    ( TypeBinderIdentity
+    , typeBinderIdentityStableName
+    )
+import MLF.Util.Names (freshNameLike)
 import MLF.XMLF.Syntax (XmlfComp (..), XmlfType (..))
 
 prettyXmlfType :: XmlfType -> String
@@ -64,39 +74,96 @@ prettyXmlfComp = goComp 0
         XTMu{} -> "(" ++ prettyXmlfType ty ++ ")"
 
 prettyXmlfTerm :: Checked.XmlfTerm -> String
-prettyXmlfTerm = goTerm 0
+prettyXmlfTerm term =
+    evalState (goTerm 0 term) emptyCheckedNameState
   where
-    goTerm :: Int -> Checked.XmlfTerm -> String
+    goTerm :: Int -> Checked.XmlfTerm -> CheckedPretty String
     goTerm p tm = case tm of
-        Checked.EVarNode resolved -> Checked.resolvedVarReferenceName resolved
-        Checked.ELit l -> prettyLit l
-        Checked.ELam resolved body ->
-            paren (p > 0) ("λ(" ++ Checked.resolvedVarReferenceName resolved ++ " : " ++ prettyCheckedType (Checked.resolvedVarType resolved) ++ ") " ++ goTerm 0 body)
-        Checked.EApp f a ->
-            paren (p > 1) (goTerm 1 f ++ " " ++ goAppArg a)
-        Checked.ELet resolved _ rhs body ->
-            paren (p > 0) ("let " ++ Checked.resolvedVarReferenceName resolved ++ " = " ++ goTerm 0 rhs ++ " in " ++ goTerm 0 body)
-        Checked.ETyAbsRef ref mbBound body ->
-            paren (p > 0) ("Λ(" ++ Checked.typeBinderRefName ref ++ " ⩾ " ++ maybe "⊥" prettyCheckedBound mbBound ++ ") " ++ goTerm 0 body)
-        Checked.ETyInst e inst ->
-            paren (p > 1) (goTerm 1 e ++ "[" ++ prettyCheckedComp inst ++ "]")
-        Checked.ERoll ty body ->
-            paren (p > 0) ("roll[" ++ prettyCheckedType ty ++ "] " ++ goPrefixArg body)
-        Checked.EUnroll body ->
-            paren (p > 0) ("unroll " ++ goPrefixArg body)
+        Checked.EVarNode resolved ->
+            pure (Checked.resolvedVarReferenceName resolved)
+        Checked.ELit l ->
+            pure (prettyLit l)
+        Checked.ELam resolved body -> do
+            binderType <- renderCheckedType (Checked.resolvedVarType resolved)
+            bodyText <- goTerm 0 body
+            pure $
+                paren
+                    (p > 0)
+                    ( "λ("
+                        ++ Checked.resolvedVarReferenceName resolved
+                        ++ " : "
+                        ++ binderType
+                        ++ ") "
+                        ++ bodyText
+                    )
+        Checked.EApp f a -> do
+            functionText <- goTerm 1 f
+            argumentText <- goAppArg a
+            pure (paren (p > 1) (functionText ++ " " ++ argumentText))
+        Checked.ELet resolved _ rhs body -> do
+            rhsText <- goTerm 0 rhs
+            bodyText <- goTerm 0 body
+            pure $
+                paren
+                    (p > 0)
+                    ( "let "
+                        ++ Checked.resolvedVarReferenceName resolved
+                        ++ " = "
+                        ++ rhsText
+                        ++ " in "
+                        ++ bodyText
+                    )
+        Checked.ETyAbsRef ref mbBound body -> do
+            binderName <- checkedRefName ref
+            boundText <-
+                case mbBound of
+                    Nothing -> pure "⊥"
+                    Just bound -> renderCheckedBound bound
+            bodyText <- goTerm 0 body
+            pure $
+                paren
+                    (p > 0)
+                    ( "Λ("
+                        ++ binderName
+                        ++ " ⩾ "
+                        ++ boundText
+                        ++ ") "
+                        ++ bodyText
+                    )
+        Checked.ETyInst e inst -> do
+            expressionText <- goTerm 1 e
+            instantiationText <- renderCheckedComp inst
+            pure $
+                paren
+                    (p > 1)
+                    (expressionText ++ "[" ++ instantiationText ++ "]")
+        Checked.ERoll ty body -> do
+            typeText <- renderCheckedType ty
+            bodyText <- goPrefixArg body
+            pure $
+                paren
+                    (p > 0)
+                    ("roll[" ++ typeText ++ "] " ++ bodyText)
+        Checked.EUnroll body -> do
+            bodyText <- goPrefixArg body
+            pure (paren (p > 0) ("unroll " ++ bodyText))
 
-    goAppArg :: Checked.XmlfTerm -> String
+    goAppArg :: Checked.XmlfTerm -> CheckedPretty String
     goAppArg tm = case tm of
         Checked.EVarNode{} -> goTerm 2 tm
         Checked.ELit{} -> goTerm 2 tm
-        _ -> "(" ++ goTerm 0 tm ++ ")"
+        _ -> do
+            text <- goTerm 0 tm
+            pure ("(" ++ text ++ ")")
 
-    goPrefixArg :: Checked.XmlfTerm -> String
+    goPrefixArg :: Checked.XmlfTerm -> CheckedPretty String
     goPrefixArg tm = case tm of
         Checked.EVarNode{} -> goTerm 1 tm
         Checked.ELit{} -> goTerm 1 tm
         Checked.ETyInst{} -> goTerm 1 tm
-        _ -> "(" ++ goTerm 0 tm ++ ")"
+        _ -> do
+            text <- goTerm 0 tm
+            pure ("(" ++ text ++ ")")
 
     prettyLit :: Lit -> String
     prettyLit lit = case lit of
@@ -106,48 +173,125 @@ prettyXmlfTerm = goTerm 0
         LString s -> show s
 
 prettyCheckedType :: Checked.ElabType -> String
-prettyCheckedType = prettyXmlfType . checkedType
-
-prettyCheckedBound :: Checked.BoundType -> String
-prettyCheckedBound = prettyXmlfType . checkedBound
+prettyCheckedType ty =
+    evalState (renderCheckedType ty) emptyCheckedNameState
 
 prettyCheckedComp :: Checked.Instantiation -> String
-prettyCheckedComp = prettyXmlfComp . checkedComp
+prettyCheckedComp inst =
+    evalState (renderCheckedComp inst) emptyCheckedNameState
 
-checkedType :: Checked.ElabType -> XmlfType
+data CheckedNameState = CheckedNameState
+    { checkedIdentityNames :: Map.Map TypeBinderIdentity String
+    , checkedUsedNames :: Set.Set String
+    }
+
+type CheckedPretty = State CheckedNameState
+
+emptyCheckedNameState :: CheckedNameState
+emptyCheckedNameState =
+    CheckedNameState
+        { checkedIdentityNames = Map.empty
+        , checkedUsedNames = Set.empty
+        }
+
+checkedRefName :: Checked.TypeBinderRef -> CheckedPretty String
+checkedRefName ref = do
+    let identity = Checked.typeBinderRefIdentity ref
+    knownName <- gets (Map.lookup identity . checkedIdentityNames)
+    case knownName of
+        Just name ->
+            pure name
+        Nothing -> do
+            usedNames <- gets checkedUsedNames
+            let rawName = Checked.typeBinderRefName ref
+                preferredName
+                    | rawName == typeBinderIdentityStableName identity = "a"
+                    | otherwise = rawName
+                name = freshNameLike preferredName usedNames
+            modify' $ \state ->
+                state
+                    { checkedIdentityNames =
+                        Map.insert identity name (checkedIdentityNames state)
+                    , checkedUsedNames =
+                        Set.insert name (checkedUsedNames state)
+                    }
+            pure name
+
+renderCheckedType :: Checked.ElabType -> CheckedPretty String
+renderCheckedType ty =
+    prettyXmlfType <$> checkedType ty
+
+renderCheckedBound :: Checked.BoundType -> CheckedPretty String
+renderCheckedBound bound =
+    prettyXmlfType <$> checkedBound bound
+
+renderCheckedComp :: Checked.Instantiation -> CheckedPretty String
+renderCheckedComp inst =
+    prettyXmlfComp <$> checkedComp inst
+
+checkedType :: Checked.ElabType -> CheckedPretty XmlfType
 checkedType ty = case ty of
-    Checked.TVarRef ref -> XTVar (Checked.typeBinderRefName ref)
-    Checked.TArrow a b -> XTArrow (checkedType a) (checkedType b)
-    Checked.TConWithIdentity _ (BaseTy c) args -> XTCon c (fmap checkedType args)
-    Checked.TVarAppRef ref args -> XTVarApp (Checked.typeBinderRefName ref) (fmap checkedType args)
-    Checked.TBaseWithIdentity _ (BaseTy b) -> XTBase b
+    Checked.TVarRef ref ->
+        XTVar <$> checkedRefName ref
+    Checked.TArrow a b ->
+        XTArrow <$> checkedType a <*> checkedType b
+    Checked.TConWithIdentity _ (BaseTy c) args ->
+        XTCon c <$> traverse checkedType args
+    Checked.TVarAppRef ref args ->
+        XTVarApp <$> checkedRefName ref <*> traverse checkedType args
+    Checked.TBaseWithIdentity _ (BaseTy b) ->
+        pure (XTBase b)
     Checked.TForallRef ref mb body ->
-        XTForall (Checked.typeBinderRefName ref) (maybe XTBottom checkedBound mb) (checkedType body)
-    Checked.TMuRef ref body -> XTMu (Checked.typeBinderRefName ref) (checkedType body)
-    Checked.TBottom -> XTBottom
+        XTForall
+            <$> checkedRefName ref
+            <*> maybe (pure XTBottom) checkedBound mb
+            <*> checkedType body
+    Checked.TMuRef ref body ->
+        XTMu <$> checkedRefName ref <*> checkedType body
+    Checked.TBottom ->
+        pure XTBottom
 
-checkedBound :: Checked.BoundType -> XmlfType
+checkedBound :: Checked.BoundType -> CheckedPretty XmlfType
 checkedBound bound = case bound of
-    Checked.TArrow a b -> XTArrow (checkedType a) (checkedType b)
-    Checked.TConWithIdentity _ (BaseTy c) args -> XTCon c (fmap checkedType args)
-    Checked.TVarAppRef ref args -> XTVarApp (Checked.typeBinderRefName ref) (fmap checkedType args)
-    Checked.TBaseWithIdentity _ (BaseTy b) -> XTBase b
+    Checked.TArrow a b ->
+        XTArrow <$> checkedType a <*> checkedType b
+    Checked.TConWithIdentity _ (BaseTy c) args ->
+        XTCon c <$> traverse checkedType args
+    Checked.TVarAppRef ref args ->
+        XTVarApp <$> checkedRefName ref <*> traverse checkedType args
+    Checked.TBaseWithIdentity _ (BaseTy b) ->
+        pure (XTBase b)
     Checked.TForallRef ref mb body ->
-        XTForall (Checked.typeBinderRefName ref) (maybe XTBottom checkedBound mb) (checkedType body)
-    Checked.TMuRef ref body -> XTMu (Checked.typeBinderRefName ref) (checkedType body)
-    Checked.TBottom -> XTBottom
+        XTForall
+            <$> checkedRefName ref
+            <*> maybe (pure XTBottom) checkedBound mb
+            <*> checkedType body
+    Checked.TMuRef ref body ->
+        XTMu <$> checkedRefName ref <*> checkedType body
+    Checked.TBottom ->
+        pure XTBottom
 
-checkedComp :: Checked.Instantiation -> XmlfComp
+checkedComp :: Checked.Instantiation -> CheckedPretty XmlfComp
 checkedComp inst = case inst of
-    Checked.InstId -> XCId
-    Checked.InstApp ty -> XCSeq (XCInner (XCBot (checkedType ty))) XCElim
-    Checked.InstBot ty -> XCBot (checkedType ty)
-    Checked.InstIntro -> XCIntro
-    Checked.InstElim -> XCElim
-    Checked.InstAbstrRef ref -> XCHyp (Checked.typeBinderRefName ref)
-    Checked.InstUnderRef ref inner -> XCOuter (Checked.typeBinderRefName ref) (checkedComp inner)
-    Checked.InstInside inner -> XCInner (checkedComp inner)
-    Checked.InstSeq left right -> XCSeq (checkedComp left) (checkedComp right)
+    Checked.InstId ->
+        pure XCId
+    Checked.InstApp ty -> do
+        typeValue <- checkedType ty
+        pure (XCSeq (XCInner (XCBot typeValue)) XCElim)
+    Checked.InstBot ty ->
+        XCBot <$> checkedType ty
+    Checked.InstIntro ->
+        pure XCIntro
+    Checked.InstElim ->
+        pure XCElim
+    Checked.InstAbstrRef ref ->
+        XCHyp <$> checkedRefName ref
+    Checked.InstUnderRef ref inner ->
+        XCOuter <$> checkedRefName ref <*> checkedComp inner
+    Checked.InstInside inner ->
+        XCInner <$> checkedComp inner
+    Checked.InstSeq left right ->
+        XCSeq <$> checkedComp left <*> checkedComp right
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs

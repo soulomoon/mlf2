@@ -3,6 +3,7 @@
 -- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module ReduceSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import Control.Monad (forM_)
 import qualified Data.Set as Set
 import Test.Hspec
@@ -13,6 +14,7 @@ import MLF.Elab.Pipeline
     , Ty(..)
     , Instantiation(..)
     , normalize
+    , reduceLeadingTypeInstantiationRedexes
     , renderPipelineError
     , runPipelineElab
     , schemeFromType
@@ -20,6 +22,7 @@ import MLF.Elab.Pipeline
     , typeCheck
     )
 import MLF.Elab.TermClosure (preserveRetainedChildAuthoritativeResult)
+import MLF.Elab.Reduce.TestSupport (collectApplicationSpineThroughHeadTypeRedexes)
 import MLF.Types.Elab
     ( ResolvedVar(..)
     , TypeBinderRef
@@ -28,8 +31,6 @@ import MLF.Types.Elab
     , instUnderWithRef
     , resolvedVarReferenceName
     , resolvedVarSameIdentity
-    , tBase
-    , tCon
     , tVarWithRef
     , typeBinderIdentityFromNode
     , typeBinderRefIdentity
@@ -56,7 +57,8 @@ import SpecUtil (mkForalls, requireRight, unsafeNormalizeExpr)
 
 spec :: Spec
 spec = do
-    let intTy = tBase (BaseTy "Int")
+    let intTy = TestElab.tBase (BaseTy "Int")
+        boolTy = TestElab.tBase (BaseTy "Bool")
         idLam = mkTestLocalLam "x" intTy (mkTestDeferredVar "x")
         polyLam = mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x")
         recursiveIntTy = testTMu "self" (TArrow (testTVar "self") intTy)
@@ -69,9 +71,9 @@ spec = do
         boundFromType ty = case ty of
             TVarRef ref -> error ("boundFromType: unexpected variable bound " ++ show (typeBinderRefName ref))
             TArrow a b -> TArrow a b
-            TConWithIdentity _ c args -> tCon c args
+            TConWithIdentity identity c args -> TConWithIdentity identity c args
             TVarAppRef ref args -> TVarAppRef ref args
-            TBaseWithIdentity _ b -> tBase b
+            TBaseWithIdentity identity b -> TBaseWithIdentity identity b
             TBottom -> TBottom
             TForallRef ref mb body -> TForallRef ref mb body
             TMuRef ref body -> TMuRef ref body
@@ -113,6 +115,145 @@ spec = do
                 `shouldBe` Just (EApp idLam (ELit (LInt 1)))
 
     describe "Phase 7 reduce" $ do
+        it "reduces a dominating quantifier-elimination spine before entering its body" $ do
+            let selfRef = typeRef 950 "self"
+                recursiveTy = TMuRef selfRef (TArrow (TVarRef selfRef) intTy)
+                recursiveBound = boundFromType recursiveTy
+                sourceRef = typeRef 951 "source"
+                operatedRef = typeRef 952 "operated"
+                param = resolvedLocal "$x#952" "x" (TVarRef operatedRef)
+                body = ELam param (EUnroll (EVarNode param))
+                term =
+                    ETyInst
+                        ( eTyAbsWithRef
+                            sourceRef
+                            (Just recursiveBound)
+                            (eTyAbsWithRef operatedRef (Just recursiveBound) body)
+                        )
+                        (InstSeq InstElim InstElim)
+            case reduceLeadingTypeInstantiationRedexes term of
+                Just reduced@(ELam param' (EUnroll (EVarNode occurrence'))) -> do
+                    resolvedVarType param' `shouldBe` recursiveTy
+                    resolvedVarType occurrence' `shouldBe` recursiveTy
+                    case typeCheck reduced of
+                        Right {} -> pure ()
+                        Left err -> expectationFailure ("Expected reduced term to typecheck, got: " ++ show err)
+                other -> expectationFailure ("Expected a concrete recursive lambda, got: " ++ show other)
+
+        it "does not evaluate value-level lets while reducing the leading type spine" $ do
+            let ref = typeRef 953 "a"
+                retainedLet =
+                    mkTestLocalLet
+                        "answer"
+                        (schemeFromType intTy)
+                        (ELit (LInt 42))
+                        (mkTestDeferredVar "answer")
+                term = ETyInst (eTyAbsWithRef ref Nothing retainedLet) InstElim
+            case reduceLeadingTypeInstantiationRedexes term of
+                Just ELet {} -> pure ()
+                other -> expectationFailure ("Expected the value-level let to remain, got: " ++ show other)
+
+        it "erases identity instantiation without evaluating its non-value operand" $ do
+            let retainedLet =
+                    mkTestLocalLet
+                        "answer"
+                        (schemeFromType intTy)
+                        (ELit (LInt 42))
+                        (mkTestDeferredVar "answer")
+            reduceLeadingTypeInstantiationRedexes (ETyInst retainedLet InstId)
+                `shouldBe` Just retainedLet
+
+        it "erases a matching Hyp after bounded elimination under a value lambda" $ do
+            let ref = typeRef 954 "result"
+                evidence = resolvedLocal "$evidence#954" "evidence" (TVarRef ref)
+                term =
+                    ETyInst
+                        ( eTyAbsWithRef
+                            ref
+                            (Just (boundFromType intTy))
+                            ( ELam
+                                evidence
+                                (ETyInst (EVarNode evidence) (instAbstrWithRef ref))
+                            )
+                        )
+                        InstElim
+                specializedEvidence =
+                    evidence{resolvedVarType = intTy}
+            reduceLeadingTypeInstantiationRedexes term
+                `shouldBe` Just (ELam specializedEvidence (EVarNode specializedEvidence))
+
+        it "reduces an alpha-equivalent forall argument at its explicit bound" $ do
+            let resultRef = typeRef 956 "bounded-result"
+                boundRef = typeRef 957 "bound-a"
+                argumentRef = typeRef 958 "argument-a"
+                boundTy =
+                    TForallRef
+                        boundRef
+                        Nothing
+                        (TArrow (TVarRef boundRef) (TVarRef boundRef))
+                argumentTy =
+                    TForallRef
+                        argumentRef
+                        Nothing
+                        (TArrow (TVarRef argumentRef) (TVarRef argumentRef))
+                occurrence = resolvedLocal "$x#956" "x" (TVarRef resultRef)
+                term =
+                    ETyInst
+                        (eTyAbsWithRef resultRef (Just (boundFromType boundTy)) (EVarNode occurrence))
+                        (InstApp argumentTy)
+                expected = EVarNode occurrence {resolvedVarType = argumentTy}
+            typeBinderRefIdentity boundRef
+                `shouldNotBe` typeBinderRefIdentity argumentRef
+            step term `shouldBe` Just expected
+
+        it "keeps a non-matching bounded InstApp on the general reduction path" $ do
+            let resultRef = typeRef 959 "bounded-result"
+                boundRef = typeRef 960 "bound-a"
+                argumentRef = typeRef 961 "argument-a"
+                boundTy =
+                    TForallRef
+                        boundRef
+                        Nothing
+                        (TArrow (TVarRef boundRef) (TVarRef boundRef))
+                argumentTy =
+                    TForallRef
+                        argumentRef
+                        Nothing
+                        (TArrow (TVarRef argumentRef) intTy)
+                occurrence = resolvedLocal "$x#959" "x" (TVarRef resultRef)
+                abstraction =
+                    eTyAbsWithRef
+                        resultRef
+                        (Just (boundFromType boundTy))
+                        (EVarNode occurrence)
+                term = ETyInst abstraction (InstApp argumentTy)
+                expected =
+                    ETyInst
+                        abstraction
+                        (InstSeq (InstInside (InstBot argumentTy)) InstElim)
+            step term `shouldBe` Just expected
+
+        it "does not beta-reduce value applications while reducing the leading type spine" $ do
+            let ref = typeRef 954 "a"
+                retainedApplication = EApp idLam (ELit (LInt 1))
+                term = ETyInst (eTyAbsWithRef ref Nothing retainedApplication) InstElim
+            reduceLeadingTypeInstantiationRedexes term
+                `shouldBe` Just retainedApplication
+
+        it "collects every deferred-case argument across a head type redex" $ do
+            let ref = typeRef 955 "case-result"
+                placeholder = mkTestDeferredVar "$deferred_case_Nat"
+                scrutinee = mkTestDeferredVar "scrutinee"
+                zeroHandler = mkTestDeferredVar "zero-handler"
+                succHandler = mkTestDeferredVar "succ-handler"
+                partialCase = EApp (EApp placeholder scrutinee) zeroHandler
+                term =
+                    EApp
+                        (ETyInst (eTyAbsWithRef ref Nothing partialCase) InstElim)
+                        succHandler
+            collectApplicationSpineThroughHeadTypeRedexes term
+                `shouldBe` (placeholder, [scrutinee, zeroHandler, succHandler])
+
         it "beta-reduces lambda applications" $ do
             let term = EApp idLam (ELit (LInt 1))
             step term `shouldBe` Just (ELit (LInt 1))
@@ -181,8 +322,7 @@ spec = do
                 other -> expectationFailure ("Expected stable-alias capture freshening, got: " ++ show other)
 
         it "reduces primitive and by resolved identity instead of runtime spelling" $ do
-            let boolTy = tBase (BaseTy "Bool")
-                andResolved =
+            let andResolved =
                     ResolvedVar
                         {
                         resolvedVarType = TArrow boolTy (TArrow boolTy boolTy)
@@ -353,6 +493,66 @@ spec = do
                 expectedInst = InstSeq (InstInside (InstBot intTy)) InstElim
             step term `shouldBe` Just (ETyInst (mkTestTyAbs "a" Nothing body) expectedInst)
 
+        it "reduces an at-bound flexible forall use constructed with N" $ do
+            let identityTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
+                body = mkTestLocalLam "x" (testTVar "result") (mkTestDeferredVar "x")
+                term = mkTestTyAbs "result" (Just (boundFromType identityTy)) body
+                reduced = mkTestLocalLam "x" identityTy (mkTestDeferredVar "x")
+                instantiated = ETyInst term InstElim
+                reducedTy = TArrow identityTy identityTy
+            typeCheck instantiated `shouldBe` Right reducedTy
+            normalize instantiated `shouldBe` reduced
+            typeCheck (normalize instantiated) `shouldBe` Right reducedTy
+
+        it "consumes a vacuous leading forall before applying a later forall" $ do
+            let method =
+                    mkTestTyAbs "ghost" Nothing $
+                        mkTestTyAbs "b" Nothing $
+                            mkTestLocalLam "flag" boolTy $
+                                mkTestLocalLam "value" (testTVar "b") (mkTestDeferredVar "value")
+                term =
+                    EApp
+                        ( EApp
+                            (ETyInst (ETyInst method InstElim) (InstApp boolTy))
+                            (ELit (LBool True))
+                        )
+                        (ELit (LBool False))
+            typeCheck term `shouldBe` Right boolTy
+            normalize term `shouldBe` ELit (LBool False)
+            typeCheck (normalize term) `shouldBe` Right boolTy
+
+        it "opens a later forall at its Gamma identity after consuming a vacuous prefix" $ do
+            let ghostRef = typeRef 962 "ghost"
+                sourceRef = typeRef 963 "source-a"
+                openedRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderRefIdentity sourceRef)
+                        "gamma-a"
+                sourceTy = TVarRef sourceRef
+                openedTy = TVarRef openedRef
+                flag = resolvedLocal "$flag#963" "flag" boolTy
+                value = resolvedLocal "$value#963" "value" sourceTy
+                producer =
+                    eTyAbsWithRef ghostRef Nothing $
+                        eTyAbsWithRef sourceRef Nothing $
+                            ELam flag $
+                                ELam value (EVarNode value)
+                term =
+                    ETyInst
+                        producer
+                        (InstSeq InstElim (InstApp openedTy))
+                openedValue = value {resolvedVarType = openedTy}
+                expected =
+                    ELam flag $
+                        ELam openedValue (EVarNode openedValue)
+            reduceLeadingTypeInstantiationRedexes term
+                `shouldBe` Just expected
+
+        it "does not erase a consuming instantiation without a leading type abstraction" $ do
+            let malformed = ETyInst (ELit (LInt 1)) InstElim
+            step malformed `shouldBe` Nothing
+            normalize malformed `shouldBe` malformed
+
         it "steps inside argument position under call-by-value" $ do
             let inner = EApp (mkTestLocalLam "y" intTy (mkTestDeferredVar "y")) (ELit (LInt 1))
                 term = EApp idLam inner
@@ -410,7 +610,7 @@ spec = do
             canonicalNormTy <- requireRight (typeCheck canonicalNorm)
             canonicalNormTy `shouldSatisfy` isPolyBinaryId
 
-        it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
+        it "normalizes dual annotated coercion consumers after InstApp specialization" $ do
             let useInt =
                     Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Int") (Surf.STBase "Int"))
                         (Surf.EApp (Surf.EVar "f") (Surf.ELit (LInt 0)))
@@ -425,17 +625,7 @@ spec = do
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
                 normExpr = unsafeNormalizeExpr expr
 
-            let expectPipelineFailure label res =
-                    case res of
-                        Left err ->
-                            renderPipelineError err `shouldSatisfy`
-                                (\msg ->
-                                    "PhiTranslatabilityError" `elem` words msg
-                                        || "TCInstantiationError" `elem` words msg
-                                        || "TCLetTypeMismatch" `elem` words msg
-                                )
-                        Right (term, ty) ->
-                            expectationFailure
-                                (label ++ " unexpectedly succeeded with type-checked term: " ++ show (term, ty))
-
-            expectPipelineFailure "canonical pipeline" (runPipelineElab Set.empty normExpr)
+            (term, ty) <- requireRight (runPipelineElab Set.empty normExpr)
+            ty `shouldBe` boolTy
+            typeCheck term `shouldBe` Right ty
+            typeCheck (normalize term) `shouldBe` Right ty

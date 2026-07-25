@@ -57,6 +57,7 @@ module MLF.Elab.Pipeline
 
     -- * Witness translation (production path)
     phiFromEdgeWitnessWithTrace,
+    phiOccurrenceFromEdgeWitnessWithTrace,
     runPipelineElab,
     runPipelineElabWithConfig,
     runPipelineElabWithEnv,
@@ -92,11 +93,16 @@ module MLF.Elab.Pipeline
     isValue,
     step,
     normalize,
+    reduceLeadingTypeInstantiationRedexes,
   )
 where
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi
+  ( contextToNodeBound,
+    phiFromEdgeWitnessWithTrace,
+    phiOccurrenceFromEdgeWitnessWithTrace,
+  )
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
   ( PipelineError (..),
@@ -109,7 +115,7 @@ import MLF.Elab.PipelineError
     liftPipelineError,
     renderPipelineError,
   )
-import MLF.Elab.Reduce (isValue, normalize, step)
+import MLF.Elab.Reduce (isValue, normalize, reduceLeadingTypeInstantiationRedexes, step)
 import MLF.Elab.Run
   ( applyRedirectsToAnn,
     authoritativeRootAnn,

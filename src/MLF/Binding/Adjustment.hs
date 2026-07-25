@@ -46,7 +46,7 @@ module MLF.Binding.Adjustment (
 ) where
 
 import MLF.Constraint.Types.Graph
-import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, bindingLCA, isBindingRoot)
+import MLF.Binding.Tree (lookupBindParent, bindingLCA, isBindingRoot)
 import MLF.Binding.GraphOps (applyRaiseStep)
 
 -- | Harmonize the binding parents of two nodes by raising them to their LCA.
@@ -184,16 +184,12 @@ raiseToParentWithCount ref target c0 = do
                 if parent == target
                     then return (constraint, reverse trace)
                     else do
-                        locked <- isUnderRigidBinder constraint nid
-                        if locked
-                            then Left (OperationOnLockedNode nid)
-                            else do
-                                result <- applyRaiseStep ref constraint
-                                case result of
-                                    (constraint', Just _) ->
-                                        go nid nidT constraint' (nidT : trace)
-                                    (_constraint', Nothing) ->
-                                        Left (RaiseNotPossible nid)
+                        result <- applyRaiseStep ref constraint
+                        case result of
+                            (constraint', Just _) ->
+                                go nid nidT constraint' (nidT : trace)
+                            (_constraint', Nothing) ->
+                                Left (RaiseNotPossible nid)
 
 -- | Raise a node to the target parent (convenience wrapper).
 raiseToParent :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p -> Constraint p
@@ -217,13 +213,9 @@ raiseToRoot ref c0 = do
                 if isBindingRoot constraint parent
                     then return (constraint, reverse trace)
                     else do
-                        locked <- isUnderRigidBinder constraint nid
-                        if locked
-                            then Left (OperationOnLockedNode nid)
-                            else do
-                                result <- applyRaiseStep ref constraint
-                                case result of
-                                    (constraint', Just _) ->
-                                        go nid nidT constraint' (nidT : trace)
-                                    (_constraint', Nothing) ->
-                                        Left (RaiseNotPossible nid)
+                        result <- applyRaiseStep ref constraint
+                        case result of
+                            (constraint', Just _) ->
+                                go nid nidT constraint' (nidT : trace)
+                            (_constraint', Nothing) ->
+                                Left (RaiseNotPossible nid)

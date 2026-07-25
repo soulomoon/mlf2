@@ -10,9 +10,16 @@ split submodules under "MLF.Elab.Phi.*".
 module MLF.Elab.Phi (
     -- * Re-exports from Context
     contextToNodeBound,
+    -- * Checked occurrence endpoint authority
+    PhiOccurrenceRole(..),
+    PhiEndpointShapeAuthority(..),
     -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
     phiFromEdgeWitnessWithTraceReadModel,
+    phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints,
+    phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor,
+    phiOccurrenceFromEdgeWitnessWithTrace,
+    phiOccurrenceFromEdgeWitnessWithTraceReadModel,
     -- * Phi environment
     PhiEnv(..),
     PhiM,
@@ -26,4 +33,14 @@ module MLF.Elab.Phi (
 
 import MLF.Elab.Phi.Context (contextToNodeBound)
 import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askTrace)
-import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace, phiFromEdgeWitnessWithTraceReadModel)
+import MLF.Elab.Phi.Translate
+    ( PhiEndpointShapeAuthority(..)
+    , PhiOccurrenceRole(..)
+    , canonicalNodeM
+    , phiFromEdgeWitnessWithTrace
+    , phiFromEdgeWitnessWithTraceReadModel
+    , phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
+    , phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor
+    , phiOccurrenceFromEdgeWitnessWithTrace
+    , phiOccurrenceFromEdgeWitnessWithTraceReadModel
+    )

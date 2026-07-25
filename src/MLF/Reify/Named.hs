@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Reify.Named (
     namedNodes,
+    namedNodesFromSoftParents,
     softenCanonicalBindParentsUnder,
     softenedBindParentsUnder
 ) where
@@ -34,19 +35,22 @@ softenBindParents canonical weakened =
 
 namedNodes :: PresolutionView p -> Either ElabError IntSet.IntSet
 namedNodes presolutionView = do
-    let constraint = pvConstraint presolutionView
+    let constraint = pvCanonicalConstraint presolutionView
         canonical = pvCanonical presolutionView
-        nodes = cNodes constraint
     bindParents <- softenedBindParentsUnder canonical constraint
-    pure . IntSet.fromList $
+    pure (namedNodesFromSoftParents canonical constraint bindParents)
+
+namedNodesFromSoftParents :: (NodeId -> NodeId) -> Constraint p -> BindParents -> IntSet.IntSet
+namedNodesFromSoftParents canonical constraint bindParents =
+    IntSet.fromList
         [ getNodeId childC
         | child <- namingRootChildren bindParents
         , let childC = canonical child
-        , isNamedNode nodes childC
+        , isNamedNode childC
         ]
   where
-    isNamedNode nodes nid =
-        case lookupNodeIn nodes nid of
+    isNamedNode nid =
+        case lookupNodeIn (cNodes constraint) nid of
             Just TyVar{} -> True
             _ -> False
 

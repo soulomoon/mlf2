@@ -1,15 +1,28 @@
 {-# LANGUAGE DataKinds #-}
 
 module MLF.Elab.ReadModel
-    ( ElabReadModel(..)
+    ( ElabReadModel
+        ( ermPresolutionView
+        , ermSoftBindParents
+        , ermSoftChildren
+        , ermNamedNodes
+        , ermNodes
+        , ermNodesVarOnly
+        , ermSchemeRootSet
+        , ermSchemeGenByRoot
+        , ermSchemeGenSet
+        )
+    , PhiReadModel
     , buildElabReadModel
+    , buildPhiReadModel
+    , phiReadModelElabReadModel
     , readModelPresolutionView
     ) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
+import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback)
 import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types.Graph
     ( BindFlag
@@ -18,20 +31,19 @@ import MLF.Constraint.Types.Graph
     , GenNode(..)
     , GenNodeId(..)
     , NodeMap
-    , NodeId
-    , NodeRef(..)
     , TyNode(..)
     , cNodes
     , fromListNode
     , getGenNodeId
     , getGenNodeMap
     , getNodeId
-    , lookupNodeIn
-    , nodeRefFromKey
     , nodeRefKey
     , toListNode
     )
-import MLF.Reify.Named (softenCanonicalBindParentsUnder)
+import MLF.Reify.Named
+    ( namedNodesFromSoftParents
+    , softenCanonicalBindParentsUnder
+    )
 import MLF.Util.ElabError (ElabError, bindingToElab)
 
 data ElabReadModel p = ElabReadModel
@@ -39,12 +51,20 @@ data ElabReadModel p = ElabReadModel
     , ermSoftBindParents :: BindParents
     , ermSoftChildren :: IntMap.IntMap [(Int, BindFlag)]
     , ermNamedNodes :: IntSet.IntSet
+    , ermNodes :: NodeMap TyNode
     , ermNodesVarOnly :: NodeMap TyNode
     , ermSchemeRootSet :: IntSet.IntSet
     , ermSchemeGenByRoot :: IntMap.IntMap GenNodeId
     , ermSchemeGenSet :: IntSet.IntSet
-    , ermPhiValidation :: Either ElabError ()
+    , ermPhiReadiness :: Either ElabError PhiReadiness
     }
+
+-- | Proof that the read model satisfies the additional global condition used
+-- by Phi translation.  Ordinary reification does not require this condition,
+-- so it is a separate capability rather than an invariant of every read model.
+data PhiReadiness = PhiReady
+
+newtype PhiReadModel p = PhiReadModel (ElabReadModel p)
 
 buildElabReadModel :: PresolutionView p -> Either ElabError (ElabReadModel p)
 buildElabReadModel presolutionView = do
@@ -54,13 +74,14 @@ buildElabReadModel presolutionView = do
                 canonicalConstraint
                 (cBindParents canonicalConstraint)
     let softChildren = bindParentChildren softBindParents
-        namedSet = namedNodesFromSoftParents canonical originalConstraint softBindParents
+        namedSet = namedNodesFromSoftParents canonical canonicalConstraint softBindParents
     pure
         ElabReadModel
             { ermPresolutionView = presolutionView
             , ermSoftBindParents = softBindParents
             , ermSoftChildren = softChildren
             , ermNamedNodes = namedSet
+            , ermNodes = cNodes originalConstraint
             , ermNodesVarOnly =
                 fromListNode
                     [ (nid, node)
@@ -70,7 +91,7 @@ buildElabReadModel presolutionView = do
             , ermSchemeRootSet = schemeRootSet
             , ermSchemeGenByRoot = schemeGenByRoot
             , ermSchemeGenSet = schemeGenSet
-            , ermPhiValidation = phiValidation
+            , ermPhiReadiness = phiReadiness
             }
   where
     originalConstraint = pvConstraint presolutionView
@@ -112,10 +133,15 @@ buildElabReadModel presolutionView = do
             [ getGenNodeId gid
             | gid <- IntMap.elems schemeGenByRoot
             ]
-    phiValidation =
+    -- This proof is shared by every extraction from the immutable read model.
+    -- Both binding-tree validity and no-Gen-fallback are Phi preconditions,
+    -- not requirements for every read-only reification query. Keeping the
+    -- capability separate lets those queries inspect intermediate graphs that
+    -- Phi must reject.
+    phiReadiness =
         bindingToElab (checkBindingTree originalConstraint)
             *> bindingToElab (checkNoGenFallback originalConstraint)
-            *> bindingToElab (checkSchemeClosureUnder canonical originalConstraint)
+            *> pure PhiReady
 
     isTyVar node = case node of
         TyVar{} -> True
@@ -129,21 +155,13 @@ bindParentChildren =
         )
         IntMap.empty
 
-namedNodesFromSoftParents :: (NodeId -> NodeId) -> Constraint p -> BindParents -> IntSet.IntSet
-namedNodesFromSoftParents canonical constraint bindParents =
-    IntSet.fromList
-        [ getNodeId childC
-        | (childKey, (GenRef{}, _flag)) <- IntMap.toList bindParents
-        , TypeRef child <- [nodeRefFromKey childKey]
-        , let childC = canonical child
-        , isNamedNode childC
-        ]
-  where
-    nodes = cNodes constraint
-    isNamedNode nid =
-        case lookupNodeIn nodes nid of
-            Just TyVar{} -> True
-            _ -> False
-
 readModelPresolutionView :: ElabReadModel p -> PresolutionView p
 readModelPresolutionView = ermPresolutionView
+
+buildPhiReadModel :: ElabReadModel p -> Either ElabError (PhiReadModel p)
+buildPhiReadModel readModel = do
+    _ <- ermPhiReadiness readModel
+    pure (PhiReadModel readModel)
+
+phiReadModelElabReadModel :: PhiReadModel p -> ElabReadModel p
+phiReadModelElabReadModel (PhiReadModel readModel) = readModel

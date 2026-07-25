@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Presolution.WitnessSpec (spec) where
 
+import IdentityTestSupport
 import Test.Hspec
 import Test.QuickCheck
 import qualified Data.IntMap.Strict as IntMap
@@ -18,10 +19,15 @@ import MLF.Constraint.Types.Witness
     )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution.Witness
-    ( OmegaNormalizeEnv(..)
+    ( EdgeWitnessOp(..)
+    , EdgeWitnessPlan(..)
+    , EdgeWitnessNonSourceOrigin(..)
+    , OmegaNormalizeEnv(..)
     , OmegaNormalizeError(..)
     , assertNoStandaloneGrafts
     , coalesceRaiseMergeWithEnv
+    , edgeWitnessPlanFromBinders
+    , integrateEdgeWitnessOps
     , integratePhase2Ops
     , normalizeInstanceOpsFull
     , reorderWeakenWithEnv
@@ -35,14 +41,34 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     , EdgeTrace(..)
     )
+import MLF.Constraint.Presolution.Base
+    ( rootRaiseMergeTraceAuthority
+    , rootWeakenRaiseMergeTraceAuthority
+    )
+import MLF.Constraint.Presolution.Construction
+    ( rawExpansionConstructionSemanticMetaKeys
+    )
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
+    , EdgeExecutionArtifacts(..)
+    , psEdgeExecutionArtifacts
+    , psEdgeTraces
+    , psEdgeWitnesses
     , CopyMapping(..)
+    , emptyExpansionResultMap
     , validateReplayMapTraceContract
     , runPresolutionM
+    , certifyAppliedNonRootWeakenReplay
     , normalizeEdgeWitnessesM
-    , InteriorNodes(..)
-    , fromListInterior
+    , ProvenancedInstanceOp(..)
+    , ProvenancedNode(..)
+    , assertNoStandaloneGraftsWithProvenance
+    , normalizeInstanceOpsCoreWithProvenance
+    , sourceInteriorFromList
+    , sourceInteriorFromSet
+    , sourceRaiseAuthorityNodesForTest
+    , singletonEdgeExecutionArtifactsForTest
+    , validateTerminalRootRaiseMergeForTest
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.Inert as Inert
@@ -116,7 +142,8 @@ spec = do
                         , cBindParents = inferBindParents nodes
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-                -- Instantiate BEFORE forall: suffix has forall, so suppressWeaken fires today
+                -- Instantiate before forall: the suffix must not suppress the
+                -- thesis-required weakening.
                 expansion =
                     ExpCompose
                         (ExpInstantiate [argId] NE.:| [ExpForall (ForallSpec [Nothing] NE.:| [])])
@@ -163,6 +190,101 @@ spec = do
                         [ OpGraft argId binderId
                         , OpWeaken binderId
                         ]
+
+        it "tags ExpInstantiate graft arguments as destination and binders as source" $ do
+            let binderId = NodeId 2
+                argId = NodeId 69
+                nodes =
+                    nodeMapFromList
+                        [ (2, TyVar {tnId = binderId, tnBound = Nothing})
+                        , (69, TyVar {tnId = argId, tnBound = Nothing})
+                        ]
+                constraint =
+                    rootedConstraint
+                        emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = inferBindParents nodes
+                            }
+                st0 =
+                    PresolutionState
+                        constraint
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        70
+                        IntSet.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+            case
+                runPresolutionM
+                    defaultTraceConfig
+                    st0
+                    (edgeWitnessPlanFromBinders [binderId] (ExpInstantiate [argId]))
+                of
+                    Left err -> expectationFailure ("edgeWitnessPlanFromBinders failed: " ++ show err)
+                    Right (plan, _) ->
+                        ewpBaseOps plan
+                            `shouldBe`
+                                [ DestinationSourceEdgeWitnessGraft argId binderId
+                                , SourceEdgeWitnessOp (OpWeaken binderId)
+                                ]
+
+        it "rejects surplus ExpInstantiate arguments instead of truncating them" $ do
+            let expNodeId = NodeId 0
+                forallId = NodeId 1
+                binderId = NodeId 2
+                firstArgId = NodeId 3
+                surplusArgId = NodeId 4
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) forallId)
+                    , (1, TyForall forallId binderId)
+                    , (2, TyVar { tnId = binderId, tnBound = Nothing })
+                    , (3, TyVar { tnId = firstArgId, tnBound = Nothing })
+                    , (4, TyVar { tnId = surplusArgId, tnBound = Nothing })
+                    ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 5 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpInstantiate [firstArgId, surplusArgId]
+
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
+                Left (ArityMismatch mismatchContext expected actual) -> do
+                    mismatchContext `shouldBe` "witnessFromExpansion/ExpInstantiate"
+                    expected `shouldBe` 1
+                    actual `shouldBe` 2
+                Left err -> expectationFailure ("Expected exact-arity failure, got " ++ show err)
+                Right _ -> expectationFailure "Expected surplus ExpInstantiate argument to be rejected"
+
+        it "rejects ExpInstantiate arguments when the source has no binders" $ do
+            let expNodeId = NodeId 0
+                bodyId = NodeId 1
+                argumentId = NodeId 2
+                nodes = nodeMapFromList
+                    [ (0, TyExp expNodeId (ExpVarId 0) bodyId)
+                    , (1, TyVar { tnId = bodyId, tnBound = Nothing })
+                    , (2, TyVar { tnId = argumentId, tnBound = Nothing })
+                    ]
+                constraint =
+                    rootedConstraint emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents = inferBindParents nodes
+                        }
+                st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 3 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+                expansion = ExpInstantiate [argumentId]
+
+            case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
+                Left (ArityMismatch mismatchContext expected actual) -> do
+                    mismatchContext `shouldBe` "witnessFromExpansion/ExpInstantiate"
+                    expected `shouldBe` 0
+                    actual `shouldBe` 1
+                Left err -> expectationFailure ("Expected zero-binder exact-arity failure, got " ++ show err)
+                Right _ -> expectationFailure "Expected zero-binder ExpInstantiate argument to be rejected"
+
         it "annotation edges preserve OpWeaken in witness (thesis-exact)" $ do
             -- Annotation edges previously had all OpWeaken stripped via dropWeakenOps
             -- during per-edge witness assembly. After eliminating
@@ -205,7 +327,7 @@ spec = do
                     , (1, TyForall forallId binderId)
                     , (2, TyVar { tnId = binderId, tnBound = Just boundId })
                     , (3, TyVar { tnId = argId, tnBound = Nothing })
-                    , (4, TyBase boundId (BaseTy "Int"))
+                    , (4, TestTyBase boundId (BaseTy "Int"))
                     ]
                 constraint =
                     rootedConstraint emptyConstraint
@@ -288,7 +410,10 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
+                Right PresolutionResult
+                    { prEdgeExpansions = exps
+                    , prEdgeWitnesses = ews
+                    } -> do
                     case IntMap.lookup edgeId exps of
                         Just (ExpInstantiate _) -> pure ()
                         Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
@@ -298,6 +423,821 @@ spec = do
                         Nothing -> expectationFailure "No witness found for Edge 0"
 
     describe "Phase 3 — Witness normalization" $ do
+        describe "operand provenance" $ do
+            let provenanceEnv root destinationInterior sourceInterior =
+                    (mkNormalizeEnv mkNormalizeConstraint root destinationInterior)
+                        { interiorRaw = sourceInterior }
+
+            it "keeps source-distinct raises when their destinations coincide" $ do
+                let root = NodeId 0
+                    target = NodeId 2
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId target))
+                            (IntSet.fromList [20, 21])
+                    tracked source =
+                        ProvenancedRaise
+                            (ProvenancedNode target (IntSet.singleton source))
+                    expected =
+                        [ tracked 20
+                        , tracked 21
+                        ]
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [tracked 20, tracked 21]
+                    `shouldBe` Right expected
+
+            it "drops a duplicate raise only when source provenance agrees" $ do
+                let root = NodeId 0
+                    target = NodeId 2
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId target))
+                            (IntSet.singleton 20)
+                    tracked =
+                        ProvenancedRaise
+                            (ProvenancedNode target (IntSet.singleton 20))
+                normalizeInstanceOpsCoreWithProvenance env [tracked, tracked]
+                    `shouldBe` Right [tracked]
+
+            it "combines Raise and Merge operand provenance when forming RaiseMerge" $ do
+                let root = NodeId 0
+                    operated = NodeId 2
+                    other = NodeId 99
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId operated))
+                            (IntSet.singleton 20)
+                    raiseNode =
+                        ProvenancedNode operated (IntSet.singleton 20)
+                    mergeNode =
+                        ProvenancedNode operated (IntSet.singleton 20)
+                    otherNode =
+                        ProvenancedNode other (IntSet.singleton 30)
+                    expected =
+                        [ ProvenancedRaiseMerge
+                            (ProvenancedNode operated (IntSet.singleton 20))
+                            otherNode
+                        ]
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [ ProvenancedRaise raiseNode
+                    , ProvenancedMerge mergeNode otherNode
+                    ]
+                    `shouldBe` Right expected
+
+            it "does not fold a different-source Raise into RaiseMerge" $ do
+                let root = NodeId 0
+                    operated = NodeId 2
+                    other = NodeId 99
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId operated))
+                            (IntSet.fromList [20, 21])
+                    source20 =
+                        ProvenancedNode operated (IntSet.singleton 20)
+                    source21 =
+                        ProvenancedNode operated (IntSet.singleton 21)
+                    external =
+                        ProvenancedNode other (IntSet.singleton 30)
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [ ProvenancedRaise source20
+                    , ProvenancedRaise source21
+                    , ProvenancedMerge source21 external
+                    ]
+                    `shouldBe`
+                        Right
+                            [ ProvenancedRaise source20
+                            , ProvenancedRaiseMerge source21 external
+                            ]
+
+            it "keeps operand provenance attached when delayed Weaken is reordered" $ do
+                let root = NodeId 0
+                    child = NodeId 2
+                    arg = NodeId 3
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.fromList [getNodeId root, getNodeId child])
+                            (IntSet.fromList [40, 42])
+                    weaken =
+                        ProvenancedWeaken
+                            (ProvenancedNode root (IntSet.singleton 40))
+                    graft =
+                        ProvenancedGraft
+                            (ProvenancedNode arg (IntSet.singleton 41))
+                            (ProvenancedNode child (IntSet.singleton 42))
+                normalizeInstanceOpsCoreWithProvenance env [weaken, graft]
+                    `shouldBe` Right [graft, weaken]
+
+            it "preserves a root Weaken before its same-source RaiseMerge transition" $ do
+                let root = NodeId 0
+                    destinationExterior = NodeId 2
+                    sourceExterior = NodeId 99
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId root))
+                            (IntSet.singleton (getNodeId root))
+                    rootOperand =
+                        ProvenancedNode root (IntSet.singleton (getNodeId root))
+                    exteriorOperand =
+                        ProvenancedNode
+                            destinationExterior
+                            (IntSet.singleton (getNodeId sourceExterior))
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [ ProvenancedWeaken rootOperand
+                    , ProvenancedRaise rootOperand
+                    , ProvenancedMerge rootOperand exteriorOperand
+                    ]
+                    `shouldBe`
+                        Right
+                            [ ProvenancedWeaken rootOperand
+                            , ProvenancedRaiseMerge rootOperand exteriorOperand
+                            ]
+
+            it "does not pair Graft and Weaken from different source binders" $ do
+                let root = NodeId 0
+                    binder = NodeId 2
+                    arg = NodeId 3
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.fromList [getNodeId root, getNodeId binder])
+                            (IntSet.fromList [10, 20, 21])
+                    graft =
+                        ProvenancedGraft
+                            (ProvenancedNode arg (IntSet.singleton 30))
+                            (ProvenancedNode binder (IntSet.singleton 20))
+                    middle =
+                        ProvenancedRaise
+                            (ProvenancedNode root (IntSet.singleton 10))
+                    weaken =
+                        ProvenancedWeaken
+                            (ProvenancedNode binder (IntSet.singleton 21))
+                normalizeInstanceOpsCoreWithProvenance env [graft, middle, weaken]
+                    `shouldBe` Right [graft, middle, weaken]
+                assertNoStandaloneGraftsWithProvenance env [graft, weaken]
+                    `shouldBe` Left (StandaloneGraftRemaining binder)
+
+            it "groups Graft-Weaken ambiguity by frozen source binder" $ do
+                let root = NodeId 0
+                    binder = NodeId 2
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.fromList [getNodeId root, getNodeId binder])
+                            (IntSet.fromList [20, 21])
+                    binderFrom source =
+                        ProvenancedNode binder (IntSet.singleton source)
+                    graft source arg =
+                        ProvenancedGraft
+                            (ProvenancedNode arg (IntSet.singleton (getNodeId arg)))
+                            (binderFrom source)
+                    weaken source = ProvenancedWeaken (binderFrom source)
+                    ops =
+                        [ graft 20 (NodeId 3)
+                        , weaken 20
+                        , graft 21 (NodeId 1)
+                        , weaken 21
+                        ]
+                normalizeInstanceOpsCoreWithProvenance env ops
+                    `shouldBe` Right ops
+
+            it "keeps a source-distinct RaiseMerge despite a shared destination" $ do
+                let root = NodeId 0
+                    target = NodeId 2
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId target))
+                            (IntSet.fromList [50, 51])
+                    operated =
+                        ProvenancedNode target (IntSet.singleton 50)
+                    other =
+                        ProvenancedNode target (IntSet.singleton 51)
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [ProvenancedRaiseMerge operated other]
+                    `shouldBe` Right [ProvenancedRaiseMerge operated other]
+
+            it "reduces a true source-identical RaiseMerge self-merge" $ do
+                let root = NodeId 0
+                    target = NodeId 2
+                    env =
+                        provenanceEnv
+                            root
+                            (IntSet.singleton (getNodeId target))
+                            (IntSet.singleton 50)
+                    operated =
+                        ProvenancedNode target (IntSet.singleton 50)
+                normalizeInstanceOpsCoreWithProvenance
+                    env
+                    [ProvenancedRaiseMerge operated operated]
+                    `shouldBe` Right [ProvenancedRaise operated]
+
+        describe "frozen-source normalization boundary" $ do
+            it "normalizes against I(etResultRoot) while preserving source witness ids" $ do
+                let edgeId = 40
+                    sourceRoot = NodeId 10
+                    sourceTarget = NodeId 11
+                    resultRoot = NodeId 20
+                    resultTarget = NodeId 21
+                    resultOther = NodeId 22
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyForall sourceRoot sourceTarget)
+                            , (getNodeId sourceTarget, TyVar sourceTarget Nothing)
+                            , (getNodeId resultRoot, TyArrow resultRoot resultTarget resultOther)
+                            , (getNodeId resultTarget, TyVar resultTarget Nothing)
+                            , (getNodeId resultOther, TyVar resultOther Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 10, [sourceRoot])
+                            , (GenNodeId 20, [resultRoot])
+                            ]
+                            [ (sourceTarget, sourceRoot, BindFlex)
+                            , (resultTarget, resultRoot, BindFlex)
+                            , (resultOther, resultRoot, BindFlex)
+                            ]
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness = InstanceWitness [OpRaise sourceTarget]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceTarget]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    (IntMap.singleton (getNodeId sourceTarget) resultTarget)
+                            , etReplayContract = ReplayContractNone
+                            }
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            IntMap.empty
+                            30
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing -> expectationFailure "missing normalized witness"
+                            Just normalizedWitness ->
+                                getInstanceOps (ewWitness normalizedWitness)
+                                    `shouldBe` [OpRaise sourceTarget]
+
+            it "retains source authority but rejects a projection outside the destination order domain" $ do
+                let edgeId = 41
+                    sourceRoot = NodeId 30
+                    sourceTarget = NodeId 31
+                    sourceOther = NodeId 32
+                    resultRoot = NodeId 40
+                    resultTarget = NodeId 41
+                    resultOtherRoot = NodeId 42
+                    resultOther = NodeId 43
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot sourceTarget sourceOther)
+                            , (getNodeId sourceTarget, TyVar sourceTarget Nothing)
+                            , (getNodeId sourceOther, TyVar sourceOther Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot resultTarget)
+                            , (getNodeId resultTarget, TyVar resultTarget Nothing)
+                            , (getNodeId resultOtherRoot, TyForall resultOtherRoot resultOther)
+                            , (getNodeId resultOther, TyVar resultOther Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 30, [sourceRoot])
+                            , (GenNodeId 40, [resultRoot])
+                            , (GenNodeId 42, [resultOtherRoot])
+                            ]
+                            [ (sourceTarget, sourceRoot, BindFlex)
+                            , (sourceOther, sourceRoot, BindFlex)
+                            , (resultTarget, resultRoot, BindFlex)
+                            , (resultOther, resultOtherRoot, BindFlex)
+                            ]
+                    rawOp = OpMerge sourceTarget sourceOther
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness = InstanceWitness [rawOp]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior =
+                                sourceInteriorFromList [sourceRoot, sourceTarget, sourceOther]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceTarget, resultTarget)
+                                        , (getNodeId sourceOther, resultOther)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            IntMap.empty
+                            50
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left
+                        ( WitnessNormalizationError
+                            (EdgeId actualEdge)
+                            (MissingOrderKey actualOther)
+                          ) -> do
+                            actualEdge `shouldBe` edgeId
+                            actualOther `shouldBe` resultOther
+                    Left err ->
+                        expectationFailure ("expected destination-order rejection, got: " ++ show err)
+                    Right _ ->
+                        expectationFailure "expected destination-order rejection"
+
+        describe "many-to-one copy provenance" $ do
+            it "restores the uniquely operated source instead of choosing a numeric inverse" $ do
+                let edgeId = 42
+                    sourceRoot = NodeId 60
+                    sourceA = NodeId 61
+                    sourceB = NodeId 62
+                    copyA = NodeId 70
+                    copyB = NodeId 71
+                    destination = NodeId 72
+                    resultRoot = NodeId 73
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot sourceA sourceB)
+                            , (getNodeId sourceA, TyVar sourceA Nothing)
+                            , (getNodeId sourceB, TyVar sourceB Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot destination)
+                            , (getNodeId destination, TyVar destination Nothing)
+                            ]
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (sourceA, sourceRoot, BindFlex)
+                                    , (sourceB, sourceRoot, BindFlex)
+                                    , (destination, resultRoot, BindFlex)
+                                    ]
+                            }
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness = InstanceWitness [OpRaise sourceB]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceA, sourceB]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, copyA)
+                                        , (getNodeId sourceB, copyB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    uf =
+                        IntMap.fromList
+                            [ (getNodeId copyA, destination)
+                            , (getNodeId copyB, destination)
+                            ]
+                    st0 =
+                        mkWitnessNormState c uf 80 edgeId edgeWitness edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing -> expectationFailure "missing normalized witness"
+                            Just normalizedWitness -> do
+                                let ops = getInstanceOps (ewWitness normalizedWitness)
+                                ops `shouldBe` [OpRaise sourceB]
+                                concatMap opNodeIds ops
+                                    `shouldSatisfy` all (`notElem` [copyA, copyB, destination])
+
+            it "does not let final UF aliases collapse frozen source operations" $ do
+                let edgeId = 43
+                    sourceRoot = NodeId 80
+                    sourceA = NodeId 81
+                    sourceAlias = NodeId 82
+                    sharedCopy = NodeId 90
+                    destination = NodeId 92
+                    resultRoot = NodeId 93
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot sourceA sourceAlias)
+                            , (getNodeId sourceA, TyVar sourceA Nothing)
+                            , (getNodeId sourceAlias, TyVar sourceAlias Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot destination)
+                            , (getNodeId destination, TyVar destination Nothing)
+                            ]
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (sourceA, sourceRoot, BindFlex)
+                                    , (sourceAlias, sourceRoot, BindFlex)
+                                    , (destination, resultRoot, BindFlex)
+                                    ]
+                            }
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceA
+                                    , OpRaise sourceAlias
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceA, sourceAlias]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, sharedCopy)
+                                        , (getNodeId sourceAlias, sharedCopy)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    uf =
+                        IntMap.fromList
+                            [ (getNodeId sourceAlias, sourceA)
+                            , (getNodeId sharedCopy, destination)
+                            ]
+                    st0 =
+                        mkWitnessNormState c uf 100 edgeId edgeWitness edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("canonical source aliases were treated as ambiguous: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing -> expectationFailure "missing normalized witness"
+                            Just normalizedWitness ->
+                                getInstanceOps (ewWitness normalizedWitness)
+                                    `shouldBe` [OpRaise sourceA, OpRaise sourceAlias]
+
+            it "keeps two explicit source operations after destination coalescing" $ do
+                let edgeId = 43
+                    sourceRoot = NodeId 80
+                    sourceA = NodeId 81
+                    sourceB = NodeId 82
+                    copyA = NodeId 90
+                    copyB = NodeId 91
+                    destination = NodeId 92
+                    resultRoot = NodeId 93
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot sourceA sourceB)
+                            , (getNodeId sourceA, TyVar sourceA Nothing)
+                            , (getNodeId sourceB, TyVar sourceB Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot destination)
+                            , (getNodeId destination, TyVar destination Nothing)
+                            ]
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (sourceA, sourceRoot, BindFlex)
+                                    , (sourceB, sourceRoot, BindFlex)
+                                    , (destination, resultRoot, BindFlex)
+                                    ]
+                            }
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceA
+                                    , OpRaise sourceB
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceA, sourceB]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, copyA)
+                                        , (getNodeId sourceB, copyB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    uf =
+                        IntMap.fromList
+                            [ (getNodeId copyA, destination)
+                            , (getNodeId copyB, destination)
+                            ]
+                    st0 =
+                        mkWitnessNormState c uf 100 edgeId edgeWitness edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("explicit source operations became ambiguous: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing -> expectationFailure "missing normalized witness"
+                            Just normalizedWitness ->
+                                getInstanceOps (ewWitness normalizedWitness)
+                                    `shouldBe` [OpRaise sourceA, OpRaise sourceB]
+
+            it "does not share one source Raise certificate across a coalesced destination" $ do
+                let edgeId = 45
+                    sourceRoot = NodeId 120
+                    sourceA = NodeId 121
+                    sourceB = NodeId 122
+                    copyA = NodeId 130
+                    copyB = NodeId 131
+                    destination = NodeId 132
+                    resultAncestor = NodeId 133
+                    resultRoot = NodeId 134
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot sourceA sourceB)
+                            , (getNodeId sourceA, TyVar sourceA Nothing)
+                            , (getNodeId sourceB, TyVar sourceB Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot resultAncestor)
+                            , (getNodeId resultAncestor, TyForall resultAncestor destination)
+                            , (getNodeId destination, TyVar destination Nothing)
+                            ]
+                    c =
+                        rootedConstraint emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (sourceA, sourceRoot, BindFlex)
+                                    , (sourceB, sourceRoot, BindFlex)
+                                    , (resultAncestor, resultRoot, BindRigid)
+                                    , (destination, resultAncestor, BindFlex)
+                                    ]
+                            }
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceA
+                                    , OpRaise sourceB
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceA, sourceB]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, copyA)
+                                        , (getNodeId sourceB, copyB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    uf =
+                        IntMap.fromList
+                            [ (getNodeId copyA, destination)
+                            , (getNodeId copyB, destination)
+                            ]
+                    st0 =
+                        setEdgeRaiseAuthority
+                            edgeId
+                            (IntSet.singleton (getNodeId sourceA))
+                            (mkWitnessNormState c uf 140 edgeId edgeWitness edgeTrace)
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left
+                        ( WitnessNormalizationError
+                            (EdgeId actualEdge)
+                            (NotTransitivelyFlexBound _ operated validationRoot)
+                          ) -> do
+                            actualEdge `shouldBe` edgeId
+                            operated `shouldBe` destination
+                            validationRoot `shouldBe` resultRoot
+                    Left err ->
+                        expectationFailure
+                            ("expected coalesced Raise authority rejection, got: " ++ show err)
+                    Right _ ->
+                        expectationFailure
+                            "one source certificate authorized an unrelated coalesced Raise"
+
+            it "distinguishes exact-copy provenance from true non-operated ambiguity" $ do
+                let edgeId = 44
+                    sourceRoot = NodeId 100
+                    operatedSource = NodeId 101
+                    otherSourceA = NodeId 102
+                    otherSourceB = NodeId 103
+                    operatedCopy = NodeId 110
+                    otherCopyA = NodeId 111
+                    otherCopyB = NodeId 112
+                    operatedDestination = NodeId 113
+                    otherDestination = NodeId 114
+                    resultRoot = NodeId 115
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot operatedSource otherSourceA)
+                            , (getNodeId operatedSource, TyVar operatedSource Nothing)
+                            , (getNodeId otherSourceA, TyVar otherSourceA Nothing)
+                            , (getNodeId otherSourceB, TyVar otherSourceB Nothing)
+                            , (getNodeId resultRoot, TyForall resultRoot operatedDestination)
+                            , (getNodeId operatedDestination, TyVar operatedDestination Nothing)
+                            , (getNodeId otherDestination, TyVar otherDestination Nothing)
+                            ]
+                    c =
+                        -- Keep the many-to-one destination outside the result
+                        -- owner's I(r).  `rootedConstraint` would put every
+                        -- term-DAG root under one gen node and would therefore
+                        -- make `otherDestination` an interior sibling.
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 100, [sourceRoot])
+                            , (GenNodeId 114, [otherDestination])
+                            , (GenNodeId 115, [resultRoot])
+                            ]
+                            [ (operatedSource, sourceRoot, BindFlex)
+                            , (otherSourceA, sourceRoot, BindFlex)
+                            , (otherSourceB, sourceRoot, BindFlex)
+                            , (operatedDestination, resultRoot, BindFlex)
+                            ]
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise operatedSource
+                                    , OpMerge operatedSource otherCopyA
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = [(operatedSource, operatedCopy)]
+                            , etInterior =
+                                sourceInteriorFromList
+                                    [ sourceRoot
+                                    , operatedSource
+                                    , otherSourceA
+                                    , otherSourceB
+                                    ]
+                            , etBinderReplayMap =
+                                IntMap.singleton
+                                    (getNodeId operatedSource)
+                                    operatedDestination
+                            , etReplayDomainBinders = [operatedDestination]
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId operatedSource, operatedCopy)
+                                        , (getNodeId otherSourceA, otherCopyA)
+                                        , (getNodeId otherSourceB, otherCopyB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractStrict
+                            }
+                    uf =
+                        IntMap.fromList
+                            [ (getNodeId operatedCopy, operatedDestination)
+                            , (getNodeId otherCopyA, otherDestination)
+                            , (getNodeId otherCopyB, otherDestination)
+                            ]
+                    st0 =
+                        setEdgeNonSourceOpOrigins
+                            edgeId
+                            (IntMap.singleton 1 SourceDestinationMergeOperation)
+                            (mkWitnessNormState c uf 120 edgeId edgeWitness edgeTrace)
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing -> expectationFailure "missing normalized witness"
+                            Just normalizedWitness -> do
+                                let ops = getInstanceOps (ewWitness normalizedWitness)
+                                ops
+                                    `shouldBe` [OpRaiseMerge operatedSource otherSourceA]
+                                concatMap opNodeIds ops
+                                    `shouldSatisfy`
+                                        all
+                                            (`notElem`
+                                                [ operatedCopy
+                                                , otherCopyA
+                                                , otherCopyB
+                                                , operatedDestination
+                                                , otherDestination
+                                                ]
+                                            )
+                let ambiguousWitness =
+                        edgeWitness
+                            { ewWitness =
+                                InstanceWitness
+                                    [ OpRaise operatedSource
+                                    , OpMerge operatedSource otherDestination
+                                    ]
+                            }
+                    ambiguousState =
+                        setEdgeNonSourceOpOrigins
+                            edgeId
+                            (IntMap.singleton 1 SourceDestinationMergeOperation)
+                            ( mkWitnessNormState
+                                c
+                                uf
+                                120
+                                edgeId
+                                ambiguousWitness
+                                edgeTrace
+                            )
+                case runPresolutionM defaultTraceConfig ambiguousState normalizeEdgeWitnessesM of
+                    Left
+                        ( WitnessNormalizationError
+                            (EdgeId actualEdge)
+                            (AmbiguousOperatedSource actualDestination sources)
+                          ) -> do
+                            actualEdge `shouldBe` edgeId
+                            actualDestination `shouldBe` otherDestination
+                            sources `shouldBe` [otherSourceA, otherSourceB]
+                    Left err ->
+                        expectationFailure ("expected non-operated ambiguity, got: " ++ show err)
+                    Right _ ->
+                        expectationFailure "expected non-operated ambiguity"
+
         it "flags delayed-weakening violations when later ops touch strict descendants" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -316,6 +1256,21 @@ spec = do
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
                 ops0 = [OpWeaken root, OpGraft arg child]
             normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpGraft arg child, OpWeaken root]
+
+        it "keeps the strict root Weaken before its RaiseMerge transition" $ do
+            let c = mkNormalizeConstraint
+                root = NodeId 0
+                exterior = NodeId 2
+                env =
+                    (mkNormalizeEnv c root (IntSet.singleton (getNodeId root)))
+                        { binderArgs = IntMap.singleton (getNodeId root) (NodeId 3)
+                        , binderReplayMap = IntMap.singleton (getNodeId root) exterior
+                        , replayContract = ReplayContractStrict
+                        , replayDomainBinders = [exterior]
+                        }
+                ops0 = [OpWeaken root, OpRaise root, OpMerge root exterior]
+            normalizeInstanceOpsFull env ops0
+                `shouldBe` Right [OpWeaken root, OpRaiseMerge root exterior]
 
         it "does not move Weaken past same-binder ops without descendants" $ do
             let c = mkNormalizeConstraint
@@ -526,6 +1481,93 @@ spec = do
             integratePhase2Ops baseOps extraOps
                 `shouldBe` [OpGraft arg b, OpMerge b a, OpWeaken b]
 
+        it "keeps destination origins aligned when integration reorders mixed operations" $ do
+            let a = NodeId 2
+                b = NodeId 3
+                arg = NodeId 10
+                baseOps = [OpGraft arg b, OpWeaken b]
+                extraOps =
+                    [ DestinationEdgeWitnessOp (OpMerge b a)
+                    , DestinationEdgeWitnessOp (OpRaise b)
+                    ]
+            integrateEdgeWitnessOps a baseOps extraOps
+                `shouldBe`
+                    ( [OpGraft arg b, OpRaise b, OpMerge b a, OpWeaken b]
+                    , IntMap.fromList
+                        [ (1, DestinationEdgeOperation)
+                        , (2, DestinationEdgeOperation)
+                        ]
+                    )
+
+        it "preserves flexible terminal construction certificates through integration" $ do
+            let operated = NodeId 2
+                exterior = NodeId 3
+                extraOps =
+                    [ FlexibleTerminalSourceEdgeWitnessOp (OpRaise operated)
+                    , FlexibleTerminalSourceEdgeWitnessOp (OpMerge operated exterior)
+                    ]
+            integrateEdgeWitnessOps operated [] extraOps
+                `shouldBe`
+                    ( [OpRaise operated, OpMerge operated exterior]
+                    , IntMap.fromList
+                        [ (0, FlexibleTerminalSourceOperation)
+                        , (1, FlexibleTerminalSourceOperation)
+                        ]
+                    )
+
+        it "keeps a rigid terminal root Weaken before its RaiseMerge block" $ do
+            let root = NodeId 2
+                exterior = NodeId 3
+                baseOps = [OpWeaken root]
+                extraOps =
+                    [ DestinationEdgeWitnessOp (OpMerge root exterior)
+                    , DestinationEdgeWitnessOp (OpRaise root)
+                    ]
+            integrateEdgeWitnessOps root baseOps extraOps
+                `shouldBe`
+                    ( [OpWeaken root, OpRaise root, OpMerge root exterior]
+                    , IntMap.fromList
+                        [ (1, DestinationEdgeOperation)
+                        , (2, DestinationEdgeOperation)
+                        ]
+                    )
+
+        it "keeps an instantiated source-root Weaken adjacent to its terminal RaiseMerge block" $ do
+            let root = NodeId 2
+                exterior = NodeId 3
+                argument = NodeId 10
+                baseOps =
+                    [ OpGraft argument root
+                    , OpWeaken root
+                    ]
+                extraOps =
+                    [ SourceEdgeWitnessOp (OpMerge root exterior)
+                    , SourceEdgeWitnessOp (OpRaise root)
+                    ]
+            integrateEdgeWitnessOps root baseOps extraOps
+                `shouldBe`
+                    ( [ OpGraft argument root
+                      , OpWeaken root
+                      , OpRaise root
+                      , OpMerge root exterior
+                      ]
+                    , IntMap.empty
+                    )
+
+        it "keeps an execution-emitted root Weaken before its RaiseMerge block" $ do
+            let root = NodeId 2
+                exterior = NodeId 3
+                extraOps =
+                    [ SourceEdgeWitnessOp (OpMerge root exterior)
+                    , SourceEdgeWitnessOp (OpRaise root)
+                    , SourceEdgeWitnessOp (OpWeaken root)
+                    ]
+            integrateEdgeWitnessOps root [] extraOps
+                `shouldBe`
+                    ( [OpWeaken root, OpRaise root, OpMerge root exterior]
+                    , IntMap.empty
+                    )
+
         it "coalesces Raise; Merge into RaiseMerge" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -619,6 +1661,23 @@ spec = do
                 let ops0 = [OpWeaken parent, OpGraft sibling sibling, OpGraft child child]
                 reorderWeakenWithEnv env ops0
                     `shouldBe` Right [OpGraft sibling sibling, OpGraft child child, OpWeaken parent]
+
+            it "moves a separated root Weaken immediately before its same-source terminal RaiseMerge" $ do
+                let exterior = NodeId 4
+                    ops0 =
+                        [ OpWeaken root
+                        , OpRaise child
+                        , OpWeaken child
+                        , OpRaiseMerge root exterior
+                        ]
+                reorderWeakenWithEnv env ops0
+                    `shouldBe`
+                        Right
+                            [ OpRaise child
+                            , OpWeaken child
+                            , OpWeaken root
+                            , OpRaiseMerge root exterior
+                            ]
 
         it "normalizeInstanceOpsFull produces validated witnesses when it succeeds" $ property $
             let c = mkNormalizeConstraint
@@ -813,7 +1872,7 @@ spec = do
                             { cNodes = nodeMapFromList
                                     [ (getNodeId root, TyForall root binder)
                                     , (getNodeId binder, TyVar { tnId = binder, tnBound = Just bound })
-                                    , (getNodeId bound, TyBase bound (BaseTy "Int"))
+                                    , (getNodeId bound, TestTyBase bound (BaseTy "Int"))
                                     , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
                                     ]
                             , cBindParents =
@@ -1020,8 +2079,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = []
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
                             , etBinderReplayMap = mempty
                             , etReplayDomainBinders = []
                             , etCopyMap = mempty
@@ -1034,6 +2094,7 @@ spec = do
                             , psNextNodeId = 4
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1043,9 +2104,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
@@ -1070,15 +2134,18 @@ spec = do
                             , (getNodeId interiorNode, TyVar { tnId = interiorNode, tnBound = Nothing })
                             , (getNodeId exteriorNode, TyVar { tnId = exteriorNode, tnBound = Nothing })
                             ]
-                    bindParents =
-                        bindParentsFromPairs
-                            [ (interiorNode, root, BindFlex)
-                            -- exteriorNode has no binding parent (outside interior)
+                    constraint =
+                        -- Destination ownership, rather than the source-domain
+                        -- trace interior, is authoritative during witness
+                        -- normalization.  Give the exterior node its own owner
+                        -- so this fixture really places it outside I(root).
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 0, [root])
+                            , (GenNodeId 2, [exteriorNode])
                             ]
-                    constraint = rootedConstraint $ emptyConstraint
-                            { cNodes = nodes
-                            , cBindParents = bindParents
-                            }
+                            [ (interiorNode, root, BindFlex)
+                            ]
                     -- Create a witness with an OpMerge where one target is outside the interior.
                     -- OpMerge n m: both n and m must be in interior for validation to pass,
                     -- but stripExteriorOps only requires one target to be in interior to keep the op.
@@ -1095,8 +2162,9 @@ spec = do
                     -- Create an edge trace with interior that does NOT include exteriorNode
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = []
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId interiorNode])
                             , etBinderReplayMap = mempty
                             , etReplayDomainBinders = []
                             , etCopyMap = mempty
@@ -1109,6 +2177,7 @@ spec = do
                             , psNextNodeId = 3
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1118,9 +2187,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
@@ -1169,8 +2241,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = []
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
                             , etBinderReplayMap = mempty
                             , etReplayDomainBinders = []
                             , etCopyMap = mempty
@@ -1183,6 +2256,7 @@ spec = do
                             , psNextNodeId = 4
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1192,9 +2266,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
@@ -1235,8 +2312,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = []
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
                             , etBinderReplayMap = mempty
                             , etReplayDomainBinders = []
                             , etCopyMap = mempty
@@ -1249,6 +2327,7 @@ spec = do
                             , psNextNodeId = 3
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1258,9 +2337,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (MissingOrderKey nid)) -> do
@@ -1282,8 +2364,8 @@ spec = do
                     nodes = nodeMapFromList
                             [ (getNodeId root, TyForall root binder)
                             , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
-                            , (getNodeId arg1, TyBase arg1 (BaseTy "Int"))
-                            , (getNodeId arg2, TyBase arg2 (BaseTy "Bool"))
+                            , (getNodeId arg1, TestTyBase arg1 (BaseTy "Int"))
+                            , (getNodeId arg2, TestTyBase arg2 (BaseTy "Bool"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1311,8 +2393,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId binder])
                             , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
@@ -1329,6 +2412,7 @@ spec = do
                             , psNextNodeId = 32
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1338,9 +2422,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
@@ -1387,8 +2474,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = [(sourceB1, missingArg1), (sourceB2, missingArg2)]
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId binder])
                             , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
@@ -1405,6 +2493,7 @@ spec = do
                             , psNextNodeId = 4
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1414,9 +2503,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
@@ -1439,8 +2531,8 @@ spec = do
                     nodes = nodeMapFromList
                             [ (getNodeId root, TyForall root binder)
                             , (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
-                            , (getNodeId arg1, TyBase arg1 (BaseTy "Int"))
-                            , (getNodeId arg2, TyBase arg2 (BaseTy "Bool"))
+                            , (getNodeId arg1, TestTyBase arg1 (BaseTy "Int"))
+                            , (getNodeId arg2, TestTyBase arg2 (BaseTy "Bool"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1467,8 +2559,9 @@ spec = do
                             }
                     edgeTrace = EdgeTrace
                             { etRoot = root
+                            , etResultRoot = root
                             , etBinderArgs = [(sourceB1, arg1), (sourceB2, arg2)]
-                            , etInterior = InteriorNodes (IntSet.fromList [getNodeId binder])
+                            , etInterior = sourceInteriorFromSet (IntSet.fromList [getNodeId binder])
                             , etBinderReplayMap =
                                 IntMap.fromList
                                     [ (getNodeId sourceB1, binder)
@@ -1485,6 +2578,7 @@ spec = do
                             , psNextNodeId = 32
                             , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                             , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -1494,9 +2588,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                            , psEdgeExpansions = IntMap.empty
-                            , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                            , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                            , psExpansionResults = emptyExpansionResultMap
+                            , psEdgeExecutionArtifacts =
+                                singletonEdgeExecutionArtifactsForTest
+                                    edgeId
+                                    edgeWitness
+                                    edgeTrace
                             }
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
@@ -1519,7 +2616,7 @@ spec = do
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyForall n bottom)
                             , (getNodeId bottom, TyBottom bottom)
-                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            , (getNodeId base, TestTyBase base (BaseTy "int"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1544,7 +2641,7 @@ spec = do
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
                             , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
-                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            , (getNodeId base, TestTyBase base (BaseTy "int"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1565,7 +2662,7 @@ spec = do
                     nodes = nodeMapFromList
                             [ (getNodeId root, TyArrow root mid mid)
                             , (getNodeId mid, TyArrow mid base base)
-                            , (getNodeId base, TyBase base (BaseTy "Poly"))
+                            , (getNodeId base, TestTyBase base (BaseTy "Poly"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1576,7 +2673,7 @@ spec = do
                         emptyConstraint
                             { cNodes = nodes
                             , cBindParents = bindParents
-                            , cPolySyms = Set.fromList [BaseTy "Poly"]
+                            , cPolySyms = Set.fromList [testTypeIdentity "Poly"]
                             }
                 case Inert.inertNodes c of
                     Left err -> expectationFailure ("inertNodes failed: " ++ show err)
@@ -1593,7 +2690,7 @@ spec = do
                             , (getNodeId mid, TyArrow mid n base)
                             , (getNodeId n, TyArrow n v base)
                             , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
-                            , (getNodeId base, TyBase base (BaseTy "int"))
+                            , (getNodeId base, TestTyBase base (BaseTy "int"))
                             ]
                     bindParents =
                         bindParentsFromPairs
@@ -1690,11 +2787,22 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("Presolution failed: " ++ show err)
-                Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
+                Right PresolutionResult
+                    { prEdgeExpansions = exps
+                    , prEdgeWitnesses = ews
+                    , prEdgeExpansionConstructions = constructions
+                    } -> do
                     case IntMap.lookup 0 exps of
                         Just (ExpCompose _) -> pure ()
                         Just other -> expectationFailure ("Expected ExpCompose, got " ++ show other)
                         Nothing -> expectationFailure "No expansion found for Edge 0"
+                    case IntMap.lookup 0 constructions of
+                        Nothing ->
+                            expectationFailure
+                                "No construction evidence found for Edge 0"
+                        Just construction ->
+                            rawExpansionConstructionSemanticMetaKeys construction
+                                `shouldSatisfy` (not . IntSet.null)
                     case IntMap.lookup 0 ews of
                         Nothing -> expectationFailure "No witness found for Edge 0"
                         Just ew -> do
@@ -1714,15 +2822,16 @@ spec = do
                             [ (getNodeId root, TyArrow root replayTarget replayTarget)
                             , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
                             , (getNodeId replayTarget, TyVar { tnId = replayTarget, tnBound = Nothing })
-                            , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
                             ]
                     , cBindParents = IntMap.empty
                     }
                 tr =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
-                        , etInterior = fromListInterior [root, source, replayTarget, argNode]
+                        , etInterior = sourceInteriorFromList [root, source, replayTarget, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayTarget)]
                         , etReplayDomainBinders = []
                         , etCopyMap = mempty
@@ -1752,7 +2861,7 @@ spec = do
                             , (getNodeId body, TyArrow body replayBinder replayBinder)
                             , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
                             , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
-                            , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Bool"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -1763,8 +2872,9 @@ spec = do
                 tr =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
-                        , etInterior = fromListInterior [root, body, replayBinder, source, argNode]
+                        , etInterior = sourceInteriorFromList [root, body, replayBinder, source, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayBinder)]
                         , etReplayDomainBinders = []
                         , etCopyMap = mempty
@@ -1784,21 +2894,59 @@ spec = do
                             [ (getNodeId root, TyArrow root replayBinder replayBinder)
                             , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
                             , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
-                            , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
                             ]
                     , cBindParents = IntMap.empty
                     }
                 tr =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
-                        , etInterior = fromListInterior [root, source, replayBinder, argNode]
+                        , etInterior = sourceInteriorFromList [root, source, replayBinder, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayBinder)]
                         , etReplayDomainBinders = [replayBinder]
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
             validateReplayMapTraceContract id c c edgeKey tr `shouldBe` Right ()
+
+        it "accepts an operation-time binder absent from the final graph when the producer publishes it explicitly" $ do
+            let edgeKey = 4
+                root = NodeId 410
+                source = NodeId 411
+                replayBinder = NodeId 412
+                argNode = NodeId 413
+                sourceConstraint = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (getNodeId root, TyArrow root replayBinder replayBinder)
+                            , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
+                            , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
+                            ]
+                    }
+                finalConstraint = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (getNodeId root, TyArrow root argNode argNode)
+                            , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
+                            ]
+                    }
+                tr =
+                    EdgeTrace
+                        { etRoot = root
+                        , etResultRoot = root
+                        , etBinderArgs = [(source, argNode)]
+                        , etInterior = sourceInteriorFromList [root, source, argNode]
+                        , etBinderReplayMap = IntMap.singleton (getNodeId source) replayBinder
+                        , etReplayDomainBinders = [replayBinder]
+                        , etCopyMap = mempty
+                        , etReplayContract = ReplayContractStrict
+                        }
+            validateReplayMapTraceContract id sourceConstraint finalConstraint edgeKey tr
+                `shouldBe` Right ()
 
         it "hard-rejects non-injective replay-map codomain under strict contract" $ do
             let edgeKey = 11
@@ -1817,8 +2965,8 @@ spec = do
                             , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
                             , (getNodeId sourceA, TyVar { tnId = sourceA, tnBound = Nothing })
                             , (getNodeId sourceB, TyVar { tnId = sourceB, tnBound = Nothing })
-                            , (getNodeId argA, TyBase argA (BaseTy "Int"))
-                            , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                            , (getNodeId argA, TestTyBase argA (BaseTy "Int"))
+                            , (getNodeId argB, TestTyBase argB (BaseTy "Bool"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -1829,8 +2977,9 @@ spec = do
                 tr =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
-                        , etInterior = fromListInterior [root, body, replayBinder, sourceA, sourceB, argA, argB]
+                        , etInterior = sourceInteriorFromList [root, body, replayBinder, sourceA, sourceB, argA, argB]
                         , etBinderReplayMap =
                             IntMap.fromList
                                 [ (getNodeId sourceA, replayBinder)
@@ -1865,9 +3014,9 @@ spec = do
                             [ (getNodeId root, TyForall root body)
                             , (getNodeId body, TyArrow body replayBinder replayBinder)
                             , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
-                            , (getNodeId replayAlias, TyBase replayAlias (BaseTy "Alias"))
+                            , (getNodeId replayAlias, TestTyBase replayAlias (BaseTy "Alias"))
                             , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
-                            , (getNodeId argNode, TyBase argNode (BaseTy "Bool"))
+                            , (getNodeId argNode, TestTyBase argNode (BaseTy "Bool"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -1878,8 +3027,9 @@ spec = do
                 tr =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
-                        , etInterior = fromListInterior [root, body, replayBinder, replayAlias, source, argNode]
+                        , etInterior = sourceInteriorFromList [root, body, replayBinder, replayAlias, source, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayAlias)]
                         , etReplayDomainBinders = []
                         , etCopyMap = mempty
@@ -1911,6 +3061,9 @@ spec = do
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap = IntMap.empty
                     , replayContract = ReplayContractNone
                     , replayDomainBinders = []
@@ -1932,6 +3085,9 @@ spec = do
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap = IntMap.empty
                     , replayContract = ReplayContractNone
                     , replayDomainBinders = []
@@ -1953,6 +3109,9 @@ spec = do
                     , constraint = emptyConstraint
                     , binderArgs = IntMap.empty
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap = IntMap.empty
                     , replayContract = ReplayContractNone
                     , replayDomainBinders = []
@@ -1971,7 +3130,7 @@ spec = do
                         nodeMapFromList
                             [ (0, TyArrow root binder binder)
                             , (1, TyVar { tnId = binder, tnBound = Nothing })
-                            , (2, TyBase argNode (BaseTy "Int"))
+                            , (2, TestTyBase argNode (BaseTy "Int"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -1989,6 +3148,9 @@ spec = do
                     , constraint = c
                     , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap = IntMap.empty
                     , replayContract = ReplayContractStrict
                     , replayDomainBinders = []
@@ -2006,8 +3168,8 @@ spec = do
                         nodeMapFromList
                             [ (0, TyArrow root binder binder)
                             , (1, TyVar { tnId = binder, tnBound = Nothing })
-                            , (2, TyBase badTarget (BaseTy "Bool"))
-                            , (3, TyBase argNode (BaseTy "Int"))
+                            , (2, TestTyBase badTarget (BaseTy "Bool"))
+                            , (3, TestTyBase argNode (BaseTy "Int"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -2026,12 +3188,48 @@ spec = do
                     , constraint = c
                     , binderArgs = IntMap.fromList [(getNodeId binder, argNode)]
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap = IntMap.fromList [(getNodeId binder, badTarget)]
                     , replayContract = ReplayContractStrict
                     , replayDomainBinders = []
                     , isAnnotationEdge = False
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapTargetOutsideReplayDomain binder badTarget)
+
+        it "accepts a certified operation-time replay binder after final graph elimination" $ do
+            let root = NodeId 0
+                binder = NodeId 1
+                replayBinder = NodeId 2
+                argNode = NodeId 3
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (0, TyArrow root argNode argNode)
+                            , (1, TyVar { tnId = binder, tnBound = Nothing })
+                            , (3, TestTyBase argNode (BaseTy "Int"))
+                            ]
+                    }
+                env = OmegaNormalizeEnv
+                    { oneRoot = root
+                    , interior = IntSet.fromList [0, 1, 3]
+                    , interiorRaw = IntSet.fromList [0, 1, 3]
+                    , weakened = IntSet.empty
+                    , orderKeys = IntMap.empty
+                    , canonical = id
+                    , constraint = c
+                    , binderArgs = IntMap.singleton (getNodeId binder) argNode
+                    , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.singleton (getNodeId replayBinder)
+                    , binderReplayMap = IntMap.singleton (getNodeId binder) replayBinder
+                    , replayContract = ReplayContractStrict
+                    , replayDomainBinders = [replayBinder]
+                    , isAnnotationEdge = False
+                    }
+            validateNormalizedWitness env [] `shouldBe` Right ()
 
         it "fails replay-map validation when two source binders map to one replay binder" $ do
             let root = NodeId 0
@@ -2045,8 +3243,8 @@ spec = do
                             [ (0, TyArrow root binderA binderB)
                             , (1, TyVar { tnId = binderA, tnBound = Nothing })
                             , (2, TyVar { tnId = binderB, tnBound = Nothing })
-                            , (3, TyBase argA (BaseTy "Int"))
-                            , (4, TyBase argB (BaseTy "Bool"))
+                            , (3, TestTyBase argA (BaseTy "Int"))
+                            , (4, TestTyBase argB (BaseTy "Bool"))
                             ]
                     , cBindParents =
                         bindParentsFromPairs
@@ -2070,6 +3268,9 @@ spec = do
                             , (getNodeId binderB, argB)
                             ]
                     , precomputedDescendants = IntMap.empty
+                    , certifiedWeakens = IntSet.empty
+                    , certifiedRaises = IntSet.empty
+                    , certifiedReplayBinders = IntSet.empty
                     , binderReplayMap =
                         IntMap.fromList
                             [ (getNodeId binderA, binderA)
@@ -2080,6 +3281,331 @@ spec = do
                     , isAnnotationEdge = False
                     }
             validateNormalizedWitness env [] `shouldBe` Left (ReplayMapNonInjective binderA binderB binderA)
+
+        describe "construction-certificate replay composition" $ do
+            it "preserves a distinct RaiseMerge replay pair beside a certified Weaken" $ do
+                let edgeId = 45
+                    sourceRoot = NodeId 600
+                    sourceRaise = NodeId 601
+                    sourceWeaken = NodeId 602
+                    sourceOther = NodeId 603
+                    resultRoot = NodeId 610
+                    copiedRaise = NodeId 611
+                    copiedWeaken = NodeId 612
+                    replayRaise = NodeId 613
+                    raiseArg = NodeId 614
+                    weakenArg = NodeId 615
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId resultRoot, TyArrow resultRoot copiedRaise copiedWeaken)
+                            , (getNodeId copiedRaise, TyVar copiedRaise Nothing)
+                            , (getNodeId copiedWeaken, TyVar copiedWeaken Nothing)
+                            , (getNodeId replayRaise, TyVar replayRaise Nothing)
+                            , (getNodeId raiseArg, TestTyBase raiseArg (BaseTy "RaiseArg"))
+                            , (getNodeId weakenArg, TestTyBase weakenArg (BaseTy "WeakenArg"))
+                            ]
+                    constraintWithWeakenFlag weakenFlag =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 610, [resultRoot])
+                            , (GenNodeId 613, [replayRaise])
+                            ]
+                            [ (copiedRaise, resultRoot, BindFlex)
+                            , (copiedWeaken, resultRoot, weakenFlag)
+                            ]
+                    constraintBefore = constraintWithWeakenFlag BindFlex
+                    constraintAfter = constraintWithWeakenFlag BindRigid
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceRaise
+                                    , OpMerge sourceRaise sourceOther
+                                    , OpWeaken sourceWeaken
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs =
+                                [ (sourceRaise, raiseArg)
+                                , (sourceWeaken, weakenArg)
+                                ]
+                            , etInterior =
+                                sourceInteriorFromList
+                                    [ sourceRoot
+                                    , sourceRaise
+                                    , sourceWeaken
+                                    ]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceRaise, copiedRaise)
+                                        , (getNodeId sourceWeaken, copiedWeaken)
+                                        , (getNodeId sourceOther, replayRaise)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                certificate <-
+                    case
+                        certifyAppliedNonRootWeakenReplay
+                            constraintBefore
+                            constraintAfter
+                            id
+                            sourceWeaken
+                            copiedWeaken
+                            resultRoot of
+                        Just certified -> pure certified
+                        Nothing ->
+                            expectationFailure "expected a valid applied-Weaken certificate"
+                                >> fail "missing certificate"
+                let st0 =
+                        ( mkWitnessNormState
+                            constraintAfter
+                            IntMap.empty
+                            620
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                        )
+                            { psWeakenReplayCertificates =
+                                IntMap.singleton
+                                    edgeId
+                                    (IntMap.singleton (getNodeId sourceWeaken) certificate)
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeTraces st') of
+                            Nothing -> expectationFailure "missing normalized edge trace"
+                            Just trace -> do
+                                etReplayContract trace `shouldBe` ReplayContractStrict
+                                etBinderArgs trace
+                                    `shouldBe`
+                                        [ (sourceRaise, raiseArg)
+                                        , (sourceWeaken, weakenArg)
+                                        ]
+                                etBinderReplayMap trace
+                                    `shouldBe`
+                                        IntMap.fromList
+                                            [ (getNodeId sourceRaise, replayRaise)
+                                            , (getNodeId sourceWeaken, copiedWeaken)
+                                            ]
+                                etReplayDomainBinders trace
+                                    `shouldBe` [replayRaise, copiedWeaken]
+
+            it "rejects two RaiseMerge targets for one exact frozen source before map construction" $ do
+                let edgeId = 46
+                    sourceRoot = NodeId 630
+                    sourceCanonical = NodeId 631
+                    sourceAlias = NodeId 632
+                    sourceOtherA = NodeId 633
+                    sourceOtherB = NodeId 634
+                    resultRoot = NodeId 640
+                    copiedCanonical = NodeId 641
+                    copiedAlias = NodeId 642
+                    copiedOperated = NodeId 643
+                    replayA = NodeId 644
+                    replayB = NodeId 645
+                    sourceArg = NodeId 646
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId resultRoot, TyArrow resultRoot copiedOperated copiedOperated)
+                            , (getNodeId copiedOperated, TyVar copiedOperated Nothing)
+                            , (getNodeId replayA, TyVar replayA Nothing)
+                            , (getNodeId replayB, TyVar replayB Nothing)
+                            , (getNodeId sourceArg, TestTyBase sourceArg (BaseTy "SourceArg"))
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 640, [resultRoot])
+                            , (GenNodeId 644, [replayA])
+                            , (GenNodeId 645, [replayB])
+                            ]
+                            [ (copiedOperated, resultRoot, BindFlex)
+                            ]
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceAlias
+                                    , OpMerge sourceAlias sourceOtherA
+                                    , OpRaise sourceAlias
+                                    , OpMerge sourceAlias sourceOtherB
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = [(sourceAlias, sourceArg)]
+                            , etInterior =
+                                sourceInteriorFromList
+                                    [ sourceRoot
+                                    , sourceCanonical
+                                    , sourceAlias
+                                    ]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceCanonical, copiedCanonical)
+                                        , (getNodeId sourceAlias, copiedAlias)
+                                        , (getNodeId sourceOtherA, replayA)
+                                        , (getNodeId sourceOtherB, replayB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    unionFind =
+                        IntMap.fromList
+                            [ (getNodeId sourceAlias, sourceCanonical)
+                            , (getNodeId copiedCanonical, copiedOperated)
+                            , (getNodeId copiedAlias, copiedOperated)
+                            ]
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            unionFind
+                            650
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left
+                        ( WitnessNormalizationError
+                            (EdgeId actualEdge)
+                            (ReplayMapSourceNonFunctional actualSource actualTargets)
+                          ) -> do
+                            actualEdge `shouldBe` edgeId
+                            actualSource `shouldBe` sourceAlias
+                            actualTargets `shouldBe` [replayA, replayB]
+                    Left err ->
+                        expectationFailure
+                            ("expected non-functional replay-source rejection, got: " ++ show err)
+                    Right _ ->
+                        expectationFailure "expected non-functional replay-source rejection"
+
+            it "builds an injective zero-legacy replay map from two certificates" $ do
+                let edgeId = 47
+                    sourceRoot = NodeId 660
+                    sourceA = NodeId 661
+                    sourceB = NodeId 662
+                    resultRoot = NodeId 670
+                    copiedA = NodeId 671
+                    copiedB = NodeId 672
+                    argA = NodeId 673
+                    argB = NodeId 674
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId resultRoot, TyArrow resultRoot copiedA copiedB)
+                            , (getNodeId copiedA, TyVar copiedA Nothing)
+                            , (getNodeId copiedB, TyVar copiedB Nothing)
+                            , (getNodeId argA, TestTyBase argA (BaseTy "ArgA"))
+                            , (getNodeId argB, TestTyBase argB (BaseTy "ArgB"))
+                            ]
+                    constraintWithWeakenFlag weakenFlag =
+                        constraintWithOwners
+                            nodes
+                            [(GenNodeId 670, [resultRoot])]
+                            [ (copiedA, resultRoot, weakenFlag)
+                            , (copiedB, resultRoot, weakenFlag)
+                            ]
+                    constraintBefore = constraintWithWeakenFlag BindFlex
+                    constraintAfter = constraintWithWeakenFlag BindRigid
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = resultRoot
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness = InstanceWitness [OpWeaken sourceA, OpWeaken sourceB]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = resultRoot
+                            , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
+                            , etInterior = sourceInteriorFromList [sourceRoot, sourceA, sourceB]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap =
+                                CopyMapping
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, copiedA)
+                                        , (getNodeId sourceB, copiedB)
+                                        ]
+                                    )
+                            , etReplayContract = ReplayContractNone
+                            }
+                    requireCertificate source copied =
+                        case
+                            certifyAppliedNonRootWeakenReplay
+                                constraintBefore
+                                constraintAfter
+                                id
+                                source
+                                copied
+                                resultRoot of
+                            Just certificate -> pure certificate
+                            Nothing ->
+                                expectationFailure
+                                    ("expected certificate for " ++ show source)
+                                    >> fail "missing certificate"
+                certificateA <- requireCertificate sourceA copiedA
+                certificateB <- requireCertificate sourceB copiedB
+                let st0 =
+                        ( mkWitnessNormState
+                            constraintAfter
+                            IntMap.empty
+                            680
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                        )
+                            { psWeakenReplayCertificates =
+                                IntMap.singleton
+                                    edgeId
+                                    ( IntMap.fromList
+                                        [ (getNodeId sourceA, certificateA)
+                                        , (getNodeId sourceB, certificateB)
+                                        ]
+                                    )
+                            }
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeTraces st') of
+                            Nothing -> expectationFailure "missing normalized edge trace"
+                            Just trace -> do
+                                etReplayContract trace `shouldBe` ReplayContractStrict
+                                etBinderArgs trace `shouldBe` [(sourceA, argA), (sourceB, argB)]
+                                etBinderReplayMap trace
+                                    `shouldBe`
+                                        IntMap.fromList
+                                            [ (getNodeId sourceA, copiedA)
+                                            , (getNodeId sourceB, copiedB)
+                                            ]
+                                etReplayDomainBinders trace `shouldBe` [copiedA, copiedB]
 
         it "normalization derives strict replay lane from edge semantics and maps codomain to edge-root replay binders" $ do
             let edgeId = 0
@@ -2099,8 +3625,8 @@ spec = do
                         , (getNodeId replayB, TyVar { tnId = replayB, tnBound = Nothing })
                         , (getNodeId sourceA, TyVar { tnId = sourceA, tnBound = Nothing })
                         , (getNodeId sourceB, TyVar { tnId = sourceB, tnBound = Nothing })
-                        , (getNodeId argA, TyBase argA (BaseTy "Int"))
-                        , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                        , (getNodeId argA, TestTyBase argA (BaseTy "Int"))
+                        , (getNodeId argB, TestTyBase argB (BaseTy "Bool"))
                         ]
                 bindParents =
                     bindParentsFromPairs
@@ -2124,9 +3650,10 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
                         , etInterior =
-                            InteriorNodes
+                            sourceInteriorFromSet
                                 (IntSet.fromList
                                     [ getNodeId root
                                     , getNodeId body
@@ -2151,6 +3678,7 @@ spec = do
                         , psNextNodeId = 40
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                         , psGraphVersion = 0
                         , psUnionFindVersion = 0
@@ -2160,9 +3688,12 @@ spec = do
                         , psBindingRepairCache = Nothing
                         , psBindingRepairDirty = Nothing
                         , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
@@ -2191,6 +3722,280 @@ spec = do
                                     , (getNodeId sourceB, replayB)
                                     ]
 
+        it "constructs a strict replay bridge from copied source-binder provenance after the source node is gone" $ do
+            let edgeKey = 0
+                sourceBinder = NodeId 2
+                root = NodeId 10
+                argument = NodeId 17
+                replayBinder = NodeId 18
+                leaf = NodeId 19
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyArrow root replayBinder replayBinder)
+                        , (getNodeId argument, TyArrow argument leaf leaf)
+                        , (getNodeId replayBinder, TyVar {tnId = replayBinder, tnBound = Just argument})
+                        , (getNodeId leaf, TyVar {tnId = leaf, tnBound = Nothing})
+                        ]
+                bindParents =
+                    IntMap.fromList
+                        [ (nodeRefKey (typeRef replayBinder), (genRef (GenNodeId 0), BindRigid))
+                        , (nodeRefKey (typeRef argument), (typeRef root, BindFlex))
+                        , (nodeRefKey (typeRef leaf), (typeRef argument, BindFlex))
+                        ]
+                c =
+                    rootedConstraint
+                        emptyConstraint
+                            { cNodes = nodes
+                            , cBindParents = bindParents
+                            }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeKey
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness =
+                            InstanceWitness
+                                [ OpGraft argument sourceBinder
+                                , OpWeaken sourceBinder
+                                ]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etResultRoot = root
+                        , etBinderArgs = [(sourceBinder, argument)]
+                        , etInterior = sourceInteriorFromList [root, sourceBinder, argument, leaf]
+                        , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
+                        , etCopyMap =
+                            CopyMapping
+                                (IntMap.singleton (getNodeId sourceBinder) replayBinder)
+                        , etReplayContract = ReplayContractNone
+                        }
+                st0 =
+                    ( PresolutionState
+                        c
+                        (Presolution IntMap.empty)
+                        IntMap.empty
+                        20
+                        IntSet.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+                        IntMap.empty
+                    )
+                        { psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeKey
+                                edgeWitness
+                                edgeTrace
+                        }
+            lookupNodeIn (cNodes c) sourceBinder `shouldBe` Nothing
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeKey (psEdgeTraces st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized trace in psEdgeTraces"
+                        Just tr' -> do
+                            etReplayContract tr' `shouldBe` ReplayContractStrict
+                            etBinderArgs tr' `shouldBe` [(sourceBinder, argument)]
+                            etReplayDomainBinders tr' `shouldBe` [replayBinder]
+                            etBinderReplayMap tr'
+                                `shouldBe` IntMap.singleton (getNodeId sourceBinder) replayBinder
+
+        describe "copied rigid identity pruning" $ do
+            let copiedRigidIdentityFixture includeWeaken =
+                    let edgeKey = 41
+                        root = NodeId 500
+                        body = NodeId 501
+                        replayBinder = NodeId 502
+                        aggregate = NodeId 503
+                        sourceAncestor = NodeId 504
+                        sourceRaised = NodeId 505
+                        sourceMuBody = NodeId 506
+                        copiedRaised = NodeId 507
+                        copiedMuBody = NodeId 508
+                        sourceBase = NodeId 509
+                        copiedBase = NodeId 510
+                        argNode = NodeId 511
+                        nodes =
+                            nodeMapFromList
+                                [ (getNodeId root, TyForall root body)
+                                , (getNodeId body, TyArrow body replayBinder aggregate)
+                                , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                                , (getNodeId aggregate, TyArrow aggregate sourceAncestor copiedRaised)
+                                , (getNodeId sourceAncestor, TyArrow sourceAncestor sourceRaised sourceRaised)
+                                , (getNodeId sourceRaised, TyMu sourceRaised sourceMuBody)
+                                , (getNodeId sourceMuBody, TyArrow sourceMuBody sourceBase sourceBase)
+                                , (getNodeId copiedRaised, TyMu copiedRaised copiedMuBody)
+                                , (getNodeId copiedMuBody, TyArrow copiedMuBody copiedBase copiedBase)
+                                , (getNodeId sourceBase, TestTyBase sourceBase (BaseTy "Source"))
+                                , (getNodeId copiedBase, TestTyBase copiedBase (BaseTy "Copy"))
+                                , (getNodeId argNode, TestTyBase argNode (BaseTy "Arg"))
+                                ]
+                        bindParents =
+                            bindParentsFromPairs
+                                [ (body, root, BindFlex)
+                                , (replayBinder, root, BindFlex)
+                                , (aggregate, root, BindFlex)
+                                , (sourceAncestor, root, BindRigid)
+                                , (sourceRaised, sourceAncestor, BindFlex)
+                                , (sourceMuBody, sourceRaised, BindFlex)
+                                , (sourceBase, sourceMuBody, BindFlex)
+                                , (copiedRaised, root, BindRigid)
+                                , (copiedMuBody, copiedRaised, BindFlex)
+                                , (copiedBase, copiedMuBody, BindFlex)
+                                ]
+                        c =
+                            rootedConstraint emptyConstraint
+                                { cNodes = nodes
+                                , cBindParents = bindParents
+                                }
+                        ops =
+                            OpRaise sourceRaised
+                                : [OpWeaken sourceRaised | includeWeaken]
+                        edgeWitness =
+                            EdgeWitness
+                                { ewEdgeId = EdgeId edgeKey
+                                , ewLeft = root
+                                , ewRight = root
+                                , ewRoot = root
+                                , ewForallIntros = 0
+                                , ewWitness = InstanceWitness ops
+                                }
+                        edgeTrace =
+                            EdgeTrace
+                                { etRoot = root
+                                , etResultRoot = root
+                                , etBinderArgs = [(replayBinder, argNode)]
+                                , etInterior =
+                                    sourceInteriorFromList
+                                        [ root
+                                        , body
+                                        , replayBinder
+                                        , aggregate
+                                        , sourceAncestor
+                                        , sourceRaised
+                                        , sourceMuBody
+                                        , copiedRaised
+                                        , copiedMuBody
+                                        , sourceBase
+                                        , copiedBase
+                                        , argNode
+                                        ]
+                                , etBinderReplayMap = IntMap.empty
+                                , etReplayDomainBinders = []
+                                , etCopyMap =
+                                    CopyMapping
+                                        (IntMap.singleton (getNodeId sourceRaised) copiedRaised)
+                                , etReplayContract = ReplayContractStrict
+                                }
+                        st0 =
+                            ( PresolutionState
+                                c
+                                (Presolution IntMap.empty)
+                                IntMap.empty
+                                600
+                                IntSet.empty
+                                IntMap.empty
+                                IntMap.empty
+                                IntMap.empty
+                                IntMap.empty
+                                IntMap.empty
+                            )
+                                { psEdgeExecutionArtifacts =
+                                    singletonEdgeExecutionArtifactsForTest
+                                        edgeKey
+                                        edgeWitness
+                                        edgeTrace
+                                }
+                     in (edgeKey, root, sourceAncestor, sourceRaised, copiedRaised, c, st0)
+
+            it "drops a copied directly-rigid Raise on a non-annotation edge" $ do
+                let (edgeKey, _root, _sourceAncestor, _sourceRaised, _copiedRaised, c, st0) =
+                        copiedRigidIdentityFixture False
+                IntSet.member edgeKey (cAnnEdges c) `shouldBe` False
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeKey (psEdgeWitnesses st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                            Just ew' ->
+                                getInstanceOps (ewWitness ew') `shouldBe` []
+
+            it "does not erase a copied rigid Raise made rigid by the same witness's Weaken" $ do
+                let (edgeKey, root, _sourceAncestor, sourceRaised, _copiedRaised, c, st0) =
+                        copiedRigidIdentityFixture True
+                IntSet.member edgeKey (cAnnEdges c) `shouldBe` False
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left
+                        ( WitnessNormalizationError
+                            (EdgeId eid)
+                            (NotTransitivelyFlexBound (OpRaise operated) target validationRoot)
+                          ) -> do
+                            eid `shouldBe` edgeKey
+                            operated `shouldBe` sourceRaised
+                            target `shouldBe` sourceRaised
+                            validationRoot `shouldBe` root
+                    Left err ->
+                        expectationFailure
+                            ("Expected retained Raise validation failure, got: " ++ show err)
+                    Right _ ->
+                        expectationFailure
+                            "Expected same-witness Weaken to prevent rigid-identity pruning"
+
+            it "accepts a Raise from its exact pre-mutation source authority certificate" $ do
+                let (edgeKey, root, sourceAncestor, sourceRaised, _copiedRaised, _c, st0) =
+                        copiedRigidIdentityFixture True
+                    initialConstraint =
+                        Binding.setBindParent
+                            (typeRef sourceAncestor)
+                            (typeRef root, BindFlex)
+                            (psConstraint st0)
+                    initialState = st0 { psConstraint = initialConstraint }
+                    sourceInterior = sourceInteriorFromList [root, sourceRaised]
+                case
+                    runPresolutionM
+                        defaultTraceConfig
+                        initialState
+                        (sourceRaiseAuthorityNodesForTest root sourceInterior)
+                  of
+                    Left err ->
+                        expectationFailure
+                            ("Expected source authority construction to succeed, got: " ++ show err)
+                    Right (raiseAuthority, _) -> do
+                        raiseAuthority
+                            `shouldBe` IntSet.singleton (getNodeId sourceRaised)
+                        let finalConstraint =
+                                Binding.setBindParent
+                                    (typeRef sourceRaised)
+                                    (typeRef sourceAncestor, BindRigid)
+                                    initialConstraint
+                            stWithAuthority =
+                                setEdgeRaiseAuthority
+                                    edgeKey
+                                    raiseAuthority
+                                    initialState {psConstraint = finalConstraint}
+                        IntSet.member edgeKey (cAnnEdges finalConstraint) `shouldBe` False
+                        case runPresolutionM defaultTraceConfig stWithAuthority normalizeEdgeWitnessesM of
+                            Left err ->
+                                expectationFailure
+                                    ("Expected certified source Raise to normalize, got: " ++ show err)
+                            Right (_, st') ->
+                                case IntMap.lookup edgeKey (psEdgeWitnesses st') of
+                                    Nothing ->
+                                        expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                                    Just ew' ->
+                                        getInstanceOps (ewWitness ew')
+                                            `shouldBe` [OpRaise sourceRaised]
+
         it "fails fast when trace source domain exceeds replay binder domain (no stale-source pruning fallback)" $ do
             let edgeId = 1
                 root = NodeId 100
@@ -2207,8 +4012,8 @@ spec = do
                         , (getNodeId replayA, TyVar { tnId = replayA, tnBound = Nothing })
                         , (getNodeId activeSource, TyVar { tnId = activeSource, tnBound = Nothing })
                         , (getNodeId staleSource, TyVar { tnId = staleSource, tnBound = Nothing })
-                        , (getNodeId argActive, TyBase argActive (BaseTy "Int"))
-                        , (getNodeId argStale, TyBase argStale (BaseTy "Bool"))
+                        , (getNodeId argActive, TestTyBase argActive (BaseTy "Int"))
+                        , (getNodeId argStale, TestTyBase argStale (BaseTy "Bool"))
                         ]
                 bindParents =
                     bindParentsFromPairs
@@ -2231,9 +4036,10 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(activeSource, argActive), (staleSource, argStale)]
                         , etInterior =
-                            InteriorNodes
+                            sourceInteriorFromSet
                                 (IntSet.fromList
                                     [ getNodeId root
                                     , getNodeId body
@@ -2255,6 +4061,7 @@ spec = do
                         , psNextNodeId = 150
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2264,9 +4071,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
@@ -2277,7 +4087,7 @@ spec = do
                 Right _ ->
                     expectationFailure "Expected fail-fast replay-map source/replay domain mismatch"
 
-        it "normalization projects no-replay source-key wrapper ops away when edge root has no replay binders" $ do
+        it "normalization projects no-replay wrapper ops without erasing source provenance" $ do
             let edgeId = 2
                 root = NodeId 300
                 source = NodeId 301
@@ -2286,7 +4096,7 @@ spec = do
                     nodeMapFromList
                         [ (getNodeId root, TyArrow root source source)
                         , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
-                        , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                        , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
                         ]
                 c = rootedConstraint emptyConstraint
                     { cNodes = nodes
@@ -2304,9 +4114,10 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
                         , etInterior =
-                            InteriorNodes
+                            sourceInteriorFromSet
                                 (IntSet.fromList
                                     [ getNodeId root
                                     , getNodeId source
@@ -2326,6 +4137,7 @@ spec = do
                         , psNextNodeId = 350
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2335,9 +4147,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
@@ -2352,7 +4167,7 @@ spec = do
                             expectationFailure "Expected normalized trace in psEdgeTraces"
                         (Just ew', Just tr') -> do
                             getInstanceOps (ewWitness ew') `shouldBe` []
-                            etBinderArgs tr' `shouldBe` []
+                            etBinderArgs tr' `shouldBe` [(source, argNode)]
                             etBinderReplayMap tr' `shouldBe` IntMap.empty
 
         it "normalization does not widen no-replay interiors with dead rewritten binder copies" $ do
@@ -2367,8 +4182,8 @@ spec = do
                 nodes =
                     nodeMapFromList
                         [ (getNodeId root, TyArrow root root root)
-                        , (getNodeId argA, TyBase argA (BaseTy "Int"))
-                        , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                        , (getNodeId argA, TestTyBase argA (BaseTy "Int"))
+                        , (getNodeId argB, TestTyBase argB (BaseTy "Bool"))
                         ]
                 c = rootedConstraint emptyConstraint
                     { cNodes = nodes
@@ -2386,8 +4201,9 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
-                        , etInterior = fromListInterior [root]
+                        , etInterior = sourceInteriorFromList [root]
                         , etBinderReplayMap = IntMap.empty
                         , etReplayDomainBinders = []
                         , etCopyMap =
@@ -2407,6 +4223,7 @@ spec = do
                         , psNextNodeId = 370
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2416,9 +4233,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
@@ -2430,6 +4250,393 @@ spec = do
                         Just ew' ->
                             getInstanceOps (ewWitness ew') `shouldBe` []
 
+        describe "root RaiseMerge no-replay authority" $ do
+            describe "terminal root RaiseMerge validation" $ do
+                let sourceRoot = NodeId 690
+                    interiorNode = NodeId 691
+                    exterior = NodeId 692
+                    flexibleTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = exterior
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, interiorNode]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    rigidTrace =
+                        let argument = NodeId 694
+                            replayRoot = NodeId 695
+                         in flexibleTrace
+                                { etBinderArgs = [(sourceRoot, argument)]
+                                , etBinderReplayMap =
+                                    IntMap.singleton (getNodeId sourceRoot) replayRoot
+                                , etReplayDomainBinders = [replayRoot]
+                                , etCopyMap =
+                                    CopyMapping
+                                        (IntMap.singleton (getNodeId sourceRoot) replayRoot)
+                                , etReplayContract = ReplayContractStrict
+                                }
+                    validateWith trace =
+                        validateTerminalRootRaiseMergeForTest
+                            (etRoot trace)
+                            (\operated other ->
+                                rootRaiseMergeTraceAuthority operated other trace
+                            )
+                            (\operated other ->
+                                rootWeakenRaiseMergeTraceAuthority operated other trace
+                            )
+
+                it "accepts zero exact-root candidates, including a terminal interior RaiseMerge" $ do
+                    validateWith flexibleTrace [OpRaiseMerge interiorNode exterior]
+                        `shouldBe` Right ()
+
+                it "accepts one trace-authorized naked terminal root RaiseMerge" $ do
+                    validateWith flexibleTrace [OpRaiseMerge sourceRoot exterior]
+                        `shouldBe` Right ()
+
+                it "accepts root authority when strict replay belongs to an unrelated source binder" $ do
+                    let argument = NodeId 694
+                        replayBinder = NodeId 695
+                        rootCopy = NodeId 696
+                        mixedTrace =
+                            flexibleTrace
+                                { etBinderArgs = [(interiorNode, argument)]
+                                , etBinderReplayMap =
+                                    IntMap.singleton
+                                        (getNodeId interiorNode)
+                                        replayBinder
+                                , etReplayDomainBinders = [replayBinder]
+                                , etCopyMap =
+                                    CopyMapping
+                                        ( IntMap.fromList
+                                            [ (getNodeId sourceRoot, rootCopy)
+                                            , (getNodeId interiorNode, replayBinder)
+                                            ]
+                                        )
+                                , etReplayContract = ReplayContractStrict
+                                }
+                    rootRaiseMergeTraceAuthority sourceRoot exterior mixedTrace
+                        `shouldBe` True
+                    validateWith mixedTrace [OpRaiseMerge sourceRoot exterior]
+                        `shouldBe` Right ()
+
+                it "rejects an exact-root RaiseMerge before the end of the restored witness" $ do
+                    validateWith
+                        flexibleTrace
+                        [OpRaiseMerge sourceRoot exterior, OpWeaken interiorNode]
+                        `shouldBe`
+                            Left (RootRaiseMergeNotTerminal sourceRoot exterior)
+
+                it "rejects multiple exact-root RaiseMerge transitions" $ do
+                    let otherExterior = NodeId 693
+                    validateWith
+                        flexibleTrace
+                        [ OpRaiseMerge sourceRoot otherExterior
+                        , OpRaiseMerge sourceRoot exterior
+                        ]
+                        `shouldBe`
+                            Left
+                                ( MultipleRootRaiseMergeTransitions
+                                    sourceRoot
+                                    [ (sourceRoot, otherExterior)
+                                    , (sourceRoot, exterior)
+                                    ]
+                                )
+
+                it "rejects a naked terminal root RaiseMerge without flexible trace authority" $ do
+                    let unauthorizedTrace =
+                            flexibleTrace
+                                { etReplayContract = ReplayContractStrict
+                                }
+                    validateWith unauthorizedTrace [OpRaiseMerge sourceRoot exterior]
+                        `shouldBe`
+                            Left
+                                ( RootRaiseMergeTraceAuthorityMissing
+                                    sourceRoot
+                                    exterior
+                                )
+
+                it "accepts an adjacent root Weaken/RaiseMerge through rigid trace authority" $ do
+                    rootRaiseMergeTraceAuthority sourceRoot exterior rigidTrace
+                        `shouldBe` False
+                    rootWeakenRaiseMergeTraceAuthority sourceRoot exterior rigidTrace
+                        `shouldBe` True
+                    validateWith
+                        rigidTrace
+                        [OpWeaken sourceRoot, OpRaiseMerge sourceRoot exterior]
+                        `shouldBe` Right ()
+
+                it "rejects an adjacent root Weaken/RaiseMerge without rigid trace authority" $ do
+                    let unauthorizedTrace =
+                            flexibleTrace
+                                { etInterior = sourceInteriorFromList [sourceRoot, exterior]
+                                }
+                    validateWith
+                        unauthorizedTrace
+                        [OpWeaken sourceRoot, OpRaiseMerge sourceRoot exterior]
+                        `shouldBe`
+                            Left
+                                ( RootWeakenRaiseMergeTraceAuthorityMissing
+                                    sourceRoot
+                                    exterior
+                                )
+
+            it "preserves exactly one source-root RaiseMerge into the exterior without replay" $ do
+                let edgeId = 25
+                    sourceRoot = NodeId 700
+                    exterior = NodeId 710
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyVar sourceRoot Nothing)
+                            , (getNodeId exterior, TyVar exterior Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 700, [sourceRoot])
+                            , (GenNodeId 710, [exterior])
+                            ]
+                            []
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = exterior
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceRoot
+                                    , OpMerge sourceRoot exterior
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = sourceRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            IntMap.empty
+                            720
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                            Just ew' ->
+                                getInstanceOps (ewWitness ew')
+                                    `shouldBe` [OpRaiseMerge sourceRoot exterior]
+
+            it "drops a source-root RaiseMerge after its edge endpoints coalesce" $ do
+                let edgeId = 252
+                    sourceRoot = NodeId 7020
+                    exterior = NodeId 7021
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyVar sourceRoot Nothing)
+                            , (getNodeId exterior, TyVar exterior Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 7020, [sourceRoot])
+                            , (GenNodeId 7021, [exterior])
+                            ]
+                            []
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = exterior
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceRoot
+                                    , OpMerge sourceRoot exterior
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = sourceRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    unionFind = IntMap.singleton (getNodeId exterior) sourceRoot
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            unionFind
+                            7030
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                            Just ew' ->
+                                getInstanceOps (ewWitness ew') `shouldBe` []
+
+            it "does not infer replay for a source-root RaiseMerge from unrelated live binders" $ do
+                let edgeId = 251
+                    sourceRoot = NodeId 7000
+                    body = NodeId 7001
+                    replayA = NodeId 7002
+                    replayB = NodeId 7003
+                    exterior = NodeId 7010
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyForall sourceRoot body)
+                            , (getNodeId body, TyArrow body replayA replayB)
+                            , (getNodeId replayA, TyVar replayA Nothing)
+                            , (getNodeId replayB, TyVar replayB Nothing)
+                            , (getNodeId exterior, TyVar exterior Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 7000, [sourceRoot, body, replayA, replayB])
+                            , (GenNodeId 7010, [exterior])
+                            ]
+                            [ (body, sourceRoot, BindFlex)
+                            , (replayA, sourceRoot, BindFlex)
+                            , (replayB, sourceRoot, BindFlex)
+                            ]
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = exterior
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness =
+                                InstanceWitness
+                                    [ OpRaise sourceRoot
+                                    , OpMerge sourceRoot exterior
+                                    ]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = sourceRoot
+                            , etBinderArgs = []
+                            , etInterior =
+                                sourceInteriorFromList
+                                    [sourceRoot, body, replayA, replayB]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            IntMap.empty
+                            7020
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                    Right (_, st') -> do
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                            Just ew' ->
+                                getInstanceOps (ewWitness ew')
+                                    `shouldBe` [OpRaiseMerge sourceRoot exterior]
+                        case IntMap.lookup edgeId (psEdgeTraces st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized trace in psEdgeTraces"
+                            Just trace -> do
+                                etReplayContract trace `shouldBe` ReplayContractNone
+                                etBinderReplayMap trace `shouldBe` IntMap.empty
+                                etReplayDomainBinders trace `shouldBe` []
+
+            it "preserves a provenance-backed interior RaiseMerge without replay" $ do
+                let edgeId = 26
+                    sourceRoot = NodeId 720
+                    interiorNode = NodeId 721
+                    exterior = NodeId 730
+                    nodes =
+                        nodeMapFromList
+                            [ (getNodeId sourceRoot, TyArrow sourceRoot interiorNode interiorNode)
+                            , (getNodeId interiorNode, TyVar interiorNode Nothing)
+                            , (getNodeId exterior, TyVar exterior Nothing)
+                            ]
+                    c =
+                        constraintWithOwners
+                            nodes
+                            [ (GenNodeId 720, [sourceRoot])
+                            , (GenNodeId 730, [exterior])
+                            ]
+                            [(interiorNode, sourceRoot, BindFlex)]
+                    rawOp = OpRaiseMerge interiorNode exterior
+                    edgeWitness =
+                        EdgeWitness
+                            { ewEdgeId = EdgeId edgeId
+                            , ewLeft = sourceRoot
+                            , ewRight = exterior
+                            , ewRoot = sourceRoot
+                            , ewForallIntros = 0
+                            , ewWitness = InstanceWitness [rawOp]
+                            }
+                    edgeTrace =
+                        EdgeTrace
+                            { etRoot = sourceRoot
+                            , etResultRoot = sourceRoot
+                            , etBinderArgs = []
+                            , etInterior = sourceInteriorFromList [sourceRoot, interiorNode]
+                            , etBinderReplayMap = IntMap.empty
+                            , etReplayDomainBinders = []
+                            , etCopyMap = mempty
+                            , etReplayContract = ReplayContractNone
+                            }
+                    st0 =
+                        mkWitnessNormState
+                            c
+                            IntMap.empty
+                            740
+                            edgeId
+                            edgeWitness
+                            edgeTrace
+                case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                    Left err ->
+                        expectationFailure
+                            ("Expected source-interior RaiseMerge preservation, got: " ++ show err)
+                    Right (_, st') ->
+                        case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                            Nothing ->
+                                expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                            Just ew' ->
+                                getInstanceOps (ewWitness ew') `shouldBe` [rawOp]
+
         it "normalization rejects residual non-root replay-family ops when no-replay projection cannot eliminate them" $ do
             let edgeId = 22
                 root = NodeId 320
@@ -2440,7 +4647,7 @@ spec = do
                     nodeMapFromList
                         [ (getNodeId root, TyArrow root source source)
                         , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
-                        , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                        , (getNodeId argNode, TestTyBase argNode (BaseTy "Int"))
                         , (getNodeId rogueTarget, TyVar { tnId = rogueTarget, tnBound = Nothing })
                         ]
                 c = rootedConstraint emptyConstraint
@@ -2459,9 +4666,10 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = [(source, argNode)]
                         , etInterior =
-                            InteriorNodes
+                            sourceInteriorFromSet
                                 (IntSet.fromList
                                     [ getNodeId root
                                     , getNodeId source
@@ -2482,6 +4690,7 @@ spec = do
                         , psNextNodeId = 350
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2491,9 +4700,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left (WitnessNormalizationError (EdgeId eid) (ReplayContractNoneRequiresReplay op)) -> do
@@ -2529,8 +4741,9 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = []
-                        , etInterior = fromListInterior [root, raised]
+                        , etInterior = sourceInteriorFromList [root, raised]
                         , etBinderReplayMap = IntMap.empty
                         , etReplayDomainBinders = []
                         , etCopyMap = mempty
@@ -2544,6 +4757,7 @@ spec = do
                         , psNextNodeId = 340
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2553,9 +4767,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
@@ -2596,9 +4813,10 @@ spec = do
                 edgeTrace =
                     EdgeTrace
                         { etRoot = root
+                        , etResultRoot = root
                         , etBinderArgs = []
                         , etInterior =
-                            InteriorNodes
+                            sourceInteriorFromSet
                                 (IntSet.fromList
                                     [ getNodeId root
                                     ]
@@ -2616,6 +4834,7 @@ spec = do
                         , psNextNodeId = 450
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
+                        , psWeakenReplayCertificates = IntMap.empty
                         , psBinderCache = IntMap.empty
                             , psGraphVersion = 0
                             , psUnionFindVersion = 0
@@ -2625,9 +4844,12 @@ spec = do
                             , psBindingRepairCache = Nothing
                             , psBindingRepairDirty = Nothing
                             , psCachedRootGen = Nothing
-                        , psEdgeExpansions = IntMap.empty
-                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
-                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        , psExpansionResults = emptyExpansionResultMap
+                        , psEdgeExecutionArtifacts =
+                            singletonEdgeExecutionArtifactsForTest
+                                edgeId
+                                edgeWitness
+                                edgeTrace
                         }
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
@@ -2640,6 +4862,77 @@ spec = do
                             getInstanceOps (ewWitness ew') `shouldBe` []
 
   where
+    constraintWithOwners nodes owners childBindings =
+        emptyConstraint
+            { cNodes = nodes
+            , cGenNodes =
+                fromListGen
+                    [ (owner, GenNode owner roots)
+                    | (owner, roots) <- owners
+                    ]
+            , cBindParents =
+                IntMap.union
+                    (bindParentsFromPairs childBindings)
+                    ( IntMap.fromList
+                        [ ( nodeRefKey (typeRef root)
+                          , (genRef owner, BindFlex)
+                          )
+                        | (owner, roots) <- owners
+                        , root <- roots
+                        ]
+                    )
+            }
+
+    mkWitnessNormState c uf nextNode edgeId edgeWitness edgeTrace =
+        PresolutionStateInternal
+            { psConstraint = c
+            , psPresolution = Presolution IntMap.empty
+            , psUnionFind = uf
+            , psNextNodeId = nextNode
+            , psPendingWeakens = IntSet.empty
+            , psPendingWeakenOwners = IntMap.empty
+            , psWeakenReplayCertificates = IntMap.empty
+            , psBinderCache = IntMap.empty
+            , psGraphVersion = 0
+            , psUnionFindVersion = 0
+            , psBindParentsVersion = 0
+            , psBindingModelCache = Nothing
+            , psEdgeLocalSnapshot = Nothing
+            , psBindingRepairCache = Nothing
+            , psBindingRepairDirty = Nothing
+            , psCachedRootGen = Nothing
+            , psExpansionResults = emptyExpansionResultMap
+            , psEdgeExecutionArtifacts =
+                singletonEdgeExecutionArtifactsForTest
+                    edgeId
+                    edgeWitness
+                    edgeTrace
+            }
+
+    setEdgeRaiseAuthority edgeKey authority =
+        modifyEdgeExecutionArtifacts edgeKey $ \artifacts ->
+            artifacts {eeaRaiseAuthorityNodes = authority}
+
+    setEdgeNonSourceOpOrigins edgeKey origins =
+        modifyEdgeExecutionArtifacts edgeKey $ \artifacts ->
+            artifacts {eeaNonSourceOpOrigins = origins}
+
+    modifyEdgeExecutionArtifacts edgeKey updateArtifacts st =
+        case IntMap.lookup edgeKey (psEdgeExecutionArtifacts st) of
+            Nothing ->
+                error
+                    ( "missing edge execution artifacts in witness fixture: "
+                        ++ show (EdgeId edgeKey)
+                    )
+            Just artifacts ->
+                st
+                    { psEdgeExecutionArtifacts =
+                        IntMap.insert
+                            edgeKey
+                            (updateArtifacts artifacts)
+                            (psEdgeExecutionArtifacts st)
+                    }
+
     opNodeIds :: InstanceOp -> [NodeId]
     opNodeIds op = case op of
         OpGraft n m -> [n, m]

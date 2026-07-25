@@ -54,8 +54,8 @@ import MLF.Constraint.Types.Graph
 -- symbols (⊥ and Poly; see §5.2.1 for the symbol set).
 isPolymorphicAnchor :: Constraint p -> TyNode -> Bool
 isPolymorphicAnchor _ TyBottom{} = True
-isPolymorphicAnchor c TyBase{ tnBase = b } = Set.member b (cPolySyms c)
-isPolymorphicAnchor c TyCon{ tnCon = con } = Set.member con (cPolySyms c)
+isPolymorphicAnchor c TyBase{ tnBaseIdentity = identity } = Set.member identity (cPolySyms c)
+isPolymorphicAnchor c TyCon{ tnConIdentity = identity } = Set.member identity (cPolySyms c)
 isPolymorphicAnchor _ _ = False
 
 -- | Compute the set of inert nodes.
@@ -75,20 +75,32 @@ inertNodes c = do
                 )
                 (IntSet.empty, IntSet.empty)
                 nodeMap
-        anchorSet = closeBoundAnchors nodeMap anchors0
-        anchors = map NodeId (IntSet.toList anchorSet)
-        nonInert = collectFlexAncestors c anchors
+        -- Eliminated variables remain in the graph only as witness provenance.
+        -- They can carry exposure across a bound chain, but are not themselves
+        -- live variables whose instantiability must survive W-normalization.
+        nonInert =
+            IntSet.difference
+                (closeExposedPolymorphism nodeMap anchors0)
+                (cEliminatedVars c)
     pure (IntSet.difference allNodes nonInert)
   where
-    closeBoundAnchors nodeMap set0 =
-        let addBound acc nid node = case node of
-                TyVar{ tnBound = Just bnd } ->
-                    if IntSet.member (getNodeId bnd) acc
-                        then IntSet.insert nid acc
-                        else acc
+    -- A bounded variable exposes any polymorphism exposed by its lower bound.
+    -- In the graph representation that relation crosses two kinds of edge:
+    -- flexible binding edges inside the bound, then the variable's `tnBound`
+    -- edge.  Close the two relations together; doing either closure only once
+    -- misses chains such as beta >= wrapper >= forall a. a -> a.
+    closeExposedPolymorphism nodeMap exposed0 =
+        let exposedByBinding =
+                collectFlexAncestors c (map NodeId (IntSet.toList exposed0))
+            exposeBoundVar acc nid node = case node of
+                TyVar{ tnBound = Just bnd }
+                    | IntSet.member (getNodeId bnd) exposedByBinding ->
+                        IntSet.insert nid acc
                 _ -> acc
-            set1 = IntMap.foldlWithKey' addBound set0 nodeMap
-        in if set1 == set0 then set0 else closeBoundAnchors nodeMap set1
+            exposed = IntMap.foldlWithKey' exposeBoundVar exposedByBinding nodeMap
+        in if exposed == exposedByBinding
+            then exposed
+            else closeExposedPolymorphism nodeMap exposed
 
 isImplicitBottomAnchor :: TyNode -> Bool
 isImplicitBottomAnchor node = case node of

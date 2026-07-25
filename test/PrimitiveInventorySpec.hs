@@ -81,12 +81,24 @@ spec = describe "MLF.Primitive.Inventory" $ do
     PrimitiveInventory.builtinTypeIdentity (PrimitiveInventory.builtinModuleName ++ ".Int")
       `shouldBe` PrimitiveInventory.builtinTypeIdentity "Int"
     PrimitiveInventory.primitiveTypeToElabType (PrimitiveInventory.PrimitiveTypeBase "Int")
-      `shouldBe` TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
+      `shouldBe` TBaseWithIdentity (Builtins.builtinTypeIdentity "Int") (BaseTy "Int")
     PrimitiveInventory.primitiveTypeToElabType (PrimitiveInventory.PrimitiveTypeCon "IO" (PrimitiveInventory.PrimitiveTypeBase "Int" :| []))
       `shouldBe` TConWithIdentity
-        (Just (Builtins.builtinTypeIdentity "IO"))
+        (Builtins.builtinTypeIdentity "IO")
         (BaseTy "IO")
-        (TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+        (TBaseWithIdentity (Builtins.builtinTypeIdentity "Int") (BaseTy "Int") :| [])
+
+  it "retains the nominal List owner in the stringFromList signature" $ do
+    let expectedTy =
+          PrimitiveInventory.PrimitiveTypeArrow
+            ( PrimitiveInventory.PrimitiveTypeCon
+                "List"
+                (PrimitiveInventory.PrimitiveTypeBase "Char" :| [])
+            )
+            (PrimitiveInventory.PrimitiveTypeBase "String")
+    PrimitiveInventory.primitiveValueType
+      <$> Map.lookup PrimitiveInventory.stringFromListPrimitiveName PrimitiveInventory.primitiveValueSpecs
+      `shouldBe` Just expectedTy
 
   it "generates primitive type binder identities for stable-looking names" $ do
     let stableName = "$typevar#991611"
@@ -278,9 +290,9 @@ elabIdentitySourceType ty =
   case ty of
     TVarRef ref -> STVar (binderName ref)
     TArrow dom cod -> STArrow (elabIdentitySourceType dom) (elabIdentitySourceType cod)
-    TBaseWithIdentity mbIdentity (BaseTy name) -> STBase (headName mbIdentity name)
-    TConWithIdentity mbIdentity (BaseTy name) args ->
-      STCon (headName mbIdentity name) (fmap elabIdentitySourceType args)
+    TBaseWithIdentity identity (BaseTy name) -> STBase (headName identity name)
+    TConWithIdentity identity (BaseTy name) args ->
+      STCon (headName identity name) (fmap elabIdentitySourceType args)
     TVarAppRef ref args -> STVarApp (binderName ref) (fmap elabIdentitySourceType args)
     TForallRef ref mbBound body ->
       STForall
@@ -291,7 +303,7 @@ elabIdentitySourceType ty =
     TBottom -> STBottom
   where
     binderName = typeBinderIdentityStableName . typeBinderRefIdentity
-    headName mbIdentity name = maybe name symbolIdentityStableName mbIdentity
+    headName identity _ = symbolIdentityStableName identity
 
 allNativeIOOperations :: [PrimitiveInventory.PrimitiveIOOperation]
 allNativeIOOperations = [minBound .. maxBound]

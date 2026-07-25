@@ -1,18 +1,35 @@
 module MLF.Elab.Run.Generalize.Prepare (
     PreparedGeneralizationArtifact,
     PreparedRootGeneralization(..),
+    PreparedRootClosure(..),
+    preparedRootClosureScheme,
+    PreparedRootConstructionScope,
+    preparedRootConstructionScopeBinders,
+    preparedRootConstructionScopeAliases,
+    preparedRootConstructionScopeLocalGammaClosures,
     prepareGeneralizationArtifact,
     prepareGeneralizationArtifactForRoots,
+    withPreparedResolvedTermSchemes,
     preparedAnnotated,
     canonicalizePreparedAnn,
     preparedReadContextReady,
     preparedResultTypeViewReady,
+    preparedIdentityGenerator,
+    applyPreparedTermSourceBinderAliases,
+    completePreparedCompilerExactSubtermResults,
+    preparedCompilerExactExpectedType,
     preparedElaborationConfig,
     preparedElaborationEnv,
     preparedElaborationEnvWithInitialEnv,
     stripPreparedWitnesslessAuthoritativeAnn,
     generalizePreparedRoot,
     generalizePreparedRootDetailed,
+    generalizePreparedRootDetailedWithConstructionAnn,
+    generalizePreparedRootDetailedWithConstructionResult,
+    prepareOrdinaryRootConstructionScope,
+    applyPreparedRootSourceTypeBinderIdentities,
+    applyPreparedRootBinderIdentities,
+    applyPreparedCompilerExactRootBinderIdentities,
     computePreparedResultType,
     computePreparedResultTypeWithRootGeneralization,
 ) where
@@ -20,18 +37,35 @@ module MLF.Elab.Run.Generalize.Prepare (
 import MLF.Elab.Run.Generalize.Prepare.Internal
     ( PreparedGeneralizationArtifact
     , PreparedRootGeneralization(..)
+    , PreparedRootClosure(..)
+    , preparedRootClosureScheme
+    , PreparedRootConstructionScope
+    , applyPreparedRootSourceTypeBinderIdentities
+    , applyPreparedRootBinderIdentities
+    , applyPreparedCompilerExactRootBinderIdentities
+    , applyPreparedTermSourceBinderAliases
     , canonicalizePreparedAnn
     , computePreparedResultType
     , computePreparedResultTypeWithRootGeneralization
     , generalizePreparedRoot
     , generalizePreparedRootDetailed
+    , generalizePreparedRootDetailedWithConstructionAnn
+    , generalizePreparedRootDetailedWithConstructionResult
+    , prepareOrdinaryRootConstructionScope
     , prepareGeneralizationArtifact
     , prepareGeneralizationArtifactForRoots
+    , withPreparedResolvedTermSchemes
     , preparedAnnotated
     , preparedElaborationConfig
     , preparedElaborationEnv
     , preparedElaborationEnvWithInitialEnv
     , preparedReadContextReady
+    , preparedRootConstructionScopeAliases
+    , preparedRootConstructionScopeBinders
+    , preparedRootConstructionScopeLocalGammaClosures
     , preparedResultTypeViewReady
+    , preparedIdentityGenerator
+    , completePreparedCompilerExactSubtermResults
+    , preparedCompilerExactExpectedType
     , stripPreparedWitnesslessAuthoritativeAnn
     )

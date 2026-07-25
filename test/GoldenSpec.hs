@@ -128,7 +128,7 @@ constraintSummary c root =
       TyVar {} -> "TyVar"
       TyBottom {} -> "TyBottom"
       TyArrow {} -> "TyArrow"
-      TyBase _ (BaseTy b) -> "TyBase(" ++ b ++ ")"
+      TyBase _ _ (BaseTy b) -> "TyBase(" ++ b ++ ")"
       TyCon {} -> "TyCon"
       TyVarApp {} -> "TyVarApp"
       TyForall {} -> "TyForall"

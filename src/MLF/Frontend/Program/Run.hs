@@ -20,13 +20,13 @@ where
 
 import Control.Exception (evaluate)
 import Control.Applicative ((<|>))
-import Control.Monad (filterM, foldM)
+import Control.Monad (foldM, void)
 import Data.Foldable (toList)
 import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, stripPrefix, tails)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
+import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), normalize, schemeFromType)
 import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBindingSymbolIdentity, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarRuntimeName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
@@ -44,6 +44,7 @@ import MLF.Frontend.Program.Elaborate
     matchMethodTypeViews,
     matchTypeViewsAgainstIdentity,
     mkElaborateScope,
+    rigidEvidenceTypeViewsMatch,
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
@@ -64,10 +65,12 @@ import MLF.Frontend.Program.Types
     ClassApplicationKey,
     ConstructorForallBinder (..),
     ConstructorInfo (..),
+    ctorForallBinderInfo,
     DataInfo (..),
     DeferredCaseCall (..),
     DeferredConstructorCall (..),
     DeferredMethodCall (..),
+    deferredMethodTotalArgCount,
     DeferredMethodEvidence (..),
     DeferredProgramObligation (..),
     EvidenceMethod (..),
@@ -82,9 +85,7 @@ import MLF.Frontend.Program.Types
     symbolNamespace,
     TypeBinderSubst,
     TypeView,
-    typeViewDisplay,
     typeViewHeadIdentities,
-    typeViewIdentity,
     TypeViewSubst,
     ValueInfo (..),
     applyConstraintInfoSubst,
@@ -103,7 +104,7 @@ import MLF.Frontend.Program.Types
     diagnosticForProgramError,
     emptyTypeBinderSubst,
     freeTypeBinderIdentitiesTypeViews,
-    freeTypeVarsTypeView,
+    freeTypeBinderIdentitiesTypeView,
     lookupInstanceMethod,
     lookupMethodParamViewSubst,
     methodType,
@@ -114,26 +115,24 @@ import MLF.Frontend.Program.Types
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     methodParamBinderIdentities,
-    mapTypeViewIdentityHeadNames,
-    metadataLightTypeView,
+    typeViewBottom,
     specializeMethodTypeView,
     splitArrows,
     splitForalls,
     typeBinderAliasIdentityMap,
-    typeViewHeadIdentityForAlias,
+    typeViewRootHeadIdentity,
     typeViewHeadArgViews,
     typeViewArrowResultViewForArity,
     typeViewSubstFromParamIdentities,
     typeViewBinderIdentityAliasEntries,
-    typeViewMergeBinderIdentities,
-    typeViewMergeHeadIdentities,
+    typeViewMergeBinderIdentityAliases,
+    typeViewMergeHeadIdentityAliases,
     typeViewMentionedHeadIdentities,
-    typeViewFromSourceTypeWithIdentityMaps,
+    requireTypeViewFromSourceType,
     uniqueEvidenceMethod,
-    uniqueEvidenceMethodMatch,
     typeBinderSubstFromTypeViewSubst,
     typeBinderSubstToTypeViewSubst,
-    insertTypeBinderSubstViewWithIdentity,
+    insertTypeBinderSubstView,
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
@@ -141,7 +140,7 @@ import MLF.Frontend.Symbol (SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), 
 import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType)
 import MLF.Types.Identity (constructorRefSymbol, DeferredRef, EnvRef, IdDetails (..), LocalRef, PrimitiveRef, primitiveRefSymbol, TypeBinderIdentity, typeBinderIdentityStableName)
 import MLF.Util.Timing (TimingConfig, timeProgramIO)
 
@@ -302,14 +301,14 @@ classifyMainMode context checked =
 isIOElabType :: ElabType -> Bool
 isIOElabType ty =
   case ty of
-    X.TConWithIdentity (Just identity) _ _ ->
+    X.TConWithIdentity identity _ _ ->
       identity == Builtins.builtinTypeIdentity "IO"
     _ -> False
 
 isIOUnitElabType :: RuntimeContext -> ElabType -> Bool
 isIOUnitElabType context ty =
   case ty of
-    X.TConWithIdentity (Just identity) _ args
+    X.TConWithIdentity identity _ args
       | identity == Builtins.builtinTypeIdentity "IO" ->
           case toList args of
             [arg] -> isPreludeUnitElabType context arg
@@ -323,9 +322,9 @@ isPreludeUnitElabType context ty =
   where
     hasPreludeUnitIdentityHead =
       case ty of
-        X.TBaseWithIdentity (Just identity) _ ->
+        X.TBaseWithIdentity identity _ ->
           isPreludeUnitIdentity context identity
-        X.TConWithIdentity (Just identity) _ args ->
+        X.TConWithIdentity identity _ args ->
           null (toList args) && isPreludeUnitIdentity context identity
         _ -> False
 
@@ -350,7 +349,7 @@ preludeUnitTypeView context = do
   let displayHeadName = dataInfoIdentityName dataInfo
       identityHeadName = symbolIdentityStableName (dataInfoSymbol dataInfo)
   pure
-    ( typeViewFromSourceTypeWithIdentityMaps
+    ( requireTypeViewFromSourceType
         ( Map.fromList
             [ (displayHeadName, dataInfoSymbol dataInfo),
               (identityHeadName, dataInfoSymbol dataInfo)
@@ -597,7 +596,7 @@ mainRuntimeValue context checked = do
 mkRuntimeContext :: CheckedProgram -> Either ProgramError RuntimeContext
 mkRuntimeContext checked = do
   let dataInfos = allDataInfos checked
-  _modulesByIdentity <-
+  void $
     uniqueRuntimeInfoByIdentity
       "module"
       [(checkedModuleIdentity checkedModule, checkedModule) | checkedModule <- checkedProgramModules checked]
@@ -1047,7 +1046,7 @@ runtimeConstructorResultView context spec args = do
     argViews = constructorInfoArgViews ctor
     resultView = runtimeConstructorOccurrenceResultView spec
     subst substBinders startSubst
-      | Set.null (freeTypeVarsTypeView resultViewFromDeferred) = startSubst
+      | Set.null (freeTypeBinderIdentitiesTypeView resultViewFromDeferred) = startSubst
       | otherwise = foldl (refineFromRuntimeArg substBinders) startSubst (zip argViews args)
       where
         resultViewFromDeferred = applyRuntimeConstructorSubstView startSubst resultView
@@ -1072,10 +1071,7 @@ runtimeConstructorSubstSeed context spec =
 
 runtimeConstructorBinders :: RuntimeContext -> ConstructorInfo -> Either ProgramError [(String, TypeBinderIdentity)]
 runtimeConstructorBinders context ctor
-  | Left missing <- freeBinderIdentities =
-      Left (ProgramPipelineError ("run-program constructor binder `" ++ missing ++ "` is missing identity"))
-  | Right identities <- freeBinderIdentities,
-    missing : _ <- Set.toList (identities `Set.difference` binderIdentities) =
+  | missing : _ <- Set.toList (freeBinderIdentities `Set.difference` binderIdentities) =
       Left (ProgramPipelineError ("run-program constructor binder `" ++ typeBinderIdentityStableName missing ++ "` is missing identity"))
   | otherwise = Right binders
   where
@@ -1105,7 +1101,7 @@ matchRuntimeTypeBinderSubstInScope ::
   TypeView ->
   Maybe TypeBinderSubst
 matchRuntimeTypeBinderSubstInScope scope binders subst templateView actualView =
-  typeBinderSubstFromTypeViewSubst binders
+  typeBinderSubstFromTypeViewSubst
     <$> matchTypeViewsAgainstIdentity
       scope
       (typeBinderSubstToTypeViewSubst subst)
@@ -1114,7 +1110,7 @@ matchRuntimeTypeBinderSubstInScope scope binders subst templateView actualView =
 
 typeBinderTemplateView :: [(String, TypeBinderIdentity)] -> TypeView -> TypeView
 typeBinderTemplateView binders view =
-  typeViewMergeBinderIdentities (typeBinderAliasIdentityMap binders) view
+  typeViewMergeBinderIdentityAliases (typeBinderAliasIdentityMap binders) view
 
 applyRuntimeConstructorSubstView :: TypeBinderSubst -> TypeView -> TypeView
 applyRuntimeConstructorSubstView subst =
@@ -1124,7 +1120,7 @@ runtimeConstructorOccurrenceResultView :: RuntimeConstructorSpec -> TypeView
 runtimeConstructorOccurrenceResultView spec =
   case runtimeConstructorDeferred spec of
     Just deferred ->
-      typeViewMergeBinderIdentities
+      typeViewMergeBinderIdentityAliases
         (typeBinderAliasIdentityMap (deferredConstructorInstBinders deferred))
         occurrenceView
       where
@@ -1251,7 +1247,7 @@ resolveRuntimeMethod context stack deferredValues env deferred args
       methodValue <- resolveRuntimeMethodReady context stack deferredValues env deferred methodArgs
       foldM (applyRuntimeValue context) methodValue extraArgs
   where
-    requiredArgCount = deferredMethodArgCount deferred
+    requiredArgCount = deferredMethodTotalArgCount deferred
 
 resolveRuntimeMethodReady ::
   RuntimeContext ->
@@ -1262,7 +1258,7 @@ resolveRuntimeMethodReady ::
   [RuntimeValue] ->
   Either ProgramError RuntimeValue
 resolveRuntimeMethodReady context stack deferredValues env deferred args =
-  if null args && deferredMethodArgCount deferred == 0
+  if null args && deferredMethodTotalArgCount deferred == 0
     then resolveRuntimeNullaryMethod context stack deferredValues env deferred
     else do
       argViews <- mapM (runtimeValueTypeView context) args
@@ -1271,9 +1267,8 @@ resolveRuntimeMethodReady context stack deferredValues env deferred args =
           Just view -> Right view
           Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
       case lookupRuntimeMethodEvidence context deferred classArgView of
-        Just (evidence, evidenceSubst) ->
+        Just evidence ->
           resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgView argViews args evidence
-            evidenceSubst
         Nothing ->
           resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgView argViews args
 
@@ -1287,15 +1282,13 @@ resolveRuntimeEvidenceMethod ::
   [TypeView] ->
   [RuntimeValue] ->
   DeferredMethodEvidence ->
-  TypeViewSubst ->
   Either ProgramError RuntimeValue
-resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgView argViews args evidence evidenceSubst = do
+resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgView argViews args evidence = do
   methodSubst <-
     case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView Map.empty argViews of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  let methodSubst' = methodSubst `Map.union` evidenceSubst
-  methodLocalConstraints <- runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst'
+  let methodLocalConstraints = runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1328,9 +1321,9 @@ resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgV
     case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  eagerConstraints <-
-    filterRuntimeConstraintGround
-      (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  let eagerConstraints =
+        filterRuntimeConstraintGround
+          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1361,8 +1354,8 @@ resolveRuntimeNullaryMethod context stack deferredValues env deferred = do
       Just view -> Right view
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
   case lookupRuntimeMethodEvidence context deferred classArgView of
-    Just (evidence, evidenceSubst) ->
-      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence evidenceSubst
+    Just evidence ->
+      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence
     Nothing ->
       resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView
 
@@ -1375,15 +1368,13 @@ resolveRuntimeNullaryEvidenceMethod ::
   TypeView ->
   TypeView ->
   DeferredMethodEvidence ->
-  TypeViewSubst ->
   Either ProgramError RuntimeValue
-resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence evidenceSubst = do
+resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence = do
   methodSubst <-
     case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView Map.empty expectedView of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  let methodSubst' = methodSubst `Map.union` evidenceSubst
-  methodLocalConstraints <- runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst'
+  let methodLocalConstraints = runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1415,9 +1406,9 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
     case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView instanceSubst expectedView of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  eagerConstraints <-
-    filterRuntimeConstraintGround
-      (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  let eagerConstraints =
+        filterRuntimeConstraintGround
+          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1431,14 +1422,14 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
   methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
   foldM (applyRuntimeValue context) methodHead evidenceArgs
 
-lookupRuntimeMethodEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe (DeferredMethodEvidence, TypeViewSubst)
+lookupRuntimeMethodEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe DeferredMethodEvidence
 lookupRuntimeMethodEvidence context deferred classArgView =
-  case uniqueEvidenceMethodMatch localMatches of
-    Just (methodEvidence, subst) ->
-      Just (mkEvidence methodEvidence, subst)
+  case uniqueEvidenceMethod localMatches of
+    Just methodEvidence ->
+      Just (mkEvidence methodEvidence)
     Nothing ->
       case globalEvidence of
-        Just methodEvidence -> Just (mkEvidence methodEvidence, Map.empty)
+        Just methodEvidence -> Just (mkEvidence methodEvidence)
         Nothing -> fallbackEvidence
   where
     methodInfo = deferredMethodInfo deferred
@@ -1457,26 +1448,27 @@ lookupRuntimeMethodEvidence context deferred classArgView =
         targetViews
         (methodInfoSymbolIdentity methodInfo)
     localMatches =
-      [ (methodEvidence, subst)
+      [ methodEvidence
       | evidence <- deferredMethodLocalEvidence deferred,
         sameSymbolIdentity (evidenceClassSymbol evidence) (methodInfoOwnerClassSymbolIdentity methodInfo),
-        Just subst <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) targetViews],
+        rigidEvidenceTypeViewsMatch scope (evidenceTypeViews evidence) targetViews,
         methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence))
       ]
     fallbackEvidence = do
       evidence <- deferredMethodEvidence deferred
-      subst <- matchMethodTypeViews scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
-      pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
+      if rigidEvidenceTypeViewsMatch scope (deferredMethodEvidenceClassArgs evidence) targetViews
+        then pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews})
+        else Nothing
 
-runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> Either ProgramError [ConstraintInfo]
-runtimeMethodLocalConstraints methodInfo classArgView methodSubst = do
-  headVars <- freeTypeBinderIdentitiesTypeViewsOrError (NE.singleton classArgView)
-  methodLocal <-
-    filterM
-      (fmap not . constraintDeterminedByTypeBinderIdentities headVars)
-      specializedForClass
-  pure (map (applyConstraintInfoSubst methodSubst) methodLocal)
+runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> [ConstraintInfo]
+runtimeMethodLocalConstraints methodInfo classArgView methodSubst =
+  map (applyConstraintInfoSubst methodSubst) methodLocal
   where
+    headVars = freeTypeBinderIdentitiesTypeViews (NE.singleton classArgView)
+    methodLocal =
+      filter
+        (not . constraintDeterminedByTypeBinderIdentities headVars)
+        specializedForClass
     classArgSubst =
       typeViewSubstFromParamIdentities
         (methodParamBinderIdentities methodInfo)
@@ -1499,13 +1491,13 @@ methodValueConstraints :: ValueInfo -> [ConstraintInfo]
 methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
 methodValueConstraints _ = []
 
-constraintGround :: ConstraintInfo -> Either ProgramError Bool
+constraintGround :: ConstraintInfo -> Bool
 constraintGround constraint =
-  Set.null <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
+  Set.null (freeTypeBinderIdentitiesTypeViews (constraintTypeViews constraint))
 
-filterRuntimeConstraintGround :: [ConstraintInfo] -> Either ProgramError [ConstraintInfo]
+filterRuntimeConstraintGround :: [ConstraintInfo] -> [ConstraintInfo]
 filterRuntimeConstraintGround =
-  filterM constraintGround
+  filter constraintGround
 
 resolveRuntimeConstraintEvidenceValues ::
   RuntimeContext ->
@@ -1566,9 +1558,9 @@ materializeRuntimeMethodEvidence ::
   ValueInfo ->
   Either ProgramError RuntimeValue
 materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
-  eagerConstraints <-
-    filterRuntimeConstraintGround
-      (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
+  let eagerConstraints =
+        filterRuntimeConstraintGround
+          (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
   nestedEvidence <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1631,7 +1623,7 @@ lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headViews methodId
     [ methodEvidence
       | evidence <- evidenceInfos,
         sameSymbolIdentity (evidenceClassSymbol evidence) classIdentity,
-        Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
+        rigidEvidenceTypeViewsMatch scope (evidenceTypeViews evidence) headViews,
         methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact methodIdentity (evidenceMethodsByIdentity evidence))
     ]
 
@@ -1643,14 +1635,7 @@ lookupRuntimeEvidenceMethodValue ::
   EvidenceMethod ->
   Either ProgramError RuntimeValue
 lookupRuntimeEvidenceMethodValue context stack deferredValues env methodEvidence =
-  case evidenceMethodResolvedVar methodEvidence of
-    Just resolved ->
-      lookupRuntimeResolvedValue context stack deferredValues env resolved
-    Nothing ->
-      Left
-        ( ProgramPipelineError
-            ("run-program evidence method lacks resolved identity: " ++ evidenceMethodRuntimeName methodEvidence)
-        )
+  lookupRuntimeResolvedValue context stack deferredValues env (evidenceMethodResolvedVar methodEvidence)
 
 orElseRuntimeEvidenceMethod :: Maybe EvidenceMethod -> Maybe EvidenceMethod -> Maybe EvidenceMethod
 orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
@@ -1671,24 +1656,17 @@ zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
         sameSymbolIdentity (evidenceClassSymbol evidence) (constraintClassSymbol constraint)
-          && case matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
-            Just _ -> True
-            Nothing -> False
+          && rigidEvidenceTypeViewsMatch
+            scope
+            (evidenceTypeViews evidence)
+            (constraintTypeViews constraint)
     )
     evidenceInfos
 
-constraintDeterminedByTypeBinderIdentities :: Set.Set TypeBinderIdentity -> ConstraintInfo -> Either ProgramError Bool
+constraintDeterminedByTypeBinderIdentities :: Set.Set TypeBinderIdentity -> ConstraintInfo -> Bool
 constraintDeterminedByTypeBinderIdentities typeVars constraint =
-  (`Set.isSubsetOf` typeVars) <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
-
-freeTypeBinderIdentitiesTypeViewsOrError :: NE.NonEmpty TypeView -> Either ProgramError (Set.Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViewsOrError views =
-  case freeTypeBinderIdentitiesTypeViews views of
-    Right identities -> Right identities
-    Left name ->
-      Left $
-        ProgramPipelineError
-          ("run-program resolved type variable `" ++ name ++ "` is missing binder identity")
+  freeTypeBinderIdentitiesTypeViews (constraintTypeViews constraint)
+    `Set.isSubsetOf` typeVars
 
 runtimeValueTypeView :: RuntimeContext -> RuntimeValue -> Either ProgramError TypeView
 runtimeValueTypeView context value =
@@ -2620,38 +2598,11 @@ normalizeProgramTerm term =
         case termSimplified of
           ETyAbsRef ref mbBound body ->
             let body' = normalizeProgramTerm body
-                rebuilt = ETyAbsRef ref mbBound body'
-             in case typeCheck rebuilt of
-                  Right (TForallRef _ _ bodyTy)
-                    | not (typeBinderRefOccursInType ref bodyTy) -> body'
-                  _ -> rebuilt
+             in ETyAbsRef ref mbBound body'
           _ -> termSimplified
-      termStripped = stripUnusedTopTyAbs termUnderTyAbs
-   in if termStripped == term
-        then termStripped
-        else normalizeProgramTerm termStripped
-
-stripUnusedTopTyAbs :: XmlfTerm -> XmlfTerm
-stripUnusedTopTyAbs term = case term of
-  ETyAbsRef ref mbBound body ->
-    let body' = stripUnusedTopTyAbs body
-        term' = ETyAbsRef ref mbBound body'
-     in case typeCheck term' of
-          Right (TForallRef _ _ bodyTy)
-            | not (typeBinderRefOccursInType ref bodyTy) -> body'
-          _ -> term'
-  ELam resolved body -> ELam resolved (stripUnusedTopTyAbs body)
-  EApp f a -> EApp (stripUnusedTopTyAbs f) (stripUnusedTopTyAbs a)
-  ELet resolved sch rhs body ->
-    ELet resolved sch (stripUnusedTopTyAbs rhs) (stripUnusedTopTyAbs body)
-  ETyInst e inst -> ETyInst (stripUnusedTopTyAbs e) inst
-  ERoll ty body -> ERoll ty (stripUnusedTopTyAbs body)
-  EUnroll body -> EUnroll (stripUnusedTopTyAbs body)
-  _ -> term
-
-typeBinderRefOccursInType :: X.TypeBinderRef -> ElabType -> Bool
-typeBinderRefOccursInType ref ty =
-  any (X.typeBinderRefsSameIdentity ref) (freeTypeVarRefsType ty)
+   in if termUnderTyAbs == term
+        then termUnderTyAbs
+        else normalizeProgramTerm termUnderTyAbs
 
 toValueWithProgram :: RuntimeContext -> CheckedProgram -> XmlfTerm -> Value
 toValueWithProgram context checked term =
@@ -2730,9 +2681,9 @@ lookupDataInfoForBinding context binding =
 lookupDataInfoByElabTypeIdentity :: RuntimeContext -> ElabType -> Maybe DataInfo
 lookupDataInfoByElabTypeIdentity context ty =
   case ty of
-    X.TBaseWithIdentity (Just identity) _ ->
+    X.TBaseWithIdentity identity _ ->
       lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
-    X.TConWithIdentity (Just identity) _ _ ->
+    X.TConWithIdentity identity _ _ ->
       lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
     X.TForallRef _ _ body ->
       lookupDataInfoByElabTypeIdentity context body
@@ -2749,16 +2700,8 @@ lookupDataInfoForTypeView context view = do
   lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
 
 sourceTypeDataHeadIdentity :: TypeView -> Maybe SymbolIdentity
-sourceTypeDataHeadIdentity view =
-  (sourceTypeDataHeadName (typeViewIdentity view) >>= typeViewHeadIdentityForAlias view)
-    <|> (sourceTypeDataHeadName (typeViewDisplay view) >>= typeViewHeadIdentityForAlias view)
-
-sourceTypeDataHeadName :: SrcType -> Maybe String
-sourceTypeDataHeadName =
-  \case
-    STBase name -> Just name
-    STCon name _ -> Just name
-    _ -> Nothing
+sourceTypeDataHeadIdentity =
+  typeViewRootHeadIdentity
 
 sourceTypeIsDataView :: RuntimeContext -> TypeView -> Bool
 sourceTypeIsDataView context view =
@@ -2799,7 +2742,7 @@ decodeAnyData context term =
     _ -> Nothing
   where
     emptyView =
-      metadataLightTypeView STBottom
+      typeViewBottom
 
 decodeChurchData :: RuntimeContext -> TypeView -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
 decodeChurchData context sourceView dataInfo subst term = do
@@ -2834,8 +2777,8 @@ dataTypeSubst dataInfo view =
         _ -> emptyTypeBinderSubst
     else emptyTypeBinderSubst
   where
-    insertDataParam (displayName, identity) argView =
-      insertTypeBinderSubstViewWithIdentity identity displayName argView
+    insertDataParam (_, identity) argView =
+      insertTypeBinderSubstView identity argView
 
 substDataParamView :: TypeView -> TypeBinderSubst -> TypeView -> TypeView
 substDataParamView _sourceView subst view =
@@ -2843,22 +2786,14 @@ substDataParamView _sourceView subst view =
 
 canonicalFieldTypeView :: RuntimeContext -> DataInfo -> TypeView -> TypeView
 canonicalFieldTypeView context _ownerInfo view =
-  typeViewMergeHeadIdentities canonicalHeadIdentities $
-    mapTypeViewIdentityHeadNames canonicalHeadName view
+  typeViewMergeHeadIdentityAliases canonicalHeadIdentities view
   where
-    canonicalHeadName mbIdentity name =
-      maybe name qualifiedDataName (lookupDataInfo mbIdentity name)
-
     canonicalHeadIdentities =
       Map.fromList
         [ (qualifiedDataName info, dataInfoSymbol info)
         | identity <- Set.toList (typeViewMentionedHeadIdentities view),
           Just info <- [lookupSymbolIdentityExact identity (runtimeDataByIdentity context)]
         ]
-
-    lookupDataInfo mbIdentity name =
-      (mbIdentity >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context))
-        <|> (typeViewHeadIdentityForAlias view name >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context))
 
 decodeArg :: RuntimeContext -> TypeView -> XmlfTerm -> Value
 decodeArg context view term =

@@ -271,8 +271,8 @@ applyToStructure uf node = case node of
     TyArrow { tnId = nid, tnDom = dom, tnCod = cod } ->
         TyArrow { tnId = nid, tnDom = findRoot uf dom, tnCod = findRoot uf cod }
     TyBase {} -> node
-    TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
-        TyCon { tnId = nid, tnCon = con, tnArgs = fmap (findRoot uf) args }
+    TyCon { tnId = nid, tnConIdentity = identity, tnCon = con, tnArgs = args } ->
+        TyCon { tnId = nid, tnConIdentity = identity, tnCon = con, tnArgs = fmap (findRoot uf) args }
     TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
         TyVarApp { tnId = nid, tnVarHead = findRoot uf headNode, tnArgs = fmap (findRoot uf) args }
     TyForall { tnId = nid, tnBody = body } ->

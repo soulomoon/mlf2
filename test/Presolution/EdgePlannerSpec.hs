@@ -312,20 +312,29 @@ spec = describe "Edge plan types" $ do
                     eprAllowTrivial plan `shouldBe` True
                     eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
 
-        it "recognizes annotation edges without special suppression" $ do
-            let body = NodeId 0
+        it "uses the TyExp wrapper owner for annotation edges" $ do
+            let outerGen = GenNodeId 0
+                annotationGen = GenNodeId 1
+                body = NodeId 0
                 target = NodeId 1
                 expNode = NodeId 2
                 n0 = TyVar { tnId = body, tnBound = Nothing }
                 n1 = TyVar { tnId = target, tnBound = Nothing }
                 nExp = TyExp { tnId = expNode, tnExpVar = ExpVarId (-2), tnBody = body }
                 edge = InstEdge (EdgeId 3) expNode target
-                constraint = rootedConstraint emptyConstraint
+                constraint = emptyConstraint
                     { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
                     , cInstEdges = [edge]
                     , cAnnEdges = IntSet.singleton 3
-                    , cBindParents = bindParentsFromPairs
-                        [ (body, expNode, BindFlex)
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (typeRef body), (genRef outerGen, BindFlex))
+                        , (nodeRefKey (genRef annotationGen), (genRef outerGen, BindFlex))
+                        , (nodeRefKey (typeRef expNode), (genRef annotationGen, BindFlex))
+                        , (nodeRefKey (typeRef target), (genRef annotationGen, BindRigid))
+                        ]
+                    , cGenNodes = fromListGen
+                        [ (outerGen, GenNode outerGen [body])
+                        , (annotationGen, GenNode annotationGen [target])
                         ]
                     }
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
@@ -334,7 +343,42 @@ spec = describe "Edge plan types" $ do
             case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
-                    eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
+                    eprSchemeOwnerGen plan `shouldBe` annotationGen
+
+        it "keeps the wrapped body owner for ordinary occurrence edges" $ do
+            let rootGen = GenNodeId 0
+                sourceGen = GenNodeId 1
+                occurrenceGen = GenNodeId 2
+                body = NodeId 0
+                target = NodeId 1
+                expNode = NodeId 2
+                n0 = TyVar { tnId = body, tnBound = Nothing }
+                n1 = TyVar { tnId = target, tnBound = Nothing }
+                nExp = TyExp { tnId = expNode, tnExpVar = ExpVarId 8, tnBody = body }
+                edge = InstEdge (EdgeId 8) expNode target
+                constraint = emptyConstraint
+                    { cNodes = nodeMapFromList [(0, n0), (1, n1), (2, nExp)]
+                    , cInstEdges = [edge]
+                    , cBindParents = IntMap.fromList
+                        [ (nodeRefKey (genRef sourceGen), (genRef rootGen, BindFlex))
+                        , (nodeRefKey (typeRef body), (genRef sourceGen, BindFlex))
+                        , (nodeRefKey (genRef occurrenceGen), (genRef rootGen, BindFlex))
+                        , (nodeRefKey (typeRef expNode), (genRef occurrenceGen, BindFlex))
+                        , (nodeRefKey (typeRef target), (genRef occurrenceGen, BindFlex))
+                        ]
+                    , cGenNodes = fromListGen
+                        [ (rootGen, GenNode rootGen [])
+                        , (sourceGen, GenNode sourceGen [body])
+                        , (occurrenceGen, GenNode occurrenceGen [target])
+                        ]
+                    }
+                st0 = PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty 3 IntSet.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
+                Left err -> expectationFailure ("planEdge failed: " ++ show err)
+                Right (plan, _) ->
+                    eprSchemeOwnerGen plan `shouldBe` sourceGen
 
         it "fails fast when a synthesized wrapper owner is only recoverable from the wrapper root" $ do
             let body = NodeId 0

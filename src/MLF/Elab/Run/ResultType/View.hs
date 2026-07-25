@@ -10,6 +10,7 @@ module MLF.Elab.Run.ResultType.View (
     rtvFallbackIndex,
     rtvLookupNode,
     rtvLookupVarBound,
+    rtvDirectBoundTarget,
     rtvPresolutionViewOverlay,
     rtvNamedNodes,
     rtvReadModel,
@@ -21,7 +22,9 @@ module MLF.Elab.Run.ResultType.View (
     rtvResolveCanonicalScope,
     rtvBindingScopeRefCanonical,
     rtvScopeRefCanonical,
-    rtvGeneralizeTarget
+    rtvGeneralizeTarget,
+    rtvGeneralizeTargetWithRequirements,
+    rtvGeneralizeTargetWithRequirementsCertified
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -32,6 +35,8 @@ import Data.Maybe (fromMaybe)
 import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
+import MLF.Constraint.Presolution.Plan.Requirements (GeneralizationRequirements)
+import MLF.Constraint.Presolution.Plan.ReifyPlan (InheritedGammaRoutes)
 import MLF.Constraint.Types.Graph
     ( BaseTy
     , Constraint(..)
@@ -58,7 +63,11 @@ import MLF.Elab.ReadModel
     , ermNodesVarOnly
     )
 import MLF.Elab.Generalize (GaBindParents(..))
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Run.Generalize
+    ( generalizeAtWithBuilder
+    , generalizeAtWithBuilderRequired
+    , generalizeAtWithBuilderRequiredCertified
+    )
 import MLF.Elab.Run.Generalize.Common (canonicalSchemeRootOwners)
 import MLF.Elab.Run.Scope
     ( bindingScopeRefCanonical
@@ -183,6 +192,15 @@ rtvLookupVarBound view nid =
     case overlayBound view nid of
         Just bnd -> Just bnd
         Nothing -> pvLookupVarBound (rtvPresolutionViewBase view) nid
+
+-- | Select the canonical node that supplies a result variable's direct lower
+-- bound.  Keeping this query on 'ResultTypeView' ensures fallback target
+-- selection observes the same overlay as reification and generalization.
+rtvDirectBoundTarget :: ResultTypeView p -> NodeId -> Maybe NodeId
+rtvDirectBoundTarget view target =
+    let canonical = rtcCanonical (rtvInputs0 view)
+        targetC = canonical target
+    in canonical <$> rtvLookupVarBound view targetC
 
 rtvPresolutionViewBase :: ResultTypeView p -> PresolutionView p
 rtvPresolutionViewBase = rtcPresolutionView . rtvInputs0
@@ -310,6 +328,44 @@ rtvGeneralizeTarget view scopeRoot target =
                 (rtvPresolutionViewOverlay view)
                 scopeRoot
                 target
+
+-- | Generalize with construction obligations that are local to this target.
+-- Required Γ binders are not cacheable under the ordinary scope/target key:
+-- their source roots and outward identities are part of the construction.
+rtvGeneralizeTargetWithRequirements
+    :: GeneralizationRequirements
+    -> ResultTypeView p
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
+rtvGeneralizeTargetWithRequirements requirements view scopeRoot target =
+    generalizeAtWithBuilderRequired
+        (rtcPlanBuilder (rtvInputs0 view))
+        requirements
+        (Just (rtvGaBindParents view))
+        (rtvPresolutionViewOverlay view)
+        scopeRoot
+        target
+
+rtvGeneralizeTargetWithRequirementsCertified
+    :: GeneralizationRequirements
+    -> ResultTypeView p
+    -> NodeRef
+    -> NodeId
+    -> Either
+        ElabError
+        ( ElabScheme
+        , IntMap.IntMap TypeBinderRef
+        , InheritedGammaRoutes
+        )
+rtvGeneralizeTargetWithRequirementsCertified requirements view scopeRoot target =
+    generalizeAtWithBuilderRequiredCertified
+        (rtcPlanBuilder (rtvInputs0 view))
+        requirements
+        (Just (rtvGaBindParents view))
+        (rtvPresolutionViewOverlay view)
+        scopeRoot
+        target
 
 generalizeCacheKey :: NodeRef -> NodeId -> (Int, Int)
 generalizeCacheKey scopeRoot target =
@@ -518,10 +574,14 @@ applyBaseBoundOverlay view constraint
     solvedToBase = gaSolvedToBase (rtcBindParentsGa inputs)
     toBase nid =
         IntMap.findWithDefault nid (getNodeId nid) solvedToBase
+    toBaseBound nid =
+        case lookupNodeIn (cNodes constraint) nid of
+            Just _ -> nid
+            Nothing -> toBase nid
     baseOverlay =
         IntMap.fromList
             [ ( getNodeId (toBase (NodeId solvedKey))
-              , toBase solvedBound
+              , toBaseBound solvedBound
               )
             | (solvedKey, solvedBound) <- IntMap.toList overlay
             ]

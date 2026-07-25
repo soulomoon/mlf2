@@ -29,7 +29,6 @@ module MLF.Types.Identity
     localRefName,
     localRefDiscard,
     freshLocalRef,
-    freshGraphLocalRef,
     freshenLocalRef,
     localRefFromNodeId,
     localRefFromScopedNodeId,
@@ -73,8 +72,6 @@ module MLF.Types.Identity
     idDetailsIsDiscard,
     idDetailsRenameLocal,
     idDetailsSameIdentity,
-    idDetailsRefMatchesWith,
-    idDetailsRefMatches,
     idDetailsGeneratedIdentities,
     symbolGeneratedIdentities,
   )
@@ -86,7 +83,6 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
-import MLF.Types.Reference (ReferenceMode (..), referenceMatchesWith)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -232,11 +228,6 @@ freshLocalRef :: String -> IdentityGenerator -> (LocalRef, IdentityGenerator)
 freshLocalRef name generator =
   let (identity, generator') = freshIdentity generator
    in (localRefFromIdentity (GeneratedLocalId identity) name, generator')
-
-freshGraphLocalRef :: String -> NodeId -> IdentityGenerator -> (LocalRef, IdentityGenerator)
-freshGraphLocalRef name nodeId generator =
-  let (identity, generator') = freshIdentity generator
-   in (localRefFromIdentity (GeneratedGraphLocalId identity nodeId) name, generator')
 
 freshenLocalRef :: String -> IdentityGenerator -> LocalRef -> (LocalRef, IdentityGenerator)
 freshenLocalRef name generator ref =
@@ -595,14 +586,6 @@ idDetailsSameIdentity left right =
       symbolIdentityPayloadKey (primitiveRefSymbol leftRef) == symbolIdentityPayloadKey (primitiveRefSymbol rightRef)
     (DeferredId leftRef, DeferredId rightRef) -> leftRef == rightRef
     _ -> False
-
-idDetailsRefMatchesWith :: ReferenceMode -> Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
-idDetailsRefMatchesWith =
-  referenceMatchesWith idDetailsSameIdentity
-
-idDetailsRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
-idDetailsRefMatches =
-  idDetailsRefMatchesWith IdentityOnly
 
 idDetailsGeneratedIdentities :: IdDetails -> [UniqueIdentity]
 idDetailsGeneratedIdentities details =

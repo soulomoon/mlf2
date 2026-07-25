@@ -21,8 +21,10 @@ planning pipeline) and performs:
    strip trivial ∀-binders and promote arrow-shaped aliases.
 5. Variable renaming — canonical variables are mapped to fresh alpha names
    (a, b, c, ...) for human-readable output.
-6. Free-variable validation — any free type variables not bound by the
-   scheme indicate a scoping bug; 'SchemeFreeVars' is raised in that case.
+6. Binder-provenance and free-variable validation — every outer binder must
+   come from the planner capability, while any remaining free identity must
+   be authorized by inherited or locally constructed Gamma; no residual is
+   repaired into a forall after reification.
 
 The function returns (ElabScheme, subst') where subst' maps node IDs to
 their final scheme-level binder refs, used by downstream Φ reconstruction.
@@ -30,39 +32,51 @@ their final scheme-level binder refs, used by downstream Φ reconstruction.
 Related thesis sections:
   - Section 8.2 — Reification and scheme construction (Fig 8.2.2, 8.2.3)
   - Section 7.6.1 — Generalized types and quantification
+  - Section 15.3.5 — exterior binders are supplied by the typing environment
 -}
 {-# LANGUAGE RecordWildCards #-}
 
 module MLF.Constraint.Presolution.Plan.Finalize
-  ( FinalizeInput (..),
+  ( FinalizeBinderPlan,
+    mkFinalizeBinderPlan,
+    finalizeBinderPlanBinderRefs,
+    FinalizeInput (..),
     finalizeScheme,
   )
 where
 
+import Control.Applicative ((<|>))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (stripPrefix)
+import Data.List (find, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..), GeneralizeEnv (..), traceGeneralize)
 import MLF.Constraint.Presolution.Plan.Normalize
   ( containsForall,
     isBaseBound,
     isVarBound,
-    promoteArrowAliasRefs,
-    simplifySchemeBindingsRefs,
+    promoteArrowAliasRefsWhen,
+    simplifySchemeBindingsRefsWhenPreserving,
+  )
+import MLF.Constraint.Presolution.Plan.ReifyPlan
+  ( InheritedGammaPlan,
+    inheritedGammaPlanAuthorizedRefs,
   )
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Elab.Types (mapBoundType)
+import MLF.Elab.Types
+  ( ambientSchemeClosureAuthority,
+    inheritedGammaSchemeClosureAuthority,
+    locallyClosedGammaSchemeClosureAuthority,
+    mapBoundType,
+    schemeClosureFreeRefs,
+  )
 import MLF.Reify.TypeOps
-  ( freeTypeVarRefsFrom,
-    freeTypeVarRefsType,
+  ( freeTypeVarRefsType,
     splitForallsRefs,
     stripForallsType,
-    substTypeSimpleRef,
   )
 import MLF.Types.Elab
   ( BoundType,
@@ -85,6 +99,54 @@ import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Names (alphaName)
 import Text.Read (readMaybe)
 
+-- | The exact outer-binder spine authorized by 'BinderPlan', paired once with
+-- the bounds reified for those binders. The constructor is private so scheme
+-- finalization cannot turn a residual ref discovered in the reified body into
+-- a new forall binder.
+newtype FinalizeBinderPlan =
+  FinalizeBinderPlan [(Int, TypeBinderRef, TypeBinderRef, Maybe BoundType)]
+
+mkFinalizeBinderPlan
+  :: [(Int, TypeBinderRef)]
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> Either ElabError FinalizeBinderPlan
+mkFinalizeBinderPlan plannedRefs reifiedBindings =
+  FinalizeBinderPlan <$> go (0 :: Int) plannedRefs reifiedBindings
+  where
+    go _ [] [] = Right []
+    go index ((key, plannedRef) : planned) ((actualRef, mbBound) : bindings)
+      | typeBinderRefsSameIdentity plannedRef actualRef =
+          ((key, plannedRef, actualRef, mbBound) :) <$> go (index + 1) planned bindings
+      | otherwise =
+          Left
+            ( ValidationFailed
+                [ "finalize binder plan disagrees with its reified binding order"
+                , "  binder index: " ++ show index
+                , "  planner identity: " ++ show plannedRef
+                , "  reified identity: " ++ show actualRef
+                ]
+            )
+    go _ planned bindings =
+      Left
+        ( ValidationFailed
+            [ "finalize binder plan and reified bindings have different lengths"
+            , "  remaining planner binders: " ++ show planned
+            , "  remaining reified bindings: " ++ show bindings
+            ]
+        )
+
+finalizeBinderPlanBinderRefs
+  :: FinalizeBinderPlan
+  -> [(Int, TypeBinderRef)]
+finalizeBinderPlanBinderRefs (FinalizeBinderPlan entries) =
+  [(key, plannedRef) | (key, plannedRef, _, _) <- entries]
+
+finalizeBinderPlanBindings
+  :: FinalizeBinderPlan
+  -> [(TypeBinderRef, Maybe BoundType)]
+finalizeBinderPlanBindings (FinalizeBinderPlan entries) =
+  [(actualRef, mbBound) | (_, _, actualRef, mbBound) <- entries]
+
 -- | Inputs needed to finalize a generalized scheme.
 data FinalizeInput p = FinalizeInput
   { fiEnv :: GeneralizeEnv p,
@@ -100,8 +162,27 @@ data FinalizeInput p = FinalizeInput
     fiSolvedToBasePref :: IntMap.IntMap NodeId,
     fiGammaAlias :: IntMap.IntMap Int,
     fiNamedUnderGaSet :: IntSet.IntSet,
-    fiOrderedBinderRefs :: [(Int, TypeBinderRef)],
-    fiBindings :: [(TypeBinderRef, Maybe BoundType)],
+    fiRequiredGammaKeys :: IntSet.IntSet,
+    -- | Required Γ entries whose paper bound S(n) is an already-scoped type
+    -- variable. Section 15.6.2 quotients these aliases before xMLF: the
+    -- required node maps to the existing ref and contributes no new binder.
+    fiRequiredGammaAliases :: IntMap.IntMap TypeBinderRef,
+    -- | Exact inherited declarations proved while the planner still owns the
+    -- original lexical and live/base provenance.  Finalization may consume
+    -- this capability, but cannot derive authority from residual free refs.
+    fiInheritedGammaPlan :: InheritedGammaPlan,
+    -- | Lexical source binders proved by the caller to enclose this local
+    -- construction.  They are closure authority, not inferred binders.
+    fiAmbientBinderRefs :: [TypeBinderRef],
+    -- | Gamma entries whose exact boundary is constructed and closed by a
+    -- nested term constructor. They may occur free in the root's temporary
+    -- reification, but must never be synthesized into root binders.
+    fiLocallyClosedGammaRefs :: [TypeBinderRef],
+    fiBinderPlan :: FinalizeBinderPlan,
+    -- | The exact substitution paired with the selected reification domain.
+    -- It may contain source-identity routes that are deliberately absent from
+    -- the local binder substitution returned to downstream Phi construction.
+    fiReifySubst :: IntMap.IntMap TypeBinderRef,
     fiSubst :: IntMap.IntMap TypeBinderRef,
     fiTyRaw :: ElabType
   }
@@ -112,16 +193,211 @@ finalizeScheme FinalizeInput {..} =
       constraint = fiConstraint
       canonical = fiCanonical
       typeRoot = fiTypeRoot
-      scopeGen = fiScopeGen
-      firstGenAncestorGa = fiFirstGenAncestorGa
-      mbBindParentsGa = fiBindParentsGa
-      solvedToBasePrefPlan = fiSolvedToBasePref
       gammaAliasPlan = fiGammaAlias
       namedUnderGaSetPlan = fiNamedUnderGaSet
-      orderedBinderRefs = fiOrderedBinderRefs
-      bindings = fiBindings
-      subst = fiSubst
-      ty0Raw = fiTyRaw
+      substRaw = fiSubst
+      orderedBinderRefsRaw = finalizeBinderPlanBinderRefs fiBinderPlan
+      reifiedBindings = finalizeBinderPlanBindings fiBinderPlan
+      requiredGammaRefs =
+        [ ref
+        | (key, ref) <- orderedBinderRefsRaw,
+          IntSet.member key fiRequiredGammaKeys,
+          IntMap.notMember key fiRequiredGammaAliases
+        ]
+      isRequiredGammaRef ref = refMember ref requiredGammaRefs
+      isLocallyClosedGammaRef ref =
+        refMember ref fiLocallyClosedGammaRefs
+      isRequiredGammaKey rawKey =
+        IntSet.member rawKey fiRequiredGammaKeys
+          && IntMap.notMember rawKey fiRequiredGammaAliases
+      requiredGammaAlias rawKey =
+        IntMap.lookup rawKey fiRequiredGammaAliases
+          <|> IntMap.lookup (getNodeId (canonical (NodeId rawKey))) fiRequiredGammaAliases
+      resolvedRequiredGammaAlias rawKey =
+        resolveAliasTarget <$> requiredGammaAlias rawKey
+      requiredGammaAliasForRef ref =
+        fmap (resolveAliasTarget . snd) $
+          find
+            ( \(key, _) ->
+                case IntMap.lookup key substRaw of
+                  Just candidate -> typeBinderRefsSameIdentity candidate ref
+                  Nothing -> False
+            )
+            (IntMap.toList fiRequiredGammaAliases)
+      requiredGammaAliasBridgeKeys =
+        IntSet.fromList
+          [ key
+          | (key, ref) <- IntMap.toList substRaw,
+            any
+              ( \aliasKey ->
+                  case IntMap.lookup aliasKey substRaw of
+                    Just requiredRef -> typeBinderRefsSameIdentity requiredRef ref
+                    Nothing -> False
+              )
+              (IntMap.keys fiRequiredGammaAliases)
+          ]
+      resolveAliasTarget targetRef =
+        case find (typeBinderRefsSameIdentity targetRef) (IntMap.elems substRaw) of
+          Just ref -> ref
+          Nothing -> targetRef
+      reifiedRouteFor ref = do
+        node <- typeBinderRefNode ref
+        IntMap.lookup (getNodeId node) fiReifySubst
+          <|> IntMap.lookup (getNodeId (canonical node)) fiReifySubst
+      orderedBinderKeys =
+        IntSet.fromList
+          [ getNodeId (canonical (NodeId key))
+          | (key, _) <- orderedBinderRefsRaw
+          ]
+      orderedBinderRefsByKey =
+        IntMap.fromList
+          [ (getNodeId (canonical (NodeId key)), ref)
+          | (key, ref) <- orderedBinderRefsRaw
+          ]
+      binderRank :: IntMap.IntMap Int
+      binderRank =
+        IntMap.fromListWith min
+          [ (getNodeId (canonical (NodeId key)), rank)
+          | (rank, (key, _)) <- zip [0 ..] orderedBinderRefsRaw
+          ]
+      -- eMLF peer-variable bounds are aliases, not independent xMLF bounds.
+      -- Quotient them before constructing the scheme (thesis sec. 15.6.2):
+      -- @forall (b >= a). tau@ contributes no binder for @b@; every use of
+      -- @b@ is represented by @a@.  The relation is functional, so chains
+      -- have a unique terminal representative.  For an internal alias cycle,
+      -- choose the earliest planned binder deterministically and quotient the
+      -- whole component to it.
+      peerAliasNext =
+        IntMap.fromList
+          [ (sourceKey, targetKey)
+          | (rawKey, _) <- orderedBinderRefsRaw,
+            let source = canonical (NodeId rawKey),
+            let sourceKey = getNodeId source,
+            Just target0 <- [VarStore.lookupVarBound constraint source],
+            let target = canonical target0,
+            let targetKey = getNodeId target,
+            sourceKey /= targetKey,
+            IntSet.member targetKey orderedBinderKeys,
+            -- A peer-variable alias is local to one binder spine.  A bound
+            -- that points from a descendant scope to an enclosing result
+            -- variable is construction routing (for example a lambda-body
+            -- consumer), not authority to replace the descendant
+            -- declaration with that exterior identity.
+            IntMap.lookup (nodeRefKey (typeRef source)) (cBindParents constraint)
+              == IntMap.lookup (nodeRefKey (typeRef target)) (cBindParents constraint),
+            Just TyVar {} <- [lookupNodeIn (cNodes constraint) target]
+          ]
+      peerAliasRepresentativeKey start = go [] IntMap.empty start
+        where
+          go path seen current =
+            case IntMap.lookup current seen of
+              Just cycleStart -> earliestBinder (drop cycleStart path)
+              Nothing ->
+                case IntMap.lookup current peerAliasNext of
+                  Just next
+                    | next /= current ->
+                        go
+                          (path ++ [current])
+                          (IntMap.insert current (length path) seen)
+                          next
+                  _ -> current
+
+          earliestBinder [] = start
+          earliestBinder (key : keys) = foldl earlier key keys
+          earlier left right
+            | rankOf left <= rankOf right = left
+            | otherwise = right
+          rankOf :: Int -> Int
+          rankOf key = IntMap.findWithDefault maxBound key binderRank
+
+      isPeerAliasSource rawKey =
+        let key = getNodeId (canonical (NodeId rawKey))
+         in not (isRequiredGammaKey rawKey)
+              && peerAliasRepresentativeKey key /= key
+      aliasRepresentativeKey key = go IntSet.empty key
+        where
+          go seen current
+            | IntSet.member current seen = current
+            | otherwise =
+                case IntMap.lookup current gammaAliasPlan of
+                  Just next
+                    | next /= current -> go (IntSet.insert current seen) next
+                  _ -> current
+      normalizeAliasRef ref
+        | isLocallyClosedGammaRef ref = ref
+        -- A required Gamma reference names the frozen source-domain exterior,
+        -- even when its live solved key canonicalizes to the operated root.
+        -- Quotienting it as an ordinary live alias would replace that
+        -- construction identity with the operated identity and erase the
+        -- paper's exterior > S'(operated) binder.
+        | Just node <- typeBinderRefNode ref,
+          Just aliasRef <- resolvedRequiredGammaAlias (getNodeId node) = aliasRef
+        -- The exterior source node and the edge result can carry distinct
+        -- graph keys while sharing the required Gamma identity.  A variable
+        -- S'(operated) aliases that whole identity class to an existing
+        -- lexical ref, so normalize every such occurrence rather than only
+        -- the map's planning key.
+        | Just aliasRef <- requiredGammaAliasForRef ref = aliasRef
+        | isRequiredGammaRef ref = ref
+        -- A reification route carries occurrence identity, not declaration
+        -- authority.  When BinderPlan proves that a local variable is a
+        -- peer-variable alias, quotient it to the planned representative
+        -- before consulting the broader reification map; otherwise S' can
+        -- preserve the alias occurrence after this function has correctly
+        -- removed its redundant binder.
+        | Just node <- typeBinderRefNode ref,
+          not (isPeerAliasSource (getNodeId node)),
+          Just routedRef <- reifiedRouteFor ref = routedRef
+        | otherwise =
+            case typeBinderRefNode ref of
+              Nothing -> ref
+              Just node ->
+                let rawKey = getNodeId node
+                    canonicalKey = getNodeId (canonical node)
+                    peerKey = peerAliasRepresentativeKey canonicalKey
+                    aliasKey =
+                      if isPeerAliasSource rawKey
+                        then peerKey
+                        else
+                          if IntMap.member peerKey gammaAliasPlan
+                            then aliasRepresentativeKey peerKey
+                            else
+                              if IntMap.member canonicalKey gammaAliasPlan
+                                then aliasRepresentativeKey canonicalKey
+                                else aliasRepresentativeKey rawKey
+                 in case
+                      IntMap.lookup aliasKey substRaw
+                        <|> IntMap.lookup peerKey orderedBinderRefsByKey
+                    of
+                      Just aliasRef -> aliasRef
+                      Nothing -> ref
+      normalizeAliasRefs :: Ty v -> Ty v
+      normalizeAliasRefs = cataIx alg
+        where
+          alg :: TyIF i Ty -> Ty i
+          alg ty = case ty of
+            TVarIFRef ref -> TVarRef (normalizeAliasRef ref)
+            TArrowIF dom cod -> TArrow dom cod
+            TConIFWithIdentity identity con args -> TConWithIdentity identity con args
+            TVarAppIFRef ref args -> TVarAppRef (normalizeAliasRef ref) args
+            TBaseIFWithIdentity identity base -> TBaseWithIdentity identity base
+            TBottomIF -> TBottom
+            TForallIFRef ref mb body -> TForallRef (normalizeAliasRef ref) mb body
+            TMuIFRef ref body -> TMuRef (normalizeAliasRef ref) body
+      orderedBinderRefs =
+        [ (nidInt, normalizeAliasRef ref)
+        | (nidInt, ref) <- orderedBinderRefsRaw,
+          not (isPeerAliasSource nidInt),
+          requiredGammaAlias nidInt == Nothing
+        ]
+      bindings =
+        [ (normalizeAliasRef ref, fmap normalizeAliasRefs mb)
+          | ((nidInt, _), (ref, mb)) <- zip orderedBinderRefsRaw reifiedBindings,
+            not (isPeerAliasSource nidInt),
+            requiredGammaAlias nidInt == Nothing
+        ]
+      subst = IntMap.map normalizeAliasRef substRaw
+      ty0Raw = normalizeAliasRefs fiTyRaw
       originalBinderRef nidInt ref =
         case IntMap.lookup nidInt subst of
           Just substRef -> substRef
@@ -135,7 +411,8 @@ finalizeScheme FinalizeInput {..} =
         ]
       aliasToTypeRootRefs =
         [ ref
-          | (nidInt, ref) <- originalBinderRefs,
+        | (nidInt, ref) <- originalBinderRefs,
+          not (isRequiredGammaRef ref),
             let nid = NodeId nidInt,
             Just bnd <- [VarStore.lookupVarBound constraint (canonical nid)],
             canonical bnd == canonical typeRoot
@@ -146,6 +423,17 @@ finalizeScheme FinalizeInput {..} =
         [ mb
           | binding@(_, mb) <- binds,
             bindingMatchesRef ref binding
+        ]
+      ownedTypeRootBounds =
+        [ (ref, bound)
+        | (ref, Just bound) <- bindings,
+          not (isRequiredGammaRef ref),
+            Just binder <- [typeBinderRefNode ref],
+            Just boundRoot <- [VarStore.lookupVarBound constraint (canonical binder)],
+            canonical boundRoot == canonical typeRoot,
+            Just (TypeRef owner, _) <-
+              [IntMap.lookup (nodeRefKey (typeRef (canonical boundRoot))) fiBindParents],
+            canonical owner == canonical binder
         ]
       inlineAliasBinder :: ElabType -> [(TypeBinderRef, Maybe BoundType)] -> (ElabType, [(TypeBinderRef, Maybe BoundType)])
       inlineAliasBinder ty binds = case ty of
@@ -158,7 +446,11 @@ finalizeScheme FinalizeInput {..} =
                       (tyToElab bnd, filter (not . bindingMatchesRef ref) binds)
                 _ -> (ty, binds)
         _ -> (ty, binds)
-      (ty0RawAlias, bindingsAlias) = inlineAliasBinder ty0Raw bindings
+      (ty0RawAlias, bindingsAlias) =
+        case ownedTypeRootBounds of
+          (aliasRef, bound) : _ ->
+            (tyToElab bound, filter (not . bindingMatchesRef aliasRef) bindings)
+          [] -> inlineAliasBinder ty0Raw bindings
       canonAllVars ty =
         let (ty', _freeEnv, _n) = go [] [] (0 :: Int) ty
          in ty'
@@ -324,6 +616,7 @@ finalizeScheme FinalizeInput {..} =
           ( \(v, mbBound) acc ->
               case mbBound of
                 Nothing -> acc
+                Just _ | isRequiredGammaRef v -> acc
                 Just bound ->
                   let boundTy = tyToElab bound
                       boundCore = stripForallsType bound
@@ -350,7 +643,8 @@ finalizeScheme FinalizeInput {..} =
                 TVarRef ref ->
                   case lookupBindingRef ref binds of
                     Just bound : _
-                      | containsForall (tyToElab bound) -> tyToElab bound
+                      | not (isRequiredGammaRef ref)
+                      , containsForall (tyToElab bound) -> tyToElab bound
                     _ -> tyAdjusted0
                 _ -> tyAdjusted0
             tyAliased = stripAliasForall (collapseBoundAliases binds tyAdjusted)
@@ -392,11 +686,14 @@ finalizeScheme FinalizeInput {..} =
                  in not binderIsTypeRoot && boundOwnedByBinder && boundIsStructured
               Nothing -> False
       namedBinderRefs =
-        [ ref
-          | (nidInt, ref) <- IntMap.toList subst,
-            IntSet.member nidInt namedUnderGaSetPlan,
-            not (isOwnedStructuredAliasBinder nidInt)
-        ]
+        unionTypeRefs
+          [ requiredGammaRefs
+          , [ ref
+            | (nidInt, ref) <- IntMap.toList subst,
+              IntSet.member nidInt namedUnderGaSetPlan,
+              not (isOwnedStructuredAliasBinder nidInt)
+            ]
+          ]
       renameVars = cataIx alg
         where
           parseRigidName v = do
@@ -435,12 +732,28 @@ finalizeScheme FinalizeInput {..} =
             TForallIFRef ref mb body -> TForallRef (renameRefFromSubst ref) mb body
             TMuIFRef ref body -> TMuRef (renameRefFromSubst ref) body
       ty0 = renameVars ty0RawAdjusted
-      inlineBaseBounds = False
+      weakenedBinderRefs =
+        [ ref
+        | (nidInt, ref) <- originalBinderRefs,
+          IntSet.member
+            (getNodeId (canonical (NodeId nidInt)))
+            (cWeakenedVars constraint)
+        ]
+      shouldInlineBaseBound ref = refMember ref weakenedBinderRefs
       bindingsAdjustedRefs =
         bindingsAdjusted
       (bindingsNorm0Refs, tyNorm0) =
-        simplifySchemeBindingsRefs inlineBaseBounds namedBinderRefs bindingsAdjustedRefs ty0
-      (bindingsNorm1Refs, tyNorm1) = promoteArrowAliasRefs bindingsNorm0Refs tyNorm0
+        simplifySchemeBindingsRefsWhenPreserving
+          shouldInlineBaseBound
+          isRequiredGammaRef
+          namedBinderRefs
+          bindingsAdjustedRefs
+          ty0
+      (bindingsNorm1Refs, tyNorm1) =
+        promoteArrowAliasRefsWhen
+          (not . isRequiredGammaRef)
+          bindingsNorm0Refs
+          tyNorm0
       (bindingsNormRefs, tyNorm) = (bindingsNorm1Refs, tyNorm1)
       bindingsNorm =
         [ (typeBinderRefName ref, mb)
@@ -450,19 +763,22 @@ finalizeScheme FinalizeInput {..} =
       usedRefs =
         unionTypeRefs
           ( quantifiedRefs
-              : freeTypeVarRefsFrom [] tyNorm
+              : freeTypeVarRefsType tyNorm
               : [freeTypeVarRefsType b | (_, Just b) <- bindingsNormRefs]
           )
       usedNames = Set.fromList (map typeBinderRefName usedRefs)
       bindingsFinalRefs =
         filter
           ( \(ref, _) ->
-              refMember ref usedRefs || refMember ref namedBinderRefs
+              refMember ref usedRefs
+                || refMember ref namedBinderRefs
+                || isRequiredGammaRef ref
           )
           bindingsNormRefs
       bindingsFinalRefs' =
         let dropRedundant (ref, mb) =
-              not (refMember ref usedRefs)
+              not (isRequiredGammaRef ref)
+                && not (refMember ref usedRefs)
                 && case mb of
                   Nothing -> True
                   Just bnd ->
@@ -534,83 +850,51 @@ finalizeScheme FinalizeInput {..} =
               ++ show bindingsRenamed
           )
 
-      usedRefsRenamed =
-        unionTypeRefs
-          ( freeTypeVarRefsFrom [] tyRenamed
-              : [freeTypeVarRefsType b | (_, Just b) <- bindingsRenamedRefs]
-          )
-      boundNames = Set.fromList (map fst bindingsRenamed)
-      boundRefs = map fst bindingsRenamedRefs
-      missingRefsRaw =
-        filter
-          (\ref -> not (refMember ref boundRefs))
-          usedRefsRenamed
-      aliasAllowed ref =
-        case typeBinderRefNode ref of
-          Just nid ->
-            let keyC = getNodeId (canonical nid)
-                aliasKey = case IntMap.lookup keyC gammaAliasPlan of
-                  Just repKey -> repKey
-                  Nothing -> keyC
-             in case IntMap.lookup aliasKey subst of
-                  Just substRef -> Set.member (renameName (typeBinderRefName substRef)) boundNames
-                  Nothing -> False
-          Nothing -> False
-      missingRefsRaw' = filter (not . aliasAllowed) missingRefsRaw
-      missingRefs =
-        case scopeGen of
-          Nothing -> missingRefsRaw'
-          Just gid ->
-            let refNodeId =
-                  typeBinderRefNode
-                underScope ref =
-                  case refNodeId ref of
-                    Just nidRef@(NodeId nid) ->
-                      let underSolved =
-                            firstGenAncestorGa (typeRef nidRef) == Just gid
-                          underBase =
-                            case mbBindParentsGa of
-                              Just ga ->
-                                case IntMap.lookup nid solvedToBasePrefPlan of
-                                  Just baseN ->
-                                    firstGenAncestorFrom (gaBindParentsBase ga) (TypeRef baseN) == Just gid
-                                  Nothing -> underSolved
-                              Nothing -> underSolved
-                       in underBase
-                    Nothing -> True
-             in filter underScope missingRefsRaw'
       keepRefs = map fst bindingsRenamedRefs
       subst' =
-        IntMap.filter (`refMember` keepRefs) $
+        IntMap.filterWithKey
+          (\key ref -> refMember ref keepRefs || IntSet.member key requiredGammaAliasBridgeKeys) $
           IntMap.map (\ref -> renameTypeBinderRef (renameRefName ref) ref) subst
-      finalize missing =
-        if null missing
-          then pure (mkElabSchemeWithRefs bindingsRenamedRefs tyRenamed, subst')
+      schemeFinal = mkElabSchemeWithRefs bindingsRenamedRefs tyRenamed
+      plannedBinderRefs = map snd orderedBinderRefs
+      unplannedFinalBinderRefs =
+        [ ref
+        | (ref, _) <- bindingsRenamedRefs,
+          not (refMember ref plannedBinderRefs)
+        ]
+      closureAuthority =
+        ambientSchemeClosureAuthority fiAmbientBinderRefs
+          <> inheritedGammaSchemeClosureAuthority
+          (inheritedGammaPlanAuthorizedRefs fiInheritedGammaPlan)
+          <> locallyClosedGammaSchemeClosureAuthority fiLocallyClosedGammaRefs
+      missingRefs = schemeClosureFreeRefs closureAuthority schemeFinal
+   in traceFinal $
+        if not (null aliasBounds)
+          then
+            Left $
+              ValidationFailed
+                [ "alias bounds survived scheme finalization: "
+                    ++ show (map fst aliasBounds)
+                ]
           else
-            let synthPairs =
-                  zip missing [alphaName idx 0 | idx <- [length bindingsRenamed ..]]
-                renameResidual ty =
-                  foldl
-                    ( \acc (oldRef, new) ->
-                        substTypeSimpleRef oldRef (TVarRef (renameTypeBinderRef new oldRef)) acc
-                    )
-                    ty
-                    synthPairs
-                tySynth = renameResidual tyRenamed
-                bindingsSynthRefs =
-                  [ (ref, fmap (mapBoundType renameResidual) mb)
-                    | (ref, mb) <- bindingsRenamedRefs
-                  ]
-                    ++ [(renameTypeBinderRef new oldRef, Nothing) | (oldRef, new) <- synthPairs]
-             in pure (mkElabSchemeWithRefs bindingsSynthRefs tySynth, subst')
-   in traceFinal $ case aliasBounds of
-        [] -> finalize missingRefs
-        _ ->
-          Left $
-            ValidationFailed
-              [ "alias bounds survived scheme finalization: "
-                  ++ show (map fst aliasBounds)
-              ]
+            if not (null unplannedFinalBinderRefs)
+              then
+                Left
+                  ( ValidationFailed
+                      [ "scheme finalization published binders without BinderPlan authority"
+                      , "  unauthorized binders: " ++ show unplannedFinalBinderRefs
+                      , "  planner binders: " ++ show plannedBinderRefs
+                      ]
+                  )
+              else
+                if null missingRefs
+                  then pure (schemeFinal, subst')
+                  else
+                    Left
+                      ( SchemeFreeVars
+                          typeRoot
+                          (map show missingRefs)
+                      )
 
 refMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
 refMember ref = any (typeBinderRefsSameIdentity ref)

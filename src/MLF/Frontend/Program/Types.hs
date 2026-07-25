@@ -3,39 +3,39 @@
 
 module MLF.Frontend.Program.Types
   ( ProgramError (..),
+    ProgramSourceTypeShape (..),
     ProgramDiagnostic (..),
     diagnosticForProgramError,
     renderProgramDiagnostic,
     TypeView,
+    TypeViewNodeView (..),
+    typeViewNodeView,
+    splitTypeViewHeadApplication,
     typeViewDisplay,
     typeViewIdentity,
     typeViewHeadIdentities,
     typeViewBinderIdentities,
+    typeViewRootHeadIdentity,
+    TypeViewConstructionError (..),
     TypeViewShapeError (..),
-    typeViewFromProjections,
-    typeViewWithIdentityMaps,
-    typeViewWithHeadIdentities,
-    typeViewWithBinderIdentities,
-    typeViewMergeHeadIdentities,
-    typeViewMergeBinderIdentities,
-    metadataLightTypeView,
-    typeViewFromSourceTypeWithIdentityMaps,
-    typeViewWithProjectedTypes,
+    typeViewFromSourceType,
+    typeViewWithIdentityAliases,
+    typeViewWithBinderIdentityAliases,
+    typeViewMergeHeadIdentityAliases,
+    typeViewMergeBinderIdentityAliases,
+    typeViewBottom,
+    requireTypeViewFromSourceType,
+    typeViewWithDisplay,
+    typeViewOverlayDisplay,
     mapTypeViewDisplayHeadNames,
     mapTypeViewDisplayBinderNames,
-    mapTypeViewDisplayBinderNamesWithIdentity,
-    mapTypeViewIdentityHeadNames,
-    mapTypeViewIdentityBinderNames,
     typeViewArrow,
+    typeViewForallBinderViews,
     typeViewAddArgumentsInsideForalls,
     typeViewQuantifyBinders,
-    typeViewQuantifyNames,
     typeViewRebuildArrowBody,
     quantifyFreeTypeView,
     stripVacuousTypeViewForalls,
-    TypeViewIdentityGap (..),
-    typeViewIdentityGaps,
-    typeViewIdentityComplete,
     ConstraintInfo (..),
     ClassApplicationKey,
     constraintClassApplicationKey,
@@ -44,24 +44,22 @@ module MLF.Frontend.Program.Types
     evidenceMethodKey,
     constraintTypeView,
     typeViewFromResolved,
+    typeViewFromElabType,
+    typeViewToResolved,
+    resolvedSourceTypeToElabType,
     displayConstraint,
     applyTypeViewSubst,
     applyConstraintInfoSubst,
-    freeTypeVarsTypeView,
-    freeTypeVarsTypeViews,
     freeTypeBinderIdentitiesTypeView,
     freeTypeBinderIdentitiesTypeViews,
+    freeTypeBinderDisplayNamesTypeView,
     typeViewIsBareBinderIdentity,
     typeViewMentionsFreeBinderIdentity,
     typeViewHeadIdentityForAlias,
     typeViewHeadIdentityLookupAliases,
     typeViewBinderIdentityForAlias,
     typeViewBinderIdentityAliasEntries,
-    filterBinderIdentitiesByNames,
-    filterHeadIdentitiesByNames,
     typeViewMentionedHeadIdentities,
-    typeViewVarPairs,
-    typeViewHeadPairs,
     typeHeadNamesSrcType,
     typeViewsDisplay,
     typeViewsIdentity,
@@ -72,17 +70,18 @@ module MLF.Frontend.Program.Types
     typeViewSubstDisplayTypes,
     typeViewSubstFromParamIdentities,
     typeParamBinderIdentity,
+    CheckedTypeParam (..),
+    checkedTypeParamName,
+    checkedTypeParamIdentity,
+    checkedTypeParamIsFirstOrder,
     mergeUniquePairMaps,
     TypeBinderSubst,
     typeBinderSubstViews,
     emptyTypeBinderSubst,
     typeBinderSubstFromTypeViewSubst,
-    applyTypeBinderSubst,
     typeBinderSubstToTypeViewSubst,
     lookupTypeBinderSubstViewByIdentity,
-    lookupTypeBinderSubstByIdentity,
-    insertTypeBinderSubstViewWithIdentity,
-    insertTypeBinderSubstWithIdentity,
+    insertTypeBinderSubstView,
     EvidenceMethod (..),
     uniqueEvidenceMethod,
     uniqueEvidenceMethodMatch,
@@ -140,7 +139,6 @@ module MLF.Frontend.Program.Types
     typeParamGeneratedIdentities,
     typeViewGeneratedIdentities,
     constraintInfoGeneratedIdentities,
-    constructorForallBinderGeneratedIdentities,
     constructorShapeGeneratedIdentities,
     constructorInfoGeneratedIdentities,
     dataInfoGeneratedIdentities,
@@ -205,7 +203,6 @@ module MLF.Frontend.Program.Types
     typeViewDirectArrowCodomainView,
     typeViewArrowResultView,
     typeViewArrowResultViewForArity,
-    projectTypeView,
     methodParamTypeViews,
     methodResultTypeViewFrom,
     methodResultTypeView,
@@ -227,6 +224,7 @@ module MLF.Frontend.Program.Types
     resolvedModuleSymbolFromIdentity,
     ConstructorForallBinder (..),
     ConstructorShape (..),
+    constructorShapeForallBinderInfo,
     constructorShapeType,
     constructorShapeTypeIdentity,
     constructorShapeForalls,
@@ -238,6 +236,7 @@ module MLF.Frontend.Program.Types
     constructorShapeResult,
     constructorShapeResultIdentity,
     ConstructorInfo (..),
+    ctorForallBinderInfo,
     ctorType,
     ctorTypeIdentity,
     ctorForalls,
@@ -270,7 +269,7 @@ module MLF.Frontend.Program.Types
     LoweredBindingIdentity,
     loweredIdentityRuntimeName,
     loweredIdentityDetails,
-    loweredBindingIdentityFromResolvedVar,
+    loweredBindingIdentityFromTopLevel,
     ResolvedVar (..),
     constructorRefFromInfo,
     loweredBindingIdentityFromConstructorInfo,
@@ -283,6 +282,8 @@ module MLF.Frontend.Program.Types
     DeferredBindingMode (..),
     DeferredMethodEvidence (..),
     DeferredMethodCall (..),
+    deferredMethodTotalArgCount,
+    deferredMethodResolutionArgCount,
     deferredMethodPlaceholder,
     deferredMethodName,
     DeferredConstructorCall (..),
@@ -307,11 +308,16 @@ module MLF.Frontend.Program.Types
     exportedClassesForDisplay,
     LoweredBinding (..),
     loweredBindingName,
+    loweredBindingSourceType,
+    loweredBindingExpectedType,
     CheckedBinding (..),
     checkedBindingName,
     checkedBindingSourceType,
     checkedBindingSourceTypeIdentity,
+    checkedBindingGeneratedIdentities,
+    checkedBindingsIdentityGenerator,
     CheckedModule (..),
+    checkedModuleGeneratedIdentities,
     splitForalls,
     splitArrows,
     applyTypeHead,
@@ -335,7 +341,7 @@ where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (nub, sort, transpose)
+import Data.List (isPrefixOf, nub, sort, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -343,7 +349,10 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), generatedIdentitiesInType, resolvedVarConstructorRef, resolvedVarRuntimeName)
+import GHC.Stack (HasCallStack)
+import MLF.Constraint.Types.Graph (BaseTy (..))
+import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), generatedIdentitiesInTerm, generatedIdentitiesInType, resolvedVarConstructorRef, resolvedVarRuntimeName)
+import qualified MLF.Elab.Types as X
 import MLF.Frontend.Symbol
   ( ResolvedReference,
     ResolvedReferenceKind (..),
@@ -365,6 +374,7 @@ import MLF.Frontend.Symbol
     resolvedSymbolSpelling,
     sameResolvedSymbol,
     sameSymbolIdentity,
+    lookupSymbolIdentityAlias,
     lookupSymbolIdentityExact,
     symbolIdentityAliasMap,
     symbolIdentityAliasMapWith,
@@ -388,7 +398,7 @@ import MLF.Frontend.Syntax
     SrcBound (..),
     SrcTy (..),
     SrcType,
-    SurfaceExpr,
+    ResolvedSurfaceExpr,
     resolvedTypeBinderIdentity,
     resolvedTypeBinderName,
     resolvedTypeBinderRefFromIdentity,
@@ -396,7 +406,12 @@ import MLF.Frontend.Syntax
   )
 import qualified MLF.Frontend.Syntax.Program as P
 import MLF.Frontend.TypeLevel (TypeLevelKind (..), TypeLevelNormalizeError (..), TypeLevelTy (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity
+
+data ProgramSourceTypeShape
+  = ProgramSourceArrowShape
+  deriving (Eq, Show)
 
 data ProgramError
   = ProgramDuplicateModule P.ModuleName
@@ -456,7 +471,12 @@ data ProgramError
   | ProgramAmbiguousConstructorUse P.ConstructorName
   | ProgramExpectedFunction SrcType
   | ProgramTypeMismatch SrcType SrcType
+  | ProgramTypeMismatchWithCause SrcType SrcType ProgramError
+  | ProgramTypeShapeMismatch ProgramSourceTypeShape SrcType
+  | ProgramTypeShapeMismatchWithCause ProgramSourceTypeShape SrcType ProgramError
   | ProgramCaseOnNonDataType SrcType
+  | ProgramDeferredCaseArityMismatch DeferredCaseCall Int
+  | ProgramDeferredCaseBottomScrutinee DeferredCaseCall SrcType
   | ProgramNonExhaustiveCase [P.ConstructorName]
   | ProgramDuplicateCaseBranch P.ConstructorName
   | ProgramPatternConstructorMismatch P.ConstructorName SrcType
@@ -475,12 +495,33 @@ data ProgramDiagnostic = ProgramDiagnostic
 
 diagnosticForProgramError :: Maybe P.LocatedProgram -> ProgramError -> ProgramDiagnostic
 diagnosticForProgramError mbLocated err =
-  ProgramDiagnostic
-    { diagnosticError = err,
-      diagnosticSpan = mbLocated >>= spanForError err . P.locatedProgramSpans,
-      diagnosticMessage = programErrorMessage err,
-      diagnosticHints = programErrorHints err
-    }
+  let (surfaceError, internalDetails) = programDiagnosticProjection err
+   in ProgramDiagnostic
+        { diagnosticError = surfaceError,
+          diagnosticSpan = mbLocated >>= spanForError surfaceError . P.locatedProgramSpans,
+          diagnosticMessage =
+            programErrorMessage surfaceError
+              ++ concatMap ("\n" ++) internalDetails,
+          diagnosticHints = programErrorHints surfaceError
+        }
+
+-- | Keep a source-facing mismatch as the diagnostic classification while
+-- retaining the compiler failure that proved the exact annotation could not
+-- be constructed.  Raw 'ProgramError' callers can inspect the structured
+-- cause; located/CLI consumers see the corresponding type-mismatch surface
+-- plus the internal detail needed for debugging.
+programDiagnosticProjection :: ProgramError -> (ProgramError, [String])
+programDiagnosticProjection err =
+  case err of
+    ProgramTypeMismatchWithCause actual expected cause ->
+      ( ProgramTypeMismatch actual expected,
+        ["internal pipeline detail: " ++ show cause]
+      )
+    ProgramTypeShapeMismatchWithCause shape expected cause ->
+      ( ProgramTypeShapeMismatch shape expected,
+        ["internal pipeline detail: " ++ show cause]
+      )
+    _ -> (err, [])
 
 renderProgramDiagnostic :: ProgramDiagnostic -> String
 renderProgramDiagnostic diagnostic =
@@ -699,7 +740,40 @@ programErrorMessage err =
     ProgramAmbiguousConstructorUse ctor -> "ambiguous constructor use `" ++ ctor ++ "`"
     ProgramExpectedFunction ty -> "expected a function, got `" ++ show ty ++ "`"
     ProgramTypeMismatch actual expected -> "type mismatch: expected `" ++ show expected ++ "`, got `" ++ show actual ++ "`"
+    ProgramTypeMismatchWithCause actual expected cause ->
+      programErrorMessage (ProgramTypeMismatch actual expected)
+        ++ "\ninternal pipeline detail: "
+        ++ show cause
+    ProgramTypeShapeMismatch ProgramSourceArrowShape expected ->
+      "type mismatch: expected `" ++ show expected ++ "`, got a function"
+    ProgramTypeShapeMismatchWithCause shape expected cause ->
+      programErrorMessage (ProgramTypeShapeMismatch shape expected)
+        ++ "\ninternal pipeline detail: "
+        ++ show cause
     ProgramCaseOnNonDataType ty -> "case scrutinee is not a data type: `" ++ show ty ++ "`"
+    ProgramDeferredCaseArityMismatch deferred actual ->
+      "binding `"
+        ++ loweredIdentityRuntimeName (deferredCaseBindingIdentity deferred)
+        ++ "`: "
+        ++ "deferred case `"
+        ++ deferredRefName (deferredCaseRef deferred)
+        ++ "` for `"
+        ++ symbolIdentityStableName (dataInfoSymbol (deferredCaseDataInfo deferred))
+        ++ "` expects "
+        ++ show (deferredCaseExpectedArgCount deferred)
+        ++ " arguments, got "
+        ++ show actual
+    ProgramDeferredCaseBottomScrutinee deferred expected ->
+      "binding `"
+        ++ loweredIdentityRuntimeName (deferredCaseBindingIdentity deferred)
+        ++ "`: "
+        ++ "deferred case `"
+        ++ deferredRefName (deferredCaseRef deferred)
+        ++ "` for `"
+        ++ symbolIdentityStableName (dataInfoSymbol (deferredCaseDataInfo deferred))
+        ++ "` resolved its scrutinee to `STBottom`; expected `"
+        ++ show expected
+        ++ "`"
     ProgramNonExhaustiveCase ctors -> "non-exhaustive case; missing constructors " ++ show ctors
     ProgramDuplicateCaseBranch ctor -> "unreachable or duplicate case branch for constructor `" ++ ctor ++ "`"
     ProgramPatternConstructorMismatch ctor ty -> "pattern for constructor `" ++ ctor ++ "` does not match expected type `" ++ show ty ++ "`"
@@ -723,6 +797,12 @@ programErrorHints err =
     ProgramDerivingMissingFieldInstance className0 ty ->
       ["add a `" ++ className0 ++ " " ++ show ty ++ "` instance or add a type parameter constraint through deriving"]
     ProgramTypeMismatch {} ->
+      ["check the nearest annotation; `.mlfp` uses eMLF inference before resolving program obligations"]
+    ProgramTypeMismatchWithCause {} ->
+      ["check the nearest annotation; `.mlfp` uses eMLF inference before resolving program obligations"]
+    ProgramTypeShapeMismatch {} ->
+      ["check the nearest annotation; `.mlfp` uses eMLF inference before resolving program obligations"]
+    ProgramTypeShapeMismatchWithCause {} ->
       ["check the nearest annotation; `.mlfp` uses eMLF inference before resolving program obligations"]
     ProgramPatternConstructorMismatch {} ->
       ["check the constructor arity and the data type being matched"]
@@ -1075,8 +1155,7 @@ names remain explicit generated names, not semantic identities.
 
 data TypeViewName identity = TypeViewName
   { typeViewNameDisplay :: String,
-    typeViewNameIdentity :: String,
-    typeViewNamePayload :: Maybe identity,
+    typeViewNamePayload :: identity,
     typeViewNameReferences :: Map String identity,
     typeViewNameStructuralHeads :: Map String SymbolIdentity
   }
@@ -1098,6 +1177,26 @@ data TypeViewType
   deriving (Show)
 
 newtype TypeView = TypeViewNode TypeViewType
+
+data TypeViewNodeView
+  = TypeViewVarNode String TypeBinderIdentity
+  | TypeViewArrowNode TypeView TypeView
+  | TypeViewBaseNode String SymbolIdentity
+  | TypeViewConNode String SymbolIdentity (NonEmpty TypeView)
+  | TypeViewVarAppNode String TypeBinderIdentity (NonEmpty TypeView)
+  | TypeViewTyLamNode String TypeBinderIdentity TypeView
+  | TypeViewTyAppNode TypeView TypeView
+  | TypeViewForallNode String TypeBinderIdentity (Maybe TypeView) TypeView
+  | TypeViewMuNode String TypeBinderIdentity TypeView
+  | TypeViewBottomNode
+  deriving (Eq, Show)
+
+data TypeViewConstructionError
+  = TypeViewMissingHeadIdentity String
+  | TypeViewAmbiguousHeadIdentity String [SymbolIdentity]
+  | TypeViewMissingBinderIdentity String
+  | TypeViewAmbiguousBinderIdentity String [TypeBinderIdentity]
+  deriving (Eq, Show)
 
 data TypeViewShapeError = TypeViewShapeMismatch SrcType SrcType
   deriving (Eq, Show)
@@ -1130,16 +1229,92 @@ typeViewBinderIdentities :: TypeView -> Map String TypeBinderIdentity
 typeViewBinderIdentities (TypeViewNode ty) =
   typeViewTypeBinderIdentities ty
 
-typeViewFromProjections :: SrcType -> SrcType -> Map String SymbolIdentity -> Map String TypeBinderIdentity -> Either TypeViewShapeError TypeView
-typeViewFromProjections display identity headIdentities binderIdentities =
-  maybe
-    (Left (TypeViewShapeMismatch display identity))
-    (Right . TypeViewNode)
-    (typeViewTypeFromProjections display identity headIdentities binderIdentities)
+typeViewRootHeadIdentity :: TypeView -> Maybe SymbolIdentity
+typeViewRootHeadIdentity (TypeViewNode ty) =
+  go ty
+  where
+    go typeNode =
+      case typeNode of
+        TypeViewBase name -> Just (typeViewNamePayload name)
+        TypeViewCon name _ -> Just (typeViewNamePayload name)
+        TypeViewContextHead _ body -> go body
+        TypeViewContextBinder _ body -> go body
+        _ -> Nothing
 
-typeViewTypeFromProjections :: SrcType -> SrcType -> Map String SymbolIdentity -> Map String TypeBinderIdentity -> Maybe TypeViewType
-typeViewTypeFromProjections display identity headIdentities binderIdentities =
-  addContextReferences <$> go display identity
+typeViewNodeView :: TypeView -> TypeViewNodeView
+typeViewNodeView view@(TypeViewNode ty) =
+  case dropTypeViewContexts ty of
+    TypeViewVar name ->
+      TypeViewVarNode (typeViewNameDisplay name) (typeViewNamePayload name)
+    TypeViewArrow dom cod ->
+      TypeViewArrowNode (projectTypeViewNode view dom) (projectTypeViewNode view cod)
+    TypeViewBase name ->
+      TypeViewBaseNode (typeViewNameDisplay name) (typeViewNamePayload name)
+    TypeViewCon name args ->
+      TypeViewConNode
+        (typeViewNameDisplay name)
+        (typeViewNamePayload name)
+        (fmap (projectTypeViewNode view) args)
+    TypeViewVarApp name args ->
+      TypeViewVarAppNode
+        (typeViewNameDisplay name)
+        (typeViewNamePayload name)
+        (fmap (projectTypeViewNode view) args)
+    TypeViewTyLam name body ->
+      TypeViewTyLamNode
+        (typeViewNameDisplay name)
+        (typeViewNamePayload name)
+        (projectTypeViewNode view body)
+    TypeViewTyApp fun arg ->
+      TypeViewTyAppNode
+        (projectTypeViewNode view fun)
+        (projectTypeViewNode view arg)
+    TypeViewForall name mbBound body ->
+      TypeViewForallNode
+        (typeViewNameDisplay name)
+        (typeViewNamePayload name)
+        (fmap (projectTypeViewNode view) mbBound)
+        (projectTypeViewNode view body)
+    TypeViewMu name body ->
+      TypeViewMuNode
+        (typeViewNameDisplay name)
+        (typeViewNamePayload name)
+        (projectTypeViewNode view body)
+    TypeViewContextHead _ body ->
+      typeViewNodeView (projectTypeViewNode view body)
+    TypeViewContextBinder _ body ->
+      typeViewNodeView (projectTypeViewNode view body)
+    TypeViewBottom ->
+      TypeViewBottomNode
+
+splitTypeViewHeadApplication :: Int -> TypeView -> Maybe (TypeView, [TypeView])
+splitTypeViewHeadApplication suffixCount view@(TypeViewNode ty)
+  | suffixCount < 0 = Nothing
+  | otherwise =
+      case dropTypeViewContexts ty of
+        TypeViewCon name args -> splitHead (TypeViewBase name) (TypeViewCon name) args
+        TypeViewVarApp name args -> splitHead (TypeViewVar name) (TypeViewVarApp name) args
+        _ -> Nothing
+  where
+    splitHead bareHead appliedHead args
+      | suffixCount > length allArgs = Nothing
+      | otherwise =
+          Just
+            ( projectTypeViewNode view headNode,
+              map (projectTypeViewNode view) suffixArgs
+            )
+      where
+        allArgs = NE.toList args
+        prefixCount = length allArgs - suffixCount
+        (prefixArgs, suffixArgs) = splitAt prefixCount allArgs
+        headNode =
+          case prefixArgs of
+            [] -> bareHead
+            prefixHead : prefixTail -> appliedHead (prefixHead :| prefixTail)
+
+typeViewFromSourceType :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> SrcType -> Either TypeViewConstructionError TypeView
+typeViewFromSourceType headIdentities binderIdentities sourceTy =
+  TypeViewNode . addContextReferences <$> go sourceTy
   where
     headAliases =
       symbolIdentityAliasMapWith
@@ -1150,81 +1325,79 @@ typeViewTypeFromProjections display identity headIdentities binderIdentities =
     binderAliases =
       typeBinderIdentityAliasMap (Map.toList binderIdentities)
 
-    headName displayName identityName =
-      let payload =
-            Map.lookup identityName headIdentities
-              <|> Map.lookup identityName headAliases
-              <|> Map.lookup displayName headIdentities
-              <|> Map.lookup displayName headAliases
-          projectedIdentityName =
-            case payload of
-              Just payloadIdentity
-                | maybe False (sameSymbolIdentity payloadIdentity) (Map.lookup identityName headAliases) ->
-                    identityName
-                | otherwise ->
-                    symbolIdentityStableName payloadIdentity
-              Nothing ->
-                identityName
-       in TypeViewName
+    headName displayName = do
+      payload <- requireHeadIdentity displayName
+      if "$identity#" `isPrefixOf` displayName
+        && symbolIdentityStableName payload /= displayName
+        && maybe True (not . sameSymbolIdentity payload) (Map.lookup displayName headIdentities)
+        then Left (TypeViewMissingHeadIdentity displayName)
+        else Right ()
+      pure
+          TypeViewName
             { typeViewNameDisplay = displayName,
-              typeViewNameIdentity = projectedIdentityName,
               typeViewNamePayload = payload,
               typeViewNameReferences =
                 Map.filterWithKey
-                  (headReferenceBelongsTo displayName identityName payload)
+                  (headReferenceBelongsTo displayName payload)
                   headIdentities,
               typeViewNameStructuralHeads = Map.empty
             }
 
-    binderName displayName identityName =
-      let payload =
-            Map.lookup identityName binderIdentities
-              <|> Map.lookup identityName binderAliases
-              <|> if displayName == identityName
-                then Map.lookup displayName binderIdentities <|> Map.lookup displayName binderAliases
-                else Nothing
-          projectedIdentityName =
-            case payload of
-              Just payloadIdentity
-                | Map.lookup identityName binderAliases == Just payloadIdentity ->
-                    identityName
-                | otherwise ->
-                    typeBinderIdentityStableName payloadIdentity
-              Nothing ->
-                identityName
-       in TypeViewName
+    binderName displayName = do
+      payload <- requireBinderIdentity displayName
+      if "$typevar#" `isPrefixOf` displayName
+        && typeBinderIdentityStableName payload /= displayName
+        && Map.lookup displayName binderIdentities /= Just payload
+        then Left (TypeViewMissingBinderIdentity displayName)
+        else Right ()
+      pure
+          TypeViewName
             { typeViewNameDisplay = displayName,
-              typeViewNameIdentity = projectedIdentityName,
               typeViewNamePayload = payload,
               typeViewNameReferences =
                 Map.filterWithKey
-                  (binderReferenceBelongsTo displayName identityName payload)
+                  (binderReferenceBelongsTo displayName payload)
                   binderIdentities,
-              typeViewNameStructuralHeads = maybe Map.empty structuralHeadsForBinder payload
+              typeViewNameStructuralHeads = structuralHeadsForBinder payload
             }
 
-    headReferenceBelongsTo displayName identityName payload name candidate =
-      name == displayName
-        || name == identityName
-        || maybe
-          False
-          ( \payloadIdentity ->
-              sameSymbolIdentity payloadIdentity candidate
-                || name `elem` symbolIdentityAliasNamesWith [displayName, identityName] payloadIdentity
-          )
-          payload
+    headCandidates name =
+      mapMaybe
+        id
+        [ Map.lookup name headIdentities,
+          Map.lookup name headAliases
+        ]
 
-    binderReferenceBelongsTo displayName identityName payload name candidate =
+    binderCandidates name =
+      mapMaybe
+        id
+        [ Map.lookup name binderIdentities,
+          Map.lookup name binderAliases
+        ]
+
+    requireHeadIdentity name =
+      case Map.elems (Map.fromList [(symbolIdentityPayloadKey candidate, candidate) | candidate <- headCandidates name]) of
+        [] -> Left (TypeViewMissingHeadIdentity name)
+        [candidate] -> Right candidate
+        candidates -> Left (TypeViewAmbiguousHeadIdentity name candidates)
+
+    requireBinderIdentity name =
+      case Set.toList (Set.fromList (binderCandidates name)) of
+        [] -> Left (TypeViewMissingBinderIdentity name)
+        [candidate] -> Right candidate
+        candidates -> Left (TypeViewAmbiguousBinderIdentity name candidates)
+
+    headReferenceBelongsTo displayName payload name candidate =
       name == displayName
-        || name == identityName
-        || maybe
-          False
-          ( \payloadIdentity ->
-              payloadIdentity == candidate
-                || name `elem` typeBinderIdentityAliasNames displayName payloadIdentity
-                || name `elem` typeBinderIdentityAliasNames identityName payloadIdentity
-          )
-          payload
+        || name == symbolIdentityStableName payload
+        || sameSymbolIdentity payload candidate
+        || name `elem` symbolIdentityAliasNamesWith [displayName] payload
+
+    binderReferenceBelongsTo displayName payload name candidate =
+      name == displayName
+        || name == typeBinderIdentityStableName payload
+        || payload == candidate
+        || name `elem` typeBinderIdentityAliasNames displayName payload
 
     structuralHeadsForBinder binderIdentity =
       case typeBinderIdentityStructural binderIdentity of
@@ -1232,163 +1405,236 @@ typeViewTypeFromProjections display identity headIdentities binderIdentities =
           Map.filter ((== unique) . symbolUniqueIdentity) headIdentities
         Nothing -> Map.empty
 
-    go displayTy identityTy =
-      case (displayTy, identityTy) of
-        (STVar displayName, STVar identityName) ->
-          Just (TypeViewVar (binderName displayName identityName))
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          TypeViewArrow <$> go displayDom identityDom <*> go displayCod identityCod
-        (STBase displayName, STBase identityName) ->
-          Just (TypeViewBase (headName displayName identityName))
-        (STCon displayName displayArgs, STCon identityName identityArgs)
-          | NE.length displayArgs == NE.length identityArgs ->
-              TypeViewCon (headName displayName identityName)
-                <$> sequenceA (NE.zipWith go displayArgs identityArgs)
-        (STVarApp displayName displayArgs, STVarApp identityName identityArgs)
-          | NE.length displayArgs == NE.length identityArgs ->
-              TypeViewVarApp (binderName displayName identityName)
-                <$> sequenceA (NE.zipWith go displayArgs identityArgs)
-        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
-          TypeViewTyLam (binderName displayName identityName) <$> go displayBody identityBody
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          TypeViewTyApp <$> go displayFun identityFun <*> go displayArg identityArg
-        (STForall displayName displayBound displayBody, STForall identityName identityBound identityBody) ->
-          TypeViewForall (binderName displayName identityName)
-            <$> pairBounds displayBound identityBound
-            <*> go displayBody identityBody
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          TypeViewMu (binderName displayName identityName) <$> go displayBody identityBody
-        (STBottom, STBottom) ->
-          Just TypeViewBottom
-        _ ->
-          Nothing
+    go = \case
+      STVar displayName ->
+        TypeViewVar <$> binderName displayName
+      STArrow displayDom displayCod ->
+        TypeViewArrow <$> go displayDom <*> go displayCod
+      STBase displayName ->
+        TypeViewBase <$> headName displayName
+      STCon displayName displayArgs ->
+        TypeViewCon <$> headName displayName <*> traverse go displayArgs
+      STVarApp displayName displayArgs ->
+        TypeViewVarApp <$> binderName displayName <*> traverse go displayArgs
+      STTyLam displayName displayBody ->
+        TypeViewTyLam <$> binderName displayName <*> go displayBody
+      STTyApp displayFun displayArg ->
+        TypeViewTyApp <$> go displayFun <*> go displayArg
+      STForall displayName displayBound displayBody ->
+        TypeViewForall
+          <$> binderName displayName
+          <*> traverse (go . unSrcBound) displayBound
+          <*> go displayBody
+      STMu displayName displayBody ->
+        TypeViewMu <$> binderName displayName <*> go displayBody
+      STBottom ->
+        Right TypeViewBottom
 
-    pairBounds Nothing Nothing = Just Nothing
-    pairBounds (Just (SrcBound displayBound)) (Just (SrcBound identityBound)) =
-      Just <$> go displayBound identityBound
-    pairBounds _ _ = Nothing
+    addContextReferences =
+      addTypeViewIdentityContexts headIdentities binderIdentities
 
-    addContextReferences ty =
-      foldr addBinderContext (foldr addHeadContext ty remainingHeadIdentities) remainingBinderIdentities
-      where
-        projectedHeads = typeViewTypeHeadIdentities ty
-        projectedBinders = typeViewTypeBinderIdentities ty
-
-        remainingHeadReferences =
-          Map.filterWithKey
-            (\name candidate -> Map.lookup name projectedHeads /= Just candidate)
-            headIdentities
-        remainingBinderReferences =
-          Map.filterWithKey
-            (\name candidate -> Map.lookup name projectedBinders /= Just candidate)
-            binderIdentities
-
-        remainingHeadIdentities =
-          Map.elems
-            ( Map.fromList
-                [ (symbolIdentityPayloadKey candidate, candidate)
-                | candidate <- Map.elems remainingHeadReferences
-                ]
-            )
-        remainingBinderIdentities =
-          Set.toList (Set.fromList (Map.elems remainingBinderReferences))
-
-        addHeadContext payloadIdentity body =
-          TypeViewContextHead
-            TypeViewName
-              { typeViewNameDisplay = symbolDefiningName payloadIdentity,
-                typeViewNameIdentity = symbolIdentityStableName payloadIdentity,
-                typeViewNamePayload = Just payloadIdentity,
-                typeViewNameReferences =
-                  Map.filter (sameSymbolIdentity payloadIdentity) remainingHeadReferences,
-                typeViewNameStructuralHeads = Map.empty
-              }
-            body
-
-        addBinderContext payloadIdentity body =
-          TypeViewContextBinder
-            TypeViewName
-              { typeViewNameDisplay = typeBinderIdentityStableName payloadIdentity,
-                typeViewNameIdentity = typeBinderIdentityStableName payloadIdentity,
-                typeViewNamePayload = Just payloadIdentity,
-                typeViewNameReferences =
-                  Map.filter (== payloadIdentity) remainingBinderReferences,
-                typeViewNameStructuralHeads = Map.empty
-              }
-            body
-
-typeViewWithIdentityMaps :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> TypeView -> TypeView
-typeViewWithIdentityMaps headIdentities binderIdentities (TypeViewNode ty) =
+typeViewWithIdentityAliases :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> TypeView -> TypeView
+typeViewWithIdentityAliases headIdentities binderIdentities (TypeViewNode ty) =
   TypeViewNode (annotateTypeViewType headIdentities binderIdentities ty)
 
-typeViewWithHeadIdentities :: Map String SymbolIdentity -> TypeView -> TypeView
-typeViewWithHeadIdentities headIdentities view =
-  typeViewWithIdentityMaps headIdentities (typeViewBinderIdentities view) view
+typeViewWithBinderIdentityAliases :: Map String TypeBinderIdentity -> TypeView -> TypeView
+typeViewWithBinderIdentityAliases binderIdentities view =
+  typeViewWithIdentityAliases (typeViewHeadIdentities view) binderIdentities view
 
-typeViewWithBinderIdentities :: Map String TypeBinderIdentity -> TypeView -> TypeView
-typeViewWithBinderIdentities binderIdentities view =
-  typeViewWithIdentityMaps (typeViewHeadIdentities view) binderIdentities view
-
-typeViewMergeHeadIdentities :: Map String SymbolIdentity -> TypeView -> TypeView
-typeViewMergeHeadIdentities headIdentities view =
-  typeViewWithHeadIdentities
+typeViewMergeHeadIdentityAliases :: Map String SymbolIdentity -> TypeView -> TypeView
+typeViewMergeHeadIdentityAliases headIdentities view =
+  typeViewWithIdentityAliases
     (mergeSymbolIdentityMaps [typeViewHeadIdentities view, headIdentities])
+    (typeViewBinderIdentities view)
     view
 
-typeViewMergeBinderIdentities :: Map String TypeBinderIdentity -> TypeView -> TypeView
-typeViewMergeBinderIdentities binderIdentities view =
-  typeViewWithBinderIdentities
+typeViewMergeBinderIdentityAliases :: Map String TypeBinderIdentity -> TypeView -> TypeView
+typeViewMergeBinderIdentityAliases binderIdentities view =
+  typeViewWithBinderIdentityAliases
     (mergeTypeBinderIdentityMaps [typeViewBinderIdentities view, binderIdentities])
     view
 
-metadataLightTypeView :: SrcType -> TypeView
-metadataLightTypeView =
-  TypeViewNode . go
+typeViewBottom :: TypeView
+typeViewBottom =
+  TypeViewNode TypeViewBottom
+
+requireTypeViewFromSourceType :: HasCallStack => Map String SymbolIdentity -> Map String TypeBinderIdentity -> SrcType -> TypeView
+requireTypeViewFromSourceType headIdentities binderIdentities sourceTy =
+  case typeViewFromSourceType headIdentities binderIdentities sourceTy of
+    Right view -> view
+    Left err ->
+      error
+        ( "identity-incomplete TypeView construction: "
+            ++ show err
+            ++ "; source type="
+            ++ show sourceTy
+            ++ "; head aliases="
+            ++ show (Map.keys headIdentities)
+            ++ "; binder aliases="
+            ++ show (Map.keys binderIdentities)
+        )
+
+typeViewWithDisplay :: SrcType -> TypeView -> Either TypeViewShapeError TypeView
+typeViewWithDisplay display view@(TypeViewNode ty) =
+  TypeViewNode <$> go display ty
   where
-    go ty =
-      case ty of
-        STVar name -> TypeViewVar (bareName name)
-        STArrow dom cod -> TypeViewArrow (go dom) (go cod)
-        STBase name -> TypeViewBase (bareName name)
-        STCon name args -> TypeViewCon (bareName name) (fmap go args)
-        STVarApp name args -> TypeViewVarApp (bareName name) (fmap go args)
-        STTyLam name body -> TypeViewTyLam (bareName name) (go body)
-        STTyApp fun arg -> TypeViewTyApp (go fun) (go arg)
-        STForall name mbBound body ->
-          TypeViewForall
-            (bareName name)
-            (go . unSrcBound <$> mbBound)
-            (go body)
-        STMu name body -> TypeViewMu (bareName name) (go body)
-        STBottom -> TypeViewBottom
+    go displayTy typeNode =
+      case typeNode of
+        TypeViewContextHead name body ->
+          TypeViewContextHead name <$> go displayTy body
+        TypeViewContextBinder name body ->
+          TypeViewContextBinder name <$> go displayTy body
+        TypeViewVar name ->
+          case displayTy of
+            STVar displayName -> Right (TypeViewVar (rename displayName name))
+            _ -> mismatch
+        TypeViewArrow dom cod ->
+          case displayTy of
+            STArrow displayDom displayCod ->
+              TypeViewArrow <$> go displayDom dom <*> go displayCod cod
+            _ -> mismatch
+        TypeViewBase name ->
+          case displayTy of
+            STBase displayName -> Right (TypeViewBase (rename displayName name))
+            _ -> mismatch
+        TypeViewCon name args ->
+          case displayTy of
+            STCon displayName displayArgs
+              | NE.length displayArgs == NE.length args ->
+                  TypeViewCon (rename displayName name)
+                    <$> sequenceA (NE.zipWith go displayArgs args)
+            _ -> mismatch
+        TypeViewVarApp name args ->
+          case displayTy of
+            STVarApp displayName displayArgs
+              | NE.length displayArgs == NE.length args ->
+                  TypeViewVarApp (rename displayName name)
+                    <$> sequenceA (NE.zipWith go displayArgs args)
+            _ -> mismatch
+        TypeViewTyLam name body ->
+          case displayTy of
+            STTyLam displayName displayBody ->
+              TypeViewTyLam (rename displayName name) <$> go displayBody body
+            _ -> mismatch
+        TypeViewTyApp fun arg ->
+          case displayTy of
+            STTyApp displayFun displayArg ->
+              TypeViewTyApp <$> go displayFun fun <*> go displayArg arg
+            _ -> mismatch
+        TypeViewForall name mbBound body ->
+          case displayTy of
+            STForall displayName displayBound displayBody ->
+              TypeViewForall
+                (rename displayName name)
+                <$> goBound displayBound mbBound
+                <*> go displayBody body
+            _ -> mismatch
+        TypeViewMu name body ->
+          case displayTy of
+            STMu displayName displayBody ->
+              TypeViewMu (rename displayName name) <$> go displayBody body
+            _ -> mismatch
+        TypeViewBottom ->
+          case displayTy of
+            STBottom -> Right TypeViewBottom
+            _ -> mismatch
+      where
+        mismatch = Left (TypeViewShapeMismatch display (typeViewIdentity view))
 
-    bareName name =
-      TypeViewName
-        { typeViewNameDisplay = name,
-          typeViewNameIdentity = name,
-          typeViewNamePayload = Nothing,
-          typeViewNameReferences = Map.empty,
-          typeViewNameStructuralHeads = Map.empty
-        }
+    goBound Nothing Nothing = Right Nothing
+    goBound (Just (SrcBound displayBound)) (Just bound) = Just <$> go displayBound bound
+    goBound _ _ = Left (TypeViewShapeMismatch display (typeViewIdentity view))
 
-typeViewFromSourceTypeWithIdentityMaps :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> SrcType -> TypeView
-typeViewFromSourceTypeWithIdentityMaps headIdentities binderIdentities sourceTy =
-  mapTypeViewIdentityBinderNames canonicalBinderName
-    . mapTypeViewIdentityHeadNames canonicalHeadName
-    . typeViewWithIdentityMaps headIdentities binderIdentities
-    $ metadataLightTypeView sourceTy
+    rename displayName name =
+      name {typeViewNameDisplay = displayName}
+
+-- | Overlay a recovered display tree while preserving every identity-bearing
+-- subtree whose shape still agrees. A caller-provided constructor owns only
+-- the smallest subtrees whose semantic shape was deliberately recovered (for
+-- example, a Church encoding recovered to its nominal data head).
+typeViewOverlayDisplay :: (SrcType -> TypeView) -> SrcType -> TypeView -> TypeView
+typeViewOverlayDisplay recover display (TypeViewNode ty) =
+  TypeViewNode (go display ty)
   where
-    canonicalHeadName mbIdentity name =
-      maybe name symbolIdentityStableName mbIdentity
+    go displayTy typeNode =
+      case typeNode of
+        TypeViewContextHead name body ->
+          TypeViewContextHead name (go displayTy body)
+        TypeViewContextBinder name body ->
+          TypeViewContextBinder name (go displayTy body)
+        TypeViewVar name ->
+          case displayTy of
+            STVar displayName -> TypeViewVar (rename displayName name)
+            _ -> recovered displayTy
+        TypeViewArrow dom cod ->
+          case displayTy of
+            STArrow displayDom displayCod ->
+              TypeViewArrow (go displayDom dom) (go displayCod cod)
+            _ -> recovered displayTy
+        TypeViewBase name ->
+          case displayTy of
+            STBase displayName -> TypeViewBase (rename displayName name)
+            _ -> recovered displayTy
+        TypeViewCon name args ->
+          case displayTy of
+            STCon displayName displayArgs
+              | NE.length displayArgs == NE.length args ->
+                  TypeViewCon
+                    (rename displayName name)
+                    (NE.zipWith go displayArgs args)
+            _ -> recovered displayTy
+        TypeViewVarApp name args ->
+          case displayTy of
+            STVarApp displayName displayArgs
+              | NE.length displayArgs == NE.length args ->
+                  TypeViewVarApp
+                    (rename displayName name)
+                    (NE.zipWith go displayArgs args)
+            _ -> recovered displayTy
+        TypeViewTyLam name body ->
+          case displayTy of
+            STTyLam displayName displayBody ->
+              TypeViewTyLam (rename displayName name) (go displayBody body)
+            _ -> recovered displayTy
+        TypeViewTyApp fun arg ->
+          case displayTy of
+            STTyApp displayFun displayArg ->
+              TypeViewTyApp (go displayFun fun) (go displayArg arg)
+            _ -> recovered displayTy
+        TypeViewForall name mbBound body ->
+          case displayTy of
+            STForall displayName displayBound displayBody ->
+              case overlayBound displayBound mbBound of
+                Just recoveredBound ->
+                  TypeViewForall
+                    (rename displayName name)
+                    recoveredBound
+                    (go displayBody body)
+                Nothing -> recovered displayTy
+            _ -> recovered displayTy
+        TypeViewMu name body ->
+          case displayTy of
+            STMu displayName displayBody ->
+              TypeViewMu (rename displayName name) (go displayBody body)
+            _ -> recovered displayTy
+        TypeViewBottom ->
+          case displayTy of
+            STBottom -> TypeViewBottom
+            _ -> recovered displayTy
 
-    canonicalBinderName mbIdentity name =
-      maybe name typeBinderIdentityStableName mbIdentity
+    overlayBound Nothing Nothing = Just Nothing
+    overlayBound (Just (SrcBound displayBound)) (Just bound) =
+      Just (Just (go displayBound bound))
+    overlayBound _ _ = Nothing
 
-typeViewWithProjectedTypes :: SrcType -> SrcType -> TypeView -> Either TypeViewShapeError TypeView
-typeViewWithProjectedTypes display identity view =
-  typeViewFromProjections display identity (typeViewHeadIdentities view) (typeViewBinderIdentities view)
+    recovered sourceTy =
+      case recover sourceTy of
+        TypeViewNode recoveredTy -> recoveredTy
 
-mapTypeViewDisplayHeadNames :: (Maybe SymbolIdentity -> String -> String) -> TypeView -> TypeView
+    rename displayName name =
+      name {typeViewNameDisplay = displayName}
+
+mapTypeViewDisplayHeadNames :: (SymbolIdentity -> String -> String) -> TypeView -> TypeView
 mapTypeViewDisplayHeadNames rename (TypeViewNode ty) =
   TypeViewNode (go ty)
   where
@@ -1410,84 +1656,12 @@ mapTypeViewDisplayHeadNames rename (TypeViewNode ty) =
         TypeViewContextBinder name body -> TypeViewContextBinder name (go body)
         TypeViewBottom -> TypeViewBottom
 
-mapTypeViewDisplayBinderNames :: (Maybe TypeBinderIdentity -> String -> String) -> TypeView -> TypeView
+mapTypeViewDisplayBinderNames :: (TypeBinderIdentity -> String -> String) -> TypeView -> TypeView
 mapTypeViewDisplayBinderNames rename (TypeViewNode ty) =
   TypeViewNode (go ty)
   where
     renameBinder name =
       name {typeViewNameDisplay = rename (typeViewNamePayload name) (typeViewNameDisplay name)}
-
-    go typeNode =
-      case typeNode of
-        TypeViewVar name -> TypeViewVar (renameBinder name)
-        TypeViewArrow dom cod -> TypeViewArrow (go dom) (go cod)
-        TypeViewBase {} -> typeNode
-        TypeViewCon name args -> TypeViewCon name (fmap go args)
-        TypeViewVarApp name args -> TypeViewVarApp (renameBinder name) (fmap go args)
-        TypeViewTyLam name body -> TypeViewTyLam (renameBinder name) (go body)
-        TypeViewTyApp fun arg -> TypeViewTyApp (go fun) (go arg)
-        TypeViewForall name mbBound body -> TypeViewForall (renameBinder name) (fmap go mbBound) (go body)
-        TypeViewMu name body -> TypeViewMu (renameBinder name) (go body)
-        TypeViewContextHead name body -> TypeViewContextHead name (go body)
-        TypeViewContextBinder name body -> TypeViewContextBinder (renameBinder name) (go body)
-        TypeViewBottom -> TypeViewBottom
-
-mapTypeViewDisplayBinderNamesWithIdentity :: (Maybe TypeBinderIdentity -> String -> String -> String) -> TypeView -> TypeView
-mapTypeViewDisplayBinderNamesWithIdentity rename (TypeViewNode ty) =
-  TypeViewNode (go ty)
-  where
-    renameBinder name =
-      name
-        { typeViewNameDisplay =
-            rename
-              (typeViewNamePayload name)
-              (typeViewNameIdentity name)
-              (typeViewNameDisplay name)
-        }
-
-    go typeNode =
-      case typeNode of
-        TypeViewVar name -> TypeViewVar (renameBinder name)
-        TypeViewArrow dom cod -> TypeViewArrow (go dom) (go cod)
-        TypeViewBase {} -> typeNode
-        TypeViewCon name args -> TypeViewCon name (fmap go args)
-        TypeViewVarApp name args -> TypeViewVarApp (renameBinder name) (fmap go args)
-        TypeViewTyLam name body -> TypeViewTyLam (renameBinder name) (go body)
-        TypeViewTyApp fun arg -> TypeViewTyApp (go fun) (go arg)
-        TypeViewForall name mbBound body -> TypeViewForall (renameBinder name) (fmap go mbBound) (go body)
-        TypeViewMu name body -> TypeViewMu (renameBinder name) (go body)
-        TypeViewContextHead name body -> TypeViewContextHead name (go body)
-        TypeViewContextBinder name body -> TypeViewContextBinder (renameBinder name) (go body)
-        TypeViewBottom -> TypeViewBottom
-
-mapTypeViewIdentityHeadNames :: (Maybe SymbolIdentity -> String -> String) -> TypeView -> TypeView
-mapTypeViewIdentityHeadNames rename (TypeViewNode ty) =
-  TypeViewNode (go ty)
-  where
-    renameHead name =
-      name {typeViewNameIdentity = rename (typeViewNamePayload name) (typeViewNameIdentity name)}
-
-    go typeNode =
-      case typeNode of
-        TypeViewVar {} -> typeNode
-        TypeViewArrow dom cod -> TypeViewArrow (go dom) (go cod)
-        TypeViewBase name -> TypeViewBase (renameHead name)
-        TypeViewCon name args -> TypeViewCon (renameHead name) (fmap go args)
-        TypeViewVarApp name args -> TypeViewVarApp name (fmap go args)
-        TypeViewTyLam name body -> TypeViewTyLam name (go body)
-        TypeViewTyApp fun arg -> TypeViewTyApp (go fun) (go arg)
-        TypeViewForall name mbBound body -> TypeViewForall name (fmap go mbBound) (go body)
-        TypeViewMu name body -> TypeViewMu name (go body)
-        TypeViewContextHead name body -> TypeViewContextHead (renameHead name) (go body)
-        TypeViewContextBinder name body -> TypeViewContextBinder name (go body)
-        TypeViewBottom -> TypeViewBottom
-
-mapTypeViewIdentityBinderNames :: (Maybe TypeBinderIdentity -> String -> String) -> TypeView -> TypeView
-mapTypeViewIdentityBinderNames rename (TypeViewNode ty) =
-  TypeViewNode (go ty)
-  where
-    renameBinder name =
-      name {typeViewNameIdentity = rename (typeViewNamePayload name) (typeViewNameIdentity name)}
 
     go typeNode =
       case typeNode of
@@ -1510,7 +1684,7 @@ typeViewArrow (TypeViewNode domain) (TypeViewNode codomain) =
 
 typeViewAddArgumentsInsideForalls :: [TypeView] -> TypeView -> TypeView
 typeViewAddArgumentsInsideForalls arguments view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps headIdentities binderIdentities rebuilt
+  typeViewWithIdentityAliases headIdentities binderIdentities rebuilt
   where
     (foralls, body) = splitTypeViewForalls sourceTy
     argumentNodes = [node | TypeViewNode node <- arguments]
@@ -1523,7 +1697,7 @@ typeViewAddArgumentsInsideForalls arguments view@(TypeViewNode sourceTy) =
 
 typeViewQuantifyBinders :: [(String, TypeBinderIdentity)] -> TypeView -> TypeView
 typeViewQuantifyBinders binders view =
-  typeViewMergeBinderIdentities binderIdentities (TypeViewNode quantifiedTy)
+  typeViewMergeBinderIdentityAliases binderIdentities (TypeViewNode quantifiedTy)
   where
     TypeViewNode sourceTy = view
     quantifiedTy =
@@ -1535,31 +1709,14 @@ typeViewQuantifyBinders binders view =
     binderName displayName identity =
       TypeViewName
         { typeViewNameDisplay = displayName,
-          typeViewNameIdentity = typeBinderIdentityStableName identity,
-          typeViewNamePayload = Just identity,
-          typeViewNameReferences = Map.empty,
-          typeViewNameStructuralHeads = Map.empty
-        }
-
-typeViewQuantifyNames :: [(String, String)] -> TypeView -> TypeView
-typeViewQuantifyNames names view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps
-    (typeViewHeadIdentities view)
-    (typeViewBinderIdentities view)
-    (TypeViewNode (foldr (\(displayName, identityName) body -> TypeViewForall (bareName displayName identityName) Nothing body) sourceTy names))
-  where
-    bareName displayName identityName =
-      TypeViewName
-        { typeViewNameDisplay = displayName,
-          typeViewNameIdentity = identityName,
-          typeViewNamePayload = Nothing,
+          typeViewNamePayload = identity,
           typeViewNameReferences = Map.empty,
           typeViewNameStructuralHeads = Map.empty
         }
 
 typeViewRebuildArrowBody :: TypeView -> [TypeView] -> TypeView -> TypeView
 typeViewRebuildArrowBody template arguments result =
-  typeViewWithIdentityMaps headIdentities binderIdentities rebuilt
+  typeViewWithIdentityAliases headIdentities binderIdentities rebuilt
   where
     TypeViewNode templateTy = template
     TypeViewNode resultTy = result
@@ -1573,7 +1730,7 @@ typeViewRebuildArrowBody template arguments result =
 
 quantifyFreeTypeView :: TypeView -> TypeView
 quantifyFreeTypeView view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps
+  typeViewWithIdentityAliases
     (typeViewHeadIdentities view)
     (typeViewBinderIdentities view)
     (TypeViewNode (foldr (\name body -> TypeViewForall name Nothing body) sourceTy freeNames))
@@ -1601,12 +1758,12 @@ quantifyFreeTypeView view@(TypeViewNode sourceTy) =
       | Set.member (binderKey name) bound = Map.empty
       | otherwise = Map.singleton (binderKey name) name
 
-    binderKey name =
-      (typeViewNamePayload name, typeViewNameIdentity name)
+    binderKey =
+      typeViewNamePayload
 
 stripVacuousTypeViewForalls :: TypeView -> TypeView
 stripVacuousTypeViewForalls view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps
+  typeViewWithIdentityAliases
     (typeViewHeadIdentities view)
     (typeViewBinderIdentities view)
     (TypeViewNode (stripLeadingForalls (dropTypeViewContexts sourceTy)))
@@ -1618,42 +1775,43 @@ stripVacuousTypeViewForalls view@(TypeViewNode sourceTy) =
         _ -> typeNode
 
     binderIsVacuous name body =
-      typeViewNameDisplay name `Set.notMember` freeTypeVarsSrcType (typeViewTypeDisplay body)
-        && typeViewNameIdentity name `Set.notMember` freeTypeVarsSrcType (typeViewTypeIdentity body)
+      typeViewNamePayload name
+        `Set.notMember` freeTypeBinderIdentitiesTypeView (TypeViewNode body)
+
+rebuildTypeViewAliases :: TypeViewType -> TypeView
+rebuildTypeViewAliases typeNode =
+  typeViewWithIdentityAliases
+    (typeViewHeadIdentities view)
+    (typeViewBinderIdentities view)
+    view
+  where
+    view = TypeViewNode typeNode
+
+stripTypeViewContexts :: TypeViewType -> TypeViewType
+stripTypeViewContexts =
+  \case
+    TypeViewContextHead _ body -> stripTypeViewContexts body
+    TypeViewContextBinder _ body -> stripTypeViewContexts body
+    TypeViewArrow dom cod -> TypeViewArrow (stripTypeViewContexts dom) (stripTypeViewContexts cod)
+    TypeViewCon name args -> TypeViewCon name (fmap stripTypeViewContexts args)
+    TypeViewVarApp name args -> TypeViewVarApp name (fmap stripTypeViewContexts args)
+    TypeViewTyLam name body -> TypeViewTyLam name (stripTypeViewContexts body)
+    TypeViewTyApp fun arg -> TypeViewTyApp (stripTypeViewContexts fun) (stripTypeViewContexts arg)
+    TypeViewForall name mbBound body ->
+      TypeViewForall name (fmap stripTypeViewContexts mbBound) (stripTypeViewContexts body)
+    TypeViewMu name body -> TypeViewMu name (stripTypeViewContexts body)
+    typeNode -> typeNode
 
 annotateTypeViewType :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> TypeViewType -> TypeViewType
 annotateTypeViewType headIdentities binderIdentities =
-  addContextReferences . go . stripContexts
+  addContextReferences . go . stripTypeViewContexts
   where
-    headAliases =
-      symbolIdentityAliasMapWith
-        [ (headIdentity, [name])
-        | (name, headIdentity) <- Map.toList headIdentities
-        ]
-
-    binderAliases =
-      typeBinderIdentityAliasMap (Map.toList binderIdentities)
-
     headName oldName =
       let displayName = typeViewNameDisplay oldName
-          identityName = typeViewNameIdentity oldName
-          payload =
-            Map.lookup identityName headIdentities
-              <|> Map.lookup identityName headAliases
-              <|> Map.lookup displayName headIdentities
-              <|> Map.lookup displayName headAliases
-          projectedIdentityName =
-            case payload of
-              Just payloadIdentity
-                | maybe False (sameSymbolIdentity payloadIdentity) (Map.lookup identityName headAliases) ->
-                    identityName
-                | otherwise ->
-                    symbolIdentityStableName payloadIdentity
-              Nothing ->
-                identityName
+          payload = typeViewNamePayload oldName
+          identityName = symbolIdentityStableName payload
        in TypeViewName
             { typeViewNameDisplay = displayName,
-              typeViewNameIdentity = projectedIdentityName,
               typeViewNamePayload = payload,
               typeViewNameReferences =
                 Map.filterWithKey
@@ -1664,74 +1822,36 @@ annotateTypeViewType headIdentities binderIdentities =
 
     binderName oldName =
       let displayName = typeViewNameDisplay oldName
-          identityName = typeViewNameIdentity oldName
-          payload =
-            Map.lookup identityName binderIdentities
-              <|> Map.lookup identityName binderAliases
-              <|> if displayName == identityName
-                then Map.lookup displayName binderIdentities <|> Map.lookup displayName binderAliases
-                else Nothing
-          projectedIdentityName =
-            case payload of
-              Just payloadIdentity
-                | Map.lookup identityName binderAliases == Just payloadIdentity ->
-                    identityName
-                | otherwise ->
-                    typeBinderIdentityStableName payloadIdentity
-              Nothing ->
-                identityName
+          payload = typeViewNamePayload oldName
+          identityName = typeBinderIdentityStableName payload
        in TypeViewName
             { typeViewNameDisplay = displayName,
-              typeViewNameIdentity = projectedIdentityName,
               typeViewNamePayload = payload,
               typeViewNameReferences =
                 Map.filterWithKey
                   (binderReferenceBelongsTo displayName identityName payload)
                   binderIdentities,
-              typeViewNameStructuralHeads = maybe Map.empty structuralHeadsForBinder payload
+              typeViewNameStructuralHeads = structuralHeadsForBinder payload
             }
 
     headReferenceBelongsTo displayName identityName payload name candidate =
       name == displayName
         || name == identityName
-        || maybe
-          False
-          ( \payloadIdentity ->
-              sameSymbolIdentity payloadIdentity candidate
-                || name `elem` symbolIdentityAliasNamesWith [displayName, identityName] payloadIdentity
-          )
-          payload
+        || sameSymbolIdentity payload candidate
+        || name `elem` symbolIdentityAliasNamesWith [displayName, identityName] payload
 
     binderReferenceBelongsTo displayName identityName payload name candidate =
       name == displayName
         || name == identityName
-        || maybe
-          False
-          ( \payloadIdentity ->
-              payloadIdentity == candidate
-                || name `elem` typeBinderIdentityAliasNames displayName payloadIdentity
-                || name `elem` typeBinderIdentityAliasNames identityName payloadIdentity
-          )
-          payload
+        || payload == candidate
+        || name `elem` typeBinderIdentityAliasNames displayName payload
+        || name `elem` typeBinderIdentityAliasNames identityName payload
 
     structuralHeadsForBinder binderIdentity =
       case typeBinderIdentityStructural binderIdentity of
         Just (unique, _) ->
           Map.filter ((== unique) . symbolUniqueIdentity) headIdentities
         Nothing -> Map.empty
-
-    stripContexts typeNode =
-      case typeNode of
-        TypeViewContextHead _ body -> stripContexts body
-        TypeViewContextBinder _ body -> stripContexts body
-        TypeViewArrow dom cod -> TypeViewArrow (stripContexts dom) (stripContexts cod)
-        TypeViewCon name args -> TypeViewCon name (fmap stripContexts args)
-        TypeViewVarApp name args -> TypeViewVarApp name (fmap stripContexts args)
-        TypeViewTyLam name body -> TypeViewTyLam name (stripContexts body)
-        TypeViewTyApp fun arg -> TypeViewTyApp (stripContexts fun) (stripContexts arg)
-        TypeViewForall name mbBound body -> TypeViewForall name (fmap stripContexts mbBound) (stripContexts body)
-        TypeViewMu name body -> TypeViewMu name (stripContexts body)
-        _ -> typeNode
 
     go typeNode =
       case typeNode of
@@ -1748,50 +1868,77 @@ annotateTypeViewType headIdentities binderIdentities =
         TypeViewContextBinder _ body -> go body
         TypeViewBottom -> TypeViewBottom
 
-    addContextReferences ty =
-      foldr addBinderContext (foldr addHeadContext ty remainingHeadIdentities) remainingBinderIdentities
-      where
-        projectedHeads = typeViewTypeHeadIdentities ty
-        projectedBinders = typeViewTypeBinderIdentities ty
-        remainingHeadReferences =
-          Map.filterWithKey
-            (\name candidate -> Map.lookup name projectedHeads /= Just candidate)
-            headIdentities
-        remainingBinderReferences =
-          Map.filterWithKey
-            (\name candidate -> Map.lookup name projectedBinders /= Just candidate)
-            binderIdentities
-        remainingHeadIdentities =
-          Map.elems
-            ( Map.fromList
-                [ (symbolIdentityPayloadKey candidate, candidate)
-                | candidate <- Map.elems remainingHeadReferences
-                ]
-            )
-        remainingBinderIdentities =
-          Set.toList (Set.fromList (Map.elems remainingBinderReferences))
+    addContextReferences =
+      addTypeViewIdentityContexts headIdentities binderIdentities
 
-        addHeadContext payloadIdentity body =
-          TypeViewContextHead
-            TypeViewName
-              { typeViewNameDisplay = symbolDefiningName payloadIdentity,
-                typeViewNameIdentity = symbolIdentityStableName payloadIdentity,
-                typeViewNamePayload = Just payloadIdentity,
-                typeViewNameReferences = Map.filter (sameSymbolIdentity payloadIdentity) remainingHeadReferences,
-                typeViewNameStructuralHeads = Map.empty
-              }
-            body
+-- | Retain aliases whose identities are not mentioned by the visible type.
+-- Build each identity's context node from a single grouping pass: filtering the
+-- complete alias map once per identity made large module finalization quadratic
+-- in the number of identities carried by the scope.
+addTypeViewIdentityContexts :: Map String SymbolIdentity -> Map String TypeBinderIdentity -> TypeViewType -> TypeViewType
+addTypeViewIdentityContexts headIdentities binderIdentities ty =
+  foldr addBinderContext (foldr addHeadContext ty (Map.elems remainingHeadGroups)) (Map.elems remainingBinderGroups)
+  where
+    projectedHeads = typeViewTypeHeadIdentities ty
+    projectedBinders = typeViewTypeBinderIdentities ty
 
-        addBinderContext payloadIdentity body =
-          TypeViewContextBinder
-            TypeViewName
-              { typeViewNameDisplay = typeBinderIdentityStableName payloadIdentity,
-                typeViewNameIdentity = typeBinderIdentityStableName payloadIdentity,
-                typeViewNamePayload = Just payloadIdentity,
-                typeViewNameReferences = Map.filter (== payloadIdentity) remainingBinderReferences,
-                typeViewNameStructuralHeads = Map.empty
-              }
-            body
+    remainingHeadReferences =
+      Map.filterWithKey
+        (\name candidate -> Map.lookup name projectedHeads /= Just candidate)
+        headIdentities
+    remainingBinderReferences =
+      Map.filterWithKey
+        (\name candidate -> Map.lookup name projectedBinders /= Just candidate)
+        binderIdentities
+
+    remainingHeadGroups =
+      Map.foldlWithKey'
+        (\groups name candidate ->
+            Map.insertWith
+              mergeHeadReferenceGroups
+              (symbolIdentityPayloadKey candidate)
+              (candidate, Map.singleton name candidate)
+              groups
+        )
+        Map.empty
+        remainingHeadReferences
+    remainingBinderGroups =
+      Map.foldlWithKey'
+        (\groups name candidate ->
+            Map.insertWith
+              mergeBinderReferenceGroups
+              candidate
+              (candidate, Map.singleton name candidate)
+              groups
+        )
+        Map.empty
+        remainingBinderReferences
+
+    mergeHeadReferenceGroups (newPayload, newReferences) (_, oldReferences) =
+      (newPayload, newReferences `Map.union` oldReferences)
+
+    mergeBinderReferenceGroups (newPayload, newReferences) (_, oldReferences) =
+      (newPayload, newReferences `Map.union` oldReferences)
+
+    addHeadContext (payloadIdentity, references) body =
+      TypeViewContextHead
+        TypeViewName
+          { typeViewNameDisplay = symbolDefiningName payloadIdentity,
+            typeViewNamePayload = payloadIdentity,
+            typeViewNameReferences = references,
+            typeViewNameStructuralHeads = Map.empty
+          }
+        body
+
+    addBinderContext (payloadIdentity, references) body =
+      TypeViewContextBinder
+        TypeViewName
+          { typeViewNameDisplay = typeBinderIdentityStableName payloadIdentity,
+            typeViewNamePayload = payloadIdentity,
+            typeViewNameReferences = references,
+            typeViewNameStructuralHeads = Map.empty
+          }
+        body
 
 typeViewTypeDisplay :: TypeViewType -> SrcType
 typeViewTypeDisplay ty =
@@ -1816,67 +1963,77 @@ typeViewTypeDisplay ty =
 typeViewTypeIdentity :: TypeViewType -> SrcType
 typeViewTypeIdentity ty =
   case ty of
-    TypeViewVar name -> STVar (typeViewNameIdentity name)
+    TypeViewVar name -> STVar (typeBinderIdentityStableName (typeViewNamePayload name))
     TypeViewArrow dom cod -> STArrow (typeViewTypeIdentity dom) (typeViewTypeIdentity cod)
-    TypeViewBase name -> STBase (typeViewNameIdentity name)
-    TypeViewCon name args -> STCon (typeViewNameIdentity name) (fmap typeViewTypeIdentity args)
-    TypeViewVarApp name args -> STVarApp (typeViewNameIdentity name) (fmap typeViewTypeIdentity args)
-    TypeViewTyLam name body -> STTyLam (typeViewNameIdentity name) (typeViewTypeIdentity body)
+    TypeViewBase name -> STBase (symbolIdentityStableName (typeViewNamePayload name))
+    TypeViewCon name args -> STCon (symbolIdentityStableName (typeViewNamePayload name)) (fmap typeViewTypeIdentity args)
+    TypeViewVarApp name args -> STVarApp (typeBinderIdentityStableName (typeViewNamePayload name)) (fmap typeViewTypeIdentity args)
+    TypeViewTyLam name body -> STTyLam (typeBinderIdentityStableName (typeViewNamePayload name)) (typeViewTypeIdentity body)
     TypeViewTyApp fun arg -> STTyApp (typeViewTypeIdentity fun) (typeViewTypeIdentity arg)
     TypeViewForall name mbBound body ->
       STForall
-        (typeViewNameIdentity name)
+        (typeBinderIdentityStableName (typeViewNamePayload name))
         (SrcBound . typeViewTypeIdentity <$> mbBound)
         (typeViewTypeIdentity body)
-    TypeViewMu name body -> STMu (typeViewNameIdentity name) (typeViewTypeIdentity body)
+    TypeViewMu name body -> STMu (typeBinderIdentityStableName (typeViewNamePayload name)) (typeViewTypeIdentity body)
     TypeViewContextHead _ body -> typeViewTypeIdentity body
     TypeViewContextBinder _ body -> typeViewTypeIdentity body
     TypeViewBottom -> STBottom
 
 typeViewTypeHeadIdentities :: TypeViewType -> Map String SymbolIdentity
 typeViewTypeHeadIdentities ty =
-  case ty of
-    TypeViewVar name -> structuralHeadIdentityMap name
-    TypeViewArrow dom cod -> mergeSymbolIdentityMaps [typeViewTypeHeadIdentities dom, typeViewTypeHeadIdentities cod]
-    TypeViewBase name -> headIdentityMap name
-    TypeViewCon name args -> mergeSymbolIdentityMaps (headIdentityMap name : map typeViewTypeHeadIdentities (NE.toList args))
-    TypeViewVarApp name args -> mergeSymbolIdentityMaps (structuralHeadIdentityMap name : map typeViewTypeHeadIdentities (NE.toList args))
-    TypeViewTyLam name body -> mergeSymbolIdentityMaps [structuralHeadIdentityMap name, typeViewTypeHeadIdentities body]
-    TypeViewTyApp fun arg -> mergeSymbolIdentityMaps [typeViewTypeHeadIdentities fun, typeViewTypeHeadIdentities arg]
-    TypeViewForall name mbBound body ->
-      mergeSymbolIdentityMaps
-        (structuralHeadIdentityMap name : typeViewTypeHeadIdentities body : maybe [] (pure . typeViewTypeHeadIdentities) mbBound)
-    TypeViewMu name body -> mergeSymbolIdentityMaps [structuralHeadIdentityMap name, typeViewTypeHeadIdentities body]
-    TypeViewContextHead name body -> mergeSymbolIdentityMaps [headIdentityMap name, typeViewTypeHeadIdentities body]
-    TypeViewContextBinder name body -> mergeSymbolIdentityMaps [structuralHeadIdentityMap name, typeViewTypeHeadIdentities body]
-    TypeViewBottom -> Map.empty
+  mergeSymbolIdentityMaps (collectIdentityMaps ty [])
   where
+    collectIdentityMaps typeNode rest =
+      case typeNode of
+        TypeViewVar name -> structuralHeadIdentityMap name : rest
+        TypeViewArrow dom cod -> collectIdentityMaps dom (collectIdentityMaps cod rest)
+        TypeViewBase name -> headIdentityMap name : rest
+        TypeViewCon name args -> headIdentityMap name : foldr collectIdentityMaps rest (NE.toList args)
+        TypeViewVarApp name args -> structuralHeadIdentityMap name : foldr collectIdentityMaps rest (NE.toList args)
+        TypeViewTyLam name body -> structuralHeadIdentityMap name : collectIdentityMaps body rest
+        TypeViewTyApp fun arg -> collectIdentityMaps fun (collectIdentityMaps arg rest)
+        TypeViewForall name mbBound body ->
+          structuralHeadIdentityMap name
+            : collectIdentityMaps body (maybe rest (\bound -> collectIdentityMaps bound rest) mbBound)
+        TypeViewMu name body -> structuralHeadIdentityMap name : collectIdentityMaps body rest
+        TypeViewContextHead name body -> headIdentityMap name : collectIdentityMaps body rest
+        TypeViewContextBinder name body -> structuralHeadIdentityMap name : collectIdentityMaps body rest
+        TypeViewBottom -> rest
+
     headIdentityMap name =
-      typeViewNameReferences name
+      Map.insert (typeViewNameDisplay name) (typeViewNamePayload name)
+        . Map.insert (symbolIdentityStableName (typeViewNamePayload name)) (typeViewNamePayload name)
+        $ typeViewNameReferences name
 
     structuralHeadIdentityMap name =
       typeViewNameStructuralHeads name
 
 typeViewTypeBinderIdentities :: TypeViewType -> Map String TypeBinderIdentity
 typeViewTypeBinderIdentities ty =
-  case ty of
-    TypeViewVar name -> binderIdentityMap name
-    TypeViewArrow dom cod -> mergeTypeBinderIdentityMaps [typeViewTypeBinderIdentities dom, typeViewTypeBinderIdentities cod]
-    TypeViewBase {} -> Map.empty
-    TypeViewCon _ args -> mergeTypeBinderIdentityMaps (map typeViewTypeBinderIdentities (NE.toList args))
-    TypeViewVarApp name args -> mergeTypeBinderIdentityMaps (binderIdentityMap name : map typeViewTypeBinderIdentities (NE.toList args))
-    TypeViewTyLam name body -> mergeTypeBinderIdentityMaps [binderIdentityMap name, typeViewTypeBinderIdentities body]
-    TypeViewTyApp fun arg -> mergeTypeBinderIdentityMaps [typeViewTypeBinderIdentities fun, typeViewTypeBinderIdentities arg]
-    TypeViewForall name mbBound body ->
-      mergeTypeBinderIdentityMaps
-        (binderIdentityMap name : typeViewTypeBinderIdentities body : maybe [] (pure . typeViewTypeBinderIdentities) mbBound)
-    TypeViewMu name body -> mergeTypeBinderIdentityMaps [binderIdentityMap name, typeViewTypeBinderIdentities body]
-    TypeViewContextHead _ body -> typeViewTypeBinderIdentities body
-    TypeViewContextBinder name body -> mergeTypeBinderIdentityMaps [binderIdentityMap name, typeViewTypeBinderIdentities body]
-    TypeViewBottom -> Map.empty
+  mergeTypeBinderIdentityMaps (collectIdentityMaps ty [])
   where
+    collectIdentityMaps typeNode rest =
+      case typeNode of
+        TypeViewVar name -> binderIdentityMap name : rest
+        TypeViewArrow dom cod -> collectIdentityMaps dom (collectIdentityMaps cod rest)
+        TypeViewBase {} -> rest
+        TypeViewCon _ args -> foldr collectIdentityMaps rest (NE.toList args)
+        TypeViewVarApp name args -> binderIdentityMap name : foldr collectIdentityMaps rest (NE.toList args)
+        TypeViewTyLam name body -> binderIdentityMap name : collectIdentityMaps body rest
+        TypeViewTyApp fun arg -> collectIdentityMaps fun (collectIdentityMaps arg rest)
+        TypeViewForall name mbBound body ->
+          binderIdentityMap name
+            : collectIdentityMaps body (maybe rest (\bound -> collectIdentityMaps bound rest) mbBound)
+        TypeViewMu name body -> binderIdentityMap name : collectIdentityMaps body rest
+        TypeViewContextHead _ body -> collectIdentityMaps body rest
+        TypeViewContextBinder name body -> binderIdentityMap name : collectIdentityMaps body rest
+        TypeViewBottom -> rest
+
     binderIdentityMap name =
-      typeViewNameReferences name
+      Map.insert (typeViewNameDisplay name) (typeViewNamePayload name)
+        . Map.insert (typeBinderIdentityStableName (typeViewNamePayload name)) (typeViewNamePayload name)
+        $ typeViewNameReferences name
 
 instance Eq TypeView where
   left == right =
@@ -1884,112 +2041,52 @@ instance Eq TypeView where
       && typeViewHeadIdentitySet left == typeViewHeadIdentitySet right
       && typeViewBinderIdentitySet left == typeViewBinderIdentitySet right
 
-data TypeViewIdentityGap
-  = MissingTypeHeadIdentity String
-  | MissingTypeBinderIdentity String
-  deriving (Eq, Ord, Show)
-
-typeViewIdentityGaps :: TypeView -> [TypeViewIdentityGap]
-typeViewIdentityGaps (TypeViewNode ty) =
-  nub (go ty)
-  where
-    go typeNode =
-      case typeNode of
-        TypeViewVar name -> requireBinder name
-        TypeViewArrow dom cod -> go dom ++ go cod
-        TypeViewBase name -> requireHead name
-        TypeViewCon name args -> requireHead name ++ foldMap go args
-        TypeViewVarApp name args -> requireBinder name ++ foldMap go args
-        TypeViewTyLam name body -> requireBinder name ++ go body
-        TypeViewTyApp fun arg -> go fun ++ go arg
-        TypeViewForall name mbBound body -> requireBinder name ++ maybe [] go mbBound ++ go body
-        TypeViewMu name body -> requireBinder name ++ go body
-        TypeViewContextHead name body -> requireHead name ++ go body
-        TypeViewContextBinder name body -> requireBinder name ++ go body
-        TypeViewBottom -> []
-
-    requireHead name =
-      case typeViewNamePayload name of
-        Just _ -> []
-        Nothing -> [MissingTypeHeadIdentity (typeViewNameIdentity name)]
-
-    requireBinder name =
-      case typeViewNamePayload name of
-        Just _ -> []
-        Nothing -> [MissingTypeBinderIdentity (typeViewNameIdentity name)]
-
-typeViewIdentityComplete :: TypeView -> Bool
-typeViewIdentityComplete =
-  null . typeViewIdentityGaps
-
 typeViewIdentityTypesMatch :: TypeView -> TypeView -> Bool
-typeViewIdentityTypesMatch leftView rightView =
-  go Map.empty Map.empty (typeViewIdentity leftView) (typeViewIdentity rightView)
+typeViewIdentityTypesMatch (TypeViewNode leftType) (TypeViewNode rightType) =
+  go leftType rightType
   where
-    go leftNames rightNames left right =
-      case (left, right) of
-        (STVar leftName, STVar rightName) ->
-          sameTypeVar leftNames rightNames leftName rightName
-        (STArrow leftDom leftCod, STArrow rightDom rightCod) ->
-          go leftNames rightNames leftDom rightDom
-            && go leftNames rightNames leftCod rightCod
-        (STBase leftName, STBase rightName) ->
-          sameTypeHead leftName rightName
-        (STCon leftName leftArgs, STCon rightName rightArgs) ->
-          sameTypeHead leftName rightName
+    go left right =
+      case (dropTypeViewContexts left, dropTypeViewContexts right) of
+        (TypeViewVar leftName, TypeViewVar rightName) ->
+          sameBinder leftName rightName
+        (TypeViewArrow leftDom leftCod, TypeViewArrow rightDom rightCod) ->
+          go leftDom rightDom && go leftCod rightCod
+        (TypeViewBase leftName, TypeViewBase rightName) ->
+          sameHead leftName rightName
+        (TypeViewCon leftName leftArgs, TypeViewCon rightName rightArgs) ->
+          sameHead leftName rightName
             && length (NE.toList leftArgs) == length (NE.toList rightArgs)
-            && and (zipWith (go leftNames rightNames) (NE.toList leftArgs) (NE.toList rightArgs))
-        (STVarApp leftName leftArgs, STVarApp rightName rightArgs) ->
-          sameTypeVar leftNames rightNames leftName rightName
+            && and (zipWith go (NE.toList leftArgs) (NE.toList rightArgs))
+        (TypeViewVarApp leftName leftArgs, TypeViewVarApp rightName rightArgs) ->
+          sameBinder leftName rightName
             && length (NE.toList leftArgs) == length (NE.toList rightArgs)
-            && and (zipWith (go leftNames rightNames) (NE.toList leftArgs) (NE.toList rightArgs))
-        (STTyLam leftName leftBody, STTyLam rightName rightBody) ->
-          maybe False (\(leftNames', rightNames') -> go leftNames' rightNames' leftBody rightBody) (bindTypeVars leftNames rightNames leftName rightName)
-        (STTyApp leftFun leftArg, STTyApp rightFun rightArg) ->
-          go leftNames rightNames leftFun rightFun
-            && go leftNames rightNames leftArg rightArg
-        (STForall leftName leftMb leftBody, STForall rightName rightMb rightBody) ->
-          case bindTypeVars leftNames rightNames leftName rightName of
-            Just (leftNames', rightNames') ->
-              sameBounds leftNames' rightNames' leftMb rightMb
-                && go leftNames' rightNames' leftBody rightBody
-            Nothing ->
-              False
-        (STMu leftName leftBody, STMu rightName rightBody) ->
-          maybe False (\(leftNames', rightNames') -> go leftNames' rightNames' leftBody rightBody) (bindTypeVars leftNames rightNames leftName rightName)
-        (STBottom, STBottom) ->
+            && and (zipWith go (NE.toList leftArgs) (NE.toList rightArgs))
+        (TypeViewTyLam leftName leftBody, TypeViewTyLam rightName rightBody) ->
+          sameBinder leftName rightName && go leftBody rightBody
+        (TypeViewTyApp leftFun leftArg, TypeViewTyApp rightFun rightArg) ->
+          go leftFun rightFun && go leftArg rightArg
+        (TypeViewForall leftName leftBound leftBody, TypeViewForall rightName rightBound rightBody) ->
+          sameBinder leftName rightName
+            && sameBounds leftBound rightBound
+            && go leftBody rightBody
+        (TypeViewMu leftName leftBody, TypeViewMu rightName rightBody) ->
+          sameBinder leftName rightName && go leftBody rightBody
+        (TypeViewBottom, TypeViewBottom) ->
           True
         _ ->
           False
 
-    sameBounds _ _ Nothing Nothing = True
-    sameBounds leftNames rightNames (Just (SrcBound leftBound)) (Just (SrcBound rightBound)) =
-      go leftNames rightNames leftBound rightBound
-    sameBounds _ _ _ _ = False
+    sameBounds Nothing Nothing = True
+    sameBounds (Just leftBound) (Just rightBound) = go leftBound rightBound
+    sameBounds _ _ = False
 
-    bindTypeVars leftNames rightNames leftName rightName
-      | sameFreeTypeVar leftName rightName =
-          Just (Map.insert leftName rightName leftNames, Map.insert rightName leftName rightNames)
-      | otherwise =
-          Nothing
+    sameBinder leftName rightName =
+      typeViewNamePayload leftName == typeViewNamePayload rightName
 
-    sameTypeVar leftNames rightNames leftName rightName =
-      case (Map.lookup leftName leftNames, Map.lookup rightName rightNames) of
-        (Just mappedRight, Just mappedLeft) -> mappedRight == rightName && mappedLeft == leftName
-        (Nothing, Nothing) -> sameFreeTypeVar leftName rightName
-        _ -> False
-
-    sameFreeTypeVar leftName rightName =
-      case (typeViewBinderIdentityForAlias leftView leftName, typeViewBinderIdentityForAlias rightView rightName) of
-        (Just leftIdentity, Just rightIdentity) -> leftIdentity == rightIdentity
-        (Nothing, Nothing) -> leftName == rightName
-        _ -> False
-
-    sameTypeHead leftName rightName =
-      case (typeViewHeadIdentityForAlias leftView leftName, typeViewHeadIdentityForAlias rightView rightName) of
-        (Just leftIdentity, Just rightIdentity) -> sameSymbolIdentity leftIdentity rightIdentity
-        (Nothing, Nothing) -> leftName == rightName
-        _ -> False
+    sameHead leftName rightName =
+      sameSymbolIdentity
+        (typeViewNamePayload leftName)
+        (typeViewNamePayload rightName)
 
 typeViewHeadIdentitySet :: TypeView -> Set SymbolIdentityPayloadKey
 typeViewHeadIdentitySet =
@@ -2010,56 +2107,37 @@ typeViewBinderIdentityFor view name =
 typeViewHeadIdentityForAlias :: TypeView -> String -> Maybe SymbolIdentity
 typeViewHeadIdentityForAlias view name =
   typeViewHeadIdentityFor view name
-    <|> (Map.lookup name (typeViewHeadPairs view) >>= typeViewHeadIdentityFor view)
-    <|> (Map.lookup name (typeViewReverseHeadPairs view) >>= typeViewHeadIdentityFor view)
-    <|> Map.lookup name (typeViewHeadStableAliases view)
+    <|> lookupSymbolIdentityAlias (typeViewHeadIdentities view) name
 
 typeViewBinderIdentityForAlias :: TypeView -> String -> Maybe TypeBinderIdentity
 typeViewBinderIdentityForAlias view name =
   typeViewBinderIdentityFor view name
-    <|> (Map.lookup name (typeViewVarPairs view) >>= typeViewBinderIdentityFor view)
-    <|> (Map.lookup name (typeViewReverseVarPairs view) >>= typeViewBinderIdentityFor view)
-    <|> Map.lookup name (typeViewBinderStableAliases view)
-
-typeViewHeadStableAliases :: TypeView -> Map String SymbolIdentity
-typeViewHeadStableAliases =
-  symbolIdentityAliasMap
-    . Map.elems
-    . typeViewHeadIdentities
+    <|> lookupTypeBinderIdentityAlias (typeViewBinderIdentities view) name
 
 typeViewHeadIdentityLookupAliases :: TypeView -> Map String SymbolIdentity
 typeViewHeadIdentityLookupAliases view =
-  mergeSymbolIdentityMaps [typeViewHeadIdentities view, aliases, pairedAliases]
+  mergeSymbolIdentityMaps [identities, symbolIdentityAliasMap (Map.elems identities)]
   where
-    aliases =
-      symbolIdentityAliasMap (Map.elems (typeViewHeadIdentities view))
-
-    pairedAliases =
-      Map.fromList
-        [ (name, identity)
-        | name <- Set.toList mentionedHeadNames,
-          Just identity <- [typeViewHeadIdentityForAlias view name]
-        ]
-
-    mentionedHeadNames =
-      typeHeadNamesSrcType (typeViewIdentity view)
-        <> typeHeadNamesSrcType (typeViewDisplay view)
-
-typeViewBinderStableAliases :: TypeView -> Map String TypeBinderIdentity
-typeViewBinderStableAliases =
-  typeBinderAliasIdentityMap . Map.toList . typeViewBinderIdentities
+    identities = typeViewHeadIdentities view
 
 typeViewMentionedHeadIdentities :: TypeView -> Set SymbolIdentity
-typeViewMentionedHeadIdentities view =
-  Set.fromList
-    [ identity
-    | name <- Set.toList headNames,
-      Just identity <- [typeViewHeadIdentityForAlias view name]
-    ]
+typeViewMentionedHeadIdentities (TypeViewNode ty) =
+  go ty
   where
-    headNames =
-      typeHeadNamesSrcType (typeViewIdentity view)
-        <> typeHeadNamesSrcType (typeViewDisplay view)
+    go typeNode =
+      case typeNode of
+        TypeViewVar {} -> Set.empty
+        TypeViewArrow dom cod -> go dom <> go cod
+        TypeViewBase name -> Set.singleton (typeViewNamePayload name)
+        TypeViewCon name args -> Set.insert (typeViewNamePayload name) (foldMap go args)
+        TypeViewVarApp _ args -> foldMap go args
+        TypeViewTyLam _ body -> go body
+        TypeViewTyApp fun arg -> go fun <> go arg
+        TypeViewForall _ mbBound body -> foldMap go mbBound <> go body
+        TypeViewMu _ body -> go body
+        TypeViewContextHead _ body -> go body
+        TypeViewContextBinder _ body -> go body
+        TypeViewBottom -> Set.empty
 
 type TypeViewSubst = Map TypeBinderIdentity TypeView
 
@@ -2111,13 +2189,6 @@ evidenceMethodKey :: SymbolIdentity -> NonEmpty TypeView -> SymbolIdentity -> Ev
 evidenceMethodKey classIdentity views =
   EvidenceMethodKey (classApplicationKey classIdentity views)
 
-constraintMetadataMatches :: [P.ClassConstraint] -> [ConstraintInfo] -> [P.ClassConstraint] -> [ConstraintInfo] -> Bool
-constraintMetadataMatches leftDisplay leftInfos rightDisplay rightInfos
-  | not (null leftInfos) || not (null rightInfos) =
-      leftInfos == rightInfos
-  | otherwise =
-      leftDisplay == rightDisplay
-
 typeViewGeneratedIdentities :: TypeView -> [UniqueIdentity]
 typeViewGeneratedIdentities view =
   concatMap symbolGeneratedIdentities uniqueHeads
@@ -2136,7 +2207,7 @@ typeViewGeneratedIdentities view =
 typeBinderSubstGeneratedIdentities :: TypeBinderSubst -> [UniqueIdentity]
 typeBinderSubstGeneratedIdentities subst =
   concatMap typeBinderGeneratedIdentities (Map.keys (typeBinderSubstByIdentity subst))
-    ++ concatMap (typeViewGeneratedIdentities . snd) (Map.elems (typeBinderSubstByIdentity subst))
+    ++ concatMap typeViewGeneratedIdentities (Map.elems (typeBinderSubstByIdentity subst))
 
 constraintInfoGeneratedIdentities :: ConstraintInfo -> [UniqueIdentity]
 constraintInfoGeneratedIdentities constraint =
@@ -2146,6 +2217,136 @@ constraintInfoGeneratedIdentities constraint =
 typeViewFromResolved :: ResolvedSrcType -> TypeView
 typeViewFromResolved =
   TypeViewNode . resolvedSrcTypeViewType
+
+typeViewFromElabType :: X.Ty v -> TypeView
+typeViewFromElabType =
+  TypeViewNode . go
+  where
+    go :: X.Ty a -> TypeViewType
+    go ty =
+      case ty of
+        X.TVarRef ref -> TypeViewVar (binderName ref)
+        X.TArrow dom cod -> TypeViewArrow (go dom) (go cod)
+        X.TBaseWithIdentity identity (BaseTy name) -> TypeViewBase (headName identity name)
+        X.TConWithIdentity identity (BaseTy name) args ->
+          TypeViewCon (headName identity name) (fmap go args)
+        X.TVarAppRef ref args -> TypeViewVarApp (binderName ref) (fmap go args)
+        X.TForallRef ref mbBound body ->
+          TypeViewForall (binderName ref) (fmap go mbBound) (go body)
+        X.TMuRef ref body -> TypeViewMu (binderName ref) (go body)
+        X.TBottom -> TypeViewBottom
+
+    binderName ref =
+      let identity = X.typeBinderRefIdentity ref
+          displayName = X.typeBinderRefName ref
+       in TypeViewName
+            { typeViewNameDisplay = displayName,
+              typeViewNamePayload = identity,
+              typeViewNameReferences =
+                typeBinderAliasIdentityMap [(displayName, identity)],
+              typeViewNameStructuralHeads = Map.empty
+            }
+
+    headName identity displayName =
+      TypeViewName
+        { typeViewNameDisplay = displayName,
+          typeViewNamePayload = identity,
+          typeViewNameReferences =
+            symbolIdentityAliasMapWith [(identity, [displayName])],
+          typeViewNameStructuralHeads = Map.empty
+        }
+
+-- | Project the identity-bearing source type directly from the node tree.
+-- Context nodes retain identities for later projections but do not add syntax.
+typeViewToResolved :: TypeView -> ResolvedSrcType
+typeViewToResolved (TypeViewNode ty) =
+  go ty
+  where
+    go typeNode =
+      case typeNode of
+        TypeViewVar name -> RSTVar (resolvedBinder name)
+        TypeViewArrow dom cod -> RSTArrow (go dom) (go cod)
+        TypeViewBase name -> RSTBase (resolvedHead name)
+        TypeViewCon name args -> RSTCon (resolvedHead name) (fmap go args)
+        TypeViewVarApp name args -> RSTVarApp (resolvedBinder name) (fmap go args)
+        TypeViewTyLam name body -> RSTTyLam (resolvedBinder name) (go body)
+        TypeViewTyApp fun arg -> RSTTyApp (go fun) (go arg)
+        TypeViewForall name mbBound body ->
+          RSTForall
+            (resolvedBinder name)
+            (ResolvedSrcBound . go <$> mbBound)
+            (go body)
+        TypeViewMu name body -> RSTMu (resolvedBinder name) (go body)
+        TypeViewContextHead _ body -> go body
+        TypeViewContextBinder _ body -> go body
+        TypeViewBottom -> RSTBottom
+
+    resolvedBinder name =
+      resolvedTypeBinderRefFromIdentity
+        (typeViewNamePayload name)
+        (typeViewNameDisplay name)
+
+    resolvedHead name =
+      let identity = typeViewNamePayload name
+          displayName = typeViewNameDisplay name
+       in mkResolvedSymbol
+            identity
+            displayName
+            displayName
+            (SymbolLocal (symbolDefiningModule identity))
+
+-- | Convert an identity-bearing source type to the elaborator's type tree.
+-- No binder is looked up by spelling and no fresh identity is allocated.
+-- Compiler-owned exact annotations and program finalization share this bridge
+-- so their treatment of bounds cannot drift.
+resolvedSourceTypeToElabType :: ResolvedSrcType -> Either String ElabType
+resolvedSourceTypeToElabType = go
+  where
+    go ty =
+      case ty of
+        RSTVar ref ->
+          Right (X.TVarRef (elabBinderRef ref))
+        RSTArrow dom cod ->
+          X.TArrow <$> go dom <*> go cod
+        RSTBase symbol ->
+          Right
+            ( X.TBaseWithIdentity
+                (resolvedSymbolIdentity symbol)
+                (BaseTy (PrimitiveInventory.normalizeBuiltinTypeReference (resolvedHeadDisplay symbol)))
+            )
+        RSTCon symbol args ->
+          X.TConWithIdentity
+            (resolvedSymbolIdentity symbol)
+            (BaseTy (PrimitiveInventory.normalizeBuiltinTypeReference (resolvedHeadDisplay symbol)))
+            <$> traverse go args
+        RSTVarApp ref args ->
+          X.TVarAppRef (elabBinderRef ref) <$> traverse go args
+        RSTForall ref mbBound body -> do
+          elabBound <- maybe (Right Nothing) resolvedBoundToElabBound mbBound
+          X.TForallRef (elabBinderRef ref) elabBound <$> go body
+        RSTMu ref body ->
+          X.TMuRef (elabBinderRef ref) <$> go body
+        RSTTyLam {} ->
+          Left "residual type lambda reached identity-bearing type conversion"
+        RSTTyApp {} ->
+          Left "residual type application reached identity-bearing type conversion"
+        RSTBottom ->
+          Right X.TBottom
+
+    resolvedBoundToElabBound (ResolvedSrcBound boundTy) = do
+      elabTy <- go boundTy
+      case elabTy of
+        X.TVarRef {} -> Right Nothing
+        X.TBottom -> Right Nothing
+        _ -> Just <$> X.elabToBound elabTy
+
+    elabBinderRef ref =
+      X.typeBinderRefFromIdentity
+        (resolvedTypeBinderIdentity ref)
+        (resolvedTypeBinderName ref)
+
+    resolvedHeadDisplay =
+      symbolDisplayName . resolvedSymbolSpelling
 
 resolvedSrcTypeViewType :: ResolvedSrcTy n v -> TypeViewType
 resolvedSrcTypeViewType ty =
@@ -2169,8 +2370,7 @@ resolvedSrcTypeViewType ty =
       let identity = resolvedTypeBinderTypeIdentity ref
        in TypeViewName
             { typeViewNameDisplay = resolvedTypeBinderName ref,
-              typeViewNameIdentity = typeBinderIdentityStableName identity,
-              typeViewNamePayload = Just identity,
+              typeViewNamePayload = identity,
               typeViewNameReferences =
                 Map.fromList
                   [ (alias, identity)
@@ -2185,14 +2385,10 @@ resolvedSrcTypeViewType ty =
       let identity = resolvedSymbolIdentity symbol
           spelling = resolvedSymbolSpelling symbol
           displayName = symbolDisplayName spelling
-          identityName =
-            case symbolNamespace identity of
-              SymbolType -> symbolIdentityStableName identity
-              _ -> displayName
+          identityName = symbolIdentityStableName identity
        in TypeViewName
             { typeViewNameDisplay = displayName,
-              typeViewNameIdentity = identityName,
-              typeViewNamePayload = Just identity,
+              typeViewNamePayload = identity,
               typeViewNameReferences =
                 Map.fromList
                   [ (alias, identity)
@@ -2211,46 +2407,34 @@ displayConstraint constraint =
 constrainedVisibleTypeView :: [ConstraintInfo] -> TypeView -> TypeView
 constrainedVisibleTypeView [] bodyView = bodyView
 constrainedVisibleTypeView constraints bodyView =
-  typeViewQuantifyNames binderPairs viewWithConstraintIdentities
+  typeViewQuantifyBinders binderPairs viewWithConstraintIdentities
   where
     constraintViews = concatMap (NE.toList . constraintTypeViews) constraints
     allViews = bodyView : constraintViews
     viewWithConstraintIdentities =
-      typeViewWithIdentityMaps
+      typeViewWithIdentityAliases
         (mergeSymbolIdentityMaps (map typeViewHeadIdentities allViews))
         (mergeTypeBinderIdentityMaps (map typeViewBinderIdentities allViews))
         bodyView
-    identityNames =
+    freeBinderIdentities =
       sort . Set.toList . Set.unions $
-        map (freeTypeVarsSrcType . typeViewIdentity) allViews
-    displayNamesByIdentityName =
-      mergeUniquePairMaps (map typeViewVarPairs allViews)
+        map freeTypeBinderIdentitiesTypeView allViews
+    displayNamesByIdentity =
+      mergeUniquePairMaps (map freeTypeBinderDisplayNamesTypeView allViews)
     binderPairs =
-      [ (Map.findWithDefault identityName identityName displayNamesByIdentityName, identityName)
-      | identityName <- identityNames
+      [ ( Map.findWithDefault
+            (typeBinderIdentityStableName identity)
+            identity
+            displayNamesByIdentity,
+          identity
+        )
+      | identity <- freeBinderIdentities
       ]
 
 applyTypeViewSubst :: TypeViewSubst -> TypeView -> TypeView
-applyTypeViewSubst subst view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps
-    (filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities)
-    ( filterBinderIdentitiesByTypeNames
-        displayTy
-        identityTy
-        substitutedBinderIdentityAliases
-        substitutedBinderIdentities
-    )
-    (TypeViewNode substitutedTy)
-  where
-    substitutedTy = substituteTypeViewType subst sourceTy
-    displayTy = typeViewTypeDisplay substitutedTy
-    identityTy = typeViewTypeIdentity substitutedTy
-    substitutedHeadIdentities =
-      mergeSymbolIdentityMaps (typeViewHeadIdentities view : map typeViewHeadIdentities (Map.elems subst))
-    substitutedBinderIdentities =
-      mergeTypeBinderIdentityMaps (typeViewBinderIdentities view : map typeViewBinderIdentities (Map.elems subst))
-    substitutedBinderIdentityAliases =
-      concatMap typeViewBinderIdentityAliasEntries (view : Map.elems subst)
+applyTypeViewSubst subst (TypeViewNode sourceTy) =
+  rebuildTypeViewAliases
+    (stripTypeViewContexts (substituteTypeViewType subst sourceTy))
 
 substituteTypeViewType :: TypeViewSubst -> TypeViewType -> TypeViewType
 substituteTypeViewType subst = go Set.empty
@@ -2288,16 +2472,16 @@ substituteTypeViewType subst = go Set.empty
         TypeViewBottom ->
           TypeViewBottom
 
-    replacementFor bound name = do
-      identity <- typeViewNamePayload name
-      if Set.member identity bound
+    replacementFor bound name =
+      let identity = typeViewNamePayload name
+       in if Set.member identity bound
         then Nothing
         else do
           TypeViewNode replacement <- Map.lookup identity subst
           pure replacement
 
     bindName bound name =
-      maybe bound (`Set.insert` bound) (typeViewNamePayload name)
+      Set.insert (typeViewNamePayload name) bound
 
 applyTypeViewHead :: TypeViewType -> NonEmpty TypeViewType -> Maybe TypeViewType
 applyTypeViewHead headTy args =
@@ -2317,121 +2501,11 @@ applyTypeViewHead headTy args =
     _ ->
       Nothing
 
-filterHeadIdentitiesByNames :: Set String -> Map String SymbolIdentity -> Map String SymbolIdentity
-filterHeadIdentitiesByNames names identities =
-  mergeSymbolIdentityMaps [keptRaw, rescuedStable]
-  where
-    identityByName =
-      symbolIdentityAliasMapWith [(identity, [key]) | (key, identity) <- Map.toList identities]
-
-    keptRaw =
-      Map.filterWithKey keep identities
-
-    rescuedStable =
-      mergeSymbolIdentityMaps
-        [ Map.singleton stableName identity
-        | (key, identity) <- Map.toList identities,
-          not (keep key identity),
-          let stableName = symbolIdentityStableName identity,
-          Set.member stableName names,
-          Map.lookup stableName identityByName == Just identity
-        ]
-
-    keep key identity =
-      Map.lookup key identityByName == Just identity && mentioned identity
-
-    mentioned identity =
-      any (\name -> Map.lookup name identityByName == Just identity) (Set.toList names)
-
-filterHeadIdentitiesByTypeNames :: SrcType -> SrcType -> Map String SymbolIdentity -> Map String SymbolIdentity
-filterHeadIdentitiesByTypeNames displayTy identityTy identities =
-  mergeSymbolIdentityMaps [filtered, pairedDisplayAliases]
-  where
-    names =
-      typeHeadNamesSrcType identityTy <> typeHeadNamesSrcType displayTy
-
-    filtered =
-      filterHeadIdentitiesByNames names identities
-
-    filteredAliases =
-      symbolIdentityAliasMap (Map.elems filtered)
-
-    lookupFiltered name =
-      Map.lookup name filtered <|> Map.lookup name filteredAliases
-
-    pairedDisplayAliases =
-      mergeSymbolIdentityMaps
-        [ Map.singleton displayName identity
-        | (identityName, displayName) <- Map.toList (srcTypeHeadPairs displayTy identityTy),
-          displayName /= identityName,
-          Set.member displayName names,
-          Just identity <- [lookupFiltered identityName]
-        ]
-
-filterBinderIdentitiesByNames :: Set String -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
-filterBinderIdentitiesByNames names aliases identities =
-  mergeTypeBinderIdentityMaps [keptRaw, rescuedStable]
-  where
-    identityByName =
-      mergeTypeBinderIdentityMaps
-        [ Map.singleton name identity
-        | (name, identity) <- aliases
-        ]
-
-    keptRaw =
-      Map.filterWithKey keep identities
-
-    rescuedStable =
-      mergeTypeBinderIdentityMaps
-        [ Map.singleton stableName identity
-        | (key, identity) <- Map.toList identities,
-          not (keep key identity),
-          let stableName = typeBinderIdentityStableName identity,
-          Set.member stableName names,
-          Map.lookup stableName identityByName == Just identity
-        ]
-
-    keep key identity =
-      Map.lookup key identityByName == Just identity && mentioned identity
-
-    mentioned identity =
-      any (\name -> Map.lookup name identityByName == Just identity) (Set.toList names)
-
-filterBinderIdentitiesByTypeNames :: SrcType -> SrcType -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
-filterBinderIdentitiesByTypeNames displayTy identityTy =
-  filterBinderIdentitiesByNames names
-  where
-    names =
-      typeBinderNamesSrcType displayTy <> typeBinderNamesSrcType identityTy
-
-filterBinderIdentitiesByProjectedTypeNames :: TypeView -> SrcType -> SrcType -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
-filterBinderIdentitiesByProjectedTypeNames view displayTy identityTy =
-  filterBinderIdentitiesByNames names
-  where
-    names =
-      leadingTypeBinderNamesSrcType (typeViewDisplay view)
-        <> leadingTypeBinderNamesSrcType (typeViewIdentity view)
-        <> typeBinderNamesSrcType displayTy
-        <> typeBinderNamesSrcType identityTy
-
 typeViewBinderIdentityAliasEntries :: TypeView -> [(String, TypeBinderIdentity)]
 typeViewBinderIdentityAliasEntries view =
-  Map.toList (mergeTypeBinderIdentityMaps [directAliases, pairedAliases])
+  Map.toList (mergeTypeBinderIdentityMaps [identities, typeBinderIdentityAliasMap (Map.toList identities)])
   where
-    identities =
-      typeViewBinderIdentities view
-
-    directAliases =
-      typeBinderIdentityAliasMap (Map.toList identities)
-
-    pairedAliases =
-      mergeTypeBinderIdentityMaps
-        [ Map.singleton alias identity
-        | (identityName, displayName) <- Map.toList (typeViewBinderPairs view)
-        , (alias, identity) <-
-            maybe [] (\identity -> [(displayName, identity)]) (lookupTypeBinderIdentityAlias identities identityName)
-              ++ maybe [] (\identity -> [(identityName, identity)]) (lookupTypeBinderIdentityAlias identities displayName)
-        ]
+    identities = typeViewBinderIdentities view
 
 mergeSymbolIdentityMaps :: [Map String SymbolIdentity] -> Map String SymbolIdentity
 mergeSymbolIdentityMaps maps =
@@ -2491,91 +2565,11 @@ typeViewSubstKeyDisplayNames view identity =
 
 typeViewSubstDisplayNames :: TypeView -> TypeBinderIdentity -> Set String
 typeViewSubstDisplayNames view identity =
-  Set.fromList
-    [ name
-    | name <-
-        Set.toList binderNames
-          ++ [ displayName
-             | (identityName, displayName) <- Map.toList (typeViewVarPairs view),
-               Set.member identityName binderNames || Set.member displayName binderNames
-             ],
-      typeViewBinderIdentityForAlias view name == Just identity
-    ]
-  where
-    binderNames =
-      typeViewSubstBinderNames view identity
+  typeViewSubstBinderNames view identity
 
 typeViewSubstBinderNames :: TypeView -> TypeBinderIdentity -> Set String
 typeViewSubstBinderNames view identity =
   Map.keysSet (Map.filter (== identity) (typeViewBinderIdentities view))
-
-typeViewVarPairs :: TypeView -> Map String String
-typeViewVarPairs view =
-  srcTypeVarPairs (typeViewDisplay view) (typeViewIdentity view)
-
-typeViewBinderPairs :: TypeView -> Map String String
-typeViewBinderPairs view =
-  mergeUniquePairMaps [typeViewVarPairs view, boundBinderPairs (typeViewDisplay view) (typeViewIdentity view)]
-  where
-    boundBinderPairs display identityTy =
-      case (display, identityTy) of
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          mergeUniquePairMaps [boundBinderPairs displayDom identityDom, boundBinderPairs displayCod identityCod]
-        (STCon _ displayArgs, STCon _ identityArgs) ->
-          pairsFromArgs displayArgs identityArgs
-        (STVarApp _ displayArgs, STVarApp _ identityArgs) ->
-          pairsFromArgs displayArgs identityArgs
-        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
-          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          mergeUniquePairMaps [boundBinderPairs displayFun identityFun, boundBinderPairs displayArg identityArg]
-        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          mergeUniquePairMaps
-            [ Map.singleton identityName displayName,
-              boundPairs displayMb identityMb,
-              boundBinderPairs displayBody identityBody
-            ]
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
-        _ ->
-          Map.empty
-
-    pairsFromArgs displayArgs identityArgs =
-      mergeUniquePairMaps (zipWith boundBinderPairs (NE.toList displayArgs) (NE.toList identityArgs))
-
-    boundPairs displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBound), Just (SrcBound identityBound)) ->
-          boundBinderPairs displayBound identityBound
-        _ ->
-          Map.empty
-
-typeViewHeadPairs :: TypeView -> Map String String
-typeViewHeadPairs view =
-  srcTypeHeadPairs (typeViewDisplay view) (typeViewIdentity view)
-
-typeViewReverseVarPairs :: TypeView -> Map String String
-typeViewReverseVarPairs =
-  uniqueReverseMap . typeViewVarPairs
-
-typeViewReverseHeadPairs :: TypeView -> Map String String
-typeViewReverseHeadPairs =
-  uniqueReverseMap . typeViewHeadPairs
-
-uniqueReverseMap :: (Ord k, Ord v) => Map k v -> Map v k
-uniqueReverseMap pairs =
-  Map.fromList
-    [ (value, key)
-    | (value, keys) <- Map.toList keysByValue,
-      [key] <- [Set.toList keys]
-    ]
-  where
-    keysByValue =
-      Map.fromListWith
-        Set.union
-        [ (value, Set.singleton key)
-        | (key, value) <- Map.toList pairs
-        ]
 
 mergeUniquePairMaps :: (Ord k, Ord v) => [Map k v] -> Map k v
 mergeUniquePairMaps maps =
@@ -2593,94 +2587,6 @@ mergeUniquePairMaps maps =
           (key, value) <- Map.toList pairMap
         ]
 
-srcTypeVarPairs :: SrcType -> SrcType -> Map String String
-srcTypeVarPairs =
-  go Set.empty Set.empty
-  where
-    go displayBound identityBound display identityTy =
-      case (display, identityTy) of
-        (STVar displayName, STVar identityName)
-          | identityName `Set.notMember` identityBound ->
-              Map.singleton identityName displayName
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          mergeUniquePairMaps
-            [ go displayBound identityBound displayDom identityDom
-            , go displayBound identityBound displayCod identityCod
-            ]
-        (STCon _ displayArgs, STCon _ identityArgs) ->
-          pairsFromArgs displayBound identityBound displayArgs identityArgs
-        (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
-          let headPair =
-                if identityName `Set.member` identityBound
-                  then Map.empty
-                  else Map.singleton identityName displayName
-           in mergeUniquePairMaps
-                [ headPair
-                , pairsFromArgs displayBound identityBound displayArgs identityArgs
-                ]
-        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
-          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          mergeUniquePairMaps
-            [ go displayBound identityBound displayFun identityFun
-            , go displayBound identityBound displayArg identityArg
-            ]
-        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          mergeUniquePairMaps
-            [ boundPairs displayBound identityBound displayMb identityMb
-            , go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-            ]
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-        _ -> Map.empty
-
-    pairsFromArgs displayBound identityBound displayArgs identityArgs =
-      mergeUniquePairMaps (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
-
-    boundPairs displayBound identityBound displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBoundTy), Just (SrcBound identityBoundTy)) ->
-          go displayBound identityBound displayBoundTy identityBoundTy
-        _ -> Map.empty
-
-srcTypeHeadPairs :: SrcType -> SrcType -> Map String String
-srcTypeHeadPairs =
-  go
-  where
-    go display identityTy =
-      case (display, identityTy) of
-        (STBase displayName, STBase identityName) ->
-          Map.singleton identityName displayName
-        (STCon displayName displayArgs, STCon identityName identityArgs) ->
-          mergeUniquePairMaps
-            [ Map.singleton identityName displayName
-            , pairsFromArgs displayArgs identityArgs
-            ]
-        (STVarApp _ displayArgs, STVarApp _ identityArgs) ->
-          pairsFromArgs displayArgs identityArgs
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          mergeUniquePairMaps [go displayDom identityDom, go displayCod identityCod]
-        (STTyLam _ displayBody, STTyLam _ identityBody) ->
-          go displayBody identityBody
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          mergeUniquePairMaps [go displayFun identityFun, go displayArg identityArg]
-        (STForall _ displayMb displayBody, STForall _ identityMb identityBody) ->
-          mergeUniquePairMaps [boundPairs displayMb identityMb, go displayBody identityBody]
-        (STMu _ displayBody, STMu _ identityBody) ->
-          go displayBody identityBody
-        _ ->
-          Map.empty
-
-    pairsFromArgs displayArgs identityArgs =
-      mergeUniquePairMaps (zipWith go (NE.toList displayArgs) (NE.toList identityArgs))
-
-    boundPairs displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBound), Just (SrcBound identityBound)) ->
-          go displayBound identityBound
-        _ ->
-          Map.empty
-
 applyConstraintInfoSubst :: TypeViewSubst -> ConstraintInfo -> ConstraintInfo
 applyConstraintInfoSubst subst constraint =
   let views = fmap (applyTypeViewSubst subst) (constraintTypeViews constraint)
@@ -2692,44 +2598,76 @@ constraintTypeView :: ConstraintInfo -> TypeView
 constraintTypeView =
   NE.head . constraintTypeViews
 
-freeTypeVarsTypeView :: TypeView -> Set String
-freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
-
-freeTypeVarsTypeViews :: NonEmpty TypeView -> Set String
-freeTypeVarsTypeViews = foldMap freeTypeVarsTypeView
-
-freeTypeBinderIdentitiesTypeView :: TypeView -> Either String (Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeView view =
-  Set.fromList <$> traverse requireBinderIdentity (Set.toList freeNames)
+freeTypeBinderIdentitiesTypeView :: TypeView -> Set TypeBinderIdentity
+freeTypeBinderIdentitiesTypeView (TypeViewNode ty) =
+  go Set.empty ty
   where
-    freeNames =
-      freeTypeVarsSrcType (typeViewDisplay view)
-        <> freeTypeVarsSrcType (typeViewIdentity view)
+    go bound typeNode =
+      case typeNode of
+        TypeViewVar name -> freeBinder bound name
+        TypeViewArrow dom cod -> go bound dom `Set.union` go bound cod
+        TypeViewBase {} -> Set.empty
+        TypeViewCon _ args -> foldMap (go bound) args
+        TypeViewVarApp name args -> freeBinder bound name `Set.union` foldMap (go bound) args
+        TypeViewTyLam name body -> go (Set.insert (typeViewNamePayload name) bound) body
+        TypeViewTyApp fun arg -> go bound fun `Set.union` go bound arg
+        TypeViewForall name mbBound body ->
+          foldMap (go bound) mbBound
+            `Set.union` go (Set.insert (typeViewNamePayload name) bound) body
+        TypeViewMu name body -> go (Set.insert (typeViewNamePayload name) bound) body
+        TypeViewContextHead _ body -> go bound body
+        TypeViewContextBinder _ body -> go bound body
+        TypeViewBottom -> Set.empty
 
-    requireBinderIdentity name =
-      case typeViewBinderIdentityForAlias view name of
-        Just identity -> Right identity
-        Nothing -> Left name
+    freeBinder bound name
+      | Set.member identity bound = Set.empty
+      | otherwise = Set.singleton identity
+      where
+        identity = typeViewNamePayload name
 
-freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Either String (Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViews views =
-  Set.unions <$> mapM freeTypeBinderIdentitiesTypeView views
+freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Set TypeBinderIdentity
+freeTypeBinderIdentitiesTypeViews =
+  foldMap freeTypeBinderIdentitiesTypeView
+
+freeTypeBinderDisplayNamesTypeView :: TypeView -> Map TypeBinderIdentity String
+freeTypeBinderDisplayNamesTypeView (TypeViewNode ty) =
+  go Set.empty ty
+  where
+    go bound typeNode =
+      case typeNode of
+        TypeViewVar name -> freeBinder bound name
+        TypeViewArrow dom cod -> mergeUniquePairMaps [go bound dom, go bound cod]
+        TypeViewBase {} -> Map.empty
+        TypeViewCon _ args -> mergeUniquePairMaps (map (go bound) (NE.toList args))
+        TypeViewVarApp name args ->
+          mergeUniquePairMaps (freeBinder bound name : map (go bound) (NE.toList args))
+        TypeViewTyLam name body -> go (Set.insert (typeViewNamePayload name) bound) body
+        TypeViewTyApp fun arg -> mergeUniquePairMaps [go bound fun, go bound arg]
+        TypeViewForall name mbBound body ->
+          mergeUniquePairMaps
+            [ foldMap (go bound) mbBound,
+              go (Set.insert (typeViewNamePayload name) bound) body
+            ]
+        TypeViewMu name body -> go (Set.insert (typeViewNamePayload name) bound) body
+        TypeViewContextHead _ body -> go bound body
+        TypeViewContextBinder _ body -> go bound body
+        TypeViewBottom -> Map.empty
+
+    freeBinder bound name
+      | Set.member identity bound = Map.empty
+      | otherwise = Map.singleton identity (typeViewNameDisplay name)
+      where
+        identity = typeViewNamePayload name
 
 typeViewIsBareBinderIdentity :: TypeBinderIdentity -> TypeView -> Bool
-typeViewIsBareBinderIdentity identity view =
-  case typeViewIdentity view of
-    STVar name -> typeViewFreeVarMatchesBinderIdentity identity view name
+typeViewIsBareBinderIdentity identity (TypeViewNode ty) =
+  case dropTypeViewContexts ty of
+    TypeViewVar name -> typeViewNamePayload name == identity
     _ -> False
 
 typeViewMentionsFreeBinderIdentity :: TypeBinderIdentity -> TypeView -> Bool
 typeViewMentionsFreeBinderIdentity identity view =
-  case freeTypeBinderIdentitiesTypeView view of
-    Right identities -> Set.member identity identities
-    Left _ -> False
-
-typeViewFreeVarMatchesBinderIdentity :: TypeBinderIdentity -> TypeView -> String -> Bool
-typeViewFreeVarMatchesBinderIdentity identity view name =
-  typeViewBinderIdentityForAlias view name == Just identity
+  Set.member identity (freeTypeBinderIdentitiesTypeView view)
 
 typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsDisplay = fmap typeViewDisplay
@@ -2748,8 +2686,33 @@ typeParamBinderIdentity :: P.TypeParam -> Maybe TypeBinderIdentity
 typeParamBinderIdentity param =
   resolvedTypeBinderTypeIdentity <$> P.typeParamRef param
 
+-- | A type parameter that has crossed the resolved-program boundary.  Unlike
+-- source 'P.TypeParam', this representation cannot encode a missing binder
+-- identity.
+data CheckedTypeParam = CheckedTypeParam
+  { checkedTypeParamRef :: ResolvedTypeBinderRef,
+    checkedTypeParamKind :: P.SrcKind
+  }
+  deriving (Eq, Show)
+
+checkedTypeParamName :: CheckedTypeParam -> String
+checkedTypeParamName =
+  resolvedTypeBinderName . checkedTypeParamRef
+
+checkedTypeParamIdentity :: CheckedTypeParam -> TypeBinderIdentity
+checkedTypeParamIdentity =
+  resolvedTypeBinderTypeIdentity . checkedTypeParamRef
+
+checkedTypeParamIsFirstOrder :: CheckedTypeParam -> Bool
+checkedTypeParamIsFirstOrder param =
+  checkedTypeParamKind param == P.KType
+
+checkedTypeParamGeneratedIdentities :: CheckedTypeParam -> [UniqueIdentity]
+checkedTypeParamGeneratedIdentities =
+  resolvedTypeBinderGeneratedIdentities . checkedTypeParamRef
+
 newtype TypeBinderSubst = TypeBinderSubst
-  { typeBinderSubstByIdentity :: Map TypeBinderIdentity (Set String, TypeView)
+  { typeBinderSubstByIdentity :: Map TypeBinderIdentity TypeView
   }
   deriving (Show)
 
@@ -2758,8 +2721,7 @@ instance Eq TypeBinderSubst where
     typeBinderSubstIdentityViews left == typeBinderSubstIdentityViews right
 
 typeBinderSubstIdentityViews :: TypeBinderSubst -> Map TypeBinderIdentity TypeView
-typeBinderSubstIdentityViews =
-  fmap snd . typeBinderSubstByIdentity
+typeBinderSubstIdentityViews = typeBinderSubstByIdentity
 
 typeBinderSubstViews :: TypeBinderSubst -> [TypeView]
 typeBinderSubstViews =
@@ -2771,78 +2733,26 @@ emptyTypeBinderSubst =
     { typeBinderSubstByIdentity = Map.empty
     }
 
-typeBinderSubstFromTypeViewSubst :: [(String, TypeBinderIdentity)] -> TypeViewSubst -> TypeBinderSubst
-typeBinderSubstFromTypeViewSubst binders subst =
-  foldr insertView emptyTypeBinderSubst (Map.toList subst)
-  where
-    bindersByIdentity =
-      Map.fromListWith
-        Set.union
-        [(identity, Set.singleton name) | (name, identity) <- binders]
-    insertView (identity, view) acc =
-      insertTypeBinderSubstViewByIdentity
-        identity
-        (Map.findWithDefault Set.empty identity bindersByIdentity)
-        view
-        acc
-
-applyTypeBinderSubst :: TypeBinderSubst -> SrcType -> SrcType
-applyTypeBinderSubst subst ty =
-  Map.foldrWithKey substituteTypeVar ty identityMap
-  where
-    identityMap =
-      Map.fromList
-        [ (name, substTy)
-        | (name, substitutions) <- Map.toList substitutionsByName,
-          [(_, substTy)] <- [Map.toList substitutions]
-        ]
-    substitutionsByName =
-      Map.fromListWith
-        Map.union
-        [ (name, Map.singleton identity substTy)
-        | (identity, (names, substView)) <- Map.toList (typeBinderSubstByIdentity subst),
-          let substTy = typeViewIdentity substView,
-          name <- Set.toList names
-        ]
+typeBinderSubstFromTypeViewSubst :: TypeViewSubst -> TypeBinderSubst
+typeBinderSubstFromTypeViewSubst = TypeBinderSubst
 
 typeBinderSubstToTypeViewSubst :: TypeBinderSubst -> TypeViewSubst
-typeBinderSubstToTypeViewSubst subst =
-  Map.fromList
-    [ (identity, view)
-    | (identity, (_, view)) <- Map.toList (typeBinderSubstByIdentity subst)
-    ]
+typeBinderSubstToTypeViewSubst = typeBinderSubstByIdentity
 
 lookupTypeBinderSubstViewByIdentity :: TypeBinderIdentity -> TypeBinderSubst -> Maybe TypeView
 lookupTypeBinderSubstViewByIdentity identity subst =
-  snd <$> Map.lookup identity (typeBinderSubstByIdentity subst)
+  Map.lookup identity (typeBinderSubstByIdentity subst)
 
-lookupTypeBinderSubstByIdentity :: TypeBinderIdentity -> TypeBinderSubst -> Maybe SrcType
-lookupTypeBinderSubstByIdentity identity subst =
-  typeViewIdentity <$> lookupTypeBinderSubstViewByIdentity identity subst
-
-insertTypeBinderSubstViewWithIdentity :: TypeBinderIdentity -> String -> TypeView -> TypeBinderSubst -> TypeBinderSubst
-insertTypeBinderSubstViewWithIdentity identity name =
-  insertTypeBinderSubstViewByIdentity identity (Set.singleton name)
-
-insertTypeBinderSubstWithIdentity :: TypeBinderIdentity -> String -> SrcType -> TypeBinderSubst -> TypeBinderSubst
-insertTypeBinderSubstWithIdentity identity name ty =
-  insertTypeBinderSubstViewWithIdentity identity name (metadataLightTypeView ty)
-
-insertTypeBinderSubstViewByIdentity :: TypeBinderIdentity -> Set String -> TypeView -> TypeBinderSubst -> TypeBinderSubst
-insertTypeBinderSubstViewByIdentity identity names view subst =
+insertTypeBinderSubstView :: TypeBinderIdentity -> TypeView -> TypeBinderSubst -> TypeBinderSubst
+insertTypeBinderSubstView identity view subst =
   subst
     { typeBinderSubstByIdentity =
-        Map.insertWith
-          (\(newNames, newView) (oldNames, _) -> (newNames <> oldNames, newView))
-          identity
-          (Set.insert (typeBinderIdentityStableName identity) (Set.filter (not . null) names), view)
-          (typeBinderSubstByIdentity subst)
+        Map.insert identity view (typeBinderSubstByIdentity subst)
     }
 
 data EvidenceMethod = EvidenceMethod
-  { evidenceMethodRuntimeName :: String,
-    evidenceMethodSymbol :: SymbolIdentity,
-    evidenceMethodResolvedVar :: Maybe ResolvedVar,
+  { evidenceMethodSymbol :: SymbolIdentity,
+    evidenceMethodResolvedVar :: ResolvedVar,
     evidenceMethodTypeView :: TypeView
   }
   deriving (Show)
@@ -2892,9 +2802,8 @@ data ConstructorShape = ConstructorShape
   { constructorShapeSymbol :: SymbolIdentity,
     constructorShapeRuntimeName :: String,
     constructorShapeTypeView :: TypeView,
-    constructorShapeForallBinderInfo :: [ConstructorForallBinder],
     constructorShapeIndex :: Int,
-    constructorShapeOwnerTypeParams :: [P.TypeParam]
+    constructorShapeOwnerTypeParams :: [CheckedTypeParam]
   }
   deriving (Show)
 
@@ -2902,7 +2811,6 @@ instance Eq ConstructorShape where
   left == right =
     sameSymbolIdentity (constructorShapeSymbol left) (constructorShapeSymbol right)
       && constructorShapeTypeView left == constructorShapeTypeView right
-      && constructorShapeForallBinderInfo left == constructorShapeForallBinderInfo right
       && constructorShapeIndex left == constructorShapeIndex right
       && constructorShapeOwnerTypeParams left == constructorShapeOwnerTypeParams right
 
@@ -2950,7 +2858,6 @@ data ConstructorInfo = ConstructorInfo
   { ctorInfoSymbol :: SymbolIdentity,
     ctorRuntimeName :: String,
     ctorTypeView :: TypeView,
-    ctorForallBinderInfo :: [ConstructorForallBinder],
     ctorOwningTypeIdentity :: SymbolIdentity,
     ctorIndex :: Int,
     ctorOwnerConstructors :: [ConstructorShape]
@@ -2961,10 +2868,28 @@ instance Eq ConstructorInfo where
   left == right =
     sameSymbolIdentity (ctorInfoSymbol left) (ctorInfoSymbol right)
       && ctorTypeView left == ctorTypeView right
-      && ctorForallBinderInfo left == ctorForallBinderInfo right
       && sameSymbolIdentity (ctorOwningTypeIdentity left) (ctorOwningTypeIdentity right)
       && ctorIndex left == ctorIndex right
       && ctorOwnerConstructors left == ctorOwnerConstructors right
+
+constructorShapeForallBinderInfo :: ConstructorShape -> [ConstructorForallBinder]
+constructorShapeForallBinderInfo =
+  constructorForallBinderInfoFromTypeView . constructorShapeTypeView
+
+ctorForallBinderInfo :: ConstructorInfo -> [ConstructorForallBinder]
+ctorForallBinderInfo =
+  constructorForallBinderInfoFromTypeView . ctorTypeView
+
+constructorForallBinderInfoFromTypeView :: TypeView -> [ConstructorForallBinder]
+constructorForallBinderInfoFromTypeView =
+  map
+    ( \(name, identity, _) ->
+        ConstructorForallBinder
+          { constructorForallDisplayName = name,
+            constructorForallIdentity = identity
+          }
+    )
+    . typeViewForallBinderViews
 
 ctorType :: ConstructorInfo -> SrcType
 ctorType =
@@ -2996,7 +2921,7 @@ ctorResult =
 
 data DataInfo = DataInfo
   { dataInfoSymbol :: SymbolIdentity,
-    dataTypeParams :: [P.TypeParam],
+    dataTypeParams :: [CheckedTypeParam],
     dataConstructors :: [ConstructorInfo]
   }
   deriving (Show)
@@ -3011,7 +2936,6 @@ data MethodInfo = MethodInfo
   { methodInfoSymbol :: SymbolIdentity,
     methodDisplayName :: P.MethodName,
     methodTypeViewRaw :: TypeView,
-    methodConstraints :: [P.ClassConstraint],
     methodConstraintInfos :: [ConstraintInfo],
     methodParamBinders :: NonEmpty (String, TypeBinderIdentity)
   }
@@ -3021,11 +2945,7 @@ instance Eq MethodInfo where
   left == right =
     sameSymbolIdentity (methodInfoSymbol left) (methodInfoSymbol right)
       && methodTypeViewRaw left == methodTypeViewRaw right
-      && constraintMetadataMatches
-        (methodConstraints left)
-        (methodConstraintInfos left)
-        (methodConstraints right)
-        (methodConstraintInfos right)
+      && methodConstraintInfos left == methodConstraintInfos right
       && typeBinderEntriesMatch (methodParamBinders left) (methodParamBinders right)
 
 typeBinderEntriesMatch :: NonEmpty (String, TypeBinderIdentity) -> NonEmpty (String, TypeBinderIdentity) -> Bool
@@ -3049,8 +2969,7 @@ data FunctionalDependencyInfo = FunctionalDependencyInfo
 
 data ClassInfo = ClassInfo
   { classInfoSymbol :: SymbolIdentity,
-    classTypeParams :: NonEmpty P.TypeParam,
-    classSuperclasses :: [P.ClassConstraint],
+    classTypeParams :: NonEmpty CheckedTypeParam,
     classSuperclassInfos :: [ConstraintInfo],
     classFunctionalDependencies :: [FunctionalDependencyInfo],
     classMethodsByIdentity :: Map SymbolIdentity MethodInfo
@@ -3061,11 +2980,7 @@ instance Eq ClassInfo where
   left == right =
     sameSymbolIdentity (classInfoSymbol left) (classInfoSymbol right)
       && classTypeParams left == classTypeParams right
-      && constraintMetadataMatches
-        (classSuperclasses left)
-        (classSuperclassInfos left)
-        (classSuperclasses right)
-        (classSuperclassInfos right)
+      && classSuperclassInfos left == classSuperclassInfos right
       && classFunctionalDependencies left == classFunctionalDependencies right
       && symbolIdentityMapMatches (classMethodsByIdentity left) (classMethodsByIdentity right)
 
@@ -3074,7 +2989,6 @@ data ValueInfo
       { valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueTypeView :: TypeView,
-        valueConstraints :: [P.ClassConstraint],
         valueConstraintInfos :: [ConstraintInfo]
       }
   | ConstructorValue
@@ -3094,11 +3008,7 @@ instance Eq ValueInfo where
       (OrdinaryValue {}, OrdinaryValue {}) ->
         sameSymbolIdentity (valueInfoSymbol left) (valueInfoSymbol right)
           && valueTypeView left == valueTypeView right
-          && constraintMetadataMatches
-            (valueConstraints left)
-            (valueConstraintInfos left)
-            (valueConstraints right)
-            (valueConstraintInfos right)
+          && valueConstraintInfos left == valueConstraintInfos right
       (ConstructorValue {}, ConstructorValue {}) ->
         sameSymbolIdentity (valueInfoSymbol left) (valueInfoSymbol right)
           && valueCtorInfo left == valueCtorInfo right
@@ -3118,15 +3028,15 @@ valueInfoRuntimeName valueInfo =
     OverloadedMethod {valueInfoSymbol = symbol} ->
       idDetailsRuntimeName (MethodId symbol)
 
-valueInfoRuntimeDetails :: ValueInfo -> Maybe IdDetails
+valueInfoRuntimeDetails :: ValueInfo -> IdDetails
 valueInfoRuntimeDetails valueInfo =
   case valueInfo of
     OrdinaryValue {valueInfoSymbol = symbol} ->
-      Just (TopLevelId symbol)
+      TopLevelId symbol
     ConstructorValue {valueCtorInfo = ctor} ->
-      Just (ConstructorId (constructorRefFromInfo ctor))
-    OverloadedMethod {} ->
-      Nothing
+      ConstructorId (constructorRefFromInfo ctor)
+    OverloadedMethod {valueInfoSymbol = symbol} ->
+      MethodId symbol
 
 valueInfoRawRuntimeName :: ValueInfo -> Maybe String
 valueInfoRawRuntimeName valueInfo =
@@ -3140,11 +3050,8 @@ valueInfoRawRuntimeName valueInfo =
 
 valueInfoIdentityRuntimeAliases :: ValueInfo -> [String]
 valueInfoIdentityRuntimeAliases valueInfo =
-  case valueInfoRuntimeDetails valueInfo of
-    Just details ->
-      idDetailsAliasNamesWith (idDetailsRuntimeName details) details
-    Nothing ->
-      []
+  let details = valueInfoRuntimeDetails valueInfo
+   in idDetailsAliasNamesWith (idDetailsRuntimeName details) details
 
 valueInfoRuntimeAliases :: ValueInfo -> [String]
 valueInfoRuntimeAliases valueInfo =
@@ -3169,19 +3076,18 @@ valueIdentityType valueInfo =
 
 ordinaryValueTypeView :: ValueInfo -> TypeView
 ordinaryValueTypeView OrdinaryValue {valueTypeView = view, valueConstraintInfos = constraints} =
-  typeViewMergeBinderIdentities
+  typeViewMergeBinderIdentityAliases
     (mergeTypeBinderIdentityMaps (map constraintBinderIdentities constraints))
     view
   where
     constraintBinderIdentities =
       foldMap typeViewBinderIdentities . constraintTypeViews
 ordinaryValueTypeView _ =
-  metadataLightTypeView STBottom
+  typeViewBottom
 
 data InstanceInfo = InstanceInfo
   { instanceClassSymbol :: SymbolIdentity,
     instanceOriginModuleIdentity :: SymbolIdentity,
-    instanceConstraints :: [P.ClassConstraint],
     instanceConstraintInfos :: [ConstraintInfo],
     instanceHeadTypeViews :: NonEmpty TypeView,
     instanceMethodsByIdentity :: Map SymbolIdentity ValueInfo
@@ -3192,11 +3098,7 @@ instance Eq InstanceInfo where
   left == right =
     sameSymbolIdentity (instanceClassSymbol left) (instanceClassSymbol right)
       && sameSymbolIdentity (instanceOriginModuleIdentity left) (instanceOriginModuleIdentity right)
-      && constraintMetadataMatches
-        (instanceConstraints left)
-        (instanceConstraintInfos left)
-        (instanceConstraints right)
-        (instanceConstraintInfos right)
+      && instanceConstraintInfos left == instanceConstraintInfos right
       && instanceHeadTypeViews left == instanceHeadTypeViews right
       && symbolIdentityMapMatches (instanceMethodsByIdentity left) (instanceMethodsByIdentity right)
 
@@ -3208,29 +3110,23 @@ instanceHeadIdentityTypes :: InstanceInfo -> NonEmpty SrcType
 instanceHeadIdentityTypes =
   fmap typeViewIdentity . instanceHeadTypeViews
 
-constructorForallBinderGeneratedIdentities :: ConstructorForallBinder -> [UniqueIdentity]
-constructorForallBinderGeneratedIdentities =
-  typeBinderGeneratedIdentities . constructorForallIdentity
-
 constructorShapeGeneratedIdentities :: ConstructorShape -> [UniqueIdentity]
 constructorShapeGeneratedIdentities shape =
   symbolGeneratedIdentities (constructorShapeSymbol shape)
     ++ typeViewGeneratedIdentities (constructorShapeTypeView shape)
-    ++ concatMap constructorForallBinderGeneratedIdentities (constructorShapeForallBinderInfo shape)
-    ++ concatMap typeParamGeneratedIdentities (constructorShapeOwnerTypeParams shape)
+    ++ concatMap checkedTypeParamGeneratedIdentities (constructorShapeOwnerTypeParams shape)
 
 constructorInfoGeneratedIdentities :: ConstructorInfo -> [UniqueIdentity]
 constructorInfoGeneratedIdentities ctorInfo =
   symbolGeneratedIdentities (ctorInfoSymbol ctorInfo)
     ++ symbolGeneratedIdentities (ctorOwningTypeIdentity ctorInfo)
     ++ typeViewGeneratedIdentities (ctorTypeView ctorInfo)
-    ++ concatMap constructorForallBinderGeneratedIdentities (ctorForallBinderInfo ctorInfo)
     ++ concatMap constructorShapeGeneratedIdentities (ctorOwnerConstructors ctorInfo)
 
 dataInfoGeneratedIdentities :: DataInfo -> [UniqueIdentity]
 dataInfoGeneratedIdentities info =
   symbolGeneratedIdentities (dataInfoSymbol info)
-    ++ concatMap typeParamGeneratedIdentities (dataTypeParams info)
+    ++ concatMap checkedTypeParamGeneratedIdentities (dataTypeParams info)
     ++ concatMap constructorInfoGeneratedIdentities (dataConstructors info)
 
 functionalDependencyGeneratedIdentities :: FunctionalDependencyInfo -> [UniqueIdentity]
@@ -3248,7 +3144,7 @@ methodInfoGeneratedIdentities info =
 classInfoGeneratedIdentities :: ClassInfo -> [UniqueIdentity]
 classInfoGeneratedIdentities info =
   symbolGeneratedIdentities (classInfoSymbol info)
-    ++ foldMap typeParamGeneratedIdentities (classTypeParams info)
+    ++ foldMap checkedTypeParamGeneratedIdentities (classTypeParams info)
     ++ concatMap constraintInfoGeneratedIdentities (classSuperclassInfos info)
     ++ concatMap functionalDependencyGeneratedIdentities (classFunctionalDependencies info)
     ++ concatMap methodInfoGeneratedIdentities (Map.elems (classMethodsByIdentity info))
@@ -3276,7 +3172,7 @@ instanceInfoGeneratedIdentities info =
 evidenceMethodGeneratedIdentities :: EvidenceMethod -> [UniqueIdentity]
 evidenceMethodGeneratedIdentities method =
   symbolGeneratedIdentities (evidenceMethodSymbol method)
-    ++ maybe [] resolvedVarGeneratedIdentities (evidenceMethodResolvedVar method)
+    ++ resolvedVarGeneratedIdentities (evidenceMethodResolvedVar method)
     ++ typeViewGeneratedIdentities (evidenceMethodTypeView method)
   where
     resolvedVarGeneratedIdentities resolved =
@@ -3301,6 +3197,7 @@ deferredProgramObligationGeneratedIdentities obligation =
     ++ case obligation of
       DeferredMethod deferred ->
         methodInfoGeneratedIdentities (deferredMethodInfo deferred)
+          ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredMethodInstBinders deferred)
           ++ maybe [] typeViewGeneratedIdentities (deferredMethodExpectedResult deferred)
           ++ maybe [] deferredMethodEvidenceGeneratedIdentities (deferredMethodEvidence deferred)
           ++ concatMap evidenceInfoGeneratedIdentities (deferredMethodLocalEvidence deferred)
@@ -3311,28 +3208,30 @@ deferredProgramObligationGeneratedIdentities obligation =
           ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredConstructorInstBinders deferred)
           ++ typeBinderSubstGeneratedIdentities (deferredConstructorInitialSubst deferred)
       DeferredCase deferred ->
-        dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
+        loweredBindingIdentityGeneratedIdentities (deferredCaseBindingIdentity deferred)
+          ++ dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
           ++ typeViewGeneratedIdentities (deferredCaseScrutineeTypeView deferred)
           ++ typeViewGeneratedIdentities (deferredCaseResultTypeView deferred)
 
-data LoweredBindingIdentity = LoweredBindingIdentity
-  { loweredIdentityDetails :: IdDetails
-  }
+data LoweredBindingIdentity
+  = LoweredTopLevelIdentity SymbolIdentity
+  | LoweredConstructorIdentity ConstructorRef
+  | LoweredMethodIdentity SymbolIdentity
   deriving (Show)
+
+loweredIdentityDetails :: LoweredBindingIdentity -> IdDetails
+loweredIdentityDetails identity =
+  case identity of
+    LoweredTopLevelIdentity symbol -> TopLevelId symbol
+    LoweredConstructorIdentity ref -> ConstructorId ref
+    LoweredMethodIdentity symbol -> MethodId symbol
 
 loweredIdentityRuntimeName :: LoweredBindingIdentity -> String
 loweredIdentityRuntimeName =
   idDetailsRuntimeName . loweredIdentityDetails
 
-loweredBindingIdentityFromDetails :: IdDetails -> LoweredBindingIdentity
-loweredBindingIdentityFromDetails details =
-  LoweredBindingIdentity
-    { loweredIdentityDetails = details
-    }
-
-loweredBindingIdentityFromResolvedVar :: ResolvedVar -> LoweredBindingIdentity
-loweredBindingIdentityFromResolvedVar resolved =
-  loweredBindingIdentityFromDetails (resolvedVarDetails resolved)
+loweredBindingIdentityFromTopLevel :: SymbolIdentity -> LoweredBindingIdentity
+loweredBindingIdentityFromTopLevel = LoweredTopLevelIdentity
 
 instance Eq LoweredBindingIdentity where
   left == right =
@@ -3347,8 +3246,8 @@ constructorRefFromInfo ctor =
   constructorRefFromSymbol (ctorInfoSymbol ctor)
 
 loweredBindingIdentityFromConstructorInfo :: ConstructorInfo -> LoweredBindingIdentity
-loweredBindingIdentityFromConstructorInfo ctor =
-  loweredBindingIdentityFromDetails (ConstructorId (constructorRefFromInfo ctor))
+loweredBindingIdentityFromConstructorInfo =
+  LoweredConstructorIdentity . constructorRefFromInfo
 
 loweredBindingIdentityFromValueInfo :: ValueInfo -> LoweredBindingIdentity
 loweredBindingIdentityFromValueInfo valueInfo =
@@ -3356,13 +3255,13 @@ loweredBindingIdentityFromValueInfo valueInfo =
     OrdinaryValue
       { valueInfoSymbol = symbol
       } ->
-        loweredBindingIdentityFromDetails (TopLevelId symbol)
+        LoweredTopLevelIdentity symbol
     ConstructorValue {valueCtorInfo = ctor} ->
       loweredBindingIdentityFromConstructorInfo ctor
     OverloadedMethod
       { valueInfoSymbol = symbol
       } ->
-      loweredBindingIdentityFromDetails (MethodId symbol)
+      LoweredMethodIdentity symbol
 
 resolvedVarFromLoweredBinding :: LoweredBinding -> ElabType -> ResolvedVar
 resolvedVarFromLoweredBinding lowered ty =
@@ -3397,13 +3296,49 @@ data DeferredMethodEvidence = DeferredMethodEvidence
 data DeferredMethodCall = DeferredMethodCall
   { deferredMethodRef :: DeferredRef,
     deferredMethodInfo :: MethodInfo,
-    deferredMethodArgCount :: Int,
-    deferredMethodFullArity :: Int,
+    -- Arguments already present at the source method occurrence, before
+    -- elaboration eta-expands a partial application.
+    deferredMethodSuppliedArgCount :: Int,
+    -- Method arguments introduced by that eta expansion. Together with the
+    -- supplied count, this is the declaration's complete value arity.
+    deferredMethodRemainingArgCount :: Int,
+    -- The ordered forall binders from the exact placeholder scheme registered
+    -- for this obligation. Finalization must not reconstruct this order from
+    -- the unspecialized method declaration.
+    deferredMethodInstBinders :: [(String, TypeBinderIdentity)],
     deferredMethodExpectedResult :: Maybe TypeView,
     deferredMethodEvidence :: Maybe DeferredMethodEvidence,
     deferredMethodLocalEvidence :: [EvidenceInfo]
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq DeferredMethodCall where
+  left == right =
+    deferredMethodRef left == deferredMethodRef right
+      && deferredMethodInfo left == deferredMethodInfo right
+      && deferredMethodSuppliedArgCount left == deferredMethodSuppliedArgCount right
+      && deferredMethodRemainingArgCount left == deferredMethodRemainingArgCount right
+      && typeBinderIdentityEntryListMatches (deferredMethodInstBinders left) (deferredMethodInstBinders right)
+      && deferredMethodExpectedResult left == deferredMethodExpectedResult right
+      && deferredMethodEvidence left == deferredMethodEvidence right
+      && deferredMethodLocalEvidence left == deferredMethodLocalEvidence right
+
+deferredMethodTotalArgCount :: DeferredMethodCall -> Int
+deferredMethodTotalArgCount deferred =
+  deferredMethodSuppliedArgCount deferred
+    + deferredMethodRemainingArgCount deferred
+
+-- | A source partial application has already crossed its checked elaboration
+-- boundary once every source-supplied argument is visible. Its remaining
+-- method variables are then carried by the checked head instantiations. An
+-- evidence placeholder has no source-supplied arguments, so it must instead
+-- wait for every eta-introduced argument.
+deferredMethodResolutionArgCount :: DeferredMethodCall -> Int
+deferredMethodResolutionArgCount deferred
+  | suppliedArgCount == 0 = deferredMethodTotalArgCount deferred
+  | otherwise = suppliedArgCount
+  where
+    suppliedArgCount = deferredMethodSuppliedArgCount deferred
 
 deferredMethodPlaceholder :: DeferredMethodCall -> String
 deferredMethodPlaceholder =
@@ -3452,7 +3387,8 @@ deferredConstructorPlaceholder =
   deferredRefName . deferredConstructorRef
 
 data DeferredCaseCall = DeferredCaseCall
-  { deferredCaseRef :: DeferredRef,
+  { deferredCaseBindingIdentity :: LoweredBindingIdentity,
+    deferredCaseRef :: DeferredRef,
     deferredCaseDataInfo :: DataInfo,
     deferredCaseScrutineeTypeView :: TypeView,
     deferredCaseResultTypeView :: TypeView,
@@ -3630,11 +3566,9 @@ displayMap values displays =
 
 data LoweredBinding = LoweredBinding
   { loweredBindingIdentity :: LoweredBindingIdentity,
-    loweredBindingSourceType :: SrcType,
-    loweredBindingSourceTypeView :: Maybe TypeView,
-    loweredBindingExpectedType :: SrcType,
-    loweredBindingExpectedTypeView :: Maybe TypeView,
-    loweredBindingSurfaceExpr :: SurfaceExpr,
+    loweredBindingSourceTypeView :: TypeView,
+    loweredBindingExpectedTypeView :: TypeView,
+    loweredBindingSurfaceExpr :: ResolvedSurfaceExpr,
     loweredBindingResolvedLocalIdentities :: [LoweredResolvedLocalIdentity],
     loweredBindingResolvedEvidenceIdentities :: [LoweredResolvedLocalIdentity],
     loweredBindingDeferredObligations :: DeferredObligations,
@@ -3652,6 +3586,14 @@ data LoweredResolvedLocalIdentity = LoweredResolvedLocalIdentity
 loweredBindingName :: LoweredBinding -> String
 loweredBindingName =
   loweredIdentityRuntimeName . loweredBindingIdentity
+
+loweredBindingSourceType :: LoweredBinding -> SrcType
+loweredBindingSourceType =
+  typeViewIdentity . loweredBindingSourceTypeView
+
+loweredBindingExpectedType :: LoweredBinding -> SrcType
+loweredBindingExpectedType =
+  typeViewDisplay . loweredBindingExpectedTypeView
 
 loweredBindingConstructorRef :: LoweredBinding -> Maybe ConstructorRef
 loweredBindingConstructorRef =
@@ -3679,6 +3621,26 @@ checkedBindingSourceTypeIdentity :: CheckedBinding -> SrcType
 checkedBindingSourceTypeIdentity =
   typeViewIdentity . checkedBindingSourceTypeView
 
+-- | Complete generated-identity inventory for a finalized binding.  Identity
+-- supply owners use this one bridge both to thread the next supply and to
+-- validate that no post-lowering finalization identity can be reissued.
+checkedBindingGeneratedIdentities :: CheckedBinding -> [UniqueIdentity]
+checkedBindingGeneratedIdentities binding =
+  idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+    ++ generatedIdentitiesInType (resolvedVarType resolved)
+    ++ typeViewGeneratedIdentities (checkedBindingSourceTypeView binding)
+    ++ generatedIdentitiesInType (checkedBindingType binding)
+    ++ generatedIdentitiesInTerm (checkedBindingTerm binding)
+    ++ concatMap (idDetailsGeneratedIdentities . DeferredId) (Map.keys (checkedBindingDeferredObligations binding))
+    ++ concatMap deferredProgramObligationGeneratedIdentities (Map.elems (checkedBindingDeferredObligations binding))
+  where
+    resolved = checkedBindingResolvedVar binding
+
+checkedBindingsIdentityGenerator :: IdentityGenerator -> [CheckedBinding] -> IdentityGenerator
+checkedBindingsIdentityGenerator generator =
+  flip advanceIdentityGeneratorPastMany generator
+    . concatMap checkedBindingGeneratedIdentities
+
 checkedBindingConstructorRef :: CheckedBinding -> Maybe ConstructorRef
 checkedBindingConstructorRef = resolvedVarConstructorRef . checkedBindingResolvedVar
 
@@ -3701,6 +3663,17 @@ instance Eq CheckedModule where
       && symbolIdentityMapMatches (checkedModuleClasses left) (checkedModuleClasses right)
       && checkedModuleInstances left == checkedModuleInstances right
       && checkedModuleExports left == checkedModuleExports right
+
+-- | Complete generated-identity inventory for a finalized module.  Cache and
+-- backend supply owners share this projection so newly added checked-module
+-- metadata cannot silently diverge between consumers.
+checkedModuleGeneratedIdentities :: CheckedModule -> [UniqueIdentity]
+checkedModuleGeneratedIdentities checkedModule =
+  symbolGeneratedIdentities (checkedModuleIdentity checkedModule)
+    ++ concatMap checkedBindingGeneratedIdentities (checkedModuleBindings checkedModule)
+    ++ concatMap dataInfoGeneratedIdentities (Map.elems (checkedModuleData checkedModule))
+    ++ concatMap classInfoGeneratedIdentities (Map.elems (checkedModuleClasses checkedModule))
+    ++ concatMap instanceInfoGeneratedIdentities (checkedModuleInstances checkedModule)
 
 valueInfoSymbolIdentity :: ValueInfo -> SymbolIdentity
 valueInfoSymbolIdentity = valueInfoSymbol
@@ -3741,20 +3714,15 @@ dataInfoHeadIdentityLookupAliases info =
 
 dataParams :: DataInfo -> [String]
 dataParams =
-  map P.typeParamName . dataTypeParams
+  map checkedTypeParamName . dataTypeParams
 
 dataParamBinderIdentities :: DataInfo -> [TypeBinderIdentity]
 dataParamBinderIdentities =
-  map requiredIdentity . dataTypeParams
-  where
-    requiredIdentity param =
-      case typeParamBinderIdentity param of
-        Just identity -> identity
-        Nothing -> error ("checked data parameter `" ++ P.typeParamName param ++ "` is missing identity")
+  map checkedTypeParamIdentity . dataTypeParams
 
 dataParamBinders :: DataInfo -> [(String, TypeBinderIdentity)]
-dataParamBinders info =
-  zip (dataParams info) (dataParamBinderIdentities info)
+dataParamBinders =
+  map (\param -> (checkedTypeParamName param, checkedTypeParamIdentity param)) . dataTypeParams
 
 constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
 constructorInfoSymbolIdentity _ = ctorInfoSymbol
@@ -3839,7 +3807,6 @@ constructorShapeFromInfo ctor =
     { constructorShapeSymbol = ctorInfoSymbol ctor,
       constructorShapeRuntimeName = constructorInfoRuntimeName ctor,
       constructorShapeTypeView = ctorTypeView ctor,
-      constructorShapeForallBinderInfo = ctorForallBinderInfo ctor,
       constructorShapeIndex = ctorIndex ctor,
       constructorShapeOwnerTypeParams = []
     }
@@ -3865,7 +3832,6 @@ constructorOwnerDataInfoFromShapes ctorInfo =
         { ctorInfoSymbol = constructorShapeSymbol shape,
           ctorRuntimeName = constructorShapeRuntimeNameFromIdentity shape,
           ctorTypeView = constructorShapeTypeView shape,
-          ctorForallBinderInfo = constructorShapeForallBinderInfo shape,
           ctorOwningTypeIdentity = ownerIdentity,
           ctorIndex = constructorShapeIndex shape,
           ctorOwnerConstructors = ownerShapes
@@ -3874,10 +3840,11 @@ constructorOwnerDataInfoFromShapes ctorInfo =
     constructorShapeRuntimeNameFromIdentity =
       idDetailsRuntimeName . ConstructorId . constructorRefFromSymbol . constructorShapeSymbol
 
-inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
+inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [CheckedTypeParam]
 inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
-  [ maybe (P.TypeParam name kind0) (`P.ResolvedTypeParam` kind0) (Map.lookup name paramRefs)
+  [ CheckedTypeParam ref kind0
   | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes paramRefs
+  , Just ref <- [Map.lookup name paramRefs]
   , let kind0 = kindForName name
   ]
   where
@@ -3931,15 +3898,17 @@ constructorOwnerResultArgRefs ctorInfo shape =
 
 constructorOwnerResultArgPairs :: ConstructorInfo -> TypeView -> [(String, TypeBinderIdentity)]
 constructorOwnerResultArgPairs ctorInfo view =
-  case (constructorOwnerResultArgs ctorInfo view (typeViewDisplay view), constructorOwnerResultArgs ctorInfo view (typeViewIdentity view)) of
-    (Just displayArgs, Just identityArgs) ->
-      [ (displayName, identity)
-      | (displayArg, identityArg) <- zip (NE.toList displayArgs) (NE.toList identityArgs),
-        Just displayName <- [srcTypeVarName displayArg],
-        Just identityName <- [srcTypeVarName identityArg],
-        Just identity <- [typeViewBinderIdentityForAlias view identityName]
-      ]
+  case typeViewHeadArgViews view of
+    Just argViews
+      | typeViewRootHeadIdentity view == Just (ctorOwningTypeIdentity ctorInfo) ->
+          mapMaybe bareBinder argViews
     _ -> []
+  where
+    bareBinder (TypeViewNode ty) =
+      case dropTypeViewContexts ty of
+        TypeViewVar name ->
+          Just (typeViewNameDisplay name, typeViewNamePayload name)
+        _ -> Nothing
 
 inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> Map String ResolvedTypeBinderRef -> [String]
 inferredConstructorOwnerParamNames ctorInfo ownerShapes paramRefs =
@@ -3956,32 +3925,8 @@ inferredConstructorOwnerParamNames ctorInfo ownerShapes paramRefs =
           case filter (`Map.member` paramRefs) names of
             name : _ -> Just name
             [] -> Nothing
-        [] ->
-          case names of
-            name : _ -> Just name
-            [] -> Nothing
+        [] -> Nothing
         _ -> Nothing
-
-constructorOwnerResultArgs :: ConstructorInfo -> TypeView -> SrcType -> Maybe (NonEmpty SrcType)
-constructorOwnerResultArgs ctorInfo view ty =
-  case ty of
-    STBase name
-      | ownerHeadMatches name ->
-          Nothing
-    STCon name args
-      | ownerHeadMatches name ->
-          Just args
-    _ -> Nothing
-  where
-    ownerIdentity = ctorOwningTypeIdentity ctorInfo
-    ownerHeadMatches name =
-      typeViewHeadIdentityForAlias view name == Just ownerIdentity
-
-srcTypeVarName :: SrcType -> Maybe String
-srcTypeVarName ty =
-  case ty of
-    STVar name -> Just name
-    _ -> Nothing
 
 constructorShapeVariableHeadArities :: ConstructorShape -> Map String Int
 constructorShapeVariableHeadArities shape =
@@ -4058,20 +4003,15 @@ classInfoIdentityQualifiedName info =
 
 classParamNames :: ClassInfo -> NonEmpty String
 classParamNames =
-  fmap P.typeParamName . classTypeParams
+  fmap checkedTypeParamName . classTypeParams
 
 classParamBinderIdentities :: ClassInfo -> NonEmpty TypeBinderIdentity
 classParamBinderIdentities =
-  fmap requiredIdentity . classTypeParams
-  where
-    requiredIdentity param =
-      case typeParamBinderIdentity param of
-        Just identity -> identity
-        Nothing -> error ("checked class parameter `" ++ P.typeParamName param ++ "` is missing identity")
+  fmap checkedTypeParamIdentity . classTypeParams
 
 classParamBinders :: ClassInfo -> NonEmpty (String, TypeBinderIdentity)
-classParamBinders info =
-  NE.zip (classParamNames info) (classParamBinderIdentities info)
+classParamBinders =
+  fmap (\param -> (checkedTypeParamName param, checkedTypeParamIdentity param)) . classTypeParams
 
 methodInfoSymbolIdentity :: MethodInfo -> SymbolIdentity
 methodInfoSymbolIdentity = methodInfoSymbol
@@ -4117,7 +4057,7 @@ lookupMethodParamViewSubst methodInfo subst =
 
 methodTypeView :: MethodInfo -> TypeView
 methodTypeView methodInfo =
-  typeViewMergeBinderIdentities
+  typeViewMergeBinderIdentityAliases
     (methodParamStableBinderIdentities methodInfo)
     (methodTypeViewRaw methodInfo)
 
@@ -4134,6 +4074,17 @@ typeViewArrowArgViews view@(TypeViewNode sourceTy) =
   where
     (_, bodyTy) = splitTypeViewForalls sourceTy
     (args, _) = splitTypeViewArrows bodyTy
+
+typeViewForallBinderViews :: TypeView -> [(String, TypeBinderIdentity, Maybe TypeView)]
+typeViewForallBinderViews view@(TypeViewNode sourceTy) =
+  [ ( typeViewNameDisplay name,
+      typeViewNamePayload name,
+      fmap (projectTypeViewNode view) mbBound
+    )
+  | (name, mbBound) <- foralls
+  ]
+  where
+    (foralls, _) = splitTypeViewForalls sourceTy
 
 typeViewHeadArgViews :: TypeView -> Maybe [TypeView]
 typeViewHeadArgViews view@(TypeViewNode sourceTy) =
@@ -4187,40 +4138,12 @@ methodResultTypeViewFrom :: TypeView -> TypeView
 methodResultTypeViewFrom =
   typeViewArrowResultView
 
-projectTypeView :: TypeView -> SrcType -> SrcType -> Maybe TypeView
-projectTypeView view displayTy identityTy =
-  either
-    (const Nothing)
-    Just
-    ( typeViewFromProjections
-        displayTy
-        identityTy
-        (filterHeadIdentitiesByTypeNames displayTy identityTy (typeViewHeadIdentities view))
-        ( filterBinderIdentitiesByProjectedTypeNames
-            view
-            displayTy
-            identityTy
-            (typeViewBinderIdentityAliasEntries view)
-            (typeViewBinderIdentities view)
-        )
-    )
-
 projectTypeViewNode :: TypeView -> TypeViewType -> TypeView
-projectTypeViewNode sourceView typeNode =
-  typeViewWithIdentityMaps
-    (filterHeadIdentitiesByTypeNames displayTy identityTy (typeViewHeadIdentities sourceView))
-    ( filterBinderIdentitiesByProjectedTypeNames
-        sourceView
-        displayTy
-        identityTy
-        (typeViewBinderIdentityAliasEntries sourceView)
-        (typeViewBinderIdentities sourceView)
-    )
-    candidate
+projectTypeViewNode (TypeViewNode sourceTy) typeNode =
+  TypeViewNode
+    (foldr TypeViewContextBinder typeNode leadingBinders)
   where
-    candidate = TypeViewNode typeNode
-    displayTy = typeViewDisplay candidate
-    identityTy = typeViewIdentity candidate
+    leadingBinders = map fst (fst (splitTypeViewForalls sourceTy))
 
 dropTypeViewContexts :: TypeViewType -> TypeViewType
 dropTypeViewContexts typeNode =
@@ -4431,32 +4354,9 @@ typeHeadNamesSrcType =
     STMu _ body -> typeHeadNamesSrcType body
     STBottom -> Set.empty
 
-typeBinderNamesSrcType :: SrcType -> Set String
-typeBinderNamesSrcType =
-  \case
-    STVar name -> Set.singleton name
-    STArrow dom cod -> typeBinderNamesSrcType dom `Set.union` typeBinderNamesSrcType cod
-    STBase {} -> Set.empty
-    STCon _ args -> foldMap typeBinderNamesSrcType args
-    STVarApp name args -> Set.insert name (foldMap typeBinderNamesSrcType args)
-    STTyLam name body -> Set.insert name (typeBinderNamesSrcType body)
-    STTyApp fun arg -> typeBinderNamesSrcType fun `Set.union` typeBinderNamesSrcType arg
-    STForall name mb body ->
-      Set.insert name $
-        maybe Set.empty (typeBinderNamesSrcType . unSrcBound) mb `Set.union` typeBinderNamesSrcType body
-    STMu name body -> Set.insert name (typeBinderNamesSrcType body)
-    STBottom -> Set.empty
-
-leadingTypeBinderNamesSrcType :: SrcType -> Set String
-leadingTypeBinderNamesSrcType =
-  \case
-    STForall name _ body ->
-      Set.insert name (leadingTypeBinderNamesSrcType body)
-    _ -> Set.empty
-
 specializeMethodTypeView :: MethodInfo -> NonEmpty TypeView -> TypeView
 specializeMethodTypeView methodInfo classArgViews =
-  typeViewMergeBinderIdentities
+  typeViewMergeBinderIdentityAliases
     (mergeTypeBinderIdentityMaps (map typeViewBinderIdentities (NE.toList classArgViews)))
     specialized
   where
@@ -4465,26 +4365,9 @@ specializeMethodTypeView methodInfo classArgViews =
     specialized = specializeQuantifiedTypeView subst view
 
 specializeQuantifiedTypeView :: TypeViewSubst -> TypeView -> TypeView
-specializeQuantifiedTypeView subst view@(TypeViewNode sourceTy) =
-  typeViewWithIdentityMaps
-    (filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities)
-    ( filterBinderIdentitiesByTypeNames
-        displayTy
-        identityTy
-        substitutedBinderIdentityAliases
-        substitutedBinderIdentities
-    )
-    (TypeViewNode specializedTy)
-  where
-    specializedTy = specializeTypeViewType subst sourceTy
-    displayTy = typeViewTypeDisplay specializedTy
-    identityTy = typeViewTypeIdentity specializedTy
-    substitutedHeadIdentities =
-      mergeSymbolIdentityMaps (typeViewHeadIdentities view : map typeViewHeadIdentities (Map.elems subst))
-    substitutedBinderIdentities =
-      mergeTypeBinderIdentityMaps (typeViewBinderIdentities view : map typeViewBinderIdentities (Map.elems subst))
-    substitutedBinderIdentityAliases =
-      concatMap typeViewBinderIdentityAliasEntries (view : Map.elems subst)
+specializeQuantifiedTypeView subst (TypeViewNode sourceTy) =
+  rebuildTypeViewAliases
+    (stripTypeViewContexts (specializeTypeViewType subst sourceTy))
 
 specializeTypeViewType :: TypeViewSubst -> TypeViewType -> TypeViewType
 specializeTypeViewType subst = go
@@ -4507,7 +4390,4 @@ specializeTypeViewType subst = go
           substituteTypeViewType subst ty
 
     hasReplacement name =
-      maybe
-        False
-        (`Map.member` subst)
-        (typeViewNamePayload name)
+      Map.member (typeViewNamePayload name) subst

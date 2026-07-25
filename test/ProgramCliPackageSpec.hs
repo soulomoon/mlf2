@@ -41,6 +41,20 @@ spec =
             checkProgramFile path `shouldReturn` Right "OK\n"
             runProgramFile path `shouldReturn` Right "true\n"
 
+        it "supplies the builtin Prelude for an explicit file import" $
+            withTempPackageRoot $ \root -> do
+                path <- writePackageFile root "Main.mlfp" builtinPreludeClientSource
+
+                checkProgramFile path `shouldReturn` Right "OK\n"
+                runProgramFile path `shouldReturn` Right "Unit\n"
+
+        it "uses a package-provided Prelude without injecting the builtin" $
+            withTempPackageRoot $ \root -> do
+                path <- writePackageFile root "Main.mlfp" packageProvidedPreludeSource
+
+                checkProgramFile path `shouldReturn` Right "OK\n"
+                runProgramFile path `shouldReturn` Right "7\n"
+
         it "checks and runs a directory package with ordered search paths" $
             withTempPackageRoots 2 $ \roots ->
                 case roots of
@@ -141,6 +155,27 @@ mainSource =
         [ "module Main export (main) {"
         , "  import Lib exposing (two);"
         , "  def main : Int = two;"
+        , "}"
+        ]
+
+builtinPreludeClientSource :: String
+builtinPreludeClientSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..));"
+        , "  def main : Unit = Unit;"
+        , "}"
+        ]
+
+packageProvidedPreludeSource :: String
+packageProvidedPreludeSource =
+    unlines
+        [ "module Prelude export (seven) {"
+        , "  def seven : Int = 7;"
+        , "}"
+        , "module Main export (main) {"
+        , "  import Prelude exposing (seven);"
+        , "  def main : Int = seven;"
         , "}"
         ]
 

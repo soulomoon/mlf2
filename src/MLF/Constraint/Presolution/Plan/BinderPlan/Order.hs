@@ -13,6 +13,7 @@ import Control.Monad (forM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import MLF.Constraint.Presolution.Plan.Requirements (ExpansionConstructionPlacements)
 import MLF.Constraint.Types.Graph
 import MLF.Util.ElabError (ElabError)
 import MLF.Util.Graph (topoSortBy)
@@ -24,6 +25,8 @@ data GaBindParentsInfo p = GaBindParentsInfo
     , gbiBaseConstraint :: Constraint p
     , gbiBaseToSolved :: IntMap.IntMap NodeId
     , gbiSolvedToBase :: IntMap.IntMap NodeId
+    , gbiRestoredSchemeRootTargets :: IntMap.IntMap NodeId
+    , gbiExpansionConstructionPlacements :: ExpansionConstructionPlacements
     }
 
 -- | Order binder candidates topologically by their bound dependencies.

@@ -42,6 +42,7 @@ import MLF.Constraint.Presolution.Plan.BinderPlan
     BinderPlan (..),
     BinderPlanInput (..),
     BinderSelectionEnv (..),
+    GaBindParentsInfo (..),
     SelectBindersArgs (..),
     bindableChildrenUnder,
     buildBinderPlan,
@@ -52,8 +53,12 @@ import MLF.Constraint.Presolution.Plan.BinderPlan
     orderBinderCandidates,
     selectBinders,
   )
+import MLF.Constraint.Presolution.Plan.Requirements
+  ( expansionConstructionRoleKeys,
+  )
 import MLF.Constraint.Presolution.Plan.Context
   ( GaBindParents (..),
+    GeneralizationRequirements (..),
     GeneralizeCtx (..),
     GeneralizeEnv (..),
     resolveContext,
@@ -64,7 +69,6 @@ import MLF.Constraint.Presolution.Plan.Env
   ( PresolutionEnv (..),
     lookupNodeInMap,
     mkGeneralizeEnv,
-    softenBindParents,
   )
 import MLF.Constraint.Presolution.Plan.SchemeRoots
   ( SchemeRootInfo (..),
@@ -84,6 +88,7 @@ import MLF.Constraint.Presolution.Plan.Target
   )
 import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
+import MLF.Reify.Named (softenCanonicalBindParentsUnder)
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
@@ -101,6 +106,10 @@ data GeneralizePlan p = GeneralizePlan
     gpBinders0 :: [NodeId],
     gpReachableFromWithBounds :: NodeId -> IntSet.IntSet,
     gpReachableFromStructural :: NodeId -> IntSet.IntSet,
+    -- Canonical binding parents before W-softening.  Generalization uses the
+    -- softened view to select flexible binders, but elaboration must retain
+    -- the original rigid ownership in order to inline rigid quantification.
+    gpRigidBindParents :: BindParents,
     gpBindParents :: BindParents
   }
 
@@ -109,6 +118,7 @@ planGeneralizeAt
   PresolutionEnv
     { pePresolutionView = presolutionView,
       peBindParentsGa = mbBindParentsGa,
+      peRequirements = requirements,
       peScopeRoot = scopeRoot,
       peTargetNode = targetNode,
       peTraceConfig = traceCfg
@@ -119,10 +129,9 @@ planGeneralizeAt
         canonical = geCanonical env
         canonKey = geCanonKey env
         isTyVarKey = geIsTyVarKey env
-        isTyForallKey = geIsTyForallKey env
         isBaseLikeKey = geIsBaseLikeKey env
     bindParents0 <- bindingToElab (Binding.canonicalizeBindParentsUnder canonical constraint)
-    let bindParentsSoft = softenBindParents canonical constraint bindParents0
+    let bindParentsSoft = softenCanonicalBindParentsUnder canonical constraint bindParents0
     let _ =
           traceGeneralize
             env
@@ -168,8 +177,8 @@ planGeneralizeAt
             sriRootByBody = schemeRootByBody
           } = schemeRootInfo
         typeRootFromBoundVar =
-          case scopeGen of
-            Just gid ->
+          case (isTyVarKey (canonKey target0), scopeGen) of
+            (True, Just gid) ->
               listToMaybe
                 [ canonical child
                 | child <- IntMapUtils.typeChildrenOfGen bindParents gid,
@@ -178,7 +187,7 @@ planGeneralizeAt
                     Just bnd -> canonical bnd == canonical target0
                     Nothing -> False
                 ]
-            Nothing -> Nothing
+            _ -> Nothing
     let orderRootForBinders = orderRoot
         orderRootBaseForBinders =
           case mbBindParentsGa of
@@ -209,8 +218,6 @@ planGeneralizeAt
                   structuralChildren node
         reachableFromWithBoundsWith canonical' nodes' allowBoundTraversal' =
           reachableFrom getNodeId canonical' (childrenWithBoundsWith nodes' allowBoundTraversal')
-        childrenWithBounds =
-          childrenWithBoundsWith nodes allowBoundTraversal
         reachableFromWithBounds root0 =
           reachableFromWithBoundsWith canonical nodes allowBoundTraversal root0
         childrenStructural nid =
@@ -221,43 +228,12 @@ planGeneralizeAt
           reachableFrom getNodeId canonical childrenStructural root0
 
     reachable <- Right (reachableFromWithBounds orderRoot)
-    let reachableForBinders0 =
-          case mbBindParentsGa of
-            Nothing -> reachable
-            Just ga ->
-              let baseConstraint = gaBaseConstraint ga
-                  baseNodes = cNodes baseConstraint
-                  baseNodesMap =
-                    IntMap.fromList
-                      [ (getNodeId nid, node)
-                      | (nid, node) <- toListNode baseNodes
-                      ]
-                  scopeGenBase = scopeGen
-                  boundSchemeOwnerBase bnd =
-                    case IntMap.lookup (getNodeId bnd) schemeRootOwnerBase of
-                      Just gid -> Just gid
-                      Nothing ->
-                        case IntMap.lookup (getNodeId bnd) schemeRootByBodyBase of
-                          Just root ->
-                            IntMap.lookup (getNodeId root) schemeRootOwnerBase
-                          Nothing -> Nothing
-                  allowBoundTraversalBase bnd =
-                    case boundSchemeOwnerBase bnd of
-                      Nothing -> True
-                      Just gid ->
-                        case scopeGenBase of
-                          Just scopeGid -> gid == scopeGid
-                          Nothing -> False
-                  reachableFromWithBoundsBase root0 =
-                    reachableFromWithBoundsWith id baseNodesMap allowBoundTraversalBase root0
-                  reachableBase = reachableFromWithBoundsBase orderRootBaseForBinders
-                  reachableBaseSolved =
-                    IntSet.fromList
-                      [ getNodeId solvedNid
-                      | baseKey <- IntSet.toList reachableBase,
-                        Just solvedNid <- [IntMap.lookup baseKey (gaBaseToSolved ga)]
-                      ]
-               in IntSet.union reachable reachableBaseSolved
+    -- Binder membership belongs to the selected live type root.  The frozen
+    -- base graph supplies ordering and source provenance only: after solving,
+    -- a base placeholder can have been replaced by a structural type and must
+    -- not be promoted back into the final Gamma merely because it was
+    -- reachable before that replacement.
+    let reachableForBinders0 = reachable
     traceGeneralizeM
       env
       ( "generalizeAt: reachable var parents="
@@ -331,7 +307,7 @@ planGeneralizeAt
               bseConstraint = constraint,
               bseIsBindable = isBindable
             }
-    binders0 <-
+    selectedBinders <-
       selectBinders
         bseEnv
         SelectBindersArgs
@@ -342,8 +318,47 @@ planGeneralizeAt
             sbaTraceWarn = traceGeneralizeM env,
             sbaMGenId = scopeGen,
             sbaNodeRef = scopeRootC
-          }
+        }
         target0
+    let locallyClosedGammaKeys =
+          IntSet.fromList
+            [ canonKey (NodeId key)
+            | key <- IntSet.toList (grLocallyClosedGammaNodes requirements)
+            ]
+        -- These are construction-role candidates, not yet declarations in
+        -- the emitted term.  Only the elaboration boundary has the lexical
+        -- environment needed for the paper's Gen(Gamma, tau) subtraction;
+        -- it must remove candidates whose final identity route is already
+        -- owned by ambient Gamma before constructing ETyAbs nodes.
+        reachableConstructionBinders =
+          case (scopeGen, mbBindParentsGaInfo) of
+            (Just currentScope, Just ga) ->
+              [ node
+              | nodeKey <-
+                  IntSet.toList
+                    ( expansionConstructionRoleKeys
+                        (gbiExpansionConstructionPlacements ga)
+                    )
+              , let node = canonical (NodeId nodeKey)
+              , firstGenAncestorGa (typeRef node) == Just currentScope
+              , IntSet.member (canonKey node) reachable
+              , case lookupNodeInMap nodes node of
+                  Just TyVar{} -> not (VarStore.isEliminatedVar constraint node)
+                  _ -> False
+              , case IntMap.lookup (nodeRefKey (typeRef node)) bindParents of
+                  Just (_parent, BindFlex) -> True
+                  _ -> False
+              ]
+            _ -> []
+        binders0 =
+          foldl insertDistinctBinder []
+            [ binder
+            | binder <- selectedBinders ++ reachableConstructionBinders
+            , not (IntSet.member (canonKey binder) locallyClosedGammaKeys)
+            ]
+        insertDistinctBinder binders binder
+          | any ((== canonKey binder) . canonKey) binders = binders
+          | otherwise = binders ++ [binder]
     let schemeRootSkipSet =
           IntSet.difference
             ( IntSet.fromList
@@ -368,12 +383,29 @@ planGeneralizeAt
           schemeRootSkipKey key || schemeRootBodySkipKey key
         reachableFromWithBoundsStop root0 =
           let stopSet = schemeRootKeySet
-              shouldStop nid = IntSet.member (getNodeId nid) stopSet
-           in reachableFromStop getNodeId canonical childrenWithBounds shouldStop root0
+              rootKey = getNodeId (canonical root0)
+              -- The selected nested scheme root owns the interior we need to
+              -- exclude.  Stop only at *other* scheme roots; stopping at the
+              -- starting node reduces the interior to the wrapper itself and
+              -- lets its lexical binders leak into the enclosing root subst.
+              shouldStop nid =
+                let key = getNodeId (canonical nid)
+                 in key /= rootKey && IntSet.member key stopSet
+              schemeInteriorChildren nid =
+                case IntMap.lookup (getNodeId (canonical nid)) nodes of
+                  Just node -> structuralChildrenWithBounds node
+                  Nothing -> []
+           in reachableFromStop getNodeId canonical schemeInteriorChildren shouldStop root0
         nestedSchemeInteriorSet =
           IntSet.unions
-            [ reachableFromWithBoundsStop (NodeId rootKey)
-            | rootKey <- IntSet.toList schemeRootSkipSet
+            [ IntSet.filter
+                (\nodeKey ->
+                  firstGenAncestorGa (typeRef (NodeId nodeKey))
+                    == Just owner
+                )
+                (reachableFromWithBoundsStop (NodeId rootKey))
+            | rootKey <- IntSet.toList schemeRootSkipSet,
+              Just owner <- [IntMap.lookup rootKey schemeRootOwner]
             ]
         isNestedSchemeBound v =
           case lookupNodeInMap nodes (canonical v) of
@@ -471,9 +503,9 @@ planGeneralizeAt
                 ++ show (VarStore.lookupVarBound constraint bnd)
             Nothing -> "None"
       )
-    let gammaPlan =
-          buildGammaPlan
-            GammaPlanInput
+    gammaPlan <-
+      buildGammaPlan
+        GammaPlanInput
               { gpiDebugEnabled = geDebugEnabled env,
                 gpiConstraint = constraint,
                 gpiNodes = nodes,
@@ -498,9 +530,10 @@ planGeneralizeAt
                 gpiReachableFromWithBounds = reachableFromWithBounds,
                 gpiBindableChildrenUnder = bindableChildrenUnder',
                 gpiAliasBinderNodes = aliasBinderNodes,
-                gpiFirstGenAncestor = firstGenAncestorGa
+                gpiFirstGenAncestor = firstGenAncestorGa,
+                gpiRequirements = requirements
               }
-        GammaPlan
+    let GammaPlan
           { gpBaseGammaSet = baseGammaSet,
             gpBaseGammaRep = baseGammaRep,
             gpNamedUnderGaSet = namedUnderGaSet,
@@ -510,7 +543,9 @@ planGeneralizeAt
             gpReachableForBinders = reachableForBinders,
             gpGammaKeyFor = gammaKeyFor,
             gpNamedUnderGa = namedUnderGa,
-            gpTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGamma
+            gpTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGamma,
+            gpRequiredGamma = requiredGamma,
+            gpSourceBinderRefs = sourceBinderRefs
           } = gammaPlan
     let liftToForall bnd0 =
           case IntMap.lookup (getNodeId (canonical bnd0)) schemeRootByBody of
@@ -548,6 +583,10 @@ planGeneralizeAt
                 trpiBoundHasForallForVar = boundHasForallForVar,
                 trpiSchemeRootByBody = schemeRootByBody,
                 trpiSchemeRootOwner = schemeRootOwner,
+                trpiSchemeRootsPlan = schemeRootsPlan,
+                trpiSolvedToBasePref = solvedToBasePref,
+                trpiBindParentsGa = mbBindParentsGaInfo,
+                trpiRequiresLiveRefinements = not (IntMap.null requiredGamma),
                 trpiLiftToForall = liftToForall
               }
         TypeRootPlan
@@ -556,8 +595,6 @@ planGeneralizeAt
           } = typeRootPlan
     reachableType <- Right (reachableFromWithBounds typeRoot)
     reachableTypeStructural <- Right (reachableFromStructural typeRoot)
-    let typeRootIsForall =
-          isTyForallKey (canonKey typeRoot)
     let orderBinderCandidatesFor =
           orderBinderCandidates
             (geDebugEnabled env)
@@ -599,7 +636,6 @@ planGeneralizeAt
             bpiTypeRoot0 = typeRoot0,
             bpiTypeRoot = typeRoot,
             bpiTypeRootFromBoundVar = typeRootFromBoundVar,
-            bpiTypeRootIsForall = typeRootIsForall,
             bpiLiftToForall = liftToForall,
             bpiReachableFromWithBounds = reachableFromWithBounds,
             bpiResForReify = resForReify,
@@ -613,7 +649,11 @@ planGeneralizeAt
             bpiSchemeRootOwnerBase = schemeRootOwnerBase,
             bpiSchemeRootByBodyBase = schemeRootByBodyBase,
             bpiAliasBinderBases = aliasBinderBases,
-            bpiOrderBinderCandidates = orderBinderCandidatesFor
+            bpiOrderBinderCandidates = orderBinderCandidatesFor,
+            bpiRequiredGamma = requiredGamma,
+            bpiLocallyClosedGammaNodes = grLocallyClosedGammaNodes requirements,
+            bpiSourceBinderRefs = sourceBinderRefs,
+            bpiAmbientBinderRefs = grAmbientBinderRefs requirements
           }
     pure
       GeneralizePlan
@@ -629,5 +669,6 @@ planGeneralizeAt
           gpBinders0 = binders0,
           gpReachableFromWithBounds = reachableFromWithBounds,
           gpReachableFromStructural = reachableFromStructural,
+          gpRigidBindParents = bindParents0,
           gpBindParents = bindParents
         }

@@ -37,14 +37,19 @@ data QuotientBindParents = QuotientBindParents
     { qbpAllRoots :: !IntSet
     , qbpBindParents :: !BindParents
     , qbpChildrenByParent :: !(IntMap [(Int, (NodeRef, BindFlag))])
+    -- | Every raw parent assignment, grouped by canonical child and with its
+    -- parent canonicalized.  Unlike 'qbpBindParents', this does not collapse
+    -- alias entries or their flags.  Construction-time conflict checks can
+    -- therefore reuse the quotient snapshot without rescanning the complete
+    -- raw binding-parent map or losing contradictory alias evidence.
+    , qbpRawParentAssignments :: !(IntMap [(NodeRef, BindFlag)])
     }
     deriving (Eq, Show)
 
 -- | Canonicalize the binding-parent relation under a canonicalization function.
 --
 -- This drops self-edges (where child and parent canonicalize to the same node),
--- merges duplicate edges by requiring the same parent and taking the max flag,
--- and rejects conflicting parents on the same canonical node.
+-- and merges duplicate alias edges deterministically while taking the max flag.
 --
 -- This is useful when unification maintains a union-find over nodes: after a
 -- merge, the raw `cBindParents` relation may contain edges for multiple aliases
@@ -59,8 +64,7 @@ canonicalizeBindParentsUnder canonical c0 = do
     pure bindParents
 
 -- | Rewrite `cBindParents` to a canonicalized binding-parent relation (dropping
--- self-edges), merging duplicates by requiring the same parent and taking the
--- max flag.
+-- self-edges) and merging duplicate aliases deterministically.
 --
 -- This is the shared core used by 'checkBindingTreeUnder', 'interiorOfUnder',
 -- and other quotient-aware binding-tree queries.
@@ -71,6 +75,16 @@ quotientBindParentsUnder
     -> Constraint p
     -> Either BindingError (IntSet, BindParents)
 quotientBindParentsUnder canonical c0 = do
+    (allRoots, bindParents, _rawParentAssignments) <-
+        quotientBindParentsDetailsUnder False canonical c0
+    pure (allRoots, bindParents)
+
+quotientBindParentsDetailsUnder
+    :: Bool
+    -> (NodeId -> NodeId)
+    -> Constraint p
+    -> Either BindingError (IntSet, BindParents, IntMap [(NodeRef, BindFlag)])
+quotientBindParentsDetailsUnder retainRawAssignments canonical c0 = do
     let bindParents0 = cBindParents c0
 
         allRoots :: IntSet
@@ -83,29 +97,41 @@ quotientBindParentsUnder canonical c0 = do
                     (getGenNodeMap (cGenNodes c0)))
                 (getNodeMap (cNodes c0))
 
-        -- Fuse entries0 + foldME: canonicalize, filter, and insert in one pass.
+        -- Canonicalize each raw edge once, retaining the exact assignments for
+        -- construction-time validation while also building the collapsed
+        -- quotient relation.
         -- Union-find canonicalization can transiently create multiple
         -- binding parents for the same canonical node. We resolve this
         -- deterministically by keeping the first parent we saw and
         -- taking the max flag.
-        bindParents =
+        (rawParentAssignments, bindParents) =
             IntMap.foldlWithKey'
-                (\bp childKey (parent0, flag) ->
+                (\(rawAssignments, bp) childKey (parent0, flag) ->
                     let childRootKey = Canonicalize.canonicalRefKey canonical (nodeRefFromKey childKey)
-                        parentRootKey = Canonicalize.canonicalRefKey canonical parent0
+                        parentRoot = Canonicalize.canonicalRef canonical parent0
+                        parentRootKey = nodeRefKey parentRoot
+                        rawAssignments'
+                            | retainRawAssignments =
+                                IntMap.insertWith
+                                    (++)
+                                    childRootKey
+                                    [(parentRoot, flag)]
+                                    rawAssignments
+                            | otherwise = rawAssignments
                     in if childRootKey == parentRootKey
                           || not (IntSet.member childRootKey allRoots)
                           || not (IntSet.member parentRootKey allRoots)
-                        then bp
+                        then (rawAssignments', bp)
                         else
-                            let parentRoot = Canonicalize.canonicalRef canonical parent0
-                            in IntMap.insertWith
+                            ( rawAssignments'
+                            , IntMap.insertWith
                                 (\(_, flagNew) (parentOld, flagOld) -> (parentOld, max flagOld flagNew))
                                 childRootKey
                                 (parentRoot, flag)
                                 bp
+                            )
                 )
-                IntMap.empty
+                (IntMap.empty, IntMap.empty)
                 bindParents0
 
     -- Sanity: rewritten nodes must correspond to canonical reps of live nodes.
@@ -123,14 +149,15 @@ quotientBindParentsUnder canonical c0 = do
                     "quotientBindParentsUnder: binding parent " ++ show parentRootKey
                         ++ " of node " ++ show childRootKey ++ " not in constraint"
 
-    pure (allRoots, bindParents)
+    pure (allRoots, bindParents, rawParentAssignments)
 
 quotientBindParentsContextUnder
     :: (NodeId -> NodeId)
     -> Constraint p
     -> Either BindingError QuotientBindParents
 quotientBindParentsContextUnder canonical c0 = do
-    (allRoots, bindParents) <- quotientBindParentsUnder canonical c0
+    (allRoots, bindParents, rawParentAssignments) <-
+        quotientBindParentsDetailsUnder True canonical c0
     let childrenByParent =
             IntMap.map reverse $
                 IntMap.foldlWithKey'
@@ -144,6 +171,7 @@ quotientBindParentsContextUnder canonical c0 = do
             { qbpAllRoots = allRoots
             , qbpBindParents = bindParents
             , qbpChildrenByParent = childrenByParent
+            , qbpRawParentAssignments = rawParentAssignments
             }
 
 quotientChildrenForParent :: NodeRef -> QuotientBindParents -> [(Int, (NodeRef, BindFlag))]

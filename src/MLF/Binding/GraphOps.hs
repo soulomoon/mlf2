@@ -41,10 +41,10 @@ its own edge) consists of flexible edges. A node is "locked" for the purposes
 of `isLocked` if that condition fails, so restricted nodes (their own edge is
 rigid) are treated as locked by this predicate.
 
-For ω operations, the thesis forbids operations *under* rigid edges (i.e. nodes
-with a rigid ancestor). This module therefore uses `isUnderRigidBinder` when
-executing Raise steps, which allows raising restricted nodes but rejects
-operations strictly beneath rigid edges. Weaken still requires a flexible edge.
+For ω operations, the thesis distinguishes orange restricted nodes (own edge
+rigid), which may be raised, from red locked nodes (own edge flexible with a
+rigid ancestor), which may not. Raise therefore checks `nodeKind` directly;
+Weaken still requires a flexible edge.
 -}
 module MLF.Binding.GraphOps (
     -- * Weaken operation
@@ -63,7 +63,14 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (InstanceOp (..))
-import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
+import MLF.Binding.Tree
+    ( NodeKind(..)
+    , bindingPathToRoot
+    , isBindingRoot
+    , lookupBindParent
+    , nodeKind
+    , setBindParent
+    )
 
 -- | Get the binding flag for a node.
 --
@@ -143,7 +150,7 @@ applyWeaken tag c = do
 --
 -- Preconditions:
 --   - n must not be a binding root
---   - n must be instantiable (not locked)
+--   - n must be non-red (instantiable or restricted, but not locked)
 --   - parent(n) must not be a root (otherwise there's nowhere to raise to)
 --
 -- Returns:
@@ -168,10 +175,10 @@ applyRaiseStep tag c = do
             -- We treat a node as "locked" iff it is *strictly* under a rigid
             -- binding edge. A restricted node (its own edge rigid) is still a
             -- valid Raise target; its translation is the identity instantiation.
-            locked <- isUnderRigidBinder c nid
-            if locked
-                then Left $ OperationOnLockedNode nid
-                else do
+            kind <- nodeKind c nid
+            case kind of
+                NodeLocked -> Left $ OperationOnLockedNode nid
+                _ -> do
                     -- Check if parent has a parent (grandparent)
                     case lookupBindParent c parent of
                         Nothing ->
@@ -185,16 +192,16 @@ applyRaiseStep tag c = do
 -- | Raise a node to a specific ancestor binder.
 --
 -- This walks the binding path once to verify the target is an ancestor,
--- checks for rigid binders in a single pass, then directly rebinds the
+-- classifies the node once, then directly rebinds the
 -- node to the target.  The previous implementation called 'applyRaiseStep'
 -- in a loop, which re-walked the path via 'isUnderRigidBinder' at every
 -- step (O(R * L) where R = raise count, L = path length).  The new
--- implementation is O(L): one path walk, one rigid-binder check, one
+-- implementation is O(L): one path walk, one node-kind check, one
 -- parent update.
 --
 -- Preconditions:
 --   - n must not be a binding root
---   - n must be instantiable
+--   - n must be non-red (instantiable or restricted, but not locked)
 --   - target must be an ancestor of n in the binding tree
 --
 -- Returns the updated constraint and the list of Raise operations applied.
@@ -216,14 +223,14 @@ applyRaiseTo tag target c = do
             "Target " ++ show target ++
             " is not an ancestor of " ++ show nid
         else do
-            -- Single rigid-binder check on the original path.
+            -- Single paper node-kind check on the original path.
             -- Ancestors' binding edges do not change across raise steps
             -- (only nid's own parent pointer is mutated), so one check
             -- is equivalent to checking at every step of the old loop.
-            locked <- isUnderRigidBinder c nid
-            if locked
-                then Left $ OperationOnLockedNode nid
-                else do
+            kind <- nodeKind c nid
+            case kind of
+                NodeLocked -> Left $ OperationOnLockedNode nid
+                _ -> do
                     -- Get current binding edge (parent and flag).
                     case lookupBindParent c nid of
                         Nothing -> Left $ MissingBindParent nid

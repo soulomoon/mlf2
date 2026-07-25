@@ -51,7 +51,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Interface` — private owner for typed checked module interface artifacts, including checked exports, local data/class summaries, visible instances, source-path metadata, and direct package-module dependencies
 - `MLF.Frontend.Program.BuildGraph` — private owner for deterministic package build graph and cache validation policy, using parsed source metadata plus typed interface summary metadata rather than file modification times, file sizes, hidden globals, or source-reparse fallbacks as the correctness mechanism
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
-- `MLF.Frontend.Program.Checked` — abstract identity-complete checked-program capability; `mkCheckedProgram` validates once at publication, while `Checked.Internal` is restricted to the owner and explicit invalid test fixtures
+- `MLF.Frontend.Program.Checked` — abstract checked-program publication boundary; its constituent resolved/checking types already require semantic identities, while `Checked.Internal` remains owner/test support
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI package entrypoints as an explicit import target
@@ -69,8 +69,8 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - `MLF.Backend.StructuralRecursiveData` — private owner for structural recursive
   ADT identity and payload-shape matching shared by backend IR validation,
-  checked-program conversion, and LLVM lowering; it separates identity-only
-  production matching from explicit metadata-light compatibility matching
+  checked-program conversion, and LLVM lowering; all semantic matching is
+  identity-only, with display names retained for diagnostics
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
@@ -84,7 +84,16 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 The `.mlfp` package/module owner is `MLF.Frontend.Program.Package`. One-file
 `.mlfp` inputs are represented as trivial package source units, while directory
 inputs and explicit search-path roots are represented as ordered local package
-roots. The package owner can discover `.mlfp` files under those roots/search
+roots. The builtin Prelude is prepended as its own canonical source unit, and
+check/run paths retain that package boundary so the checker can reuse its
+checked Prelude artifact; there is no flattening Prelude adapter. Cache
+eligibility follows hidden builtin source provenance minted by the Prelude
+owner, not the display path `<mlfp-prelude>`, and the cache key retains the
+complete resolved syntax, identities, and spellings observed by checking. The
+one-slot cache builds with a Prelude-owned descending identity supply, stores
+the checked module with the extrema of every generated identity it contains,
+and advances each client supply past those extrema on both cache hits and
+misses. The package owner can discover `.mlfp` files under those roots/search
 paths, retain source paths, reject duplicate modules across searched roots with
 source-path context, build a module-to-file graph, reject missing or cyclic
 module imports, and project modules in dependency order so imports are checked
@@ -194,16 +203,31 @@ these consumers. Core elaboration emits resolved variable occurrences from
 `EnvBinding`: external environment values carry `EnvId`, while lambda and let
 binders carry `LocalId`, and lambda/let rewrite helpers refresh local occurrence
 sidecar types when they rewrite binder types. Every `XmlfTerm` variable and binder
-form carries `ResolvedVar` at the type level.
+form carries `ResolvedVar` at the type level. The elaboration `Env` has one
+authoritative `Map ResolvedTermIdentityKey EnvBinding`; runtime names are
+payload projections, and the type-check environment is derived instead of
+stored as a second synchronized index. `PreparedExternalBindings` likewise
+owns alias-indexed `PreparedExternalBinding` records that pair each external
+binding with its checked scheme. Constraint, elaboration, and type-check maps
+are projections of those records; preferred/fallback union cannot cross-pair
+independently merged binding and scheme maps.
 
 Resolved Program expressions still pass through `compileResolvedExpr` into the
 source-shaped `SurfaceExpr` boundary. Its variable, lambda, let, and annotated
-lambda nodes carry `TermReference` directly: parser input is explicitly
-metadata-light, while resolved lowering stores `IdDetails` plus a display/runtime
-spelling. Normalization, desugaring, and constraint generation preserve that
-payload into the exact `ALam`/`ALet` node. Finalization therefore does not
+lambda nodes carry a phase-indexed `TermReference` directly: parser input is
+name-only by construction, while `MLF.Frontend.TermResolve` crosses once to a
+resolved carrier that requires `IdDetails` plus a display/runtime spelling.
+Normalization, desugaring, and constraint generation preserve that payload into
+the exact `ALam`/`ALet` node. Finalization therefore does not
 reconstruct binder meaning from a `Map String IdDetails`, a wrapper node, or a
 runtime-name sidecar. Runtime-name projections remain boundary views.
+Source `ELamAnn` nodes always desugar through the thesis κσ coercion. A
+compiler-generated `EvidenceId` parameter instead desugars to the core-only
+`EExactLamNode`; class metadata already owns its exact type, so routing it
+through κσ would incorrectly introduce a fresh flexible codomain.
+The source κσ graph uses direct rigid and flexible copies of the annotation;
+Figure 8.2.3's Eq-Var case is not encoded as a synthetic bounded-`forall`
+wrapper around the flexible copy.
 
 Backend-emission preparation, runtime reachability, typechecking, reduction, and
 backend conversion consume `ResolvedVar` / `IdDetails`. Constructor applications
@@ -211,17 +235,30 @@ carry `ConstructorId`; constructor bindings, including constructor-local
 `forall` shapes, are finalized directly from `ConstructorInfo` metadata. Their
 surface expression is not a fallback semantic authority.
 
-`TypeView` owns one node-level tree whose head and binder nodes carry display and
-identity spellings, semantic identity, and aliases. Display types, identity
-types, and lookup indexes are projections of that tree. Context nodes retain
-constructor-scope identities that are not visible in a projected result type;
-substitution and quantified specialization select nodes by `TypeBinderIdentity`.
-Structural lowering canonicalizes a stale display-shape mismatch to the
-identity-bearing shape before publishing another `TypeView`. Completeness is
-mention-sensitive and validated in one recursive checked-program traversal that
-also checks `ElabType` payloads. Constructor-visible rewriting, deferred
-constructor/case obligations, evidence keys, and type-binder substitution retain
-those identities. The focused snapshot is
+`LoweredBindingIdentity` is a closed top-level/constructor/method sum. A local,
+environment, or deferred `IdDetails` value cannot cross the module-binding
+construction boundary. Type-binder substitutions are direct
+`Map TypeBinderIdentity TypeView` values; display aliases are source-boundary
+inputs, not substitution state. `typeViewFromSourceTypeInScope` constructs the
+identity-bearing node tree first and then changes only its display projection,
+so import qualification cannot temporarily erase a type-head identity.
+
+`TypeView` owns one node-level tree whose head and binder nodes carry display
+spelling, semantic identity payload, and lookup aliases. Stable-name source
+types and lookup indexes are derived from those payloads; there is no cached
+identity spelling or parallel identity-shaped tree that can diverge. Context
+nodes retain constructor-scope identities that are not visible in a projected
+result type. Construction from source-shaped syntax accepts one shape plus
+identity aliases and rejects a missing or ambiguous payload explicitly.
+Substitution, quantified specialization, and subtree projection preserve node
+payloads and lexical binder contexts directly instead of projecting two
+`SrcType`s and pairing their strings. `typeViewNodeView`, `typeViewToResolved`,
+free-binder collection, matching, and backend conversion likewise traverse
+payloads directly. Display-only updates are shape checked and preserve
+payloads. `CheckedProgram` publication therefore does not run a late
+identity-hydration or completeness repair traversal. Constructor-visible
+rewriting, deferred constructor/case obligations, evidence keys, and
+type-binder substitution retain those identities. The focused snapshot is
 `docs/audit/identity-string-reference-audit.md`.
 
 The target does not duplicate every checked module declaration inside every
@@ -309,6 +346,11 @@ runtime invariants as compile-time types:
   reconstruction, while keeping redirect/canonicalization, copy-node recovery,
   scope overrides, and the owner-local base-constraint projection on
   `GaBindParents.gaBaseConstraint` out of `MLF.Elab.Run.Pipeline`.
+- Generalization root selection returns a tagged live/base root. Application of
+  that plan immediately pairs the root with its owning `PresolutionView` or
+  `GaBindParents.gaBaseConstraint`, and the no-fallback reifier consumes that
+  pair. A bare `NodeId` is never used to guess between graph domains, because
+  live and base graphs may reuse the same numeric key.
 - `MLF.Elab.Run.ResultType.View` owns result-type reconstruction's query
   adapter over the prepared result-type input: bound overlays, no-fallback
   reification, base-target projection into `GaBindParents.gaBaseConstraint`,
@@ -359,17 +401,16 @@ invariants for those executable shapes live at this boundary so conversion and
 lowering share one executable contract.
 
 Production lowering accepts `ProductionBackendProgram`, constructed only by
-`mkProductionBackendProgram` after identity-complete validation.
+`mkProductionBackendProgram` after closed-program validation.
 `MLF.Backend.Convert` returns this capability wrapper, and LLVM entrypoints do
 not accept a raw `BackendProgram`. Its raw projection is confined to
-`MLF.Backend.IR.Production.Internal` for the LLVM lowering owner and explicit
-test support. Metadata-light tests cross the separate
-`MLF.Backend.IR.Fixture.BackendProgramFixture` boundary.
-`validateBackendProgram` first rejects every
-missing semantic reference identity, then validates the executable/type
-invariants. Backend IR data types still admit name-only or optional-identity
-forms for explicit metadata-light fixtures; tests reach that path only through
-`BackendIRTestSupport`.
+`MLF.Backend.IR.Production.Internal` for the LLVM lowering owner. Backend IR
+constructors themselves require identities for modules, declarations,
+references, lexical binders, patterns, type heads, and type binders; compact
+identity-erasing patterns are unidirectional match/render views. Test support
+constructs complete fixture identities rather than entering a permissive raw
+IR. `validateBackendProgram` therefore checks relationships and typing, not a
+repairable missing-identity mode.
 
 That callable contract is explicit. `BackendApp` is the direct first-order
 call node, so local direct aliases that remain first-order stay on this path.
@@ -394,13 +435,11 @@ boxing/storage policy, or layout-only witnesses.
 Structural recursive ADT identity and payload-shape matching is centralized in
 `MLF.Backend.StructuralRecursiveData`. `MLF.Backend.IR`,
 `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` reuse that owner. Its
-mode-aware boundary entrypoints separate identity-only production checks from
-metadata-light checks; lower-level compatibility helpers compare identity when
-present and may use structural names only when identity is absent. Checked
-`TypeView` completeness plus `ProductionBackendProgram` validation makes that
-identityless recovery unreachable for production lowering. Conversion retains a
-narrow, explicitly metadata-light structural recovery adapter for fixtures and
-source-boundary normalization only.
+nominal and structural entrypoints compare carried data, constructor, type
+binder, and recursive-owner identities. Structural names remain diagnostic and
+canonical emitted spellings; they cannot supply a missing owner or override a
+conflicting identity. Conversion normalizes representation shape only after the
+owner is selected by identity.
 
 The row-5 primitive/eager contract is explicit as well. The current primitive
 surface is the inventory-owned reserved runtime-binding set in
@@ -473,8 +512,8 @@ The boundary invariants are:
   diagnostics;
 - lambda, application, let, type abstraction/application, recursive roll, and
   recursive unroll nodes satisfy local type equalities checked by
-  identity-complete `validateBackendProgram`; metadata-light fixtures use the
-  explicitly named `validateBackendProgramFixture` test adapter;
+  `validateBackendProgram`; test fixtures construct and validate the same
+  identity-complete IR;
 - ADT construction and case analysis are explicit backend nodes checked against
   program constructor metadata for known constructors, constructor arity,
   constructor-local `forall` bounds, argument/result types, case scrutinee
@@ -512,12 +551,12 @@ program bindings. Unsupported result types fail before native-run assertions,
 so the native process boundary does not invent source or IO semantics.
 `docs/backend-native-pipeline.md` records the linked-executable test pipeline,
 toolchain discovery, generated artifacts, runtime support, and row coverage
-classification. `Parity.ProgramMatrix.NativePolicy` owns the test-support
-ProgramSpec-to-LLVM native/object-code row policy consumed by
-`BackendLLVMSpec`; it classifies interpreter-success rows by source checking,
-interpreter/runtime expectation, backend LLVM assembly, object-code smoke,
-native executable run, and required LLVM/native tools without widening
-production backend APIs.
+classification. `Parity.ProgramMatrix.NativePolicy` owns the merged
+test-support interpreter, LLVM, native, and object-code row policy consumed by
+`BackendLLVMSpec`. Each row constructs one checked artifact, asserts its
+interpreter result, and then reuses that artifact for backend LLVM assembly,
+object-code smoke, and native execution without widening production backend
+APIs.
 
 `MLF.Backend.Emission.Prepare` owns the shared semantic preparation step for
 raw and native backend emission: source-string callers parse with a display path
@@ -605,6 +644,14 @@ semantics that are not represented elsewhere just as explicitly.”
 
 ## Witness Representation (Φ/Σ)
 
+- Production presolution commits one `EdgeExecutionArtifacts` packet per edge.
+  The packet owns the expansion, witness, Raise authority, non-source operation
+  origins, raw construction certificate, and replay trace as one immutable
+  proof artifact. `recordEdgeExecutionArtifacts` accepts an equal replay and
+  rejects a write that changes any field; replay likewise rejects a packet that
+  conflicts with the committed edge. The exported legacy `PresolutionState`
+  fixture pattern remains a test-compatibility projection and may synthesize
+  empty auxiliary fields, so it is not the production construction contract.
 - `EdgeWitness.ewForallIntros` stores the number of quantifier introductions
   needed for the O phase, and `EdgeWitness.ewWitness` stores the Ω-only instance
   operations (`OpGraft`, `OpMerge`, `OpRaise`, `OpWeaken`, `OpRaiseMerge`).
@@ -614,6 +661,33 @@ semantics that are not represented elsewhere just as explicitly.”
   provenance. Witness operation node IDs, `etBinderArgs`, `etInterior`, and
   `etCopyMap` keys live in one source-ID domain; canonical IDs are derived at
   lookup sites rather than globally rewriting trace provenance.
+- `RawExpansionConstruction` records the exact destination-domain parent edits
+  made while constructing χₑ, together with argument and semantic-meta roles.
+  Composed expansion steps union compatible certificates and reject a shared
+  child with conflicting parents. Preparation projects this evidence through
+  the final quotient into `ExpansionConstructionPlacements`; consumers then
+  derive the candidate's current owner and binding flag from the authoritative
+  binding tree. Cross-source copy edges retain Phase-4 alignment. If a
+  construction child and parent collapse to one source representative, the
+  administrative χₑ edge is discarded and terminal χₚ Raise/Weaken placement
+  remains authoritative.
+- Φ represents the thesis split directly. `QuantifierReordering` validates
+  φ_R, `EdgeTranslation` validates T(e), and `OccurrenceComputation` retains
+  their validated composition. Each component checks application and
+  alpha-equivalent endpoints; the composition seam requires exact
+  identity-bearing `ElabType` equality, so two alpha-equivalent forall trees
+  with different binder identities cannot be silently joined.
+- `ElabReadModel` is the general read-only graph projection. Φ translation can
+  consume it only after `buildPhiReadModel` has produced a `PhiReadModel`
+  capability proving binding-tree integrity and the absence of Gen fallback;
+  legal non-Φ reification is not rejected merely because an intermediate graph
+  is not Φ-ready. Scheme closure is separately context-aware:
+  `SchemeClosureAuthority` admits free binder identities only through an exact
+  ambient, inherited Γ, or locally closed Γ capability. Generalization outer
+  binders additionally pass through the opaque `FinalizeBinderPlan`, which
+  pairs the planner order with its reified bounds once; finalization cannot
+  manufacture a forall for a residual ref. Let publication and prepared-root
+  closure revalidate the composed scheme at their authoritative boundaries.
 
 ## Executable
 

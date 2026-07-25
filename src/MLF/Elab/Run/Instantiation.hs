@@ -3,6 +3,10 @@
 {-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.Instantiation (
     inferInstAppArgsFromSchemeRefs,
+    inferInstAppArgsFromSchemeRefsExact,
+    resolvedSourceApplicationArgumentEndpoint,
+    sourceSchemeConstructsExactEndpoint,
+    residualTopologyAgreesExact,
     varRefsInType,
     substTypeSelectiveRefs,
     instInsideFromArgsWithBoundsRefs,
@@ -10,39 +14,161 @@ module MLF.Elab.Run.Instantiation (
 ) where
 
 import Control.Applicative ((<|>))
+import Control.Monad (foldM, guard)
 import qualified Data.Map.Strict as Map
 
 import Data.List (find)
 
-import MLF.Reify.TypeOps (alphaEqType, composeTypeHeadRef, matchTypeRefs, stripForallsType)
+import MLF.Elab.Inst (applyInstantiation, schemeToType)
+import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
-
+import MLF.Reify.TypeOps
+    ( alphaEqType
+    , churchAwareEqType
+    , composeTypeHeadRef
+    , freeTypeVarRefsType
+    , matchChurchAwareTypeRefs
+    , matchTypeRefs
+    , stripForallsType
+    )
 newtype SubstFun (i :: TopVar) =
     SubstFun { runSubstFun :: [TypeBinderRef] -> Ty i }
 
 inferInstAppArgsFromSchemeRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
 inferInstAppArgsFromSchemeRefs binds body targetTy =
+    inferInstAppArgsFromSchemeRefsWith
+        matchTypeRefs
+        alphaEqType
+        (stripForallsType targetTy)
+        binds
+        body
+        targetTy
+
+-- | Infer source-scheme applications for an explicit xMLF endpoint.  Unlike
+-- the compatibility inference above, this preserves a leading forall in the
+-- target: first-class polymorphic arguments such as @id id@ instantiate the
+-- function at @forall a. a -> a@, not at that scheme's stripped body.
+inferInstAppArgsFromSchemeRefsExact :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
+inferInstAppArgsFromSchemeRefsExact binds body targetTy =
+    inferInstAppArgsFromSchemeRefsWith
+        matchChurchAwareTypeRefs
+        exactTypesAgree
+        targetTy
+        binds
+        body
+        targetTy
+  where
+    exactTypesAgree left right =
+        alphaEqType left right || churchAwareEqType left right
+
+-- | Select the exact argument endpoint for an identity-resolved source
+-- application.  The function's source domain must already be closed: if it
+-- still depends on one of the function scheme's binders, as in the paper's
+-- @g g@ construction, root preparation must not invent a specialization
+-- before the application constructor has established it.
+resolvedSourceApplicationArgumentEndpoint
+    :: TypeCheck.Env
+    -> SchemeInfo
+    -> SchemeInfo
+    -> Maybe ElabType
+resolvedSourceApplicationArgumentEndpoint typeEnv functionSchemeInfo argumentSchemeInfo = do
+    sourceDomain <-
+        case schemeBody (siScheme functionSchemeInfo) of
+            TArrow domain _ -> Just domain
+            _ -> Nothing
+    guard (null (freeTypeVarRefsType sourceDomain))
+    sourceSchemeConstructsExactEndpoint
+        typeEnv
+        sourceDomain
+        argumentSchemeInfo
+
+-- | Prove that one identity-resolved source occurrence constructs an exact
+-- endpoint. The complete source forall spine must be consumed, and every
+-- type application is checked before the endpoint is published.
+sourceSchemeConstructsExactEndpoint
+    :: TypeCheck.Env
+    -> ElabType
+    -> SchemeInfo
+    -> Maybe ElabType
+sourceSchemeConstructsExactEndpoint typeEnv endpoint schemeInfo = do
+    let sourceScheme = siScheme schemeInfo
+        sourceTy = schemeToType sourceScheme
+        sourceBinders = schemeBinderRefs sourceScheme
+    arguments <-
+        inferInstAppArgsFromSchemeRefsExact
+            sourceBinders
+            (schemeBody sourceScheme)
+            endpoint
+    guard (length arguments == length sourceBinders)
+    appliedTy <- foldM applySourceArgument sourceTy arguments
+    guard (alphaEqType appliedTy endpoint || churchAwareEqType appliedTy endpoint)
+    pure endpoint
+  where
+    applySourceArgument currentTy argumentTy =
+        let instantiation =
+                case currentTy of
+                    TForallRef _ (Just bound) _
+                        | alphaEqType argumentTy (tyToElab bound)
+                            || churchAwareEqType argumentTy (tyToElab bound) ->
+                            InstElim
+                    _ -> InstApp argumentTy
+        in either
+            (const Nothing)
+            Just
+            (TypeCheck.checkInstantiation typeEnv currentTy instantiation)
+
+-- | Compare a fully specialized residual function with the application
+-- topology that justified its arguments.  A graph endpoint may retain a
+-- leading bounded forall where the constructed endpoint has already selected
+-- that bound, so equality may eliminate those explicit bounds at any residual
+-- position.  Other arrow structure must agree recursively; matching only the
+-- terminal result is deliberately insufficient.
+residualTopologyAgreesExact :: ElabType -> ElabType -> Bool
+residualTopologyAgreesExact left right
+    | alphaEqType left right || churchAwareEqType left right = True
+    | otherwise =
+        case (left, right) of
+            (TArrow leftDomain leftCodomain, TArrow rightDomain rightCodomain) ->
+                residualTopologyAgreesExact leftDomain rightDomain
+                    && residualTopologyAgreesExact leftCodomain rightCodomain
+            (TForallRef{}, _) ->
+                case applyInstantiation left InstElim of
+                    Right left' -> residualTopologyAgreesExact left' right
+                    Left _ -> False
+            (_, TForallRef{}) ->
+                case applyInstantiation right InstElim of
+                    Right right' -> residualTopologyAgreesExact left right'
+                    Left _ -> False
+            _ -> False
+
+inferInstAppArgsFromSchemeRefsWith
+    :: ([TypeBinderRef] -> ElabType -> ElabType -> Either ElabError (Map.Map TypeBinderRef ElabType))
+    -> (ElabType -> ElabType -> Bool)
+    -> ElabType
+    -> [(TypeBinderRef, Maybe BoundType)]
+    -> ElabType
+    -> ElabType
+    -> Maybe [ElabType]
+inferInstAppArgsFromSchemeRefsWith matchRefs typesAgree targetCore binds body targetTy =
     let binderRefs = map fst binds
-        targetCore = stripForallsType targetTy
         targetForallRefs =
             let alg ty = case ty of
                     TForallIFRef ref _ body' -> ref : unK body'
                     TConIFWithIdentity _ _ args -> concatMap unK args
                     _ -> []
             in cataIxConst alg targetTy
-        argsAreIdentity :: [TypeBinderRef] -> [ElabType] -> Bool
-        argsAreIdentity refs args =
+        argsAreIdentity :: [ElabType] -> Bool
+        argsAreIdentity args =
             and
                 [ case arg of
                     TVarRef argRef ->
-                        typeBinderRefsSameIdentity argRef ref
-                            || any (typeBinderRefsSameIdentity argRef) targetForallRefs
+                        any (typeBinderRefsSameIdentity argRef) targetForallRefs
                     _ -> False
-                | (ref, arg) <- zip refs args
+                | arg <- args
                 ]
         inferFromBody =
             let fromMatch =
-                    case matchTypeRefs binderRefs body targetCore of
+                    case matchRefs binderRefs body targetCore of
                         Left _ -> Nothing
                         Right subst ->
                             let present = map (`Map.member` subst) binderRefs
@@ -52,7 +178,7 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
                                 args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
                             in if hasOutOfOrder
                                 then Nothing
-                                else if argsAreIdentity prefixRefs args
+                                else if argsAreIdentity args
                                     then Nothing
                                     else Just args
                 fromArrowPrefix =
@@ -63,10 +189,10 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
                                         case Map.lookup binderRef substAcc of
                                             Nothing -> Just (Map.insert binderRef targetDom substAcc)
                                             Just prev
-                                                | alphaEqType prev targetDom -> Just substAcc
+                                                | typesAgree prev targetDom -> Just substAcc
                                                 | otherwise -> Nothing
                                 _
-                                    | alphaEqType bodyDom targetDom -> Just substAcc
+                                    | typesAgree bodyDom targetDom -> Just substAcc
                                     | otherwise -> Nothing
                         go substAcc bodyTy targetTy' =
                             case (bodyTy, targetTy') of
@@ -83,10 +209,36 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
                             args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
                         if hasOutOfOrder
                             then Nothing
-                            else if argsAreIdentity prefixRefs args
+                            else if argsAreIdentity args
                                 then Nothing
                                 else Just args
             in fromMatch <|> fromArrowPrefix
+        inferDefaultEliminations =
+            -- A quantified variable may be absent from the body, so matching
+            -- the body cannot infer an argument for it.  In that case the
+            -- paper's N computation is canonical: eliminate each leading
+            -- quantifier at its current lower bound, and accept the arguments
+            -- only when the constructed computation reaches the exact
+            -- semantic endpoint.
+            let sourceTy =
+                    foldr
+                        (\(ref, mbBound) rest -> tForallWithRef ref mbBound rest)
+                        body
+                        binds
+                go current remaining acc =
+                    case remaining of
+                        []
+                            | alphaEqType current targetTy
+                                || churchAwareEqType current targetTy -> Just (reverse acc)
+                            | otherwise -> Nothing
+                        _ : rest ->
+                            case current of
+                                TForallRef _ mbBound _ -> do
+                                    current' <- either (const Nothing) Just (applyInstantiation current InstElim)
+                                    let argument = maybe TBottom tyToElab mbBound
+                                    go current' rest (argument : acc)
+                                _ -> Nothing
+            in go sourceTy binds []
         inferFromBound binderRef bound =
             let boundCore = stripForallsType bound
                 matchVars = map canonicalSchemeRef (varRefsInType boundCore)
@@ -94,7 +246,7 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
                     case find (typeBinderRefsSameIdentity ref) binderRefs of
                         Just binderRef' -> binderRef'
                         Nothing -> ref
-            in case matchTypeRefs matchVars boundCore targetCore of
+            in case matchRefs matchVars boundCore targetCore of
                 Left _ -> Nothing
                 Right subst ->
                     let innerVars =
@@ -118,19 +270,20 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
                         hasOutOfOrder = or (drop prefixLen present)
                         prefixArgs = take prefixLen argsMaybe
                         args = [ty | Just ty <- prefixArgs]
-                        prefixRefs = take prefixLen binderRefs
                     in if hasOutOfOrder
                         then Nothing
-                        else if argsAreIdentity prefixRefs args
+                        else if argsAreIdentity args
                             then Nothing
                             else Just args
     in case body of
         TVarRef ref ->
             case find (typeBinderRefsSameIdentity ref . fst) binds of
-                Just (binderRef, Just bound) -> inferFromBound binderRef (tyToElab bound)
-                Just (_, Nothing) -> inferFromBody
+                Just (binderRef, Just bound) ->
+                    inferFromBound binderRef (tyToElab bound)
+                        <|> inferDefaultEliminations
+                Just (_, Nothing) -> inferFromBody <|> inferDefaultEliminations
                 Nothing -> Nothing
-        _ -> inferFromBody
+        _ -> inferFromBody <|> inferDefaultEliminations
   where
     matchBinderRef ref =
         find (typeBinderRefsSameIdentity ref) (map fst binds)

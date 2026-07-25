@@ -16,7 +16,9 @@ module MLF.Backend.LLVM.Lower.Types
     ConstructedValue (..),
     DataRuntime (..),
     ExprEnv (..),
+    FunctionParam (..),
     FunctionForm (..),
+    ffParams,
     FunctionState (..),
     LocalFunction (..),
     LowerM,
@@ -31,6 +33,7 @@ module MLF.Backend.LLVM.Lower.Types
     Specialization (..),
     SpecializationKey,
     Wrapper (..),
+    wrapperExpectedType,
     WrapperKey,
     WrapperKind (..),
     atMay,
@@ -71,11 +74,9 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import MLF.Backend.IR
 import MLF.Backend.LLVM.Syntax (LLVMBasicBlock, LLVMFunction, LLVMInstruction, LLVMOperand, LLVMType)
-import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, lookupSymbolIdentityExact, symbolIdentityPayloadKey, symbolRefMatchesWith)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), IdentityGenerator, LocalRef, ResolvedTermIdentityKey, TypeBinderIdentity, UniqueIdentity, idDetailsIdentityKey)
-import MLF.Types.Reference (ReferenceMode (..))
 
 data BackendLLVMError
   = BackendLLVMValidationFailed BackendValidationError
@@ -114,8 +115,7 @@ data ProgramEnv = ProgramEnv
   }
 
 data BindingInfo = BindingInfo
-  { biRef :: BackendBindingRef,
-    biIdentity :: Maybe SymbolIdentity,
+  { biIdentity :: SymbolIdentity,
     biName :: String,
     biForm :: FunctionForm,
     biExportedAsMain :: Bool
@@ -159,69 +159,58 @@ backendBindingRefIdentity =
 
 bindingInfoRef :: BindingInfo -> BackendBindingRef
 bindingInfoRef =
-  biRef
+  backendBindingRefFromIdentity . biIdentity
 
-lookupProgramBindingByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe BindingInfo
-lookupProgramBindingByIdentityExact base mbIdentity =
-  mbIdentity >>= (`lookupSymbolIdentityExact` pbBindingsByIdentity base)
+lookupProgramBindingByIdentityExact :: ProgramBase -> SymbolIdentity -> Maybe BindingInfo
+lookupProgramBindingByIdentityExact base identity =
+  lookupSymbolIdentityExact identity (pbBindingsByIdentity base)
 
-lookupProgramConstructorByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe ConstructorRuntime
-lookupProgramConstructorByIdentityExact base mbIdentity =
-  mbIdentity >>= (`lookupSymbolIdentityExact` pbConstructorsByIdentity base)
+lookupProgramConstructorByIdentityExact :: ProgramBase -> SymbolIdentity -> Maybe ConstructorRuntime
+lookupProgramConstructorByIdentityExact base identity =
+  lookupSymbolIdentityExact identity (pbConstructorsByIdentity base)
 
-lookupProgramDataByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe DataRuntime
-lookupProgramDataByIdentityExact base mbIdentity =
-  mbIdentity >>= (`lookupSymbolIdentityExact` pbDataByIdentity base)
+lookupProgramDataByIdentityExact :: ProgramBase -> SymbolIdentity -> Maybe DataRuntime
+lookupProgramDataByIdentityExact base identity =
+  lookupSymbolIdentityExact identity (pbDataByIdentity base)
 
 instance Eq BindingInfo where
   left == right =
-    biRef left == biRef right
-      && bindingInfoIdentityMatches left right
+    sameSymbolIdentity (biIdentity left) (biIdentity right)
       && biForm left == biForm right
       && biExportedAsMain left == biExportedAsMain right
 
-bindingInfoIdentityMatches :: BindingInfo -> BindingInfo -> Bool
-bindingInfoIdentityMatches left right =
-  case (biIdentity left, biIdentity right) of
-    (Just leftIdentity, Just rightIdentity) ->
-      symbolRefMatchesWith IdentityOnly (Just leftIdentity) (biName left) (Just rightIdentity) (biName right)
-    (Nothing, Nothing) ->
-      backendBindingRefIdentity (biRef left) == Nothing && backendBindingRefIdentity (biRef right) == Nothing
-    _ ->
-      False
+data FunctionParam = FunctionParam
+  { functionParamIdentity :: IdDetails,
+    functionParamName :: String,
+    functionParamType :: BackendType
+  }
+  deriving (Show)
+
+instance Eq FunctionParam where
+  left == right =
+    backendTermRefMatches (functionParamIdentity left) (functionParamIdentity right)
+      && functionParamType left == functionParamType right
 
 data FunctionForm = FunctionForm
   { ffTypeBinders :: [BackendTypeBinder],
-    ffParams :: [(String, BackendType)],
-    ffParamIdentities :: [Maybe IdDetails],
+    ffParameters :: [FunctionParam],
     ffEvidenceParams :: Set Int,
     ffBody :: BackendExpr,
     ffReturnType :: BackendType
   }
   deriving (Show)
 
+ffParams :: FunctionForm -> [(String, BackendType)]
+ffParams =
+  map (\param -> (functionParamName param, functionParamType param)) . ffParameters
+
 instance Eq FunctionForm where
   left == right =
     ffTypeBinders left == ffTypeBinders right
-      && functionFormParamsMatch (ffParamIdentities left) (ffParams left) (ffParamIdentities right) (ffParams right)
+      && ffParameters left == ffParameters right
       && ffEvidenceParams left == ffEvidenceParams right
       && ffBody left == ffBody right
       && ffReturnType left == ffReturnType right
-
-functionFormParamsMatch :: [Maybe IdDetails] -> [(String, BackendType)] -> [Maybe IdDetails] -> [(String, BackendType)] -> Bool
-functionFormParamsMatch leftIdentities leftParams rightIdentities rightParams =
-  length leftParams == length rightParams
-    && and
-      ( zipWith
-          functionFormParamMatches
-          (zip (leftIdentities ++ repeat Nothing) leftParams)
-          (zip (rightIdentities ++ repeat Nothing) rightParams)
-      )
-
-functionFormParamMatches :: (Maybe IdDetails, (String, BackendType)) -> (Maybe IdDetails, (String, BackendType)) -> Bool
-functionFormParamMatches (leftIdentity, (leftName, leftType)) (rightIdentity, (rightName, rightType)) =
-  backendTermRefMatchesWith IdentityOnly leftIdentity leftName rightIdentity rightName
-    && leftType == rightType
 
 data ConstructorRuntime = ConstructorRuntime
   { crConstructor :: BackendConstructor,
@@ -278,24 +267,23 @@ data Wrapper = Wrapper
   { wrapperKind :: WrapperKind,
     wrapperBindingRef :: BackendBindingRef,
     wrapperFunctionName :: String,
-    wrapperExpectedType :: BackendType,
     wrapperExpr :: BackendExpr,
-    wrapperParamIdentities :: [Maybe IdDetails]
+    wrapperParameters :: [FunctionParam],
+    wrapperReturnType :: BackendType
   }
   deriving (Show)
+
+wrapperExpectedType :: Wrapper -> BackendType
+wrapperExpectedType wrapper =
+  foldr BTArrow (wrapperReturnType wrapper) (map functionParamType (wrapperParameters wrapper))
 
 instance Eq Wrapper where
   left == right =
     wrapperKind left == wrapperKind right
       && wrapperBindingRef left == wrapperBindingRef right
-      && wrapperExpectedType left == wrapperExpectedType right
       && wrapperExpr left == wrapperExpr right
-      && wrapperParamIdentities left == wrapperParamIdentities right
-
-data IdentityRefKey identity
-  = IdentityRefKey identity
-  | MetadataLightNameRefKey String
-  deriving (Eq, Ord, Show)
+      && wrapperParameters left == wrapperParameters right
+      && wrapperReturnType left == wrapperReturnType right
 
 data BackendLiteralIdentityKey
   = BackendIntLiteralKey Integer
@@ -305,45 +293,45 @@ data BackendLiteralIdentityKey
   deriving (Eq, Ord, Show)
 
 data BackendTypeIdentityKey
-  = BackendTypeVarKey (IdentityRefKey TypeBinderIdentity)
+  = BackendTypeVarKey TypeBinderIdentity
   | BackendTypeArrowKey BackendTypeIdentityKey BackendTypeIdentityKey
-  | BackendTypeBaseKey (IdentityRefKey SymbolIdentityPayloadKey)
-  | BackendTypeConKey (IdentityRefKey SymbolIdentityPayloadKey) (NonEmpty BackendTypeIdentityKey)
-  | BackendTypeVarAppKey (IdentityRefKey TypeBinderIdentity) (NonEmpty BackendTypeIdentityKey)
-  | BackendTypeForallKey (IdentityRefKey TypeBinderIdentity) (Maybe BackendTypeIdentityKey) BackendTypeIdentityKey
-  | BackendTypeMuKey (IdentityRefKey TypeBinderIdentity) BackendTypeIdentityKey
+  | BackendTypeBaseKey SymbolIdentityPayloadKey
+  | BackendTypeConKey SymbolIdentityPayloadKey (NonEmpty BackendTypeIdentityKey)
+  | BackendTypeVarAppKey TypeBinderIdentity (NonEmpty BackendTypeIdentityKey)
+  | BackendTypeForallKey TypeBinderIdentity (Maybe BackendTypeIdentityKey) BackendTypeIdentityKey
+  | BackendTypeMuKey TypeBinderIdentity BackendTypeIdentityKey
   | BackendTypeBottomKey
   deriving (Eq, Ord, Show)
 
 data BackendPatternIdentityKey
   = BackendDefaultPatternKey
   | BackendConstructorPatternKey
-      (IdentityRefKey SymbolIdentityPayloadKey)
-      [IdentityRefKey ResolvedTermIdentityKey]
+      SymbolIdentityPayloadKey
+      [ResolvedTermIdentityKey]
   deriving (Eq, Ord, Show)
 
 data BackendExprIdentityKey
-  = BackendVarExprKey BackendTypeIdentityKey (IdentityRefKey ResolvedTermIdentityKey)
+  = BackendVarExprKey BackendTypeIdentityKey ResolvedTermIdentityKey
   | BackendLitExprKey BackendTypeIdentityKey BackendLiteralIdentityKey
-  | BackendLamExprKey BackendTypeIdentityKey (IdentityRefKey ResolvedTermIdentityKey) BackendTypeIdentityKey BackendExprIdentityKey
+  | BackendLamExprKey BackendTypeIdentityKey ResolvedTermIdentityKey BackendTypeIdentityKey BackendExprIdentityKey
   | BackendAppExprKey BackendTypeIdentityKey BackendExprIdentityKey BackendExprIdentityKey
-  | BackendLetExprKey BackendTypeIdentityKey (IdentityRefKey ResolvedTermIdentityKey) BackendTypeIdentityKey BackendExprIdentityKey BackendExprIdentityKey
-  | BackendTyAbsExprKey BackendTypeIdentityKey (IdentityRefKey TypeBinderIdentity) (Maybe BackendTypeIdentityKey) BackendExprIdentityKey
+  | BackendLetExprKey BackendTypeIdentityKey ResolvedTermIdentityKey BackendTypeIdentityKey BackendExprIdentityKey BackendExprIdentityKey
+  | BackendTyAbsExprKey BackendTypeIdentityKey TypeBinderIdentity (Maybe BackendTypeIdentityKey) BackendExprIdentityKey
   | BackendTyAppExprKey BackendTypeIdentityKey BackendExprIdentityKey BackendTypeIdentityKey
   | BackendRollExprKey BackendTypeIdentityKey BackendExprIdentityKey
   | BackendUnrollExprKey BackendTypeIdentityKey BackendExprIdentityKey
   | BackendClosureExprKey
       BackendTypeIdentityKey
-      (IdentityRefKey UniqueIdentity)
-      [ ( IdentityRefKey ResolvedTermIdentityKey,
+      UniqueIdentity
+      [ ( ResolvedTermIdentityKey,
           BackendTypeIdentityKey,
           BackendExprIdentityKey
         )
       ]
-      [(IdentityRefKey ResolvedTermIdentityKey, BackendTypeIdentityKey)]
+      [(ResolvedTermIdentityKey, BackendTypeIdentityKey)]
       BackendExprIdentityKey
   | BackendClosureCallExprKey BackendTypeIdentityKey BackendExprIdentityKey [BackendExprIdentityKey]
-  | BackendConstructExprKey BackendTypeIdentityKey (IdentityRefKey SymbolIdentityPayloadKey) [BackendExprIdentityKey]
+  | BackendConstructExprKey BackendTypeIdentityKey SymbolIdentityPayloadKey [BackendExprIdentityKey]
   | BackendCaseExprKey BackendTypeIdentityKey BackendExprIdentityKey (NonEmpty (BackendPatternIdentityKey, BackendExprIdentityKey))
   deriving (Eq, Ord, Show)
 
@@ -353,63 +341,57 @@ data SpecializationKey = SpecializationKey BackendBindingRef [BackendTypeIdentit
 data WrapperKey = WrapperKey BackendTypeIdentityKey BackendExprIdentityKey
   deriving (Eq, Ord, Show)
 
-identityRefKey :: Maybe identity -> String -> IdentityRefKey identity
-identityRefKey mbIdentity name =
-  case mbIdentity of
-    Just identity -> IdentityRefKey identity
-    Nothing -> MetadataLightNameRefKey name
-
 backendTypeIdentityKey :: BackendType -> BackendTypeIdentityKey
 backendTypeIdentityKey =
   \case
-    BTVarWithIdentity identity name ->
-      BackendTypeVarKey (identityRefKey identity name)
+    BTVarWithIdentity identity _ ->
+      BackendTypeVarKey identity
     BTArrow domain codomain ->
       BackendTypeArrowKey (backendTypeIdentityKey domain) (backendTypeIdentityKey codomain)
-    BTBaseWithIdentity identity (BaseTy name) ->
-      BackendTypeBaseKey (identityRefKey (symbolIdentityPayloadKey <$> identity) name)
-    BTConWithIdentity identity (BaseTy name) args ->
+    BTBaseWithIdentity identity _ ->
+      BackendTypeBaseKey (symbolIdentityPayloadKey identity)
+    BTConWithIdentity identity _ args ->
       BackendTypeConKey
-        (identityRefKey (symbolIdentityPayloadKey <$> identity) name)
+        (symbolIdentityPayloadKey identity)
         (fmap backendTypeIdentityKey args)
-    BTVarAppWithIdentity identity name args ->
-      BackendTypeVarAppKey (identityRefKey identity name) (fmap backendTypeIdentityKey args)
-    BTForallWithIdentity identity name mbBound body ->
+    BTVarAppWithIdentity identity _ args ->
+      BackendTypeVarAppKey identity (fmap backendTypeIdentityKey args)
+    BTForallWithIdentity identity _ mbBound body ->
       BackendTypeForallKey
-        (identityRefKey identity name)
+        identity
         (backendTypeIdentityKey <$> mbBound)
         (backendTypeIdentityKey body)
-    BTMuWithIdentity identity name body ->
-      BackendTypeMuKey (identityRefKey identity name) (backendTypeIdentityKey body)
+    BTMuWithIdentity identity _ body ->
+      BackendTypeMuKey identity (backendTypeIdentityKey body)
     BTBottom ->
       BackendTypeBottomKey
 
 backendExprIdentityKey :: BackendExpr -> BackendExprIdentityKey
 backendExprIdentityKey =
   \case
-    BackendVarWithIdentity resultTy identity name ->
-      BackendVarExprKey (backendTypeIdentityKey resultTy) (termRefKey identity name)
+    BackendVarWithIdentity resultTy identity _ ->
+      BackendVarExprKey (backendTypeIdentityKey resultTy) (termRefKey identity)
     BackendLit resultTy lit ->
       BackendLitExprKey (backendTypeIdentityKey resultTy) (literalKey lit)
-    BackendLamWithIdentity resultTy identity name paramTy body ->
+    BackendLamWithIdentity resultTy identity _ paramTy body ->
       BackendLamExprKey
         (backendTypeIdentityKey resultTy)
-        (termRefKey identity name)
+        (termRefKey identity)
         (backendTypeIdentityKey paramTy)
         (backendExprIdentityKey body)
     BackendApp resultTy fun arg ->
       BackendAppExprKey (backendTypeIdentityKey resultTy) (backendExprIdentityKey fun) (backendExprIdentityKey arg)
-    BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
+    BackendLetWithIdentity resultTy identity _ bindingTy rhs body ->
       BackendLetExprKey
         (backendTypeIdentityKey resultTy)
-        (termRefKey identity name)
+        (termRefKey identity)
         (backendTypeIdentityKey bindingTy)
         (backendExprIdentityKey rhs)
         (backendExprIdentityKey body)
-    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+    BackendTyAbsWithIdentity resultTy identity _ mbBound body ->
       BackendTyAbsExprKey
         (backendTypeIdentityKey resultTy)
-        (identityRefKey identity name)
+        identity
         (backendTypeIdentityKey <$> mbBound)
         (backendExprIdentityKey body)
     BackendTyApp resultTy fun ty ->
@@ -418,19 +400,19 @@ backendExprIdentityKey =
       BackendRollExprKey (backendTypeIdentityKey resultTy) (backendExprIdentityKey payload)
     BackendUnroll resultTy payload ->
       BackendUnrollExprKey (backendTypeIdentityKey resultTy) (backendExprIdentityKey payload)
-    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+    BackendClosureWithParamIdentities resultTy entryIdentity _ captures params body ->
       BackendClosureExprKey
         (backendTypeIdentityKey resultTy)
-        (identityRefKey entryIdentity entryName)
+        entryIdentity
         (map captureKey captures)
         (map paramKey params)
         (backendExprIdentityKey body)
     BackendClosureCall resultTy fun args ->
       BackendClosureCallExprKey (backendTypeIdentityKey resultTy) (backendExprIdentityKey fun) (map backendExprIdentityKey args)
-    BackendConstructWithIdentity resultTy identity name args ->
+    BackendConstructWithIdentity resultTy identity _ args ->
       BackendConstructExprKey
         (backendTypeIdentityKey resultTy)
-        (identityRefKey (symbolIdentityPayloadKey <$> identity) name)
+        (symbolIdentityPayloadKey identity)
         (map backendExprIdentityKey args)
     BackendCase resultTy scrutinee alternatives ->
       BackendCaseExprKey
@@ -438,8 +420,7 @@ backendExprIdentityKey =
         (backendExprIdentityKey scrutinee)
         (fmap alternativeKey alternatives)
   where
-    termRefKey identity name =
-      identityRefKey (idDetailsIdentityKey <$> identity) name
+    termRefKey = idDetailsIdentityKey
 
     literalKey lit =
       case lit of
@@ -449,13 +430,13 @@ backendExprIdentityKey =
         LChar value -> BackendCharLiteralKey value
 
     captureKey capture =
-      ( termRefKey (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture),
+      ( termRefKey (backendClosureCaptureIdentity capture),
         backendTypeIdentityKey (backendClosureCaptureType capture),
         backendExprIdentityKey (backendClosureCaptureExpr capture)
       )
 
     paramKey param =
-      ( termRefKey (backendClosureParamIdentity param) (backendClosureParamName param),
+      ( termRefKey (backendClosureParamIdentity param),
         backendTypeIdentityKey (backendClosureParamType param)
       )
 
@@ -466,10 +447,10 @@ backendExprIdentityKey =
       case pattern0 of
         BackendDefaultPattern ->
           BackendDefaultPatternKey
-        BackendConstructorPatternWithBinderIdentities identity name binders ->
+        BackendConstructorPatternWithBinderIdentities identity _ binders ->
           BackendConstructorPatternKey
-            (identityRefKey (symbolIdentityPayloadKey <$> identity) name)
-            [ termRefKey (backendPatternBinderIdentity binder) (backendPatternBinderName binder)
+            (symbolIdentityPayloadKey identity)
+            [ termRefKey (backendPatternBinderIdentity binder)
             | binder <- binders
             ]
 
@@ -486,36 +467,17 @@ data ClosureEntryOrigin
   | GeneratedReturnedPartialOrigin
   deriving (Eq, Show)
 
-data ClosureEntryIdentityKey
+newtype ClosureEntryIdentityKey
   = BackendClosureEntryIdentityKey UniqueIdentity
-  | UnassignedBackendClosureEntryIdentityKey
-      String
-      BackendTypeIdentityKey
-      [ ( IdentityRefKey ResolvedTermIdentityKey,
-          LowerValueKind,
-          BackendTypeIdentityKey
-        )
-      ]
-      [(IdentityRefKey ResolvedTermIdentityKey, BackendTypeIdentityKey)]
-      (Set Int)
-      BackendExprIdentityKey
-  | ReturnedPartialClosureEntryIdentityKey
-      LowerValueKind
-      BackendTypeIdentityKey
-      [(LowerValueKind, BackendTypeIdentityKey)]
-      [BackendTypeIdentityKey]
-      (Set Int)
-      BackendTypeIdentityKey
   deriving (Eq, Ord, Show)
 
 data ClosureEntry = ClosureEntry
   { ceOrigin :: ClosureEntryOrigin,
     ceFunctionType :: BackendType,
-    ceEntryIdentity :: Maybe UniqueIdentity,
+    ceEntryIdentity :: UniqueIdentity,
     ceEntryName :: String,
     ceCaptures :: [ClosureCaptureSlot],
-    ceParams :: [(String, BackendType)],
-    ceParamIdentities :: [Maybe IdDetails],
+    ceParameters :: [FunctionParam],
     ceEvidenceParams :: Set Int,
     ceBody :: BackendExpr
   }
@@ -523,77 +485,26 @@ data ClosureEntry = ClosureEntry
 
 {- Note [Identity assignment for qualified closure entries]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Production backend closures carry an entry identity.  Specialization
-qualification deliberately clears it because one source closure can yield
-several emitted entries.  Before fresh identities are assigned, repeated
-collection of the same qualified entry must share one generated identity;
-otherwise the two copies become falsely distinct.
-
-The qualified emission name is used only in this unassigned construction key,
-together with the full identity-bearing closure payload.  It is not a semantic
-reference after assignment.  Returned-partial entries do not need that seam:
-their callable/capture/parameter shape is their complete synthetic origin, so
-their emitted names remain absent from the key.
+Every closure entry is identity-complete when constructed. Generated entry
+seeds live outside this type and are assigned their entry, capture, and
+parameter identities before becoming a 'ClosureEntry'.
 -}
-closureEntryIdentityKey :: ClosureEntry -> Maybe ClosureEntryIdentityKey
-closureEntryIdentityKey entry =
-  case ceOrigin entry of
-    BackendClosureOrigin ->
-      case ceEntryIdentity entry of
-        Just identity ->
-          Just (BackendClosureEntryIdentityKey identity)
-        Nothing ->
-          Just
-            ( UnassignedBackendClosureEntryIdentityKey
-                (ceEntryName entry)
-                (backendTypeIdentityKey (ceFunctionType entry))
-                [ ( termIdentityRefKey (ccsIdentity capture) (ccsName capture),
-                    ccsValueKind capture,
-                    backendTypeIdentityKey (ccsType capture)
-                  )
-                | capture <- ceCaptures entry
-                ]
-                [ ( termIdentityRefKey mbIdentity name,
-                    backendTypeIdentityKey paramTy
-                  )
-                | ((name, paramTy), mbIdentity) <- zip (ceParams entry) (ceParamIdentities entry ++ repeat Nothing)
-                ]
-                (ceEvidenceParams entry)
-                (backendExprIdentityKey (ceBody entry))
-            )
-    GeneratedReturnedPartialOrigin ->
-      case ceCaptures entry of
-        callee : supplied ->
-          Just
-            ( ReturnedPartialClosureEntryIdentityKey
-                (ccsValueKind callee)
-                (backendTypeIdentityKey (ccsType callee))
-                [ (ccsValueKind capture, backendTypeIdentityKey (ccsType capture))
-                  | capture <- supplied
-                ]
-                (map (backendTypeIdentityKey . snd) (ceParams entry))
-                (ceEvidenceParams entry)
-                (backendTypeIdentityKey (ceFunctionType entry))
-            )
-        [] ->
-          Nothing
-
-termIdentityRefKey :: Maybe IdDetails -> String -> IdentityRefKey ResolvedTermIdentityKey
-termIdentityRefKey mbIdentity name =
-  identityRefKey (idDetailsIdentityKey <$> mbIdentity) name
+closureEntryIdentityKey :: ClosureEntry -> ClosureEntryIdentityKey
+closureEntryIdentityKey =
+  BackendClosureEntryIdentityKey . ceEntryIdentity
 
 instance Eq ClosureEntry where
   left == right =
     ceOrigin left == ceOrigin right
       && ceFunctionType left == ceFunctionType right
-      && closureEntryRefMatchesWith IdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+      && closureEntryRefMatches (ceEntryIdentity left) (ceEntryIdentity right)
       && ceCaptures left == ceCaptures right
-      && functionFormParamsMatch (ceParamIdentities left) (ceParams left) (ceParamIdentities right) (ceParams right)
+      && ceParameters left == ceParameters right
       && ceEvidenceParams left == ceEvidenceParams right
       && ceBody left == ceBody right
 
 data ClosureCaptureSlot = ClosureCaptureSlot
-  { ccsIdentity :: Maybe IdDetails,
+  { ccsIdentity :: IdDetails,
     ccsName :: String,
     ccsType :: BackendType,
     ccsValueKind :: LowerValueKind
@@ -602,7 +513,7 @@ data ClosureCaptureSlot = ClosureCaptureSlot
 
 instance Eq ClosureCaptureSlot where
   left == right =
-    backendTermRefMatchesWith IdentityOnly (ccsIdentity left) (ccsName left) (ccsIdentity right) (ccsName right)
+    backendTermRefMatches (ccsIdentity left) (ccsIdentity right)
       && ccsType left == ccsType right
       && ccsValueKind left == ccsValueKind right
 
@@ -641,14 +552,13 @@ data LowerValue = LowerValueWithIdentity
     lvOperand :: LLVMOperand,
     lvValueKind :: LowerValueKind,
     lvConstructedValue :: Maybe ConstructedValue,
-    lvSymbolIdentity :: Maybe SymbolIdentity,
     lvBindingRef :: Maybe BackendBindingRef
   }
   deriving (Eq, Show)
 
 pattern LowerValue :: BackendType -> LLVMType -> LLVMOperand -> LowerValueKind -> Maybe ConstructedValue -> LowerValue
 pattern LowerValue backendType llvmType operand valueKind constructedValue =
-  LowerValueWithIdentity backendType llvmType operand valueKind constructedValue Nothing Nothing
+  LowerValueWithIdentity backendType llvmType operand valueKind constructedValue Nothing
 
 {-# COMPLETE LowerValue #-}
 
@@ -658,16 +568,16 @@ data LowerValueKind
   | LowerFunctionPointer
   deriving (Eq, Ord, Show)
 
-constructedValueForConstructor :: SymbolIdentity -> String -> [LowerValueKind] -> ConstructedValue
-constructedValueForConstructor identity _name =
+constructedValueForConstructor :: SymbolIdentity -> [LowerValueKind] -> ConstructedValue
+constructedValueForConstructor identity =
   constructedValueForConstructorKey (constructorValueKeyFromIdentity identity)
 
 constructedValueForConstructorKey :: ConstructorValueKey -> [LowerValueKind] -> ConstructedValue
 constructedValueForConstructorKey key fieldKinds =
   ConstructedValue (Map.singleton key fieldKinds)
 
-constructedFieldValueKind :: SymbolIdentity -> String -> Int -> ConstructedValue -> Maybe LowerValueKind
-constructedFieldValueKind identity _constructorName =
+constructedFieldValueKind :: SymbolIdentity -> Int -> ConstructedValue -> Maybe LowerValueKind
+constructedFieldValueKind identity =
   constructedFieldValueKindByKey (constructorValueKeyFromIdentity identity)
 
 constructedFieldValueKindByKey :: ConstructorValueKey -> Int -> ConstructedValue -> Maybe LowerValueKind

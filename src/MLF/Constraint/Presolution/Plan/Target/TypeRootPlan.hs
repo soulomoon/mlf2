@@ -3,16 +3,22 @@
 module MLF.Constraint.Presolution.Plan.Target.TypeRootPlan (
     TypeRootPlanInput(..),
     TypeRootPlan(..),
+    ReifyRootSource(..),
     buildTypeRootPlan
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
+import MLF.Constraint.Presolution.Plan.SchemeRoots
+    ( SchemeRootsPlan(..)
+    , schemeOwnerFromBody
+    )
 import MLF.Constraint.Types.Graph
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
-data TypeRootPlanInput = TypeRootPlanInput
+data TypeRootPlanInput p = TypeRootPlanInput
     { trpiNodes :: IntMap.IntMap TyNode
     , trpiCanonical :: NodeId -> NodeId
     , trpiCanonKey :: NodeId -> Int
@@ -34,8 +40,22 @@ data TypeRootPlanInput = TypeRootPlanInput
     , trpiBoundHasForallForVar :: NodeId -> Bool
     , trpiSchemeRootByBody :: IntMap.IntMap NodeId
     , trpiSchemeRootOwner :: IntMap.IntMap GenNodeId
+    , trpiSchemeRootsPlan :: SchemeRootsPlan
+    , trpiSolvedToBasePref :: IntMap.IntMap NodeId
+    , trpiBindParentsGa :: Maybe (GaBindParentsInfo p)
+    , trpiRequiresLiveRefinements :: Bool
     , trpiLiftToForall :: NodeId -> NodeId
     }
+
+-- | The graph domain from which the generalized result type must be reified.
+--
+-- A live solved root carries semantic refinements introduced by presolution.
+-- A base root is valid only when it is the structural source of a scheme body;
+-- copy provenance alone is not evidence that the two roots have the same type.
+data ReifyRootSource
+    = ReifyLiveRoot NodeId
+    | ReifyBaseSchemeRoot NodeId
+    deriving (Eq, Show)
 
 data TypeRootPlan = TypeRootPlan
     { trUseBoundTypeRoot :: Bool
@@ -45,9 +65,10 @@ data TypeRootPlan = TypeRootPlan
     , trSchemeBodyChildUnderGen :: Maybe NodeId
     , trTypeRoot0 :: NodeId
     , trTypeRoot :: NodeId
+    , trReifyRootSource :: ReifyRootSource
     }
 
-buildTypeRootPlan :: TypeRootPlanInput -> TypeRootPlan
+buildTypeRootPlan :: TypeRootPlanInput p -> TypeRootPlan
 buildTypeRootPlan TypeRootPlanInput{..} =
     let nodes = trpiNodes
         canonical = trpiCanonical
@@ -59,7 +80,6 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         scopeGen = trpiScopeGen
         target0 = trpiTarget0
         targetBound = trpiTargetBound
-        targetIsSchemeRoot = trpiTargetIsSchemeRoot
         targetIsSchemeRootForScope = trpiTargetIsSchemeRootForScope
         targetIsTyVar = trpiTargetIsTyVar
         targetBoundUnderOtherGen = trpiTargetBoundUnderOtherGen
@@ -70,13 +90,51 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         boundHasForallForVar = trpiBoundHasForallForVar
         schemeRootByBody = trpiSchemeRootByBody
         schemeRootOwner = trpiSchemeRootOwner
+        schemeRootsPlan = trpiSchemeRootsPlan
+        solvedToBasePref = trpiSolvedToBasePref
+        bindParentsGa = trpiBindParentsGa
+        requiresLiveRefinements = trpiRequiresLiveRefinements
         liftToForall = trpiLiftToForall
+        -- An ordinary bounded scheme root remains a quantified root.  Only
+        -- Phase 1's let-edge certificate proves that this root is an
+        -- administrative wrapper whose live bound is the semantic type root.
+        restoredSchemeRootUsesBound =
+            case (targetBound, bindParentsGa) of
+                (Just bnd, Just ga) ->
+                    case IntMap.lookup
+                        (getNodeId target0)
+                        (gbiRestoredSchemeRootTargets ga)
+                    of
+                        Just target -> canonical target == canonical bnd
+                        Nothing -> False
+                _ -> False
         useBoundTypeRootLocal =
-            not targetIsSchemeRoot &&
-            case targetBound of
-                Just bnd ->
-                    IntMap.member (getNodeId (canonical bnd)) schemeRootByBody
-                Nothing -> False
+            restoredSchemeRootUsesBound
+                || ( (not targetIsSchemeRootForScope || targetBoundUnderOtherGen)
+                        && case targetBound of
+                            Just bnd ->
+                                let bndC = canonical bnd
+                                    boundIsSchemeBody =
+                                        IntMap.member (getNodeId bndC) schemeRootByBody
+                                    -- A result wrapper owned by a nested root is not a
+                                    -- binder of the enclosing scheme.  When that wrapper
+                                    -- owns a complete structural bound, the bound is its
+                                    -- authoritative result type; reifying the wrapper
+                                    -- itself would manufacture a free type variable and
+                                    -- make the real binders look vacuous.  Locally named
+                                    -- Gamma variables remain flexible and therefore keep
+                                    -- the wrapper as their type root.
+                                    targetOwnsStructuralBound =
+                                        targetBoundUnderOtherGen
+                                            && not targetInGammaLocal
+                                            && case IntMap.lookup (nodeRefKey (typeRef bndC)) bindParents of
+                                                Just (TypeRef owner, _) ->
+                                                    canonical owner == canonical target0
+                                                        && isStructuralNode bndC
+                                                _ -> False
+                                in boundIsSchemeBody || targetOwnsStructuralBound
+                            Nothing -> False
+                   )
         schemeBodyRootLocal =
             case targetBound of
                 Just bnd ->
@@ -109,7 +167,11 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                         Nothing -> schemeBodyRootLocal
                 _ ->
                     case (useBoundTypeRootLocal, targetBound) of
-                        (True, Just bnd) -> liftToForall bnd
+                        (True, Just bnd) ->
+                            let lifted = liftToForall bnd
+                            in if canonical lifted == canonical target0
+                                then canonical bnd
+                                else lifted
                         _ ->
                             case typeRootFromBoundVar of
                                 Just v
@@ -132,12 +194,89 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                     , gid == gidOwner ->
                         canonical b
                 _ -> typeRoot0Local
-    in TypeRootPlan
-        { trUseBoundTypeRoot = useBoundTypeRootLocal
-        , trSchemeBodyRoot = schemeBodyRootLocal
-        , trTargetInGamma = targetInGammaLocal
-        , trTargetIsBaseLike = targetIsBaseLikeLocal
-        , trSchemeBodyChildUnderGen = schemeBodyChildUnderGenLocal
-        , trTypeRoot0 = typeRoot0Local
-        , trTypeRoot = typeRootLocal
-        }
+        typeRootCLocal = canonical typeRootLocal
+        typeRootOwnerLocal =
+            case IntMap.lookup (canonKey typeRootCLocal) schemeRootOwner of
+                Just owner -> Just owner
+                Nothing ->
+                    fst
+                        (schemeOwnerFromBody schemeRootsPlan solvedToBasePref typeRootCLocal)
+        typeRootIsStructuralLocal =
+            isStructuralNode typeRootCLocal
+        isStructuralNode node =
+            case IntMap.lookup (canonKey node) nodes of
+                Just TyVar{} -> False
+                Just TyBase{} -> False
+                Just TyBottom{} -> False
+                Just _ -> True
+                Nothing -> False
+        liveRootExists = IntMap.member (canonKey typeRootCLocal) nodes
+        baseStructuralSource = do
+            baseRoot <- IntMap.lookup (canonKey typeRootCLocal) solvedToBasePref
+            if baseRootIsStructuralSource baseRoot
+                then Just baseRoot
+                else Nothing
+        reifyRootSourceLocal =
+            if requiresLiveRefinements
+                then liveSource
+                else
+                    case baseStructuralSource of
+                        Just baseRoot
+                            | not liveRootExists ->
+                                ReifyBaseSchemeRoot baseRoot
+                        _ ->
+                            case (scopeGen, typeRootOwnerLocal) of
+                                (Just scopeGid, Just owner)
+                                    | scopeGid == owner
+                                    , typeRootIsStructuralLocal ->
+                                        case baseStructuralSource of
+                                            Just baseRoot
+                                                | not (baseRootReturnsToLiveRoot baseRoot) ->
+                                                    ReifyBaseSchemeRoot baseRoot
+                                            _ -> liveSource
+                                _ -> liveSource
+        -- A live root must be carried in the live graph's canonical domain.
+        -- The pre-canonical key can already have been removed from cNodes;
+        -- retaining it here would make reification rediscover a redirect that
+        -- the plan has already proved.
+        liveSource = ReifyLiveRoot typeRootCLocal
+        baseRootIsStructuralSource baseRoot =
+            case bindParentsGa >>= \ga -> lookupNodeIn (cNodes (gbiBaseConstraint ga)) baseRoot of
+                Just TyVar{} -> False
+                Just TyBase{} -> False
+                Just TyBottom{} -> False
+                Just _ -> True
+                Nothing -> False
+        baseRootReturnsToLiveRoot baseRoot =
+            case bindParentsGa of
+                Just ga ->
+                    let baseSchemeRoot =
+                            IntMap.lookup
+                                (getNodeId baseRoot)
+                                (srSchemeRootByBodyBase schemeRootsPlan)
+                        candidates =
+                            case baseSchemeRoot of
+                                Just root -> [baseRoot, root]
+                                Nothing -> [baseRoot]
+                        returns candidate =
+                            case IntMap.lookup (getNodeId candidate) (gbiBaseToSolved ga) of
+                                Just solvedRoot ->
+                                    case IntMap.lookup (canonKey solvedRoot) nodes of
+                                        Just TyVar{tnBound = Just bnd} ->
+                                            canonical bnd == typeRootCLocal
+                                        _ -> False
+                                Nothing -> False
+                    in any returns candidates
+                Nothing -> False
+        result =
+            TypeRootPlan
+                { trUseBoundTypeRoot = useBoundTypeRootLocal
+                , trSchemeBodyRoot = schemeBodyRootLocal
+                , trTargetInGamma = targetInGammaLocal
+                , trTargetIsBaseLike = targetIsBaseLikeLocal
+                , trSchemeBodyChildUnderGen = schemeBodyChildUnderGenLocal
+                , trTypeRoot0 = typeRoot0Local
+                , trTypeRoot = typeRootLocal
+                , trReifyRootSource = reifyRootSourceLocal
+                }
+    in result

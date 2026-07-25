@@ -38,27 +38,28 @@ matcher:
 - conversion and lowering can use focused-constructor matching for operation
   local evidence, but focused matching does not relax whole-data validity.
 
-The matcher uses exact canonical backend data identity. Constructor identity is
-owner-qualified by canonical data identity plus constructor name; bare
-constructor names are not backend identities.
+The matcher uses exact carried backend data, constructor, recursive-self, and
+type-parameter identities. Constructor names and structural binder spellings
+remain diagnostics; they cannot select an owner or override a conflicting
+identity.
 
-The matcher has metadata-light and metadata-backed entrypoints over one core:
+The matcher has focused-constructor and whole-data entrypoints over one
+identity-bearing core. Whole-data matching uses nominal `BackendData`
+declarations to prove constructor-set equality, recovered data-parameter
+substitution, and aligned constructor-field evidence. Focused matching still
+requires the selected declaration and constructor identity; it only narrows the
+returned evidence to the operation-local constructor.
 
-- metadata-light matching proves only canonical data identity and structural
-  recursive skeleton compatibility;
-- metadata-backed matching uses nominal `BackendData` declarations to prove
-  constructor-set equality, recovered data-parameter substitution, and aligned
-  constructor-field evidence.
-
-Metadata-light matching is not a fallback for missing declarations when an
-operation needs constructor sets, substitutions, payload fields, handler
-validation, or lowering field types. Adapter operations that need metadata-backed
-evidence must acquire nominal declarations or fail closed.
+There is no metadata-light fallback. Operations that need constructor sets,
+substitutions, payload fields, handler validation, or lowering field types must
+acquire nominal declarations or fail closed.
 
 The matcher returns derived evidence rather than storing match state in backend
 IR. A **Backend Structural Recursive Data Match** carries canonical data
-identity, recovered data-parameter substitution, and aligned payload evidence
-for the current adapter operation. It is not cached on `BackendProgram`,
+identity, its diagnostic name, recovered data-parameter substitution, and
+aligned payload evidence for the current adapter operation. Focused constructor
+evidence also carries the data and constructor identities. Evidence equality
+ignores diagnostic names. The evidence is not cached on `BackendProgram`,
 `BackendData`, or constructor metadata.
 
 Payload comparison is substitution-aware and recursive. Recursive structural
@@ -88,9 +89,9 @@ diagnostics or LLVM-specific diagnostic text.
   instead of keeping one canonical backend representation after conversion.
 - Store match evidence in backend IR metadata. Stored evidence can go stale and
   widens the backend IR boundary for an operation-local proof.
-- Use metadata-light matching as a fallback when declarations are missing. That
-  would let validation or lowering rely on skeleton evidence where full ADT
-  evidence is required.
+- Use spelling-only matching when declarations are missing. That would let
+  validation or lowering rely on a name skeleton where full ADT identity and
+  payload evidence are required.
 
 ## Consequences
 
@@ -108,7 +109,7 @@ diagnostics or LLVM-specific diagnostic text.
   reconstructing payload compatibility.
 - Tests should cover the private matcher directly for exact identity, recursive
   payload cycle guards, substitution mismatch, extra or missing constructors,
-  and metadata-light evidence limits.
+  and same-spelled wrong-owner rejection.
 - Adapter regression tests should validate, convert, and lower the same
   recursive ADT shape through public backend paths so validation, conversion,
   and LLVM lowering cannot drift independently.

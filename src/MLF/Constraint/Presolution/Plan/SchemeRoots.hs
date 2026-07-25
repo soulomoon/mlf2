@@ -10,6 +10,7 @@ module MLF.Constraint.Presolution.Plan.SchemeRoots (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -38,8 +39,9 @@ buildSchemeRootInfo
     :: (NodeId -> NodeId)
     -> Constraint p
     -> IntMap.IntMap TyNode
+    -> (NodeRef -> Maybe GenNodeId)
     -> SchemeRootInfo
-buildSchemeRootInfo canonical constraint nodes =
+buildSchemeRootInfo canonical constraint nodes firstGenAncestor =
     let schemeRootsWithGen =
             [ (gnId gen, root)
             | gen <- NodeAccess.allGenNodes constraint
@@ -64,6 +66,11 @@ buildSchemeRootInfo canonical constraint nodes =
                 [ (getNodeId (canonical bnd), root)
                 | (_gid, root) <- schemeRootsWithGen
                 , Just bnd <- [VarStore.lookupVarBound constraint root]
+                , let rootOwner =
+                        IntMap.lookup
+                            (getNodeId (canonical root))
+                            schemeRootOwner
+                , firstGenAncestor (typeRef (canonical bnd)) == rootOwner
                 , case IntMap.lookup (getNodeId (canonical bnd)) nodes of
                     Just TyBase{} -> False
                     Just TyBottom{} -> False
@@ -81,11 +88,12 @@ buildSchemeRootsPlan
     :: (NodeId -> NodeId)
     -> Constraint p
     -> IntMap.IntMap TyNode
+    -> (NodeRef -> Maybe GenNodeId)
     -> Maybe (GaBindParentsInfo p)
-    -> (BindParents -> NodeRef -> Maybe GenNodeId)
     -> SchemeRootsPlan
-buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor =
-    let schemeRootInfo = buildSchemeRootInfo canonical constraint nodes
+buildSchemeRootsPlan canonical constraint nodes firstGenAncestor mbBindParentsGa =
+    let schemeRootInfo =
+            buildSchemeRootInfo canonical constraint nodes firstGenAncestor
         SchemeRootInfo
             { sriRootKeySet = schemeRootKeySet
             , sriRootOwner = schemeRootOwner
@@ -147,7 +155,7 @@ buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor
                             , root <- gnSchemes gen
                             ]
                         ownerFromBinding root =
-                            firstGenAncestor baseParents (TypeRef root)
+                            firstGenAncestorFrom baseParents (TypeRef root)
                     in ( IntMap.fromList
                             [ (getNodeId root, gid)
                             | root <- baseSchemeRoots
@@ -158,6 +166,8 @@ buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor
                             [ (getNodeId bnd, root)
                             | root <- baseSchemeRoots
                             , Just bnd <- [VarStore.lookupVarBound baseConstraint root]
+                            , Just owner <- [ownerFromBinding root]
+                            , ownerFromBinding bnd == Just owner
                             , case lookupNodeIn baseNodes bnd of
                                 Just TyBase{} -> False
                                 Just TyBottom{} -> False

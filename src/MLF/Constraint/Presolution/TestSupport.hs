@@ -1,6 +1,20 @@
 module MLF.Constraint.Presolution.TestSupport (
+    EdgeWitnessOp(..),
     EdgeArtifacts(..),
+    TranslatabilityIssue(..),
+    ExpansionResultMap(..),
     PresolutionState(..),
+    EdgeExecutionArtifacts(..),
+    psEdgeExpansions,
+    psEdgeWitnesses,
+    psEdgeRaiseAuthorityNodes,
+    psEdgeNonSourceOpOrigins,
+    psEdgeExpansionConstructions,
+    psEdgeTraces,
+    emptyExpansionResultMap,
+    lookupExpansionResult,
+    lookupExpansionResultUnder,
+    canonicalizeExpansionResultMap,
     emptyBindingRepairDirty,
     CopyMapping(..),
     CopyMap,
@@ -9,66 +23,453 @@ module MLF.Constraint.Presolution.TestSupport (
     copiedNodes,
     originalNodes,
     InteriorNodes(..),
+    EdgeSourceInterior(..),
+    sourceInteriorFromList,
+    sourceInteriorFromSet,
     fromListInterior,
     toListInterior,
+    emptyRawExpansionConstruction,
     runPresolutionM,
     defaultPlanBuilder,
     decideMinimalExpansion,
     processInstEdge,
+    runPresolutionLoopWithOperationTimingForTest,
+    runIdentityExpansionWithBaseOpsForTest,
+    runIdentityStructuralUnificationsForTest,
+    edgeExpansionExtraOpsForTest,
+    requireExpansionResultScopeForTest,
     validateReplayMapTraceContract,
     unifyAcyclic,
     unifyAcyclicRawWithRaiseTrace,
+    unifyAcyclicRawWithRaiseTracePrefer,
+    setVarBoundWithRaiseTraceForTest,
+    rebindWithBoundRepairTraceForTest,
+    unifyStructureForTest,
+    recordEdgeExecutionArtifactsForTest,
+    singletonEdgeExecutionArtifactsForTest,
     runEdgeUnifyForTest,
+    runEdgeStructureUnifyForTest,
+    runEdgeTerminalStructureUnifyForTest,
+    TerminalRootTransition(..),
+    classifyTerminalRootTransitionForTest,
+    sourceRaiseAuthorityNodesForTest,
+    runEdgeUnifyWithBinderMetasForTest,
+    sourceWitnessNodeWithCopyMapForTest,
+    runEdgeBoundInstallForTest,
+    RebuildBindParentsEnv(..),
+    rebuildBindParentsForTest,
+    contractExpansionWrapperBindingsForTest,
     instantiateScheme,
     instantiateSchemeWithTrace,
+    instantiateSchemeAtTargetWithBoundsForTest,
+    copyForallBoundProjectionAtBinderForTest,
+    applyExpansionEdgeTracedAtTargetWithBindersForTest,
     mergeExpansions,
-    applyExpansion,
+    materializeExpansionsForTest,
+    bindExpansionArgsForTest,
+    instantiationBindersForTest,
+    dropVarBindForTest,
+    certifyAppliedNonRootWeakenReplay,
     normalizeEdgeWitnessesM,
+    ProvenancedNode(..),
+    ProvenancedInstanceOp(..),
+    normalizeInstanceOpsCoreWithProvenance,
+    assertNoStandaloneGraftsWithProvenance,
+    validateTerminalRootRaiseMergeForTest,
     validateTranslatablePresolution,
+    structuralInterior,
     translatableWeakenedNodes
 ) where
+
+import Control.Monad (void)
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.Base
     ( CopyMap
     , CopyMapping(..)
     , EdgeArtifacts(..)
+    , EdgeExecutionArtifacts(..)
+    , EdgeTrace
+    , ExpansionResultMap(..)
     , InteriorNodes(..)
+    , EdgeSourceInterior(..)
+    , InteriorSet
+    , FrontierSet
     , PresolutionPlanBuilder(..)
+    , MonadPresolution(bindExpansionArgs)
+    , PresolutionM
+    , PresolutionError
+    , TranslatabilityIssue(..)
     , PresolutionState(..)
+    , psEdgeExpansions
+    , psEdgeWitnesses
+    , psEdgeRaiseAuthorityNodes
+    , psEdgeNonSourceOpOrigins
+    , psEdgeExpansionConstructions
+    , psEdgeTraces
+    , RawExpansionConstruction
+    , emptyExpansionResultMap
+    , emptyRawExpansionConstruction
+    , canonicalizeExpansionResultMap
+    , certifyAppliedNonRootWeakenReplay
     , emptyBindingRepairDirty
     , copiedNodes
     , fromListInterior
     , insertCopy
+    , instantiationBindersM
     , lookupCopy
+    , lookupExpansionResult
+    , lookupExpansionResultUnder
     , originalNodes
     , runPresolutionM
+    , sourceInteriorFromList
+    , sourceInteriorFromSet
     , toListInterior
     )
 import MLF.Constraint.Presolution.Copy
-    ( instantiateScheme
+    ( copyForallBoundProjectionAtBinder
+    , instantiateScheme
+    , instantiateExpansionWithTraceAtTargetSnapshot
     , instantiateSchemeWithTrace
     )
 import MLF.Constraint.Presolution.Driver
     ( validateReplayMapTraceContract
     )
-import MLF.Constraint.Presolution.EdgeProcessing (processInstEdge)
-import MLF.Constraint.Presolution.EdgeUnify (runEdgeUnifyForTest)
+import MLF.Constraint.Presolution.EdgeProcessing
+    ( processInstEdge
+    , runPresolutionLoopWithTiming
+    )
+import qualified MLF.Constraint.Presolution.EdgeProcessing.Unify as EdgeUnify
+import qualified MLF.Constraint.Presolution.EdgeProcessing.Solve as EdgeSolve
+import qualified MLF.Constraint.Presolution.EdgeProcessing.Interpreter as EdgeInterpreter
+import MLF.Constraint.Presolution.EdgeUnify
+    ( runEdgeBoundInstallForTest
+    , runEdgeStructureUnifyForTest
+    , runEdgeTerminalStructureUnifyForTest
+    , runEdgeUnifyForTest
+    , runEdgeUnifyWithBinderMetasForTest
+    , sourceWitnessNodeWithCopyMapForTest
+    )
+import MLF.Constraint.Presolution.EdgeUnify.Unify
+    ( TerminalRootTransition(..)
+    , classifyTerminalRootTransition
+    )
+import MLF.Constraint.Presolution.Rewrite
+    ( RebuildBindParentsEnv(..)
+    , contractExpansionWrapperBindings
+    , rebuildBindParents
+    )
 import MLF.Constraint.Presolution.Expansion
-    ( applyExpansion
+    ( applyExpansionEdgeTracedAtTargetWithBinders
     , decideMinimalExpansion
     , mergeExpansions
     )
+import MLF.Constraint.Presolution.StateAccess (getBindingSnapshot)
+import qualified MLF.Constraint.Presolution.Materialization as Materialization
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
+import qualified MLF.Constraint.Presolution.Ops as Ops
 import MLF.Constraint.Presolution.Unify
     ( unifyAcyclic
     , unifyAcyclicRawWithRaiseTrace
+    , unifyAcyclicRawWithRaiseTracePrefer
     )
 import MLF.Constraint.Presolution.Validation
-    ( translatableWeakenedNodes
+    ( structuralInterior
+    , translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
+import MLF.Constraint.Presolution.Witness (EdgeWitnessOp(..))
+import qualified MLF.Constraint.Presolution.WitnessValidation as WitnessValidation
+import MLF.Constraint.Presolution.WitnessCanon
+    ( ProvenancedInstanceOp(..)
+    , ProvenancedNode(..)
+    , assertNoStandaloneGraftsWithProvenance
+    , normalizeInstanceOpsCoreWithProvenance
+    )
+import MLF.Constraint.Types.Graph
+    ( BindFlag
+    , BindParents
+    , BindingError
+    , Constraint
+    , EdgeId
+    , GenNodeId
+    , InstEdge
+    , NodeId
+    , NodeRef
+    , TyNode
+    )
+import MLF.Constraint.RootOwnership (emptyRootOwnershipIndex)
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion(..), InstanceOp)
+import MLF.Util.Timing (defaultTimingConfig, timingProgramOperations)
 import MLF.Util.Trace (TraceConfig)
 
 defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
 defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
+
+-- | Test-only view of the total terminal-root binding-flag classifier.  The
+-- production mutation paths consume its non-optional result, so 'Nothing'
+-- cannot reserve or eliminate edge-local authority state.
+classifyTerminalRootTransitionForTest
+    :: Maybe BindFlag
+    -> Maybe BindFlag
+    -> Maybe TerminalRootTransition
+classifyTerminalRootTransitionForTest = classifyTerminalRootTransition
+
+-- | Test-only projection of the production constructor for frozen standalone
+-- Raise authority.  Tests use it before mutating the binding tree so they
+-- cannot manufacture a certificate that construction would never issue.
+sourceRaiseAuthorityNodesForTest
+    :: NodeId
+    -> EdgeSourceInterior
+    -> PresolutionM p IntSet.IntSet
+sourceRaiseAuthorityNodesForTest = EdgeInterpreter.sourceRaiseAuthorityNodes
+
+validateTerminalRootRaiseMergeForTest
+    :: NodeId
+    -> (NodeId -> NodeId -> Bool)
+    -> (NodeId -> NodeId -> Bool)
+    -> [InstanceOp]
+    -> Either WitnessValidation.OmegaNormalizeError ()
+validateTerminalRootRaiseMergeForTest =
+    WitnessValidation.validateTerminalRootRaiseMerge
+
+-- | Test-only entrypoint for checking that the decomposed operation-timing
+-- interpreter is semantically identical to the fused edge interpreter.
+runPresolutionLoopWithOperationTimingForTest
+    :: Bool
+    -> String
+    -> TraceConfig
+    -> [InstEdge]
+    -> PresolutionState p
+    -> IO (Either PresolutionError ((), PresolutionState p))
+runPresolutionLoopWithOperationTimingForTest operationTiming label traceCfg edges =
+    runPresolutionLoopWithTiming
+        defaultTimingConfig {timingProgramOperations = operationTiming}
+        label
+        traceCfg
+        emptyRootOwnershipIndex
+        edges
+
+-- | Test-only assertion seam for the ExpIdentity witness-plan invariant.  The
+-- production input record stays private; tests can still prove that identity
+-- execution rejects any accidental Omega base operations.
+runIdentityExpansionWithBaseOpsForTest
+    :: GenNodeId
+    -> EdgeId
+    -> TyNode
+    -> TyNode
+    -> NodeId
+    -> [InstanceOp]
+    -> PresolutionM p ()
+runIdentityExpansionWithBaseOpsForTest owner edgeId leftRaw rightRaw bodyRoot baseOps =
+    void $
+        EdgeUnify.runExpansionUnify
+            EdgeUnify.EdgeExpansionInput
+                { EdgeUnify.eeiGenId = owner
+                , EdgeUnify.eeiEdgeId = edgeId
+                , EdgeUnify.eeiLeftRaw = leftRaw
+                , EdgeUnify.eeiRightRaw = rightRaw
+                , EdgeUnify.eeiExpansion = ExpIdentity
+                , EdgeUnify.eeiBodyRoot = bodyRoot
+                , EdgeUnify.eeiSourceInterior = EdgeSourceInterior mempty
+                , EdgeUnify.eeiLockedSourceNodes = mempty
+                , EdgeUnify.eeiSourceRaiseAuthorityNodes = mempty
+                , EdgeUnify.eeiSourceNodeKeys = mempty
+                , EdgeUnify.eeiBoundVars = []
+                , EdgeUnify.eeiBinderArgs = []
+                , EdgeUnify.eeiStructuralUnifications = []
+                }
+            baseOps
+
+-- | Test-only entrypoint for the structural equalities selected by an
+-- 'ExpIdentity' decision.  It keeps the private edge-execution input record out
+-- of specs while allowing them to exercise the production identity lane.
+runIdentityStructuralUnificationsForTest
+    :: GenNodeId
+    -> EdgeId
+    -> TyNode
+    -> TyNode
+    -> NodeId
+    -> EdgeSourceInterior
+    -> IntSet.IntSet
+    -> IntSet.IntSet
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p ()
+runIdentityStructuralUnificationsForTest
+    owner
+    edgeId
+    leftRaw
+    rightRaw
+    bodyRoot
+    sourceInterior
+    sourceRaiseAuthorityNodes
+    sourceNodeKeys
+    structuralUnifications =
+        void $
+            EdgeUnify.runExpansionUnify
+                EdgeUnify.EdgeExpansionInput
+                    { EdgeUnify.eeiGenId = owner
+                    , EdgeUnify.eeiEdgeId = edgeId
+                    , EdgeUnify.eeiLeftRaw = leftRaw
+                    , EdgeUnify.eeiRightRaw = rightRaw
+                    , EdgeUnify.eeiExpansion = ExpIdentity
+                    , EdgeUnify.eeiBodyRoot = bodyRoot
+                    , EdgeUnify.eeiSourceInterior = sourceInterior
+                    , EdgeUnify.eeiLockedSourceNodes = IntSet.empty
+                    , EdgeUnify.eeiSourceRaiseAuthorityNodes = sourceRaiseAuthorityNodes
+                    , EdgeUnify.eeiSourceNodeKeys = sourceNodeKeys
+                    , EdgeUnify.eeiBoundVars = []
+                    , EdgeUnify.eeiBinderArgs = []
+                    , EdgeUnify.eeiStructuralUnifications = structuralUnifications
+                    }
+                []
+
+edgeExpansionExtraOpsForTest
+    :: EdgeUnify.EdgeExpansionResult
+    -> [EdgeWitnessOp]
+edgeExpansionExtraOpsForTest = EdgeUnify.eerExtraOps
+
+-- | Test-only seam for the post-Omega monotone owner certificate.  Expansion
+-- construction itself remains covered by the destination-aware constructor.
+requireExpansionResultScopeForTest
+    :: NodeId
+    -> [NodeRef]
+    -> PresolutionM p NodeId
+requireExpansionResultScopeForTest = EdgeUnify.requireExpansionResultScope
+
+-- | Test-only access to the final expansion rewrite and ownership transfer.
+materializeExpansionsForTest :: PresolutionM p (IntMap NodeId)
+materializeExpansionsForTest = Materialization.materializeExpansions
+
+-- | Test-only access to the paper's expansion-destination ownership step.
+bindExpansionArgsForTest :: NodeId -> [(NodeId, NodeId)] -> PresolutionM p ()
+bindExpansionArgsForTest = bindExpansionArgs
+
+-- | Test-only access to binder discovery so cache invalidation can be checked
+-- across an authoritative graph mutation.
+instantiationBindersForTest
+    :: GenNodeId
+    -> NodeId
+    -> PresolutionM p (NodeId, [NodeId])
+instantiationBindersForTest = instantiationBindersM
+
+-- | Test-only alias for the normal eliminated-variable mutation path.
+dropVarBindForTest :: NodeId -> PresolutionM p ()
+dropVarBindForTest = Ops.dropVarBind
+
+-- | Test-only seam for the complete atomic destination-aware instantiation.
+-- The first trace is the complete semantic copy, including lower bounds
+-- reached by binder substitution.  The compatibility second trace is empty;
+-- argument-owned auxiliary copies are intentionally private to the constructor.
+instantiateSchemeAtTargetWithBoundsForTest
+    :: GenNodeId
+    -> NodeId
+    -> NodeId
+    -> [(NodeId, NodeId)]
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p
+        ( (NodeId, CopyMap, InteriorSet, FrontierSet)
+        , (CopyMap, InteriorSet, FrontierSet)
+        )
+instantiateSchemeAtTargetWithBoundsForTest sourceOwner target body binderMetas binderArgs = do
+    snapshot <- getBindingSnapshot
+    (semanticTrace, compatibilityTrace, _construction) <-
+        instantiateExpansionWithTraceAtTargetSnapshot
+            snapshot
+            sourceOwner
+            target
+            body
+            binderMetas
+            binderArgs
+    pure (semanticTrace, compatibilityTrace)
+
+-- | Test-only seam for the destination-aware copy used by a
+-- 'BoundProjection' in forall introduction.
+copyForallBoundProjectionAtBinderForTest
+    :: NodeRef
+    -> NodeId
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p NodeId
+copyForallBoundProjectionAtBinderForTest destinationBinder boundRoot substitutions = do
+    snapshot <- getBindingSnapshot
+    copyForallBoundProjectionAtBinder
+        snapshot
+        destinationBinder
+        boundRoot
+        substitutions
+
+-- | Test-only access to the complete target-aware expansion interpreter,
+-- including ExpCompose recipes whose instantiation is not the outer constructor.
+applyExpansionEdgeTracedAtTargetWithBindersForTest
+    :: GenNodeId
+    -> NodeId
+    -> Expansion
+    -> TyNode
+    -> NodeId
+    -> [NodeId]
+    -> PresolutionM p
+        ( NodeId
+        , (CopyMap, InteriorSet, FrontierSet)
+        , RawExpansionConstruction
+        )
+applyExpansionEdgeTracedAtTargetWithBindersForTest =
+    applyExpansionEdgeTracedAtTargetWithBinders
+
+-- | Test-only seam for the construction-time variable-bound scope invariant.
+setVarBoundWithRaiseTraceForTest
+    :: NodeId
+    -> Maybe NodeId
+    -> PresolutionM p [NodeId]
+setVarBoundWithRaiseTraceForTest = Ops.setVarBoundWithRaiseTrace
+
+-- | Test-only seam for atomic binding moves that preserve bound scopes.
+rebindWithBoundRepairTraceForTest
+    :: NodeRef
+    -> (NodeRef, BindFlag)
+    -> PresolutionM p [NodeId]
+rebindWithBoundRepairTraceForTest = Ops.rebindWithBoundRepairTrace
+
+-- | Test-only access to the expansion-aware structural unifier.  Keep the
+-- implementation module private while allowing focused graph regressions.
+unifyStructureForTest :: NodeId -> NodeId -> PresolutionM p ()
+unifyStructureForTest = EdgeSolve.unifyStructure
+
+-- | Test-only access to the atomic edge execution recorder.  Keeping this
+-- seam here lets structural tests exercise duplicate-write rejection
+-- without exposing the edge-processing implementation publicly.
+recordEdgeExecutionArtifactsForTest
+    :: EdgeId
+    -> EdgeExecutionArtifacts
+    -> PresolutionM p ()
+recordEdgeExecutionArtifactsForTest = EdgeSolve.recordEdgeExecutionArtifacts
+
+singletonEdgeExecutionArtifactsForTest
+    :: Int
+    -> EdgeWitness
+    -> EdgeTrace
+    -> IntMap EdgeExecutionArtifacts
+singletonEdgeExecutionArtifactsForTest edgeKey witness trace =
+    IntMap.singleton
+        edgeKey
+        EdgeExecutionArtifacts
+            { eeaExpansion = ExpIdentity
+            , eeaWitness = witness
+            , eeaRaiseAuthorityNodes = IntSet.empty
+            , eeaNonSourceOpOrigins = IntMap.empty
+            , eeaExpansionConstruction = emptyRawExpansionConstruction
+            , eeaTrace = trace
+            }
+
+-- | Test-only access to final bind-parent reconstruction.  Keep the rewrite
+-- implementation private while allowing focused ownership regressions.
+rebuildBindParentsForTest :: RebuildBindParentsEnv p -> PresolutionM q BindParents
+rebuildBindParentsForTest = rebuildBindParents
+
+contractExpansionWrapperBindingsForTest
+    :: (NodeId -> NodeId)
+    -> Constraint p
+    -> Either BindingError BindParents
+contractExpansionWrapperBindingsForTest = contractExpansionWrapperBindings

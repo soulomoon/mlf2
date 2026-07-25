@@ -9,6 +9,7 @@ import MLF.Elab.Pipeline
     , typeCheck
     )
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
+import MLF.Reify.TypeOps (freeTypeVarRefsType)
 import SpecUtil (unsafeNormalizeExpr)
 
 spec :: Spec
@@ -39,7 +40,8 @@ spec = describe "Phi soundness" $ do
                 (ELam "f" (EApp (EVar "f") (ELit (LInt 1))))
         case runPipelineElab Set.empty expr of
             Left err -> expectationFailure $ "pipeline: " ++ show err
-            Right (term, _ty) ->
+            Right (term, ty) -> do
+                freeTypeVarRefsType ty `shouldBe` []
                 case typeCheck term of
                     Left err -> expectationFailure $ "typeCheck: " ++ show err
                     Right _ -> pure ()

@@ -3,13 +3,17 @@
 module MLF.Constraint.Presolution.Plan.Target.GammaPlan (
     GammaPlanInput(..),
     GammaPlan(..),
-    buildGammaPlan
+    buildGammaPlan,
+    expandSourceBinderRefs,
+    expandSourceBinderRefsWithPreference
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (sort, sortBy)
-import Data.Maybe (listToMaybe)
+import Control.Monad (foldM)
+import Data.List (find, sort, sortBy)
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.Maybe (isJust, listToMaybe)
 import MLF.Util.Trace (traceWhen)
 
 import qualified MLF.Binding.Tree as Binding
@@ -18,6 +22,23 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), firstSchemeRootAncestorWith)
+import MLF.Constraint.Presolution.Plan.Requirements
+    ( GeneralizationRequirements(..)
+    , RequiredGammaBinder(..)
+    , RequiredGammaPlacement(..)
+    , expansionConstructionRoleKeys
+    , requiredGammaPlacementIsLocal
+    )
+import MLF.Reify.TypeOps (alphaEqType)
+import MLF.Types.Elab
+    ( Ty (..)
+    , TypeBinderRef
+    , typeBinderRefIdentity
+    , typeBinderRefNode
+    , typeBinderRefsSameIdentity
+    )
+import MLF.Types.Identity (typeBinderIdentityGeneratedUnique)
+import MLF.Util.ElabError (ElabError(..))
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import qualified MLF.Util.Order as Order
 
@@ -47,6 +68,7 @@ data GammaPlanInput p = GammaPlanInput
     , gpiBindableChildrenUnder :: NodeRef -> [NodeId]
     , gpiAliasBinderNodes :: [NodeId]
     , gpiFirstGenAncestor :: NodeRef -> Maybe GenNodeId
+    , gpiRequirements :: GeneralizationRequirements
     }
 
 data GammaPlan = GammaPlan
@@ -61,13 +83,108 @@ data GammaPlan = GammaPlan
     , gpNamedUnderGa :: [NodeId]
     , gpBoundHasNamedOutsideGamma :: Bool
     , gpTypeRootHasNamedOutsideGamma :: Bool
+    , gpRequiredGamma :: IntMap.IntMap RequiredGammaBinder
+    , gpSourceBinderRefs :: IntMap.IntMap TypeBinderRef
     }
 
 tracePlanEnabled :: Bool -> String -> a -> a
 tracePlanEnabled = traceWhen
 
-buildGammaPlan :: GammaPlanInput p -> GammaPlan
-buildGammaPlan GammaPlanInput{..} =
+-- | Route one semantic source-binder identity through every base alias and
+-- the live node in its solved equivalence class. A source identity can be
+-- attached to a different base alias from the one selected for reification
+-- (for example, an exact-annotation binder versus its field occurrence).
+-- Distinct identities in one solved class require an explicit, scope-owned
+-- base preference; without one there is no traversal-order-independent name
+-- that S' could assign to that class. Graph and structural identities are
+-- construction-local declarations, so they remain only at their direct keys:
+-- solved type equality cannot make them lexical aliases.
+expandSourceBinderRefs
+    :: (NodeId -> NodeId)
+    -> IntMap.IntMap NodeId
+    -> IntMap.IntMap TypeBinderRef
+    -> Either ElabError (IntMap.IntMap TypeBinderRef)
+expandSourceBinderRefs =
+    expandSourceBinderRefsWithPreference IntMap.empty
+
+-- | Resolve any multi-identity solved class through the base binder already
+-- selected by the local Gamma plan.  If that structural binder has no source
+-- identity of its own, the identity already attached to the selected live
+-- representative owns the class.  Once selected, route that one identity
+-- through every alias so later reification cannot recover a different lexical
+-- binder from its traversal order.
+expandSourceBinderRefsWithPreference
+    :: IntMap.IntMap NodeId
+    -> (NodeId -> NodeId)
+    -> IntMap.IntMap NodeId
+    -> IntMap.IntMap TypeBinderRef
+    -> Either ElabError (IntMap.IntMap TypeBinderRef)
+expandSourceBinderRefsWithPreference preferredBase canonical baseToSolved directRefs = do
+    classRefs <- IntMap.traverseWithKey uniqueClassRef classCandidates
+    let expandedGeneratedRefs =
+            IntMap.unions [baseAliases classRefs, classRefs, generatedDirectRefs]
+    pure (IntMap.union constructionLocalRefs expandedGeneratedRefs)
+  where
+    generatedDirectRefs =
+        IntMap.filter
+            ( isJust
+                . typeBinderIdentityGeneratedUnique
+                . typeBinderRefIdentity
+            )
+            directRefs
+
+    constructionLocalRefs =
+        IntMap.filter
+            ( not
+                . isJust
+                . typeBinderIdentityGeneratedUnique
+                . typeBinderRefIdentity
+            )
+            directRefs
+
+    classCandidates =
+        IntMap.fromListWith (++)
+            [ (classKeyForBase baseKey, [(baseKey, ref)])
+            | (baseKey, ref) <- IntMap.toList generatedDirectRefs
+            ]
+
+    classKeyForBase baseKey =
+        getNodeId
+            ( canonical
+                (IntMap.findWithDefault (NodeId baseKey) baseKey baseToSolved)
+            )
+
+    baseAliases classRefs =
+        IntMap.fromList
+            [ (baseKey, ref)
+            | (baseKey, solvedNode) <- IntMap.toList baseToSolved
+            , Just ref <- [IntMap.lookup (getNodeId (canonical solvedNode)) classRefs]
+            ]
+
+    uniqueClassRef classKey candidates@((_, firstRef) : rest)
+        | all (typeBinderRefsSameIdentity firstRef . snd) rest = Right firstRef
+        | Just (NodeId preferredKey) <- IntMap.lookup classKey preferredBase
+        , Just preferredRef <- lookup preferredKey candidates = Right preferredRef
+        | IntMap.member classKey preferredBase
+        , Just representativeRef <- lookup classKey candidates = Right representativeRef
+        | otherwise =
+            Left
+                (ValidationFailed
+                    [ "one solved equivalence class carries conflicting source-binder identities"
+                    , "  class: " ++ show (NodeId classKey)
+                    , "  preferred base: " ++ show (IntMap.lookup classKey preferredBase)
+                    , "  references: " ++ show candidates
+                    ])
+    uniqueClassRef _ [] =
+        Left
+            (ValidationFailed
+                ["source-binder identity class was unexpectedly empty"])
+
+buildGammaPlan :: GammaPlanInput p -> Either ElabError GammaPlan
+buildGammaPlan GammaPlanInput{..} = do
+    requiredGamma <- validateRequiredGamma
+    requiredGlobalAliases <- validateRequiredGlobalAliases requiredGamma
+    certifiedExpansionGammaSet <- validateExpansionConstructionRoles
     let tracePlan = tracePlanEnabled gpiDebugEnabled
         constraint = gpiConstraint
         nodes = gpiNodes
@@ -124,7 +241,7 @@ buildGammaPlan GammaPlanInput{..} =
                                     | nid <- baseKids ++ solvedKids ++ aliasBinderNodes
                                     ]
                 Nothing -> []
-        (baseGammaSetLocalOut, baseGammaRepLocalOut, namedUnderGaSetLocalOut, solvedToBasePrefLocalOut) =
+        (baseGammaSetLocalOut, baseGammaRepLocalOut, namedUnderGaSetLocalOut, solvedToBasePrefLocalOut0) =
             case (scopeGen, mbBindParentsGa) of
                 (Just gid, Just ga) ->
                     let baseConstraint = gbiBaseConstraint ga
@@ -276,63 +393,39 @@ buildGammaPlan GammaPlanInput{..} =
                                 [ (getNodeId baseNid, getNodeId (canonical (NodeId solvedKey)))
                                 | (solvedKey, baseNid) <- IntMap.toList solvedToBase
                                 ]
+                        pickFromSolvedKeys solvedKeys =
+                            let underScopeKeys = filter solvedUnderScope solvedKeys
+                                pickFrom keys =
+                                    case filter isTyVarKey keys of
+                                        (k:_) -> Just k
+                                        [] -> listToMaybe keys
+                            in case pickFrom underScopeKeys of
+                                Just key -> Just key
+                                Nothing -> pickFrom solvedKeys
+                        pickMappedFallback baseKey =
+                            case IntMap.lookup baseKey solvedByBasePref of
+                                Just solvedKeys -> pickFromSolvedKeys solvedKeys
+                                Nothing ->
+                                    case IntMap.lookup baseKey alignBaseToSolved of
+                                        Just solvedKey -> Just solvedKey
+                                        Nothing -> IntMap.lookup baseKey solvedFallback
+                        pickIdentity baseKey
+                            | IntMap.member baseKey nodes = Just baseKey
+                            | otherwise = Nothing
                         pickSolved baseKey =
-                            if IntMap.member baseKey nodes && solvedUnderScope baseKey
-                                then Just baseKey
-                                else
-                                    case IntMap.lookup baseKey baseToSolved of
-                                        Just solvedNid ->
-                                            let solvedKey = getNodeId (canonical solvedNid)
-                                            in if solvedUnderScope solvedKey
-                                                then Just solvedKey
-                                                else
-                                                    case IntMap.lookup baseKey solvedByBasePref of
-                                                        Just solvedKeys ->
-                                                            let underScopeKeys = filter solvedUnderScope solvedKeys
-                                                                pickFrom keys =
-                                                                    case filter isTyVarKey keys of
-                                                                        (k:_) -> Just k
-                                                                        [] ->
-                                                                            case keys of
-                                                                                (k:_) -> Just k
-                                                                                _ -> Nothing
-                                                            in case pickFrom underScopeKeys of
-                                                                Just k -> Just k
-                                                                Nothing -> pickFrom solvedKeys
-                                                        _ ->
-                                                            case IntMap.lookup baseKey alignBaseToSolved of
-                                                                Just solvedKey' -> Just solvedKey'
-                                                                Nothing ->
-                                                                    case IntMap.lookup baseKey solvedFallback of
-                                                                        Just solvedKey' -> Just solvedKey'
-                                                                        Nothing ->
-                                                                            if IntMap.member baseKey nodes
-                                                                                then Just baseKey
-                                                                                else Nothing
-                                        Nothing ->
-                                            case IntMap.lookup baseKey solvedByBasePref of
-                                                Just solvedKeys ->
-                                                    let underScopeKeys = filter solvedUnderScope solvedKeys
-                                                        pickFrom keys =
-                                                            case filter isTyVarKey keys of
-                                                                (k:_) -> Just k
-                                                                [] ->
-                                                                    case keys of
-                                                                        (k:_) -> Just k
-                                                                        _ -> Nothing
-                                                    in case pickFrom underScopeKeys of
-                                                        Just k -> Just k
-                                                        Nothing -> pickFrom solvedKeys
-                                                _ ->
-                                                    case IntMap.lookup baseKey alignBaseToSolved of
-                                                        Just solvedKey -> Just solvedKey
-                                                        Nothing ->
-                                                            case IntMap.lookup baseKey solvedFallback of
-                                                                Just solvedKey -> Just solvedKey
-                                                                Nothing ->
-                                                                    if IntMap.member baseKey nodes
-                                                                        then Just baseKey
-                                                                        else Nothing
+                            case IntMap.lookup baseKey baseToSolved of
+                                Just solvedNid ->
+                                    let solvedKey = getNodeId (canonical solvedNid)
+                                    in if solvedUnderScope solvedKey
+                                        then Just solvedKey
+                                        else
+                                            case pickMappedFallback baseKey of
+                                                Just fallbackKey -> Just fallbackKey
+                                                Nothing -> pickIdentity baseKey
+                                Nothing ->
+                                    case pickMappedFallback baseKey of
+                                        Just fallbackKey -> Just fallbackKey
+                                        Nothing -> pickIdentity baseKey
                         baseGammaRepLocal =
                             IntMap.fromList
                                 [ (baseKey, solvedKey)
@@ -405,12 +498,14 @@ buildGammaPlan GammaPlanInput{..} =
                             IntMap.union alignPrefer
                                 (IntMap.union scopeAliasOverrides solvedToBasePrefLocal)
                         namedUnderGaSetLocal =
-                            IntSet.union
-                                (IntSet.fromList
+                            IntSet.unions
+                                [ IntSet.fromList
                                     [ solvedKey
                                     | solvedKey <- IntMap.elems baseGammaRepLocal
-                                    ])
-                                namedUnderGaInterior
+                                    ]
+                                , namedUnderGaInterior
+                                , certifiedExpansionGammaSet
+                                ]
                     in tracePlan
                         ("generalizeAt: baseGammaSet="
                             ++ show (IntSet.toList baseGammaSetLocal)
@@ -457,26 +552,68 @@ buildGammaPlan GammaPlanInput{..} =
                         namedUnderGaInterior
                     , IntMap.empty
                     )
-        gammaAliasLocal =
+        requiredBasePreferences =
+            IntMap.fromList
+                (concatMap requiredBasePreference (IntMap.toList requiredGamma))
+        requiredBasePreference (requirementKey, requirement) =
+            case rgbPlacement requirement of
+                RequiredGammaAtCurrentScope ->
+                    [ (getNodeId (canonical resultRoot), rgbExteriorNode requirement)
+                    | resultRoot <- NonEmpty.toList (rgbResultRoots requirement)
+                    ]
+                RequiredGammaAtConstructionScope _ ->
+                    [ (getNodeId (canonical resultRoot), rgbExteriorNode requirement)
+                    | resultRoot <- NonEmpty.toList (rgbResultRoots requirement)
+                    ]
+                RequiredGammaAtNestedScope _ ->
+                    [(requirementKey, rgbExteriorNode requirement)]
+        solvedToBasePrefLocalOut =
+            IntMap.union requiredBasePreferences solvedToBasePrefLocalOut0
+        gammaAliasLocalBase =
             case mbBindParentsGa of
                 Just ga ->
                     let baseToSolved = gbiBaseToSolved ga
-                        aliasEligible solvedKey =
+                        targetKey = canonKey target0
+                        targetIsLocalSchemeStructure =
                             case scopeGen of
-                                Nothing -> True
+                                Nothing -> False
                                 Just gid ->
-                                    let underSolved =
-                                            firstGenAncestorGa (typeRef (NodeId solvedKey)) == Just gid
-                                        underBasePref =
-                                            case IntMap.lookup solvedKey solvedToBasePrefLocalOut of
-                                                Just baseN ->
-                                                    firstGenAncestorFrom (gbiBindParentsBase ga) (TypeRef baseN) == Just gid
-                                                Nothing -> False
-                                        underBaseGamma =
-                                            case IntMap.lookup solvedKey solvedToBasePrefLocalOut of
-                                                Just baseN -> IntSet.member (getNodeId baseN) baseGammaSetLocalOut
-                                                Nothing -> False
-                                    in underSolved || underBasePref || underBaseGamma
+                                    IntMap.lookup targetKey schemeRootOwner == Just gid
+                                        || case IntMap.lookup targetKey schemeRootByBody of
+                                            Just root -> IntMap.lookup (canonKey root) schemeRootOwner == Just gid
+                                            Nothing -> False
+                        aliasRetainsBinderIdentity solvedKey =
+                            go IntSet.empty (canonical (NodeId solvedKey))
+                          where
+                            go seen nid
+                                | IntSet.member key seen = True
+                                | otherwise =
+                                    case IntMap.lookup key nodes of
+                                        Just TyVar{} ->
+                                            case VarStore.lookupVarBound constraint nid of
+                                                Nothing -> True
+                                                Just bound -> go (IntSet.insert key seen) (canonical bound)
+                                        Just TyBottom{} -> True
+                                        _ -> False
+                              where
+                                key = getNodeId nid
+                        aliasEligible solvedKey =
+                            (targetIsLocalSchemeStructure || aliasRetainsBinderIdentity solvedKey)
+                                && case scopeGen of
+                                    Nothing -> True
+                                    Just gid ->
+                                        let underSolved =
+                                                firstGenAncestorGa (typeRef (NodeId solvedKey)) == Just gid
+                                            underBasePref =
+                                                case IntMap.lookup solvedKey solvedToBasePrefLocalOut of
+                                                    Just baseN ->
+                                                        firstGenAncestorFrom (gbiBindParentsBase ga) (TypeRef baseN) == Just gid
+                                                    Nothing -> False
+                                            underBaseGamma =
+                                                case IntMap.lookup solvedKey solvedToBasePrefLocalOut of
+                                                    Just baseN -> IntSet.member (getNodeId baseN) baseGammaSetLocalOut
+                                                    Nothing -> False
+                                        in underSolved || underBasePref || underBaseGamma
                         solvedToBaseAll =
                             IntMap.fromListWith
                                 (++)
@@ -513,6 +650,24 @@ buildGammaPlan GammaPlanInput{..} =
                                 ]
                     in IntMap.union aliasFromBase aliasFromPref
                 Nothing -> IntMap.empty
+        requiredResultKeys =
+            IntSet.fromList
+                (concatMap requiredRoutingKeys (IntMap.toList requiredGamma))
+        requiredRoutingKeys (requirementKey, requirement) =
+            case rgbPlacement requirement of
+                RequiredGammaAtCurrentScope ->
+                    [ getNodeId (canonical resultRoot)
+                    | resultRoot <- NonEmpty.toList (rgbResultRoots requirement)
+                    ]
+                RequiredGammaAtConstructionScope _ ->
+                    [ getNodeId (canonical resultRoot)
+                    | resultRoot <- NonEmpty.toList (rgbResultRoots requirement)
+                    ]
+                RequiredGammaAtNestedScope _ -> [requirementKey]
+        gammaAliasLocal =
+            IntMap.union
+                requiredGlobalAliases
+                (IntMap.withoutKeys gammaAliasLocalBase requiredResultKeys)
         baseGammaRepSetLocal =
             IntSet.fromList (IntMap.elems baseGammaRepLocalOut)
         reachableForBindersLocal =
@@ -564,7 +719,16 @@ buildGammaPlan GammaPlanInput{..} =
                     in any isNamedOutside (IntSet.toList reachableBound)
                 Nothing -> False
         typeRootHasNamedOutsideGammaLocal = False
-    in GammaPlan
+    sourceBinderRefsLocal <-
+        case mbBindParentsGa of
+            Just ga ->
+                expandSourceBinderRefsWithPreference
+                    solvedToBasePrefLocalOut
+                    canonical
+                    (gbiBaseToSolved ga)
+                    (grSourceBinderRefs gpiRequirements)
+            Nothing -> pure (grSourceBinderRefs gpiRequirements)
+    pure GammaPlan
         { gpBaseGammaSet = baseGammaSetLocalOut
         , gpBaseGammaRep = baseGammaRepLocalOut
         , gpNamedUnderGaSet = namedUnderGaSetLocalOut
@@ -576,4 +740,465 @@ buildGammaPlan GammaPlanInput{..} =
         , gpNamedUnderGa = namedUnderGaLocal
         , gpBoundHasNamedOutsideGamma = boundHasNamedOutsideGammaLocal
         , gpTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGammaLocal
+        , gpRequiredGamma = requiredGamma
+        , gpSourceBinderRefs = sourceBinderRefsLocal
         }
+  where
+    validateExpansionConstructionRoles =
+        case (gpiScopeGen, gpiBindParentsGa) of
+            (Just scopeGen, Just ga) ->
+                foldM
+                    (insertCertified scopeGen)
+                    IntSet.empty
+                    ( IntSet.toList
+                        ( expansionConstructionRoleKeys
+                            (gbiExpansionConstructionPlacements ga)
+                        )
+                    )
+            _ -> pure IntSet.empty
+
+    insertCertified scopeGen certified argumentKey =
+        let argument = gpiCanonical (NodeId argumentKey)
+            canonicalKey = getNodeId argument
+            actualOwner = gpiFirstGenAncestor (typeRef argument)
+            constructedBinding =
+                IntMap.lookup
+                    (nodeRefKey (typeRef argument))
+                    gpiBindParents
+        in case IntMap.lookup canonicalKey gpiNodes of
+            Just TyVar{}
+                | VarStore.isEliminatedVar gpiConstraint argument ->
+                    Left
+                        (ValidationFailed
+                            [ "an expansion construction role was eliminated before generalization"
+                            , "  node: " ++ show argument
+                            , "  planning scope: " ++ show scopeGen
+                            ])
+                | Nothing <- actualOwner ->
+                    Left
+                        (ValidationFailed
+                            [ "an expansion construction role has no owner in the current binding tree"
+                            , "  node: " ++ show argument
+                            , "  planning scope: " ++ show scopeGen
+                            , "  constructed binding: " ++ show constructedBinding
+                            ])
+                | actualOwner /= Just scopeGen ->
+                    pure certified
+                | Just (_parent, BindFlex) <- constructedBinding ->
+                    pure (IntSet.insert canonicalKey certified)
+                | Just (_parent, BindRigid) <- constructedBinding ->
+                    -- A role starts flexible in chi_e, but the final chi_p
+                    -- witness may rigidify it.  Gamma is defined from chi_p,
+                    -- so such a role is no longer a binder candidate.
+                    pure certified
+                | otherwise ->
+                    Left
+                        (ValidationFailed
+                            [ "an expansion construction role is not flexibly bound in the current tree"
+                            , "  node: " ++ show argument
+                            , "  planning scope: " ++ show scopeGen
+                            , "  current owner: " ++ show actualOwner
+                            , "  constructed binding: " ++ show constructedBinding
+                            ])
+            node ->
+                Left
+                    (ValidationFailed
+                        [ "an expansion construction role is not a live type variable"
+                        , "  node: " ++ show argument
+                        , "  value: " ++ show node
+                        ])
+
+    validateRequiredGlobalAliases required =
+        case gpiBindParentsGa of
+            Nothing -> pure IntMap.empty
+            Just ga ->
+                foldM
+                    (insertAlias ga)
+                    IntMap.empty
+                    [ entry
+                    | entry@(_, requirement) <- IntMap.toList required
+                    , requiredGammaPlacementIsLocal
+                        (rgbPlacement requirement)
+                    ]
+
+    insertAlias ga acc (resultKey, requirement) =
+        case IntMap.lookup (getNodeId (rgbExteriorNode requirement)) (gbiBaseToSolved ga) of
+            Nothing -> pure acc
+            Just globalSolved ->
+                let globalKey = getNodeId (gpiCanonical globalSolved)
+                in if globalKey == resultKey
+                    then pure acc
+                    else
+                        case IntMap.lookup globalKey acc of
+                            Nothing -> pure (IntMap.insert globalKey resultKey acc)
+                            Just existingResult
+                                | existingResult == resultKey -> pure acc
+                                | otherwise ->
+                                    Left
+                                        (ValidationFailed
+                                            [ "one global exterior representative feeds multiple edge-local Gamma results"
+                                            , "  global representative: " ++ show (NodeId globalKey)
+                                            , "  first result: " ++ show (NodeId existingResult)
+                                            , "  second result: " ++ show (NodeId resultKey)
+                                            ])
+
+    validateRequiredGamma = do
+        mergedRequirements <-
+            foldM mergeRequired [] (grRequiredGammaBinders gpiRequirements)
+        foldM insertRequired IntMap.empty mergedRequirements
+
+    mergeRequired existing requirement =
+        case find (sameExterior requirement) existing of
+            Nothing -> pure (existing ++ [requirement])
+            Just prior
+                | rgbPlacement prior /= rgbPlacement requirement ->
+                    Left
+                        (ValidationFailed
+                            [ "root RaiseMerge entries assign one Gamma exterior to different construction scopes"
+                            , "  exterior: " ++ show (rgbExteriorNode requirement)
+                            , "  first placement: " ++ show (rgbPlacement prior)
+                            , "  second placement: " ++ show (rgbPlacement requirement)
+                            ])
+                | alphaEqType
+                    (rgbOperatedType prior)
+                    (rgbOperatedType requirement) ->
+                    pure (map (mergeMatchingExterior requirement) existing)
+                | TBottom <- rgbOperatedType prior ->
+                    -- Bottom is the neutral lower-bound obligation.  Preserve
+                    -- the operated-root provenance of the non-bottom edge when
+                    -- it supplies the authoritative bound for this exterior.
+                    pure (map (replaceMatchingExterior requirement) existing)
+                | TBottom <- rgbOperatedType requirement ->
+                    pure (map (mergeMatchingExterior requirement) existing)
+                | otherwise ->
+                    Left
+                        (ValidationFailed
+                            [ "root RaiseMerge entries require incompatible bounds for one Gamma exterior"
+                            , "  exterior: " ++ show (rgbExteriorNode requirement)
+                            , "  first bound: " ++ show (rgbOperatedType prior)
+                            , "  second bound: " ++ show (rgbOperatedType requirement)
+                            ])
+
+    sameExterior left right =
+        rgbExteriorNode left == rgbExteriorNode right
+
+    mergeMatchingExterior incoming prior
+        | sameExterior incoming prior =
+            prior
+                { rgbEdgeIds =
+                    foldl
+                        appendEdgeId
+                        (rgbEdgeIds prior)
+                        (NonEmpty.toList (rgbEdgeIds incoming))
+                , rgbResultRoots =
+                    foldl
+                        appendResultRoot
+                        (rgbResultRoots prior)
+                        (NonEmpty.toList (rgbResultRoots incoming))
+                }
+        | otherwise = prior
+
+    replaceMatchingExterior incoming prior
+        | sameExterior incoming prior =
+            incoming
+                { rgbEdgeIds =
+                    foldl
+                        appendEdgeId
+                        (rgbEdgeIds incoming)
+                        (NonEmpty.toList (rgbEdgeIds prior))
+                , rgbResultRoots =
+                    foldl
+                        appendResultRoot
+                        (rgbResultRoots incoming)
+                        (NonEmpty.toList (rgbResultRoots prior))
+                }
+        | otherwise = prior
+
+    appendResultRoot roots resultRoot
+        | resultRoot `elem` roots = roots
+        | otherwise = roots <> NonEmpty.singleton resultRoot
+
+    appendEdgeId edges edgeId
+        | edgeId `elem` edges = edges
+        | otherwise = edges <> NonEmpty.singleton edgeId
+
+    insertRequired acc requirement =
+        case gpiBindParentsGa of
+            Nothing ->
+                Left
+                    (ValidationFailed
+                        [ "root RaiseMerge Γ construction requires the frozen base graph"
+                        , "  requirement: " ++ show requirement
+                        ])
+            Just ga -> do
+                let requirementExterior = rgbExteriorNode requirement
+                    operatedRoot = rgbOperatedRoot requirement
+                    resultRoots = NonEmpty.toList (rgbResultRoots requirement)
+                    primaryResultRoot = NonEmpty.head (rgbResultRoots requirement)
+                    baseConstraint = gbiBaseConstraint ga
+                exterior <-
+                    case lookupNodeIn (cNodes baseConstraint) requirementExterior of
+                        Just _ -> pure requirementExterior
+                        Nothing ->
+                            case
+                                IntMap.lookup
+                                    (getNodeId requirementExterior)
+                                    (gbiSolvedToBase ga)
+                            of
+                                Just baseExterior
+                                    | Just _ <-
+                                        lookupNodeIn
+                                            (cNodes baseConstraint)
+                                            baseExterior ->
+                                        pure baseExterior
+                                _ ->
+                                    Left
+                                        (ValidationFailed
+                                            [ "root RaiseMerge exterior has no frozen base provenance"
+                                            , "  exterior: " ++ show requirementExterior
+                                            ])
+                case lookupNodeIn (cNodes baseConstraint) exterior of
+                    Just _ -> pure ()
+                    Nothing ->
+                        Left
+                            (ValidationFailed
+                                [ "root RaiseMerge exterior provenance is absent from the frozen base graph"
+                                , "  requirement exterior: " ++ show requirementExterior
+                                , "  exterior: " ++ show exterior
+                                ])
+                let bindParentsBase = gbiBindParentsBase ga
+                    placementOwner =
+                        case rgbPlacement requirement of
+                            RequiredGammaAtCurrentScope ->
+                                GenRef <$> gpiScopeGen
+                            RequiredGammaAtConstructionScope owner ->
+                                Just owner
+                            RequiredGammaAtNestedScope owner ->
+                                Just owner
+                    placementIsValid =
+                        case (rgbPlacement requirement, placementOwner) of
+                            (RequiredGammaAtCurrentScope, Just owner) ->
+                                flexiblyOwnedByScope bindParentsBase owner exterior
+                            (RequiredGammaAtConstructionScope owner, Just _) ->
+                                flexiblyOwnedByScope bindParentsBase owner exterior
+                                    || parentlessResultEndpointOwnedByCurrentScope
+                                        bindParentsBase
+                                        owner
+                                        exterior
+                                        requirement
+                            (RequiredGammaAtNestedScope owner, Just _) ->
+                                -- Nested placement is positive evidence
+                                -- constructed by 'placeNestedRootRequirements':
+                                -- it has already checked either the exact
+                                -- term-local closure or the frozen exterior
+                                -- path.  Canonicalization may subsequently
+                                -- move that exterior to another graph path, so
+                                -- rechecking the path here would discard valid
+                                -- lexical ownership.  The remaining invariant
+                                -- at this solved-graph boundary is that the
+                                -- certified owner belongs to this scope.
+                                withinCurrentScope bindParentsBase owner
+                            _ -> False
+                if placementIsValid
+                    then pure ()
+                    else
+                        Left
+                            (ValidationFailed
+                                [ "root RaiseMerge exterior is not owned by its declared construction Gamma"
+                                , "  requirement exterior: " ++ show requirementExterior
+                                , "  frozen exterior: " ++ show exterior
+                                , "  requirement: " ++ show requirement
+                                , "  current scope: " ++ show gpiScopeGen
+                                , "  declared owner: " ++ show placementOwner
+                                , "  target: " ++ show gpiTarget0
+                                , "  path: "
+                                    ++ show
+                                        (Binding.bindingPathToRootLocal
+                                            (gbiBindParentsBase ga)
+                                            (typeRef exterior)
+                                        )
+                                , "  path bindings: "
+                                    ++ show
+                                        [ (ref, IntMap.lookup (nodeRefKey ref) (gbiBindParentsBase ga))
+                                        | ref <-
+                                            either
+                                                (const [])
+                                                id
+                                                ( Binding.bindingPathToRootLocal
+                                                    (gbiBindParentsBase ga)
+                                                    (typeRef exterior)
+                                                )
+                                        ]
+                                ])
+                case lookupNodeIn (cNodes baseConstraint) operatedRoot of
+                    Nothing ->
+                        Left
+                            (ValidationFailed
+                                [ "root RaiseMerge operated source root is absent from the frozen base graph"
+                                , "  operated root: " ++ show operatedRoot
+                                ])
+                    Just _ -> pure ()
+                globalSolved <-
+                    case IntMap.lookup (getNodeId exterior) (gbiBaseToSolved ga) of
+                        Just node -> pure node
+                        Nothing ->
+                            Left
+                                (ValidationFailed
+                                    [ "root RaiseMerge exterior has no base-to-solved bridge"
+                                    , "  exterior: " ++ show exterior
+                                    , "  result roots: " ++ show resultRoots
+                                    ])
+                let globalSolvedC = gpiCanonical globalSolved
+                    globalKey = getNodeId globalSolvedC
+                    primaryResultC = gpiCanonical primaryResultRoot
+                    primaryResultKey = getNodeId primaryResultC
+                    resultEntries =
+                        [ (resultRoot, gpiCanonical resultRoot)
+                        | resultRoot <- resultRoots
+                        ]
+                    resultKeys =
+                        IntSet.fromList
+                            [ getNodeId resultC
+                            | (_, resultC) <- resultEntries
+                            ]
+                    sourceRouteKeys =
+                        [ getNodeId sourceNode
+                        | sourceKey <-
+                            getNodeId requirementExterior
+                                : getNodeId operatedRoot
+                                : map getNodeId resultRoots
+                        , Just sourceRef <-
+                            [IntMap.lookup sourceKey (grSourceBinderRefs gpiRequirements)]
+                        , Just sourceNode <- [typeBinderRefNode sourceRef]
+                        ]
+                    nestedRouteCandidates =
+                        sourceRouteKeys ++ [getNodeId requirementExterior]
+                    nestedRouteKey =
+                        listToMaybe
+                            [ candidate
+                            | candidate <- nestedRouteCandidates
+                            , case IntMap.lookup candidate gpiNodes of
+                                Just TyVar{} -> True
+                                _ -> False
+                            ]
+                    requirementKey =
+                        case rgbPlacement requirement of
+                            RequiredGammaAtCurrentScope -> primaryResultKey
+                            RequiredGammaAtConstructionScope _ ->
+                                primaryResultKey
+                            RequiredGammaAtNestedScope _ ->
+                                case nestedRouteKey of
+                                    Just key -> key
+                                    Nothing -> primaryResultKey
+                case IntMap.lookup globalKey gpiNodes of
+                    Just _ -> pure ()
+                    Nothing ->
+                        Left
+                            (ValidationFailed
+                                [ "root RaiseMerge global exterior bridge is absent from the solved graph"
+                                , "  exterior: " ++ show exterior
+                                , "  mapped result: " ++ show globalSolvedC
+                                ])
+                mapM_
+                    (\(_, resultC) ->
+                        case IntMap.lookup (getNodeId resultC) gpiNodes of
+                            Just _ -> pure ()
+                            Nothing ->
+                                Left
+                                    (ValidationFailed
+                                        [ "root RaiseMerge result root is absent from the solved graph"
+                                        , "  exterior: " ++ show exterior
+                                        , "  global representative: " ++ show globalSolvedC
+                                        , "  trace result: " ++ show resultC
+                                        ]))
+                    resultEntries
+                -- Current-scope requirements route through the witness result.
+                -- A nested Figure 15.3.5 constructor instead retains its own
+                -- live source/exterior key in the enclosing closure scheme.
+                -- This lets two lexical Gammas share a solved result without
+                -- collapsing their distinct binder identities.
+                case
+                    find
+                        ( \(_, existing) ->
+                            rgbPlacement existing == rgbPlacement requirement
+                                && requirementsOverlapResults resultKeys existing
+                        )
+                        (IntMap.toList acc)
+                  of
+                    Just (existingKey, existing) ->
+                        Left
+                            (ValidationFailed
+                                [ "multiple root RaiseMerge Gamma entries in one construction scope collapse to one edge-local result"
+                                , "  result roots: " ++ show resultEntries
+                                , "  existing binder key: " ++ show (NodeId existingKey)
+                                , "  first: " ++ show existing
+                                , "  second: " ++ show requirement
+                                ])
+                    Nothing ->
+                        case IntMap.lookup requirementKey acc of
+                            Nothing ->
+                                pure (IntMap.insert requirementKey requirement acc)
+                            Just existing ->
+                                Left
+                                    (ValidationFailed
+                                        [ "distinct root RaiseMerge Gamma scopes have no distinct live routing keys"
+                                        , "  routing key: " ++ show (NodeId requirementKey)
+                                        , "  source route candidates: " ++ show (map NodeId nestedRouteCandidates)
+                                        , "  first: " ++ show existing
+                                        , "  second: " ++ show requirement
+                                        ])
+
+    requirementsOverlapResults resultKeys requirement =
+        any
+            (\resultRoot ->
+                IntSet.member
+                    (getNodeId (gpiCanonical resultRoot))
+                    resultKeys)
+            (rgbResultRoots requirement)
+
+    flexiblyOwnedByScope bindParents owner exterior =
+        go IntSet.empty (typeRef exterior)
+      where
+        go seen child
+            | IntSet.member childKey seen = False
+            | otherwise =
+                case IntMap.lookup childKey bindParents of
+                    Just (parent, BindFlex)
+                        | parent == owner -> True
+                        | TypeRef{} <- parent ->
+                            go (IntSet.insert childKey seen) parent
+                    _ -> False
+          where
+            childKey = nodeRefKey child
+
+    -- A root RaiseMerge can expose its Gamma exterior directly as the result
+    -- endpoint.  Such an exterior is deliberately parentless in the frozen
+    -- binding tree, so the exact construction-scope stamp produced by
+    -- 'placeNestedRootRequirements' is the ownership proof.  Keep the check
+    -- narrow: raw current-scope requirements, non-result exteriors, and
+    -- placements owned by any other scope still require a flexible path.
+    parentlessResultEndpointOwnedByCurrentScope
+        bindParents
+        owner
+        exterior
+        requirement =
+            Just owner == (GenRef <$> gpiScopeGen)
+                && IntMap.notMember
+                    (nodeRefKey (typeRef exterior))
+                    bindParents
+                && exterior `elem` rgbResultRoots requirement
+
+    -- A nested source constructor can share the same gen node as its
+    -- enclosing constructor; 'LocalGammaOwner' distinguishes those lexical
+    -- placements before requirements reach this graph planner.  Here we only
+    -- verify that the declared graph scope is the current scope or a true
+    -- descendant of it, never a sibling or ancestor.
+    withinCurrentScope bindParents nestedOwner =
+        case gpiScopeGen of
+            Nothing -> False
+            Just currentScope ->
+                let currentOwner = GenRef currentScope
+                in nestedOwner == currentOwner
+                    || case Binding.bindingPathToRootLocal bindParents nestedOwner of
+                        Right (_ : ancestors) -> currentOwner `elem` ancestors
+                        _ -> False

@@ -21,8 +21,14 @@ isTargetSchemeBinderFor
     -> Bool
 isTargetSchemeBinderFor canonical constraint target0 targetIsBaseLike v
     | targetIsBaseLike = False
+    | not targetIsVariable = False
     | canonical v == canonical target0 = True
     | otherwise =
         case VarStore.lookupVarBound constraint (canonical v) of
             Just bnd -> canonical bnd == canonical target0
             Nothing -> False
+  where
+    targetIsVariable =
+        case lookupNodeIn (cNodes constraint) (canonical target0) of
+            Just TyVar {} -> True
+            _ -> False

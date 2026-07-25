@@ -2,6 +2,8 @@
 
 module Reify.TypeOpsSpec (spec) where
 
+import IdentityTestSupport
+import qualified ElabTypeTestSupport as TestElab
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
@@ -12,14 +14,14 @@ import MLF.Constraint.Types.Graph
     GenNodeMap (..),
     NodeId (..),
     NodeMap (..),
-    TyNode (..),
     fromListNode,
   )
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts)
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.TypeOps
   ( alphaEqType,
-    alphaEqTypeMetadataLight,
+    churchAwareEqType,
+    churchMuEquivalent,
     firstNonContractiveRecursiveType,
     freeTypeVarRefsList,
     freeTypeVarRefsFrom,
@@ -27,6 +29,8 @@ import MLF.Reify.TypeOps
     freeTypeVarsType,
     inlineBaseBoundsType,
     inlineAliasBoundsWithBySeen,
+    inlineAliasBoundsWithBySeenProtected,
+    matchChurchAwareTypeRefs,
     matchTypeRefs,
     splitForallsRefs,
     stripForallsType,
@@ -37,7 +41,6 @@ import MLF.Types.Elab
   ( ElabType,
     Ty (..),
     TypeBinderRef,
-    tBase,
     tForallWithRef,
     tMuWithRef,
     tVarAppWithRef,
@@ -54,10 +57,10 @@ import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityStableName)
 import Test.Hspec
 
 intTy :: ElabType
-intTy = tBase (BaseTy "int")
+intTy = TestElab.tBase (BaseTy "int")
 
 boolTy :: ElabType
-boolTy = tBase (BaseTy "bool")
+boolTy = TestElab.tBase (BaseTy "bool")
 
 typeRef :: Int -> String -> TypeBinderRef
 typeRef key name =
@@ -83,6 +86,8 @@ emptyConstraint =
       cWeakenedVars = mempty,
       cAnnEdges = mempty,
       cLetEdges = mempty,
+      cGraftedEdges = mempty,
+      cGraftResultConstructions = mempty,
       cGenNodes = GenNodeMap mempty
     }
 
@@ -141,6 +146,17 @@ spec = describe "MLF.Reify.TypeOps" $ do
           second = typeRef 24 "a"
       freeTypeVarRefsList (TArrow (tVarWithRef first) (tVarWithRef second))
         `shouldBe` [first, second]
+
+  describe "freeTypeVarRefsType" $ do
+    it "keeps an outer reference free in a same-identity nested forall bound" $ do
+      let outer = typeRef 70 "outer"
+          result = typeRef 71 "result"
+          nested =
+            tForallWithRef
+              outer
+              (Just (TArrow (tVarWithRef outer) (tVarWithRef outer)))
+              (tVarWithRef result)
+      freeTypeVarRefsType nested `shouldBe` [outer, result]
 
   describe "freeTypeVarRefsFrom" $ do
     it "treats first argument as bound refs; bound vars excluded from result" $ do
@@ -287,6 +303,23 @@ spec = describe "MLF.Reify.TypeOps" $ do
             `shouldBe` intTy
 
   describe "inlineAliasBoundsWithBySeen" $ do
+    it "keeps exact endpoint refs ambient while ordinary alias inlining resolves them" $
+      let ambientRef = typeRef 5 "ambient"
+          ty = tVarWithRef ambientRef
+          nodes = fromListNode [(NodeId 5, TestTyBase (NodeId 5) (BaseTy "int"))]
+          inline protected =
+            inlineAliasBoundsWithBySeenProtected
+              protected
+              False
+              id
+              nodes
+              (const Nothing)
+              (\_ nid -> if nid == NodeId 5 then Right intTy else Left ())
+              ty
+       in do
+            inline [] `shouldBe` intTy
+            inline [ambientRef] `shouldBe` ty
+
     it "preserves identity refs while walking untouched types" $
       let refA = typeRef 6 "a"
           refF = typeRef 7 "f"
@@ -311,7 +344,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
       let boundRef = typeRef 106 "t9"
           freeRef = typeRef 9 "t9"
           ty = tForallWithRef boundRef Nothing (tVarWithRef freeRef)
-          nodes = fromListNode [(NodeId 9, TyBase (NodeId 9) (BaseTy "int"))]
+          nodes = fromListNode [(NodeId 9, TestTyBase (NodeId 9) (BaseTy "int"))]
           result =
             inlineAliasBoundsWithBySeen
               False
@@ -325,7 +358,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
     it "does not inline identity-bearing alias refs by stale parsed names" $
       let staleRef = typeRef 109 "t9"
           ty = tVarWithRef staleRef
-          nodes = fromListNode [(NodeId 9, TyBase (NodeId 9) (BaseTy "int"))]
+          nodes = fromListNode [(NodeId 9, TestTyBase (NodeId 9) (BaseTy "int"))]
           result =
             inlineAliasBoundsWithBySeen
               False
@@ -339,7 +372,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
     it "does not inline generated identity alias refs by parsed names" $
       let staleRef = generatedTypeRef 991601 "t9"
           ty = tVarWithRef staleRef
-          nodes = fromListNode [(NodeId 9, TyBase (NodeId 9) (BaseTy "int"))]
+          nodes = fromListNode [(NodeId 9, TestTyBase (NodeId 9) (BaseTy "int"))]
           result =
             inlineAliasBoundsWithBySeen
               False
@@ -369,7 +402,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
           ty = tForallWithRef boundRef Nothing (TArrow (tVarWithRef boundRef) (tVarWithRef freeRef))
           constraint =
             emptyConstraint
-              { cNodes = fromListNode [(NodeId 9, TyBase (NodeId 9) (BaseTy "int"))]
+              { cNodes = fromListNode [(NodeId 9, TestTyBase (NodeId 9) (BaseTy "int"))]
               }
        in inlineBaseBoundsType constraint id ty
             `shouldBe` tForallWithRef boundRef Nothing (TArrow (tVarWithRef boundRef) intTy)
@@ -378,9 +411,9 @@ spec = describe "MLF.Reify.TypeOps" $ do
       let freeRef = typeRef 110 "t110"
           constraint =
             emptyConstraint
-              { cNodes = fromListNode [(NodeId 110, TyBase (NodeId 110) (BaseTy "Int"))]
+              { cNodes = fromListNode [(NodeId 110, TestTyBase (NodeId 110) (BaseTy "Int"))]
               }
-          expectedIdentity = PrimitiveIdentity.builtinTypeHeadIdentity "Int"
+          expectedIdentity = PrimitiveIdentity.builtinTypeIdentity "Int"
        in do
             inlineBaseBoundsType constraint id (tVarWithRef freeRef)
               `shouldBe` TBaseWithIdentity expectedIdentity (BaseTy "Int")
@@ -413,22 +446,19 @@ spec = describe "MLF.Reify.TypeOps" $ do
             `shouldBe` False
 
     it "distinguishes same-named type heads with different identities" $
-      let left = TBaseWithIdentity (Just (typeIdentity 991801)) (BaseTy "Token")
-          right = TBaseWithIdentity (Just (typeIdentity 991802)) (BaseTy "Token")
+      let left = TBaseWithIdentity (typeIdentity 991801) (BaseTy "Token")
+          right = TBaseWithIdentity (typeIdentity 991802) (BaseTy "Token")
        in alphaEqType left right `shouldBe` False
 
-    it "does not match identity-bearing type heads through name-only fallback" $
-      let identityHead = TBaseWithIdentity (Just (typeIdentity 991806)) (BaseTy "Token")
-          nameOnlyHead = TBaseWithIdentity Nothing (BaseTy "Token")
-       in alphaEqType identityHead nameOnlyHead `shouldBe` False
-
     it "keeps production type equality identity-only" $ do
-      typeHeadRefMatches Nothing (BaseTy "Token") Nothing (BaseTy "Token")
+      let leftIdentity = typeIdentity 991806
+          rightIdentity = typeIdentity 991807
+      typeHeadRefMatches leftIdentity rightIdentity
         `shouldBe` False
-      alphaEqType (TBaseWithIdentity Nothing (BaseTy "Token")) (TBaseWithIdentity Nothing (BaseTy "Token"))
+      alphaEqType
+        (TBaseWithIdentity leftIdentity (BaseTy "Token"))
+        (TBaseWithIdentity rightIdentity (BaseTy "Token"))
         `shouldBe` False
-      alphaEqTypeMetadataLight (TBaseWithIdentity Nothing (BaseTy "Token")) (TBaseWithIdentity Nothing (BaseTy "Token"))
-        `shouldBe` True
 
     it "recognises alpha-equivalent bound variables by binder position" $
       let refA = typeRef 43 "a"
@@ -437,6 +467,93 @@ spec = describe "MLF.Reify.TypeOps" $ do
             (tForallWithRef refA Nothing (tVarWithRef refA))
             (tForallWithRef refB Nothing (tVarWithRef refB))
             `shouldBe` True
+
+  describe "churchAwareEqType" $ do
+    it "matches nested Church recursive types after result instantiation and self aliasing" $ do
+      let sourceNatSelf = typeRef 1201 "Nat_self"
+          sourceNatResult = typeRef 1202 "Nat_result"
+          sourceNat =
+            tMuWithRef sourceNatSelf $
+              tForallWithRef sourceNatResult Nothing $
+                TArrow
+                  (tVarWithRef sourceNatResult)
+                  ( TArrow
+                      (TArrow (tVarWithRef sourceNatSelf) (tVarWithRef sourceNatResult))
+                      (tVarWithRef sourceNatResult)
+                  )
+          sourceExprSelf = typeRef 1203 "Expr_self"
+          sourceExprResult = typeRef 1204 "Expr_result"
+          sourceExpr =
+            tMuWithRef sourceExprSelf $
+              tForallWithRef sourceExprResult Nothing $
+                TArrow
+                  (TArrow sourceNat (tVarWithRef sourceExprResult))
+                  ( TArrow
+                      (TArrow (tVarWithRef sourceExprSelf) (tVarWithRef sourceExprResult))
+                      (tVarWithRef sourceExprResult)
+                  )
+          targetNatSelf = typeRef 1211 "t37"
+          targetNatSelfAlias = typeRef 1212 "t31"
+          targetNatResult = typeRef 1213 "t32"
+          targetNat =
+            tMuWithRef targetNatSelf $
+              TArrow
+                (tVarWithRef targetNatResult)
+                ( TArrow
+                    (TArrow (tVarWithRef targetNatSelfAlias) (tVarWithRef targetNatResult))
+                    (tVarWithRef targetNatResult)
+                )
+          targetExprSelf = typeRef 1214 "t43"
+          targetExprSelfAlias = typeRef 1215 "t29"
+          targetExprResult = typeRef 1216 "t30"
+          targetExpr =
+            tMuWithRef targetExprSelf $
+              TArrow
+                (TArrow targetNat (tVarWithRef targetExprResult))
+                ( TArrow
+                    (TArrow (tVarWithRef targetExprSelfAlias) (tVarWithRef targetExprResult))
+                    (tVarWithRef targetExprResult)
+                )
+      churchMuEquivalent sourceExpr targetExpr `shouldBe` True
+      churchMuEquivalent targetExpr sourceExpr `shouldBe` True
+      churchAwareEqType sourceExpr targetExpr `shouldBe` True
+      churchAwareEqType targetExpr sourceExpr `shouldBe` True
+
+    it "rejects inconsistent uses of one instantiated Church result" $ do
+      let sourceSelf = typeRef 1221 "Source_self"
+          sourceResult = typeRef 1222 "Source_result"
+          source =
+            tMuWithRef sourceSelf $
+              tForallWithRef sourceResult Nothing $
+                TArrow
+                  (tVarWithRef sourceResult)
+                  (TArrow (tVarWithRef sourceSelf) (tVarWithRef sourceResult))
+          targetSelf = typeRef 1223 "Target_self"
+          targetSelfAlias = typeRef 1224 "Target_self_alias"
+          targetResult = typeRef 1225 "Target_result"
+          conflictingResult = typeRef 1226 "Target_result_conflict"
+          target =
+            tMuWithRef targetSelf $
+              TArrow
+                (tVarWithRef targetResult)
+                (TArrow (tVarWithRef targetSelfAlias) (tVarWithRef conflictingResult))
+      churchMuEquivalent source target `shouldBe` False
+      churchAwareEqType source target `shouldBe` False
+
+    it "does not erase an explicit forall around a recursive type" $ do
+      let selfRef = typeRef 1231 "Recursive_self"
+          resultRef = typeRef 1232 "Recursive_result"
+          outerRef = typeRef 1233 "outer"
+          recursiveTy =
+            tMuWithRef selfRef $
+              tForallWithRef resultRef Nothing $
+                TArrow
+                  (tVarWithRef resultRef)
+                  (tVarWithRef resultRef)
+          explicitlyPolymorphicTy =
+            tForallWithRef outerRef Nothing recursiveTy
+      churchAwareEqType explicitlyPolymorphicTy recursiveTy `shouldBe` False
+      churchAwareEqType recursiveTy explicitlyPolymorphicTy `shouldBe` False
 
   describe "matchTypeRefs" $ do
     it "matches a pattern variable against a concrete type" $ do
@@ -473,11 +590,151 @@ spec = describe "MLF.Reify.TypeOps" $ do
             Right subst -> expectationFailure ("Expected identity mismatch, got: " ++ show subst)
 
     it "does not match same-named type heads with different identities" $
-      let left = TConWithIdentity (Just (typeIdentity 991803)) (BaseTy "Token") (intTy NE.:| [])
-          right = TConWithIdentity (Just (typeIdentity 991804)) (BaseTy "Token") (intTy NE.:| [])
+      let left = TConWithIdentity (typeIdentity 991803) (BaseTy "Token") (intTy NE.:| [])
+          right = TConWithIdentity (typeIdentity 991804) (BaseTy "Token") (intTy NE.:| [])
        in case matchTypeRefs [] left right of
             Left _ -> pure ()
             Right subst -> expectationFailure ("Expected identity mismatch, got: " ++ show subst)
+
+  describe "matchChurchAwareTypeRefs" $ do
+    it "keeps one source argument when repeated targets use equivalent Church mu presentations" $ do
+      let sourceArgument = typeRef 1221 "a"
+          annotatedSelf = typeRef 1222 "Unit_self"
+          annotatedResult = typeRef 1223 "Unit_result"
+          annotatedUnit =
+            tMuWithRef annotatedSelf $
+              tForallWithRef annotatedResult Nothing $
+                TArrow
+                  (tVarWithRef annotatedResult)
+                  (tVarWithRef annotatedResult)
+          instantiatedSelf = typeRef 1224 "tUnit"
+          instantiatedResult = typeRef 1225 "tResult"
+          instantiatedUnit =
+            tMuWithRef instantiatedSelf $
+              TArrow
+                (tVarWithRef instantiatedResult)
+                (tVarWithRef instantiatedResult)
+          sourcePattern =
+            TArrow
+              (tVarWithRef sourceArgument)
+              (tVarWithRef sourceArgument)
+          target =
+            TArrow annotatedUnit instantiatedUnit
+      case matchTypeRefs [sourceArgument] sourcePattern target of
+        Left _ -> pure ()
+        Right subst ->
+          expectationFailure
+            ("Expected strict repeated-argument mismatch, got: " ++ show subst)
+      matchChurchAwareTypeRefs [sourceArgument] sourcePattern target
+        `shouldBe` Right (Map.singleton sourceArgument annotatedUnit)
+
+    it "extracts one source-to-graph quotient across instantiated Church mu types" $ do
+      let sourceElement = typeRef 1231 "a"
+          sourceSelf = typeRef 1232 "List_self"
+          sourceResult = typeRef 1233 "List_result"
+          sourceList =
+            tMuWithRef sourceSelf $
+              tForallWithRef sourceResult Nothing $
+                TArrow
+                  (tVarWithRef sourceResult)
+                  ( TArrow
+                      ( TArrow
+                          (tVarWithRef sourceElement)
+                          (TArrow (tVarWithRef sourceSelf) (tVarWithRef sourceResult))
+                      )
+                      (tVarWithRef sourceResult)
+                  )
+          targetElement = typeRef 1241 "tElement"
+          targetSelf = typeRef 1242 "tList"
+          targetSelfAlias = typeRef 1243 "tListAlias"
+          targetResult = typeRef 1244 "tResult"
+          targetList =
+            tMuWithRef targetSelf $
+              TArrow
+                (tVarWithRef targetResult)
+                ( TArrow
+                    ( TArrow
+                        (tVarWithRef targetElement)
+                        (TArrow (tVarWithRef targetSelfAlias) (tVarWithRef targetResult))
+                    )
+                    (tVarWithRef targetResult)
+                )
+      matchChurchAwareTypeRefs [sourceElement] sourceList targetList
+        `shouldBe` Right (Map.singleton sourceElement (tVarWithRef targetElement))
+
+    it "keeps repeated Church occurrences consistent without sharing local result binders" $ do
+      let sourceElement = typeRef 1251 "a"
+          sourceSelf = typeRef 1252 "List_self"
+          sourceResult = typeRef 1253 "List_result"
+          sourceList =
+            tMuWithRef sourceSelf $
+              tForallWithRef sourceResult Nothing $
+                TArrow
+                  (tVarWithRef sourceResult)
+                  ( TArrow
+                      ( TArrow
+                          (tVarWithRef sourceElement)
+                          (TArrow (tVarWithRef sourceSelf) (tVarWithRef sourceResult))
+                      )
+                      (tVarWithRef sourceResult)
+                  )
+          targetElement = typeRef 1261 "tElement"
+          targetList self selfAlias result =
+            tMuWithRef self $
+              TArrow
+                (tVarWithRef result)
+                ( TArrow
+                    ( TArrow
+                        (tVarWithRef targetElement)
+                        (TArrow (tVarWithRef selfAlias) (tVarWithRef result))
+                    )
+                    (tVarWithRef result)
+                )
+          targetLeft = targetList (typeRef 1262 "tLeft") (typeRef 1263 "tLeftAlias") (typeRef 1264 "tLeftResult")
+          targetRight = targetList (typeRef 1265 "tRight") (typeRef 1266 "tRightAlias") (typeRef 1267 "tRightResult")
+      matchChurchAwareTypeRefs
+        [sourceElement]
+        (TArrow sourceList sourceList)
+        (TArrow targetLeft targetRight)
+        `shouldBe` Right (Map.singleton sourceElement (tVarWithRef targetElement))
+
+    it "rejects inconsistent graph identities across repeated Church occurrences" $ do
+      let sourceElement = typeRef 1271 "a"
+          sourceSelf = typeRef 1272 "List_self"
+          sourceResult = typeRef 1273 "List_result"
+          sourceList =
+            tMuWithRef sourceSelf $
+              tForallWithRef sourceResult Nothing $
+                TArrow
+                  (tVarWithRef sourceResult)
+                  ( TArrow
+                      ( TArrow
+                          (tVarWithRef sourceElement)
+                          (TArrow (tVarWithRef sourceSelf) (tVarWithRef sourceResult))
+                      )
+                      (tVarWithRef sourceResult)
+                  )
+          targetList targetElement self selfAlias result =
+            tMuWithRef self $
+              TArrow
+                (tVarWithRef result)
+                ( TArrow
+                    ( TArrow
+                        (tVarWithRef targetElement)
+                        (TArrow (tVarWithRef selfAlias) (tVarWithRef result))
+                    )
+                    (tVarWithRef result)
+                )
+          targetLeft = targetList (typeRef 1281 "leftElement") (typeRef 1282 "left") (typeRef 1283 "leftAlias") (typeRef 1284 "leftResult")
+          targetRight = targetList (typeRef 1285 "rightElement") (typeRef 1286 "right") (typeRef 1287 "rightAlias") (typeRef 1288 "rightResult")
+      case
+          matchChurchAwareTypeRefs
+            [sourceElement]
+            (TArrow sourceList sourceList)
+            (TArrow targetLeft targetRight)
+        of
+          Left _ -> pure ()
+          Right subst -> expectationFailure ("Expected inconsistent quotient rejection, got: " ++ show subst)
 
   describe "firstNonContractiveRecursiveType" $ do
     it "returns Nothing for a type without TMu" $

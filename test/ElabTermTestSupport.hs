@@ -49,7 +49,6 @@ import MLF.Types.Elab
     resolvedVarSameIdentity,
     schemeBinderRefs,
     schemeBody,
-    tCon,
     tForallWithRef,
     tMuWithRef,
     tVarAppWithRef,
@@ -263,8 +262,8 @@ resolveFixtureTypeNameInType name target =
           | otherwise -> ty
         TArrow left right ->
           TArrow (go left) (go right)
-        TConWithIdentity _ con args ->
-          tCon con (fmap go args)
+        TConWithIdentity identity con args ->
+          TConWithIdentity identity con (fmap go args)
         TVarAppRef ref args ->
           TVarAppRef (resolveRef ref) (fmap go args)
         TBaseWithIdentity _ _ -> ty

@@ -9,8 +9,13 @@ module MLF.Elab.Run.Pipeline
     PipelineElabDetailedResult (..),
     PreparedExternalBindings,
     prepareExternalBindings,
+    prepareExternalBindingsWithTypeIdentities,
     preparedExternalTypeCheckEnv,
+    preparedSourceTypeIdentityMaps,
+    preparedSourceTypeBinderIdentityCandidates,
     extendPreparedExternalBindingTypeIdentities,
+    extendPreparedExternalBindingTypeIdentityCandidates,
+    preferPreparedExternalBindingTypeIdentities,
     reservePreparedExternalBindingIdentities,
     restrictPreparedExternalBindings,
     restrictPreparedExternalBindingsByKeys,
@@ -21,18 +26,38 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabDetailedWithConfigAndExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedWithPreparedExternalBindings,
+    runPipelineElabDetailedResolvedWithPreparedExternalBindingsFromSupply,
+    runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTimingFromSupply,
     runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTimingFromSupply,
+    runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTimingFromSupply,
     runPipelineElabDetailedUncheckedWithExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindings,
+    runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsFromSupply,
+    runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTimingFromSupply,
     freshenTypeAbsAgainstEnv,
+    freshenTypeAbsAgainstEnvFromSupply,
     authoritativeRootAnn,
+    closePipelineTerm,
   )
 where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent (forkIO, newEmptyMVar, putMVar, rtsSupportsBoundThreads, takeMVar)
+import Control.Concurrent
+  ( forkIO,
+    newEmptyMVar,
+    putMVar,
+    rtsSupportsBoundThreads,
+    takeMVar,
+  )
 import Control.Exception (SomeException, evaluate, throwIO, try)
 import Control.Monad (foldM)
 import Control.Monad.Except (ExceptT (..), runExceptT)
@@ -46,7 +71,12 @@ import qualified Data.Set as Set
 import GHC.Conc (getNumCapabilities, getNumProcessors, setNumCapabilities)
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (computePresolution, computePresolutionWithTiming, computePresolutionWithTimingAndRootOwnership)
+import MLF.Constraint.Presolution
+  ( PresolutionResult,
+    computePresolution,
+    computePresolutionWithTiming,
+    computePresolutionWithTimingAndRootOwnership,
+  )
 import MLF.Constraint.RootOwnership
   ( ModuleRootId (..),
     RootOwnershipIndex (..),
@@ -81,9 +111,30 @@ import MLF.Constraint.Types.Graph
     toListGen,
     toListNode,
   )
-import MLF.Constraint.Types.Phase (Phase (Presolved, Raw))
-import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnv)
-import MLF.Elab.Elaborate.Algebra (Env, mkEnvWithResolvedBindings)
+import MLF.Constraint.Types.Phase (Phase (Acyclic, Presolved, Raw))
+import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnvDetailed, validateElaborationWithEnv)
+import MLF.Elab.Elaborate.Algebra
+  ( CompilerExactResultBoundCertificate,
+    ElaboratedTerm (..),
+    Env,
+    alignEnvToConstructionBinderRenames,
+    alignEnvToCompilerExactBinderRenames,
+    extendEnvTypeScopeWithAliases,
+    mkEnvWithResolvedBindings,
+    projectCompilerExactResultBoundCertificates,
+    withEnvConstructedLambdaParamTypes,
+    withEnvLocalGammaClosures,
+  )
+import MLF.Elab.Elaborate.Annotation
+  ( elaborateClosedExactAnnotationTermAtType,
+    sourceTypeToElabTypeWithIdentitiesFromSupply,
+  )
+import MLF.Elab.Generalize
+  ( CompilerExactResultStage (..),
+    subtermGeneralizationConstructionBinderRenames,
+    subtermGeneralizationCompilerExactBinderRenames,
+    subtermGeneralizationCompilerExactBoundary,
+  )
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -97,21 +148,38 @@ import MLF.Elab.PipelineError
   )
 import MLF.Elab.Run.Generalize.Prepare
   ( PreparedGeneralizationArtifact,
+    PreparedRootConstructionScope,
+    PreparedRootClosure (..),
     PreparedRootGeneralization (..),
+    preparedRootClosureScheme,
+    preparedRootConstructionScopeAliases,
+    preparedRootConstructionScopeBinders,
+    preparedRootConstructionScopeLocalGammaClosures,
+    applyPreparedCompilerExactRootBinderIdentities,
+    applyPreparedRootBinderIdentities,
+    applyPreparedRootSourceTypeBinderIdentities,
     canonicalizePreparedAnn,
     computePreparedResultTypeWithRootGeneralization,
+    completePreparedCompilerExactSubtermResults,
     generalizePreparedRootDetailed,
+    generalizePreparedRootDetailedWithConstructionResult,
+    prepareOrdinaryRootConstructionScope,
     prepareGeneralizationArtifact,
     prepareGeneralizationArtifactForRoots,
+    withPreparedResolvedTermSchemes,
     preparedAnnotated,
     preparedElaborationConfig,
     preparedElaborationEnvWithInitialEnv,
+    preparedIdentityGenerator,
+    preparedCompilerExactExpectedType,
+    applyPreparedTermSourceBinderAliases,
     preparedReadContextReady,
     preparedResultTypeViewReady,
     stripPreparedWitnesslessAuthoritativeAnn,
   )
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
+    constructTermWithSchemeSubstRefs,
     preserveRetainedChildAuthoritativeResult,
     substInTermRefs,
   )
@@ -125,6 +193,7 @@ import MLF.Frontend.ConstraintGen
     ConstraintResult (..),
     ExternalBinding (..),
     ExternalBindingIdentity,
+    externalBindingIdentityFromDetails,
     externalBindingRuntimeName,
     externalBindingDetails,
     ExternalBindingMode (..),
@@ -132,15 +201,17 @@ import MLF.Frontend.ConstraintGen
     ExternalEnv,
     ModuleConstraintRoot (..),
     ModuleConstraintResult (..),
-    generateConstraintsWithExternalBindingsFromSupply,
-    generateModuleConstraintsKeyedWithExternalBindingsFromSupply,
+    generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply,
+    generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply,
+    generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply,
+    generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdentityMaps)
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
-import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
+import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, NormSurfaceExprOf, ResolvedNormSurfaceExpr, ResolvedSrcType, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
-import MLF.Reify.TypeOps (freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef)
 import MLF.Util.Timing
   ( TimingConfig,
     emitProgramOperationMetricIO,
@@ -150,15 +221,15 @@ import MLF.Util.Timing
   )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Types.Identity
-  ( EnvRef,
-    IdDetails (..),
+  ( IdDetails (..),
     IdentityGenerator,
+    advanceIdentityGeneratorPastMany,
     freshEnvRef,
     idDetailsAliasNamesWith,
     idDetailsGeneratedIdentities,
     idDetailsSameIdentity,
     identityGeneratorAfter,
-    localRefMatchesNodeId,
+    typeBinderIdentityAliasMap,
     typeBinderIdentityFromStructural,
     symbolGeneratedIdentities,
     StructuralTypeBinderRole (..),
@@ -169,25 +240,102 @@ data PipelineElabDetailedResult = PipelineElabDetailedResult
   { pedTerm :: XmlfTerm,
     pedType :: ElabType,
     pedRootAnn :: AnnExpr,
-    pedTypeCheckEnv :: TypeCheck.Env
+    pedTypeCheckEnv :: TypeCheck.Env,
+    pedIdentityGenerator :: IdentityGenerator
   }
 
+data PreparedExternalBinding = PreparedExternalBinding
+  { preparedBindingSource :: ExternalBinding,
+    preparedBindingSchemeInfo :: SchemeInfo
+  }
+  deriving (Eq)
+
 data PreparedExternalBindings = PreparedExternalBindings
-  { pebBindings :: ExternalBindings,
-    pebSchemeInfos :: Map.Map VarName SchemeInfo,
-    pebElaborationBindings :: Map.Map VarName (SchemeInfo, ResolvedVar),
-    pebTypeCheckEnv :: TypeCheck.Env,
-    pebSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
-    pebSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
+  { pebBindingsByAlias :: Map.Map VarName PreparedExternalBinding,
+    -- Keep the complete candidate set for type heads for the same reason as
+    -- source binders below.  Once an ambiguous spelling has been collapsed out
+    -- of a plain map, a later extension can otherwise make an unrelated third
+    -- identity appear authoritative.
+    pebSourceTypeHeadIdentityCandidates :: SymbolIdentityCandidates,
+    -- Keep every binder identity proposed for an alias.  A plain
+    -- @Map String TypeBinderIdentity@ is a lossy representation here: merging
+    -- two prepared environments first removes an ambiguous alias, after which
+    -- extending the result can accidentally make a third identity look
+    -- authoritative.  The resolved map consumed by constraint generation is
+    -- therefore always derived from this candidate set.
+    pebSourceTypeBinderIdentityCandidates :: TypeBinderIdentityCandidates,
     pebReservedIdentities :: [UniqueIdentity]
   }
 
+type TypeBinderIdentityCandidates = Map.Map String (Set.Set TypeBinderIdentity)
+
+type SymbolIdentityCandidates = Map.Map String (Set.Set SymbolIdentity)
+
+symbolIdentityCandidatesFromMaps :: [Map.Map String SymbolIdentity] -> SymbolIdentityCandidates
+symbolIdentityCandidatesFromMaps maps =
+  Map.fromListWith
+    Set.union
+    [ (name, Set.singleton identity)
+    | identities <- maps,
+      (name, identity) <- Map.toList identities
+    ]
+
+mergeSymbolIdentityCandidates :: [SymbolIdentityCandidates] -> SymbolIdentityCandidates
+mergeSymbolIdentityCandidates =
+  Map.unionsWith Set.union
+
+resolvedSymbolIdentityCandidates :: SymbolIdentityCandidates -> Map.Map String SymbolIdentity
+resolvedSymbolIdentityCandidates =
+  Map.mapMaybe uniqueIdentity
+  where
+    uniqueIdentity identities =
+      case Set.toList identities of
+        [identity] -> Just identity
+        _ -> Nothing
+
+typeBinderIdentityCandidatesFromMaps :: [Map.Map String TypeBinderIdentity] -> TypeBinderIdentityCandidates
+typeBinderIdentityCandidatesFromMaps maps =
+  Map.fromListWith
+    Set.union
+    [ (name, Set.singleton identity)
+    | identities <- maps,
+      (name, identity) <- Map.toList identities
+    ]
+
+mergeTypeBinderIdentityCandidates :: [TypeBinderIdentityCandidates] -> TypeBinderIdentityCandidates
+mergeTypeBinderIdentityCandidates =
+  Map.unionsWith Set.union
+
+resolvedTypeBinderIdentityCandidates :: TypeBinderIdentityCandidates -> Map.Map String TypeBinderIdentity
+resolvedTypeBinderIdentityCandidates =
+  Map.mapMaybe uniqueIdentity
+  where
+    uniqueIdentity identities =
+      case Set.toList identities of
+        [identity] -> Just identity
+        _ -> Nothing
+
+preparedSourceTypeBinderIdentities :: PreparedExternalBindings -> Map.Map String TypeBinderIdentity
+preparedSourceTypeBinderIdentities =
+  resolvedTypeBinderIdentityCandidates . pebSourceTypeBinderIdentityCandidates
+
+preparedSourceTypeHeadIdentities :: PreparedExternalBindings -> Map.Map String SymbolIdentity
+preparedSourceTypeHeadIdentities =
+  resolvedSymbolIdentityCandidates . pebSourceTypeHeadIdentityCandidates
+
 preparedExternalTypeCheckEnv :: PreparedExternalBindings -> TypeCheck.Env
-preparedExternalTypeCheckEnv = pebTypeCheckEnv
+preparedExternalTypeCheckEnv =
+  typeCheckEnvFromElaborationBindings . preparedExternalElaborationBindings
 
 preparedExternalIdentityGenerator :: [PreparedExternalBindings] -> IdentityGenerator
 preparedExternalIdentityGenerator prepared =
   identityGeneratorAfter (concatMap preparedExternalGeneratedIdentities prepared)
+
+preparedExternalIdentityGeneratorFrom :: IdentityGenerator -> [PreparedExternalBindings] -> IdentityGenerator
+preparedExternalIdentityGeneratorFrom generator prepared =
+  advanceIdentityGeneratorPastMany
+    (concatMap preparedExternalGeneratedIdentities prepared)
+    generator
 
 preparedExternalGeneratedIdentities :: PreparedExternalBindings -> [UniqueIdentity]
 preparedExternalGeneratedIdentities prepared =
@@ -195,24 +343,62 @@ preparedExternalGeneratedIdentities prepared =
     ++ concat
       [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
           ++ generatedIdentitiesInType (resolvedVarType resolved)
-      | (_, resolved) <- Map.elems (pebElaborationBindings prepared)
+      | (_, resolved) <- Map.elems (preparedExternalElaborationBindings prepared)
       ]
-    ++ concatMap symbolGeneratedIdentities (Map.elems (pebSourceTypeHeadIdentities prepared))
-    ++ concatMap typeBinderGeneratedIdentities (Map.elems (pebSourceTypeBinderIdentities prepared))
+    ++ concatMap
+      symbolGeneratedIdentities
+      (concatMap Set.toList (Map.elems (pebSourceTypeHeadIdentityCandidates prepared)))
+    ++ concatMap
+      typeBinderGeneratedIdentities
+      (concatMap Set.toList (Map.elems (pebSourceTypeBinderIdentityCandidates prepared)))
 
 preparedExternalElaborationEnv :: PreparedExternalBindings -> Env
 preparedExternalElaborationEnv =
-  mkEnvWithResolvedBindings . pebElaborationBindings
+  mkEnvWithResolvedBindings . preparedExternalElaborationBindings
 
-preparedElaborationEnvWithExternalIdentities ::
+preparedExternalElaborationBindings :: PreparedExternalBindings -> Map.Map VarName (SchemeInfo, ResolvedVar)
+preparedExternalElaborationBindings =
+  Map.map preparedExternalElaborationBinding . pebBindingsByAlias
+
+-- | Exact source schemes keyed by the resolved identity carried by each
+-- occurrence. Alias spellings may duplicate an entry, but they cannot select
+-- a different declaration once the identity key is fixed.
+preparedExternalSchemesByIdentity ::
+  PreparedExternalBindings ->
+  Map.Map ResolvedTermIdentityKey SchemeInfo
+preparedExternalSchemesByIdentity prepared =
+  Map.fromList
+    [ ( idDetailsIdentityKey
+          ( externalBindingDetails
+              (externalBindingIdentity (preparedBindingSource binding))
+          ),
+        preparedBindingSchemeInfo binding
+      )
+    | binding <- Map.elems (pebBindingsByAlias prepared)
+    ]
+
+preparedExternalElaborationBinding :: PreparedExternalBinding -> (SchemeInfo, ResolvedVar)
+preparedExternalElaborationBinding prepared =
+  (schemeInfo, resolvedExternalBindingVar (externalBindingIdentity binding) schemeInfo)
+  where
+    binding = preparedBindingSource prepared
+    schemeInfo = preparedBindingSchemeInfo prepared
+
+preparedExternalSourceBindings :: PreparedExternalBindings -> ExternalBindings
+preparedExternalSourceBindings =
+  Map.map preparedBindingSource . pebBindingsByAlias
+
+preparedElaborationEnvWithSourceBinderAliases ::
+  Map.Map String TypeBinderIdentity ->
   IntMap.IntMap NormSrcType ->
   PreparedExternalBindings ->
   PreparedGeneralizationArtifact ->
   ElabEnv 'Presolved
-preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared artifact =
+preparedElaborationEnvWithSourceBinderAliases sourceBinderAliases annSourceTypes extPrepared artifact =
   (preparedElaborationEnvWithInitialEnv annSourceTypes (preparedExternalElaborationEnv extPrepared) artifact)
     { eeSourceTypeHeadIdentities = headIdentities,
-      eeSourceTypeBinderIdentities = binderIdentities
+      eeSourceTypeBinderIdentities =
+        sourceBinderAliases `Map.union` binderIdentities
     }
   where
     (headIdentities, binderIdentities) =
@@ -222,23 +408,106 @@ preparedSourceTypeIdentityMaps ::
   PreparedExternalBindings ->
   (Map.Map String SymbolIdentity, Map.Map String TypeBinderIdentity)
 preparedSourceTypeIdentityMaps prepared =
-  ( pebSourceTypeHeadIdentities prepared,
-    pebSourceTypeBinderIdentities prepared
+  ( preparedSourceTypeHeadIdentities prepared,
+    preparedSourceTypeBinderIdentities prepared
   )
 
-externalBindingsSourceTypeIdentityMaps ::
+-- | Retain the complete identity domain at boundaries that must reject an
+-- ambiguous source spelling instead of selecting whichever singleton remains
+-- after projection to the ordinary identity map.
+preparedSourceTypeBinderIdentityCandidates ::
+  PreparedExternalBindings ->
+  Map.Map String (Set.Set TypeBinderIdentity)
+preparedSourceTypeBinderIdentityCandidates =
+  pebSourceTypeBinderIdentityCandidates
+
+preparedAnnotationExpectedTypesWithSourceBinderAliases
+  :: IdentityGenerator
+  -> Map.Map String TypeBinderIdentity
+  -> PreparedExternalBindings
+  -> IntMap.IntMap NormSrcType
+  -> Either ElabError (IntMap.IntMap ElabType, IdentityGenerator)
+preparedAnnotationExpectedTypesWithSourceBinderAliases identityGenerator sourceBinderAliases prepared sourceTypes =
+  -- 'IntMap.toAscList' makes lexical identity allocation independent of map
+  -- construction history while the accumulator makes distinct annotation
+  -- occurrences consume distinct identities.
+  foldM convertOne (IntMap.empty, identityGenerator) (IntMap.toAscList sourceTypes)
+  where
+    (headIdentities, binderIdentities) =
+      preparedSourceTypeIdentityMaps prepared
+    allBinderIdentities =
+      sourceBinderAliases `Map.union` binderIdentities
+
+    convertOne (expectedTypes, generator) (nodeKey, sourceType) = do
+      (expectedType, generator') <-
+        sourceTypeToElabTypeWithIdentitiesFromSupply
+          generator
+          headIdentities
+          allBinderIdentities
+          sourceType
+      pure (IntMap.insert nodeKey expectedType expectedTypes, generator')
+
+preparedAnnotationExpectedTypesForRoots
+  :: IdentityGenerator
+  -> [(key, PreparedExternalBindings, ModuleConstraintRoot)]
+  -> IntMap.IntMap NormSrcType
+  -> Either ElabError (IntMap.IntMap ElabType, IdentityGenerator)
+preparedAnnotationExpectedTypesForRoots identityGenerator roots sourceTypes =
+  -- Module roots already arrive in the stable order chosen by the batch plan.
+  -- Thread one supply across them so root-local and global finalization assign
+  -- the same lexical identities.
+  foldM convertRoot (IntMap.empty, identityGenerator) roots
+  where
+    convertRoot (expectedTypes, generator) (_, prepared, root) = do
+      (rootExpectedTypes, generator') <-
+        preparedAnnotationExpectedTypesWithSourceBinderAliases
+          generator
+          (mcrSourceTypeBinderAliases root)
+          prepared
+          (IntMap.restrictKeys sourceTypes (annotationSourceTypeNodeKeys (mcrAnnotated root)))
+      pure (IntMap.union expectedTypes rootExpectedTypes, generator')
+
+-- Source annotation types are recorded only at coercion codomains and exact
+-- lambda parameters.  Collect those raw graph keys per definition so a
+-- multi-root batch converts each type with that definition's resolved binder
+-- identities; merging spelling maps first would conflate unrelated @a@s.
+annotationSourceTypeNodeKeys :: AnnExpr -> IntSet.IntSet
+annotationSourceTypeNodeKeys ann =
+  case ann of
+    AResolvedVar {} -> IntSet.empty
+    ALit {} -> IntSet.empty
+    ALam _ _ paramNode _ body _ _ ->
+      IntSet.insert (getNodeId paramNode) (annotationSourceTypeNodeKeys body)
+    AApp fun arg _ _ _ ->
+      annotationSourceTypeNodeKeys fun
+        `IntSet.union` annotationSourceTypeNodeKeys arg
+    ALet _ _ _ _ _ _ rhs body _ ->
+      annotationSourceTypeNodeKeys rhs
+        `IntSet.union` annotationSourceTypeNodeKeys body
+    AExactAnn inner _ sourceTypeNode _ ->
+      IntSet.insert (getNodeId sourceTypeNode) (annotationSourceTypeNodeKeys inner)
+    AAnn inner sourceTypeNode _ ->
+      IntSet.insert (getNodeId sourceTypeNode) (annotationSourceTypeNodeKeys inner)
+    ALetScope inner _ _ -> annotationSourceTypeNodeKeys inner
+    AUnfold inner _ _ -> annotationSourceTypeNodeKeys inner
+
+externalBindingsSourceTypeIdentityCandidates ::
   ExternalBindings ->
-  (Map.Map String SymbolIdentity, Map.Map String TypeBinderIdentity)
-externalBindingsSourceTypeIdentityMaps extBindings =
-  (headIdentities, binderIdentities)
+  (SymbolIdentityCandidates, TypeBinderIdentityCandidates)
+externalBindingsSourceTypeIdentityCandidates extBindings =
+  (headIdentityCandidates, binderIdentityCandidates)
   where
     bindings = Map.elems extBindings
 
-    headIdentities =
-      mergeSymbolIdentityMaps (map externalBindingTypeHeadIdentities bindings)
+    headIdentityCandidates =
+      symbolIdentityCandidatesFromMaps (map externalBindingTypeHeadIdentities bindings)
 
-    binderIdentities =
-      mergeTypeBinderIdentityMaps (structuralTypeBinderIdentitiesFromHeads headIdentities : map externalBindingTypeBinderIdentities bindings)
+    headIdentities =
+      resolvedSymbolIdentityCandidates headIdentityCandidates
+
+    binderIdentityCandidates =
+      typeBinderIdentityCandidatesFromMaps
+        (structuralTypeBinderIdentitiesFromHeads headIdentities : map externalBindingTypeBinderIdentities bindings)
 
 structuralTypeBinderIdentitiesFromHeads :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity
 structuralTypeBinderIdentitiesFromHeads headIdentities =
@@ -253,6 +522,7 @@ structuralTypeBinderIdentitiesFromHeads headIdentities =
 data ModuleBatchPlan key p = ModuleBatchPlan
   { mbpRoots :: [(key, PreparedExternalBindings, ModuleConstraintRoot)],
     mbpPartitions :: [(key, RootPartition p)],
+    mbpIdentityGenerator :: IdentityGenerator,
     mbpSharedEdgeCount :: !Int,
     mbpUnknownEdgeCount :: !Int
   }
@@ -262,6 +532,9 @@ data RootPartition p = RootPartition
     rpConstraint :: Constraint p,
     rpAnnotated :: !AnnExpr,
     rpAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
+    rpExactProducerTypes :: !(IntMap.IntMap ResolvedSrcType),
+    rpSourceTypeBinderIdentities :: !(IntMap.IntMap TypeBinderIdentity),
+    rpSourceTypeBinderAliases :: !(Map.Map String TypeBinderIdentity),
     rpPreparedExternalBindings :: !PreparedExternalBindings,
     rpOwnedEdgeCount :: !Int,
     rpExternalSchemeUseCount :: !Int
@@ -283,7 +556,244 @@ data RootFinalizationContext p = RootFinalizationContext
     rfcPreparedExternalBindings :: !PreparedExternalBindings
   }
 
+data RootPresolutionContext = RootPresolutionContext
+  { rpcFinalizationContext :: !(RootFinalizationContext 'Raw),
+    rpcAcyclicConstraint :: !(Constraint 'Acyclic),
+    rpcPresolution :: !PresolutionResult
+  }
+
+data PreparedRootFinalizationContext = PreparedRootFinalizationContext
+  { prfcFinalizationContext :: !(RootFinalizationContext 'Raw),
+    prfcPreparedGeneralization :: !PreparedGeneralizationArtifact
+  }
+
+data DeferredRootExactAnnotation = DeferredRootExactAnnotation
+  { dreaEdgeId :: !EdgeId
+  }
+
+data RootElaborationPlan
+  = OrdinaryRootElaborationPlan
+      { repElaborationCanonicalAnn :: !AnnExpr,
+        repElaborationPrecanonicalAnn :: !AnnExpr
+      }
+  | ExactRootElaborationPlan
+      { repElaborationCanonicalAnn :: !AnnExpr,
+        repElaborationPrecanonicalAnn :: !AnnExpr,
+        repResultCanonicalAnn :: !AnnExpr,
+        repResultPrecanonicalAnn :: !AnnExpr,
+        repExactAnnotation :: !DeferredRootExactAnnotation
+      }
+
+-- | Construction-time root authority.  Ordinary roots carry only the Gamma
+-- needed for strict Hyp checking; they cannot expose a reusable final result
+-- generalization before elaboration has selected the authoritative result.
+-- Compiler-exact roots are the one case whose result authority is fixed in
+-- advance, so they retain a complete provisional generalization for entering
+-- the exact construction Gamma.  Local-binder placement is still finalized
+-- from owner certificates after elaboration.
+data PreparedRootConstruction
+  = PreparedOrdinaryRootConstruction !PreparedRootConstructionScope
+  | PreparedExactRootConstruction
+      !DeferredRootExactAnnotation
+      !PreparedRootGeneralization
+
+data PreparedRootExactness
+  = PreparedOrdinaryRoot
+  | PreparedExactRoot !DeferredRootExactAnnotation
+
+rootConstructionScope :: PreparedRootConstruction -> PreparedRootConstructionScope
+rootConstructionScope construction =
+  case construction of
+    PreparedOrdinaryRootConstruction scope -> scope
+    PreparedExactRootConstruction _ rootGeneralization ->
+      prgConstructionScope rootGeneralization
+
+preparedRootConstructionDiagnostic :: PreparedRootConstruction -> String
+preparedRootConstructionDiagnostic construction =
+  case construction of
+    PreparedOrdinaryRootConstruction{} -> "<ordinary root>"
+    PreparedExactRootConstruction _ preparedRoot ->
+      show
+        ( prgScopeRoot preparedRoot,
+          prgTarget preparedRoot,
+          prgScheme preparedRoot
+        )
+
+-- | Everything a root can compute after packet preparation without consuming
+-- the generated-identity supply.  In the root-local module path these values
+-- are produced concurrently; closing and collision freshening are deliberately
+-- kept out of this record because both can allocate type-binder identities.
+data PreparedPipelineRootStage = PreparedPipelineRootStage
+  { pprsPreparedGeneralization :: !PreparedGeneralizationArtifact,
+    pprsInitialTypeCheckEnv :: !TypeCheck.Env,
+    pprsRootGeneralization :: !PreparedRootGeneralization,
+    pprsRootScheme :: !ElabScheme,
+    pprsRootSubstitution :: !(IntMap.IntMap TypeBinderRef),
+    pprsElaboratedTerm :: !XmlfTerm,
+    pprsSubstitutedTerm :: !XmlfTerm,
+    pprsCompilerExactResultBoundCertificates :: ![CompilerExactResultBoundCertificate],
+    pprsAuthoritativeCanonicalAnn :: !AnnExpr,
+    pprsAuthoritativePrecanonicalAnn :: !AnnExpr,
+    pprsRootExactness :: !PreparedRootExactness
+  }
+
+-- | A root after every identity-allocating finalization step has consumed the
+-- authoritative supply.  Canonicalization, checking, and diagnostics can now
+-- run concurrently without changing identity assignment.
+data FreshenedPipelineRootStage = FreshenedPipelineRootStage
+  { fprsPreparedRoot :: !PreparedPipelineRootStage,
+    fprsClosedTerm :: !XmlfTerm,
+    fprsAuthoritativeResultType :: !ElabType,
+    fprsIdentityGenerator :: !IdentityGenerator
+  }
+
 type PipelineStage a = ExceptT PipelineError IO a
+
+rootElaborationPlan :: AnnExpr -> AnnExpr -> Either ElabError RootElaborationPlan
+rootElaborationPlan annCanon annPre =
+  case annCanon of
+    AExactAnn innerCanon _ _ edgeId ->
+      case annPre of
+        AExactAnn innerPre _ _ _ ->
+          Right
+            ExactRootElaborationPlan
+              { repElaborationCanonicalAnn = innerCanon,
+                repElaborationPrecanonicalAnn = innerPre,
+                repResultCanonicalAnn = annCanon,
+                repResultPrecanonicalAnn = annPre,
+                repExactAnnotation =
+                  DeferredRootExactAnnotation
+                    { dreaEdgeId = edgeId }
+              }
+        _ ->
+          Left
+            ( ValidationFailed
+                [ "canonical root exact annotation lost its source counterpart",
+                  "  canonical: " ++ show annCanon,
+                  "  source: " ++ show annPre
+                ]
+            )
+    _ ->
+      Right
+        OrdinaryRootElaborationPlan
+          { repElaborationCanonicalAnn = annCanon,
+            repElaborationPrecanonicalAnn = annPre
+          }
+
+-- | Prepare only the authority available before term construction.  Ordinary
+-- roots receive a construction-only Γ.  A compiler-owned exact root fixes its
+-- endpoint authority in advance and therefore carries a complete provisional
+-- plan, but pending local-Gamma placement is finalized from post-elaboration
+-- owner certificates in both cases.  This implements Figure 15.3.5's
+-- ordering: local Hyp computations are checked under their enclosing Γ before
+-- Λ(Γ) is wrapped around the completed term.
+prepareRootConstruction
+  :: PreparedGeneralizationArtifact
+  -> RootElaborationPlan
+  -> Either ElabError PreparedRootConstruction
+prepareRootConstruction prepared rootPlan =
+  case rootPlan of
+    OrdinaryRootElaborationPlan{} ->
+      PreparedOrdinaryRootConstruction
+        <$> prepareOrdinaryRootConstructionScope
+          prepared
+          (repElaborationCanonicalAnn rootPlan)
+          (repElaborationPrecanonicalAnn rootPlan)
+    ExactRootElaborationPlan
+      { repResultCanonicalAnn = resultCanonicalAnn,
+        repResultPrecanonicalAnn = resultPrecanonicalAnn,
+        repExactAnnotation = exactAnnotation
+      } -> do
+      rootGeneralization0 <-
+        generalizePreparedRootDetailed
+          prepared
+          resultCanonicalAnn
+          resultPrecanonicalAnn
+      sourceProjectedRoot <-
+        applyPreparedRootSourceTypeBinderIdentities
+          rootGeneralization0
+      rootGeneralization <-
+        applyPreparedCompilerExactRootBinderIdentities
+          prepared
+          (dreaEdgeId exactAnnotation)
+          sourceProjectedRoot
+          (prgSubst sourceProjectedRoot)
+      pure
+        ( PreparedExactRootConstruction
+            exactAnnotation
+            rootGeneralization
+        )
+
+-- | Install the construction inputs that a nested 'AExactAnn' would install
+-- itself.  Root planning deliberately elaborates the exact annotation's
+-- child, so the root path must enter the packet's identity quotient and seed
+-- lambda domains from the identity-bearing exact contract before recursive
+-- construction begins.  Source-annotation routes remain occurrence-owned;
+-- replacing them with root Gamma aliases would collapse distinct authorities
+-- that merely share a solved graph representative.
+elabEnvWithRootConstructionScope
+  :: PreparedRootConstruction
+  -> AnnExpr
+  -> ElabEnv p
+  -> Either ElabError (ElabEnv p)
+elabEnvWithRootConstructionScope rootConstruction constructionAnn elabEnv = do
+  alignedInitialEnv <-
+    case rootConstruction of
+      PreparedOrdinaryRootConstruction{} ->
+        pure (eeInitialTermEnv elabEnv)
+      PreparedExactRootConstruction exactAnnotation _ -> do
+        packets <- eeSubtermGeneralizations elabEnv
+        envInPacketConstruction <-
+          alignEnvToConstructionBinderRenames
+            [ rename
+            | packet <- Map.elems packets
+            , subtermGeneralizationCompilerExactBoundary packet
+                == Just (dreaEdgeId exactAnnotation)
+            , rename <- subtermGeneralizationConstructionBinderRenames packet
+            ]
+            (eeInitialTermEnv elabEnv)
+        alignEnvToCompilerExactBinderRenames
+          [ rename
+          | packet <- Map.elems packets
+          , subtermGeneralizationCompilerExactBoundary packet
+              == Just (dreaEdgeId exactAnnotation)
+          , rename <- subtermGeneralizationCompilerExactBinderRenames packet
+          ]
+          envInPacketConstruction
+  let scopedInitialEnv =
+        withEnvLocalGammaClosures
+          (preparedRootConstructionScopeLocalGammaClosures constructionScope)
+          ( extendEnvTypeScopeWithAliases
+              constructionAliases
+              (preparedRootConstructionScopeBinders constructionScope)
+              alignedInitialEnv
+          )
+  constructionInitialEnv <-
+    case rootConstruction of
+      PreparedOrdinaryRootConstruction{} -> pure scopedInitialEnv
+      PreparedExactRootConstruction exactAnnotation _ -> do
+        exactTypes <- eeExactProducerTypes elabEnv
+        expectedType <-
+          case IntMap.lookup (getEdgeId (dreaEdgeId exactAnnotation)) exactTypes of
+            Just ty -> pure ty
+            Nothing ->
+              Left
+                ( ValidationFailed
+                    [ "exact root construction has no prepared expected type"
+                    , "  edge: " ++ show (dreaEdgeId exactAnnotation)
+                    ]
+                )
+        pure
+          ( withEnvConstructedLambdaParamTypes
+              expectedType
+              constructionAnn
+              scopedInitialEnv
+          )
+  pure elabEnv {eeInitialTermEnv = constructionInitialEnv}
+  where
+    constructionScope = rootConstructionScope rootConstruction
+    constructionAliases =
+      preparedRootConstructionScopeAliases constructionScope
 
 timePipelineValueSuffix ::
   TimingConfig ->
@@ -333,7 +843,7 @@ fromPipelineEither :: Either PipelineError a -> PipelineStage a
 fromPipelineEither result =
   ExceptT (pure result)
 
-validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
+validateDirectRecursiveAnnotations :: NormSurfaceExprOf references -> Either ConstraintError ()
 validateDirectRecursiveAnnotations = goExpr
   where
     goExpr expr =
@@ -345,7 +855,10 @@ validateDirectRecursiveAnnotations = goExpr
         Surface.ELetNode _ rhs body -> goExpr rhs >> goExpr body
         Surface.ELamAnnNode _ annTy body -> validateAnn annTy >> goExpr body
         Surface.EAnn inner annTy -> goExpr inner >> validateAnn annTy
+        Surface.EExactAnn inner annTy _ -> goExpr inner >> validateAnn annTy
+        Surface.EExactLamNode _ annTy body -> validateAnn annTy >> goExpr body
         Surface.ECoerceConst _ -> Right ()
+        Surface.EExactCoerceConst _ _ -> Right ()
 
     validateAnn annTy =
       case directNonContractiveMu annTy of
@@ -444,6 +957,22 @@ runPipelineElabDetailedWithPreparedExternalBindingsWithTiming :: TimingConfig ->
 runPipelineElabDetailedWithPreparedExternalBindingsWithTiming timing label =
   runPipelineElabWithPreparedWithTiming timing label FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
 
+runPipelineElabDetailedResolvedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedResolvedWithPreparedExternalBindings =
+  runPipelineElabWithResolvedPrepared FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsFromSupply =
+  runPipelineElabWithResolvedPreparedFromSupply FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTiming timing label =
+  runPipelineElabWithResolvedPreparedWithTiming timing label FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTimingFromSupply :: TimingConfig -> String -> IdentityGenerator -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedResolvedWithPreparedExternalBindingsWithTimingFromSupply timing label =
+  runPipelineElabWithResolvedPreparedWithTimingFromSupply timing label FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
+
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings =
   runPipelineElabWithPrepared FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
@@ -452,87 +981,115 @@ runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming :: Timing
 runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming timing label =
   runPipelineElabWithPreparedWithTiming timing label FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
 
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindings =
+  runPipelineElabWithResolvedPrepared FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsFromSupply =
+  runPipelineElabWithResolvedPreparedFromSupply FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTiming timing label =
+  runPipelineElabWithResolvedPreparedWithTiming timing label FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTimingFromSupply :: TimingConfig -> String -> IdentityGenerator -> PolySyms -> PreparedExternalBindings -> ResolvedNormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedResolvedUncheckedWithPreparedExternalBindingsWithTimingFromSupply timing label =
+  runPipelineElabWithResolvedPreparedWithTimingFromSupply timing label FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
+
 schemeExternalBindings :: ExternalEnv -> ExternalBindings
-schemeExternalBindings =
-  Map.map
-    ( \srcTy ->
-        ExternalBinding
-          { externalBindingType = srcTy,
-            externalBindingMode = ExternalBindingScheme,
-            externalBindingIdentity = Nothing,
-            externalBindingTypeHeadIdentities = Map.empty,
-            externalBindingTypeBinderIdentities = Map.empty
-          }
-    )
+schemeExternalBindings bindings =
+  snd (Map.mapAccumWithKey resolveOne (identityGeneratorAfter []) bindings)
+  where
+    resolveOne generator name srcTy =
+      let (ref, generator') = freshEnvRef name generator
+       in ( generator',
+            ExternalBinding
+              { externalBindingType = srcTy,
+                externalBindingMode = ExternalBindingScheme,
+                externalBindingIdentity = externalBindingIdentityFromDetails (EnvId ref),
+                externalBindingTypeHeadIdentities = Map.empty,
+                externalBindingTypeBinderIdentities = Map.empty
+              }
+          )
 
 prepareExternalBindings :: ExternalBindings -> Either ConstraintError PreparedExternalBindings
-prepareExternalBindings extBindings0 = do
-  let extBindings = externalBindingsWithIdentityAliases extBindings0
-      initialGenerator = identityGeneratorAfter (externalBindingsGeneratedIdentities extBindings0)
-  (schemeGenerator, schemeInfos0) <- externalBindingSchemeInfos initialGenerator extBindings0
-  let schemeInfos = externalBindingSchemeInfoAliases extBindings0 extBindings schemeInfos0
-  let (elaborationBindings, typeCheckEnv0) = externalBindingPreparedEnvs schemeGenerator extBindings schemeInfos
-      (headIdentities, binderIdentities) = externalBindingsSourceTypeIdentityMaps extBindings
+prepareExternalBindings =
+  prepareExternalBindingsWithTypeIdentities Map.empty Map.empty
+
+prepareExternalBindingsWithTypeIdentities ::
+  Map.Map String SymbolIdentity ->
+  Map.Map String TypeBinderIdentity ->
+  ExternalBindings ->
+  Either ConstraintError PreparedExternalBindings
+prepareExternalBindingsWithTypeIdentities sharedHeadIdentities sharedBinderIdentities extBindings0 = do
+  let initialGenerator =
+        identityGeneratorAfter
+          ( externalBindingsGeneratedIdentities extBindings0
+              ++ concatMap symbolGeneratedIdentities (Map.elems sharedHeadIdentities)
+              ++ concatMap typeBinderGeneratedIdentities (Map.elems sharedBinderIdentities)
+          )
+  (_, bindings0) <-
+    prepareExternalBindingEntries
+      sharedHeadIdentities
+      sharedBinderIdentities
+      initialGenerator
+      extBindings0
+  let bindings = preparedBindingsWithIdentityAliases bindings0
+      extBindings = Map.map preparedBindingSource bindings
+  let (bindingHeadIdentityCandidates, bindingBinderIdentityCandidates) =
+        externalBindingsSourceTypeIdentityCandidates extBindings
+      headIdentityCandidates =
+        mergeSymbolIdentityCandidates
+          [ bindingHeadIdentityCandidates,
+            symbolIdentityCandidatesFromMaps [sharedHeadIdentities]
+          ]
+      headIdentities =
+        resolvedSymbolIdentityCandidates headIdentityCandidates
+      binderIdentityCandidates =
+        mergeTypeBinderIdentityCandidates
+          [ bindingBinderIdentityCandidates,
+            typeBinderIdentityCandidatesFromMaps
+              ( sharedBinderIdentities
+                  : structuralTypeBinderIdentitiesFromHeads headIdentities
+                  : map externalBindingTypeBinderIdentities (Map.elems extBindings0)
+              )
+          ]
   pure
     PreparedExternalBindings
-      { pebBindings = extBindings,
-        pebSchemeInfos = schemeInfos,
-        pebElaborationBindings = elaborationBindings,
-        pebTypeCheckEnv = typeCheckEnv0,
-        pebSourceTypeHeadIdentities = headIdentities,
-        pebSourceTypeBinderIdentities = binderIdentities,
+      { pebBindingsByAlias = bindings,
+        pebSourceTypeHeadIdentityCandidates = headIdentityCandidates,
+        pebSourceTypeBinderIdentityCandidates = binderIdentityCandidates,
         pebReservedIdentities = externalBindingsGeneratedIdentities extBindings0
       }
 
-externalBindingsWithIdentityAliases :: ExternalBindings -> ExternalBindings
-externalBindingsWithIdentityAliases extBindings =
-  extBindings `Map.union` Map.filterWithKey (\name _ -> Map.notMember name extBindings) uniqueAliases
+preparedBindingsWithIdentityAliases :: Map.Map VarName PreparedExternalBinding -> Map.Map VarName PreparedExternalBinding
+preparedBindingsWithIdentityAliases bindings =
+  bindings `Map.union` Map.filterWithKey (\name _ -> Map.notMember name bindings) uniqueAliases
   where
     uniqueAliases =
       Map.fromList
-        [ (alias, binding)
-        | (alias, binding : rest) <- Map.toList aliasesByName,
-          all (== binding) rest
+        [ (alias, prepared)
+        | (alias, prepared : rest) <- Map.toList aliasesByName,
+          all (== prepared) rest
         ]
 
     aliasesByName =
       Map.fromListWith
         (++)
-        [ (alias, [binding])
-        | (name, binding) <- Map.toList extBindings,
-          alias <- externalBindingAliases name binding
-        ]
-
-externalBindingSchemeInfoAliases :: ExternalBindings -> ExternalBindings -> Map.Map VarName SchemeInfo -> Map.Map VarName SchemeInfo
-externalBindingSchemeInfoAliases originalBindings extBindings schemeInfos =
-  schemeInfos `Map.union` Map.filterWithKey (\name _ -> Map.notMember name schemeInfos) uniqueAliases
-  where
-    uniqueAliases =
-      Map.fromList
-        [ (alias, schemeInfo)
-        | (alias, (binding, schemeInfo) : rest) <- Map.toList aliasesByName,
-          all ((== binding) . fst) rest
-        ]
-
-    aliasesByName =
-      Map.fromListWith
-        (++)
-        [ (alias, [(binding, schemeInfo)])
-        | (name, binding) <- Map.toList originalBindings,
-          Just schemeInfo <- [Map.lookup name schemeInfos],
-          alias <- externalBindingAliases name binding,
-          Map.member alias extBindings
+        [ (alias, [prepared])
+        | (name, prepared) <- Map.toList bindings,
+          alias <- externalBindingAliases name (preparedBindingSource prepared)
         ]
 
 externalBindingAliases :: VarName -> ExternalBinding -> [VarName]
 externalBindingAliases name binding =
-  case externalBindingIdentity binding of
-    Just identity ->
-      Set.toList $
-        Set.fromList $
-          idDetailsAliasNamesWith name (externalBindingDetails identity)
-            ++ idDetailsAliasNamesWith (externalBindingRuntimeName identity) (externalBindingDetails identity)
-    Nothing -> [name]
+  Set.toList $
+    Set.fromList $
+      idDetailsAliasNamesWith name (externalBindingDetails identity)
+        ++ idDetailsAliasNamesWith (externalBindingRuntimeName identity) (externalBindingDetails identity)
+  where
+    identity = externalBindingIdentity binding
 
 extendPreparedExternalBindingTypeIdentities ::
   Map.Map String SymbolIdentity ->
@@ -540,19 +1097,72 @@ extendPreparedExternalBindingTypeIdentities ::
   PreparedExternalBindings ->
   PreparedExternalBindings
 extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities prepared =
-  let heads =
-        mergeSymbolIdentityMaps
-          [pebSourceTypeHeadIdentities prepared, headIdentities]
-      binders =
-        mergeTypeBinderIdentityMaps
-          [ pebSourceTypeBinderIdentities prepared,
-            binderIdentities,
-            structuralTypeBinderIdentitiesFromHeads heads
+  extendPreparedExternalBindingTypeIdentityCandidates
+    [headIdentities]
+    [binderIdentities]
+    prepared
+
+extendPreparedExternalBindingTypeIdentityCandidates ::
+  [Map.Map String SymbolIdentity] ->
+  [Map.Map String TypeBinderIdentity] ->
+  PreparedExternalBindings ->
+  PreparedExternalBindings
+extendPreparedExternalBindingTypeIdentityCandidates headIdentityMaps binderIdentityMaps prepared =
+  let headIdentityCandidates =
+        mergeSymbolIdentityCandidates
+          [ pebSourceTypeHeadIdentityCandidates prepared,
+            symbolIdentityCandidatesFromMaps headIdentityMaps
+          ]
+      heads =
+        resolvedSymbolIdentityCandidates headIdentityCandidates
+      binderIdentityCandidates =
+        mergeTypeBinderIdentityCandidates
+          [ pebSourceTypeBinderIdentityCandidates prepared,
+            typeBinderIdentityCandidatesFromMaps
+              (structuralTypeBinderIdentitiesFromHeads heads : binderIdentityMaps)
           ]
    in prepared
-        { pebSourceTypeHeadIdentities = heads,
-          pebSourceTypeBinderIdentities = binders
+        { pebSourceTypeHeadIdentityCandidates = headIdentityCandidates,
+          pebSourceTypeBinderIdentityCandidates = binderIdentityCandidates
         }
+
+-- | Install identities owned by the current definition root ahead of
+-- same-spelled candidates inherited from its external environment.  The
+-- external candidate sets remain intact for every other alias; only names
+-- whose semantic identity is carried by this root are authoritative here.
+-- This is deliberately distinct from
+-- 'extendPreparedExternalBindingTypeIdentityCandidates': module-wide
+-- preparation must retain cross-root ambiguity, while constraint generation
+-- for one root must not lose its own binder merely because another root also
+-- displays it as @a@.
+preferPreparedExternalBindingTypeIdentities ::
+  Map.Map String SymbolIdentity ->
+  Map.Map String TypeBinderIdentity ->
+  PreparedExternalBindings ->
+  PreparedExternalBindings
+preferPreparedExternalBindingTypeIdentities headIdentities binderIdentities prepared =
+  prepared
+    { pebSourceTypeHeadIdentityCandidates =
+        authoritativeHeadCandidates
+          `Map.union` pebSourceTypeHeadIdentityCandidates prepared,
+      pebSourceTypeBinderIdentityCandidates =
+        authoritativeBinderCandidates
+          `Map.union` inheritedBinderCandidates
+    }
+  where
+    authoritativeHeadCandidates =
+      symbolIdentityCandidatesFromMaps [headIdentities]
+    resolvedHeads =
+      resolvedSymbolIdentityCandidates
+        (authoritativeHeadCandidates `Map.union` pebSourceTypeHeadIdentityCandidates prepared)
+    authoritativeBinderCandidates =
+      typeBinderIdentityCandidatesFromMaps [binderIdentities]
+    inheritedBinderCandidates =
+      mergeTypeBinderIdentityCandidates
+        [ pebSourceTypeBinderIdentityCandidates prepared,
+          typeBinderIdentityCandidatesFromMaps
+            [structuralTypeBinderIdentitiesFromHeads resolvedHeads]
+        ]
 
 reservePreparedExternalBindingIdentities :: [UniqueIdentity] -> PreparedExternalBindings -> PreparedExternalBindings
 reservePreparedExternalBindingIdentities identities prepared =
@@ -560,86 +1170,65 @@ reservePreparedExternalBindingIdentities identities prepared =
 
 restrictPreparedExternalBindings :: Set.Set VarName -> PreparedExternalBindings -> PreparedExternalBindings
 restrictPreparedExternalBindings names prepared =
-  let schemeInfos = Map.restrictKeys (pebSchemeInfos prepared) names
-      elaborationBindings = Map.restrictKeys (pebElaborationBindings prepared) names
-   in PreparedExternalBindings
-        { pebBindings = Map.restrictKeys (pebBindings prepared) names,
-          pebSchemeInfos = schemeInfos,
-          pebElaborationBindings = elaborationBindings,
-          pebTypeCheckEnv = restrictTypeCheckEnv elaborationBindings (pebTypeCheckEnv prepared),
-          pebSourceTypeHeadIdentities = pebSourceTypeHeadIdentities prepared,
-          pebSourceTypeBinderIdentities = pebSourceTypeBinderIdentities prepared,
-          pebReservedIdentities = pebReservedIdentities prepared
-        }
+  PreparedExternalBindings
+    { pebBindingsByAlias = Map.restrictKeys (pebBindingsByAlias prepared) names,
+      pebSourceTypeHeadIdentityCandidates = pebSourceTypeHeadIdentityCandidates prepared,
+      pebSourceTypeBinderIdentityCandidates = pebSourceTypeBinderIdentityCandidates prepared,
+      pebReservedIdentities = pebReservedIdentities prepared
+    }
 
--- | Restrict resolved callers by semantic identity while retaining the
--- explicit name-keyed path used by metadata-light surface syntax.
+-- | Restrict resolved callers by semantic identity. The outer map remains
+-- name-indexed for storage, but selection never uses that spelling.
 restrictPreparedExternalBindingsByKeys :: Set.Set BindingKey -> PreparedExternalBindings -> PreparedExternalBindings
 restrictPreparedExternalBindingsByKeys bindingKeys prepared =
   restrictPreparedExternalBindings selectedNames prepared
   where
     selectedNames =
       Map.keysSet $
-        Map.filterWithKey bindingSelected (pebBindings prepared)
+        Map.filter bindingSelected (pebBindingsByAlias prepared)
 
-    bindingSelected name binding =
-      MetadataLightBindingKey name `Set.member` bindingKeys
-        || case externalBindingIdentity binding of
-          Just identity ->
-            ResolvedBindingKey (idDetailsIdentityKey (externalBindingDetails identity))
-              `Set.member` bindingKeys
-          Nothing -> False
+    bindingSelected preparedBinding =
+      ResolvedBindingKey
+        ( idDetailsIdentityKey
+            (externalBindingDetails (externalBindingIdentity (preparedBindingSource preparedBinding)))
+        )
+        `Set.member` bindingKeys
 
 unionPreparedExternalBindings :: PreparedExternalBindings -> PreparedExternalBindings -> PreparedExternalBindings
 unionPreparedExternalBindings preferred fallback =
-  let schemeInfos = pebSchemeInfos preferred `Map.union` pebSchemeInfos fallback
+  let headIdentityCandidates =
+        mergeSymbolIdentityCandidates
+          [ pebSourceTypeHeadIdentityCandidates preferred,
+            pebSourceTypeHeadIdentityCandidates fallback
+          ]
       heads =
-        mergeSymbolIdentityMaps
-          [pebSourceTypeHeadIdentities preferred, pebSourceTypeHeadIdentities fallback]
-      binders =
-        mergeTypeBinderIdentityMaps
-          [ pebSourceTypeBinderIdentities preferred,
-            pebSourceTypeBinderIdentities fallback,
-            structuralTypeBinderIdentitiesFromHeads heads
+        resolvedSymbolIdentityCandidates headIdentityCandidates
+      binderIdentityCandidates =
+        mergeTypeBinderIdentityCandidates
+          [ pebSourceTypeBinderIdentityCandidates preferred,
+            pebSourceTypeBinderIdentityCandidates fallback,
+            typeBinderIdentityCandidatesFromMaps
+              [structuralTypeBinderIdentitiesFromHeads heads]
           ]
    in PreparedExternalBindings
-        { pebBindings = pebBindings preferred `Map.union` pebBindings fallback,
-          pebSchemeInfos = schemeInfos,
-          pebElaborationBindings = pebElaborationBindings preferred `Map.union` pebElaborationBindings fallback,
-          pebTypeCheckEnv = TypeCheck.unionEnvs (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback),
-          pebSourceTypeHeadIdentities = heads,
-          pebSourceTypeBinderIdentities = binders,
+        { pebBindingsByAlias = pebBindingsByAlias preferred `Map.union` pebBindingsByAlias fallback,
+          pebSourceTypeHeadIdentityCandidates = headIdentityCandidates,
+          pebSourceTypeBinderIdentityCandidates = binderIdentityCandidates,
           pebReservedIdentities = pebReservedIdentities preferred ++ pebReservedIdentities fallback
         }
 
-externalBindingPreparedEnvs :: IdentityGenerator -> ExternalBindings -> Map.Map VarName SchemeInfo -> (Map.Map VarName (SchemeInfo, ResolvedVar), TypeCheck.Env)
-externalBindingPreparedEnvs generator0 extBindings schemeInfos =
-  (Map.fromList elaborationEntries, TypeCheck.mkTypeCheckEnvWithResolvedTerms typeCheckEntries Map.empty)
-  where
-    (_, elaborationEntries, typeCheckEntries) =
-      foldl bindingEntry (generator0, [], []) (Map.toList schemeInfos)
-
-    bindingEntry (generator, elabAcc, tcAcc) (name, schemeInfo) =
-      let ty = schemeToType (siScheme schemeInfo)
-       in case Map.lookup name extBindings >>= externalBindingIdentity of
-            Just identity ->
-              let resolved = resolvedExternalBindingVar identity schemeInfo
-               in ( generator,
-                    (name, (schemeInfo, resolved)) : elabAcc,
-                    (resolved, ty) : tcAcc
-                  )
-            Nothing ->
-              let (envRef, generator') = freshEnvRef name generator
-                  resolved = resolvedGeneratedExternalBindingVar envRef name schemeInfo
-               in ( generator',
-                    (name, (schemeInfo, resolved)) : elabAcc,
-                    (resolved, ty) : tcAcc
-                  )
+typeCheckEnvFromElaborationBindings :: Map.Map VarName (SchemeInfo, ResolvedVar) -> TypeCheck.Env
+typeCheckEnvFromElaborationBindings elaborationBindings =
+  TypeCheck.mkTypeCheckEnvWithResolvedTerms
+    [ (resolved, schemeToType (siScheme schemeInfo))
+    | (schemeInfo, resolved) <- Map.elems elaborationBindings
+    ]
+    Map.empty
 
 externalBindingsGeneratedIdentities :: ExternalBindings -> [UniqueIdentity]
 externalBindingsGeneratedIdentities extBindings =
   [ identity
-  | ExternalBinding {externalBindingIdentity = Just externalIdentity} <- Map.elems extBindings,
+  | ExternalBinding {externalBindingIdentity = externalIdentity} <- Map.elems extBindings,
     identity <- idDetailsGeneratedIdentities (externalBindingDetails externalIdentity)
   ]
     ++ [ identity
@@ -657,22 +1246,6 @@ resolvedExternalBindingVar identity schemeInfo =
     { resolvedVarType = schemeToType (siScheme schemeInfo),
       resolvedVarDetails = externalBindingDetails identity
     }
-
-resolvedGeneratedExternalBindingVar :: EnvRef -> VarName -> SchemeInfo -> ResolvedVar
-resolvedGeneratedExternalBindingVar envRef _name schemeInfo =
-  ResolvedVar
-    { resolvedVarType = schemeToType (siScheme schemeInfo),
-      resolvedVarDetails = EnvId envRef
-    }
-
-restrictTypeCheckEnv :: Map.Map VarName (SchemeInfo, ResolvedVar) -> TypeCheck.Env -> TypeCheck.Env
-restrictTypeCheckEnv bindings env =
-  TypeCheck.restrictResolvedTermBindings allowed env
-  where
-    allowed =
-      [ resolved
-      | (_, (_, resolved)) <- Map.toList bindings
-      ]
 
 detailedPair :: PipelineElabDetailedResult -> (XmlfTerm, ElabType)
 detailedPair result = (pedTerm result, pedType result)
@@ -723,10 +1296,52 @@ runPipelineElabWithPrepared finalCheckMode diagnosticsMode traceCfg polySyms ext
     diagnosticsMode
     traceCfg
     extPrepared
-    ( generateConstraintsWithExternalBindingsFromSupply
+    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
         (preparedExternalIdentityGenerator [extPrepared])
         polySyms
-        (pebBindings extPrepared)
+        (preparedSourceTypeHeadIdentities extPrepared)
+        (preparedSourceTypeBinderIdentities extPrepared)
+        (preparedExternalSourceBindings extPrepared)
+    )
+
+runPipelineElabWithResolvedPrepared ::
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TraceConfig ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  ResolvedNormSurfaceExpr ->
+  Either PipelineError PipelineElabDetailedResult
+runPipelineElabWithResolvedPrepared finalCheckMode diagnosticsMode traceCfg polySyms extPrepared =
+  runPipelineElabWithResolvedPreparedFromSupply
+    finalCheckMode
+    diagnosticsMode
+    traceCfg
+    (preparedExternalIdentityGenerator [extPrepared])
+    polySyms
+    extPrepared
+
+runPipelineElabWithResolvedPreparedFromSupply ::
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TraceConfig ->
+  IdentityGenerator ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  ResolvedNormSurfaceExpr ->
+  Either PipelineError PipelineElabDetailedResult
+runPipelineElabWithResolvedPreparedFromSupply finalCheckMode diagnosticsMode traceCfg suppliedGenerator polySyms extPrepared =
+  runPipelineElabWithPreparedGenerated
+    finalCheckMode
+    diagnosticsMode
+    traceCfg
+    extPrepared
+    ( generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+        (preparedExternalIdentityGeneratorFrom suppliedGenerator [extPrepared])
+        polySyms
+        (preparedSourceTypeHeadIdentities extPrepared)
+        (preparedSourceTypeBinderIdentities extPrepared)
+        (preparedExternalSourceBindings extPrepared)
     )
 
 runPipelineElabWithPreparedGenerated ::
@@ -734,52 +1349,280 @@ runPipelineElabWithPreparedGenerated ::
   ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
-  (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
-  NormSurfaceExpr ->
+  (NormSurfaceExprOf references -> Either ConstraintError (ConstraintResult 'Raw)) ->
+  NormSurfaceExprOf references ->
   Either PipelineError PipelineElabDetailedResult
 runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg extPrepared generateConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
-  ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
+  ConstraintResult
+    { crConstraint = c0,
+      crAnnotated = ann,
+      crIdentityGenerator = packetIdentityGenerator,
+      crAnnSourceTypes = annSourceTypes,
+      crExactProducerTypes = exactProducerTypes,
+      crSourceTypeBinderIdentities = sourceTypeBinderIdentities,
+      crSourceTypeBinderAliases = sourceTypeBinderAliases,
+      crInitialEnv = _initialBindings
+    } <-
     fromConstraintError (generateConstraints expr)
   let c1 = normalize c0
   (cAcyclic, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
   pres <- fromPresolutionError (computePresolution traceCfg acyc cAcyclic)
-  prepared <-
+  (annExpectedTypes, preparationIdentityGenerator) <-
+    fromElabError
+      ( preparedAnnotationExpectedTypesWithSourceBinderAliases
+          packetIdentityGenerator
+          sourceTypeBinderAliases
+          extPrepared
+          annSourceTypes
+      )
+  prepared0 <-
     fromSolveError $
-      prepareGeneralizationArtifact traceCfg cAcyclic pres ann
+      prepareGeneralizationArtifact
+        traceCfg
+        preparationIdentityGenerator
+        exactProducerTypes
+        annExpectedTypes
+        sourceTypeBinderIdentities
+        cAcyclic
+        pres
+        ann
   -- Use external schemes and identities from prepared bindings instead of
   -- re-generalizing through the constraint graph, which would produce
   -- graph-internal variable names that conflict with constructor types.
-  let initialTcEnv = pebTypeCheckEnv extPrepared
+  let prepared =
+        withPreparedResolvedTermSchemes
+          (preparedExternalSchemesByIdentity extPrepared)
+          prepared0
+      initialTcEnv = preparedExternalTypeCheckEnv extPrepared
       annCanon = preparedAnnotated prepared
       elabConfig = preparedElaborationConfig traceCfg prepared
       elabEnv =
-        preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
-  term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
+        preparedElaborationEnvWithSourceBinderAliases
+          sourceTypeBinderAliases
+          annSourceTypes
+          extPrepared
+          prepared
+  rootPlan <- fromElabError (rootElaborationPlan annCanon ann)
+  preparedRootConstruction <-
+    fromElabError
+      ( prepareRootConstruction
+          prepared
+          rootPlan
+      )
+  constructionElabEnv <-
+    fromElabError
+      ( elabEnvWithRootConstructionScope
+          preparedRootConstruction
+          (repElaborationCanonicalAnn rootPlan)
+          elabEnv
+      )
+  case preparedRootConstruction of
+    PreparedExactRootConstruction{} ->
+      fromElabError (validateElaborationWithEnv constructionElabEnv annCanon)
+    PreparedOrdinaryRootConstruction{} -> pure ()
+  elaboration <-
+    case
+        elaborateWithEnvDetailed
+          elabConfig
+          constructionElabEnv
+          (repElaborationCanonicalAnn rootPlan)
+      of
+        Right elaborated -> pure elaborated
+        Left err ->
+          fromElabError
+            ( Left
+                ( ValidationFailed
+                    [ "root construction elaboration failed",
+                      "  cause=" ++ show err,
+                      "  prepared exact root="
+                        ++ preparedRootConstructionDiagnostic preparedRootConstruction,
+                      "  construction Gamma binders="
+                        ++ show
+                          ( preparedRootConstructionScopeBinders
+                              (rootConstructionScope preparedRootConstruction)
+                          )
+                    ]
+                )
+            )
+  let term = elaboratedTerm elaboration
+      mbOwnerFinalConstruction =
+        elaboratedOwnerFinalConstruction elaboration
+      localGammaConstructionCertificates =
+        elaboratedLocalGammaConstructionCertificates elaboration
+      compilerExactResultBoundCertificates =
+        elaboratedCompilerExactResultBoundCertificates elaboration
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
     () -> pure ()
-  let authoritativeAnnCanon = authoritativeRootAnn term annCanon
-      authoritativeAnnPre = authoritativeRootAnn term ann
+  let sourceAuthoritativeAnnCanon =
+        authoritativeRootAnn term (repElaborationCanonicalAnn rootPlan)
+      sourceAuthoritativeAnnPre =
+        authoritativeRootAnn term (repElaborationPrecanonicalAnn rootPlan)
+      (sourceAuthoritativeAnnCanonFinal, sourceAuthoritativeAnnPreFinal) =
+        stripPreparedWitnesslessAuthoritativeAnn
+          prepared
+          sourceAuthoritativeAnnCanon
+          sourceAuthoritativeAnnPre
       (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-        stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-  rootGeneralization <-
+        case rootPlan of
+          ExactRootElaborationPlan
+            { repResultCanonicalAnn = resultCanon,
+              repResultPrecanonicalAnn = resultPre
+            } ->
+              (resultCanon, resultPre)
+          OrdinaryRootElaborationPlan{} ->
+            (sourceAuthoritativeAnnCanonFinal, sourceAuthoritativeAnnPreFinal)
+  -- Root construction is provisional until the source constructor has
+  -- published its owner/local-Gamma certificates.  This is true for an exact
+  -- root too: its endpoint is fixed in advance, but placing a pending local
+  -- Gamma binder at the root would expose it as ambient and suppress the
+  -- lambda that must construct it.  Finalize ownership now, then perform the
+  -- source projection exactly once on this post-elaboration result.
+  rootGeneralization0 <-
     fromElabError $
-      generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal
-  let rootScheme0 = prgScheme rootGeneralization
-      rootSubst = prgSubst rootGeneralization
-      rootScheme = siScheme (schemeInfoFromRefSubst rootScheme0 rootSubst)
-  let termSubst = substInTermRefs rootSubst term
+      generalizePreparedRootDetailedWithConstructionResult
+        prepared
+        (repElaborationCanonicalAnn rootPlan)
+        (repElaborationPrecanonicalAnn rootPlan)
+        authoritativeAnnCanonFinal
+        mbOwnerFinalConstruction
+        localGammaConstructionCertificates
+  rootGeneralization <-
+    fromElabError
+      ( applyPreparedRootSourceTypeBinderIdentities
+          rootGeneralization0
+      )
+  let rootSubst0 = prgSubst rootGeneralization
+  rootSubstAliased <-
+    fromElabError
+      (applyPreparedTermSourceBinderAliases prepared rootSubst0 term)
+  rootGeneralizationFinal <-
+    case preparedRootConstruction of
+      PreparedExactRootConstruction deferred _ ->
+        fromElabError
+          ( applyPreparedCompilerExactRootBinderIdentities
+              prepared
+              (dreaEdgeId deferred)
+              rootGeneralization
+              rootSubstAliased
+          )
+      PreparedOrdinaryRootConstruction{} ->
+        fromElabError
+          ( applyPreparedRootBinderIdentities
+              rootSubstAliased
+              rootGeneralization
+          )
+  let
+      rootScheme = prgScheme rootGeneralizationFinal
+      rootSubst = prgSubst rootGeneralizationFinal
+      termSubst = substInTermRefs rootSubst term
+      projectedCompilerExactResultBoundCertificates =
+        projectCompilerExactResultBoundCertificates
+          rootSubst
+          compilerExactResultBoundCertificates
 
-  let termClosed = closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst
-  let termClosedFresh = freshenTypeAbsAgainstEnv initialTcEnv termClosed
+  preparedGenerator <-
+    fromElabError (preparedIdentityGenerator prepared)
+  let (termClosed, closedGenerator) =
+        closePipelineTermFromSupply
+          preparedGenerator
+          ( case preparedRootConstruction of
+              PreparedOrdinaryRootConstruction{} -> PreparedOrdinaryRoot
+              PreparedExactRootConstruction deferred _ -> PreparedExactRoot deferred
+          )
+          initialTcEnv
+          rootSubst
+          (prgClosure rootGeneralizationFinal)
+          term
+          termSubst
+  (termExact, authoritativeResultType) <-
+    case preparedRootConstruction of
+      PreparedOrdinaryRootConstruction{} ->
+        pure (termClosed, schemeToType rootScheme)
+      PreparedExactRootConstruction deferred _ -> do
+        sourceCompletedTerm <-
+          fromElabError
+            ( completePreparedCompilerExactSubtermResults
+                prepared
+                projectedCompilerExactResultBoundCertificates
+                CompleteBeforeCompilerExact
+                (dreaEdgeId deferred)
+                termClosed
+            )
+        expectedExactType <-
+          fromElabError
+            ( preparedCompilerExactExpectedType
+                prepared
+                (dreaEdgeId deferred)
+            )
+        let closedExpectedExactType =
+              closePreparedExactExpectedType
+                (prgClosure rootGeneralizationFinal)
+                expectedExactType
+        exactTerm <-
+          case
+              elaborateClosedExactAnnotationTermAtType
+                initialTcEnv
+                closedExpectedExactType
+                (dreaEdgeId deferred)
+                sourceCompletedTerm
+            of
+              Left err ->
+                fromElabError
+                  ( Left
+                      ( ValidationFailed
+                          [ "root compiler-exact construction failed"
+                          , "  cause: " ++ show err
+                          ]
+                      )
+                  )
+              Right result -> pure result
+        completedTerm <-
+          fromElabError
+            ( completePreparedCompilerExactSubtermResults
+                prepared
+                projectedCompilerExactResultBoundCertificates
+                CompleteAfterCompilerExact
+                (dreaEdgeId deferred)
+                exactTerm
+            )
+        exactTy <-
+          case typeCheckWithEnv initialTcEnv completedTerm of
+            Right ty -> pure ty
+            Left err ->
+              fromElabError
+                ( Left
+                    ( ValidationFailed
+                        [ "root compiler-exact completion failed"
+                        , "  cause: " ++ show err
+                        ]
+                    )
+                )
+        pure (completedTerm, exactTy)
+  let (termClosedFresh0, freshenedGenerator) =
+        case preparedRootConstruction of
+          PreparedExactRootConstruction{} -> (termExact, closedGenerator)
+          PreparedOrdinaryRootConstruction{} ->
+            freshenTypeAbsAgainstEnvFromSupply closedGenerator initialTcEnv termExact
+      termClosedFresh =
+        case preparedRootConstruction of
+          PreparedExactRootConstruction{} -> termClosedFresh0
+          PreparedOrdinaryRootConstruction{} ->
+            TypeCheck.canonicalizeResolvedTermTypes initialTcEnv termClosedFresh0
+  let resultGenerator resultType =
+        advanceIdentityGeneratorPastMany
+          (generatedIdentitiesInTerm termClosedFresh ++ generatedIdentitiesInType resultType)
+          freshenedGenerator
       uncheckedAuthoritative =
-        pure
-          PipelineElabDetailedResult
-            { pedTerm = termClosedFresh,
-              pedType = schemeToType rootScheme,
-              pedRootAnn = authoritativeAnnCanonFinal,
-              pedTypeCheckEnv = initialTcEnv
-            }
+        let resultType = authoritativeResultType
+         in pure
+              PipelineElabDetailedResult
+                { pedTerm = termClosedFresh,
+                  pedType = resultType,
+                  pedRootAnn = authoritativeAnnCanonFinal,
+                  pedTypeCheckEnv = initialTcEnv,
+                  pedIdentityGenerator = resultGenerator resultType
+                }
       checkedAuthoritative = do
         tyChecked <-
           case typeCheckWithEnv initialTcEnv termClosedFresh of
@@ -790,7 +1633,8 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
             { pedTerm = termClosedFresh,
               pedType = tyChecked,
               pedRootAnn = authoritativeAnnCanonFinal,
-              pedTypeCheckEnv = initialTcEnv
+              pedTypeCheckEnv = initialTcEnv,
+              pedIdentityGenerator = resultGenerator tyChecked
             }
       authoritativeResult =
         case finalCheckMode of
@@ -830,10 +1674,60 @@ runPipelineElabWithPreparedWithTiming timing label finalCheckMode diagnosticsMod
     diagnosticsMode
     traceCfg
     extPrepared
-    ( generateConstraintsWithExternalBindingsFromSupply
+    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
         (preparedExternalIdentityGenerator [extPrepared])
         polySyms
-        (pebBindings extPrepared)
+        (preparedSourceTypeHeadIdentities extPrepared)
+        (preparedSourceTypeBinderIdentities extPrepared)
+        (preparedExternalSourceBindings extPrepared)
+    )
+
+runPipelineElabWithResolvedPreparedWithTiming ::
+  TimingConfig ->
+  String ->
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TraceConfig ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  ResolvedNormSurfaceExpr ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabWithResolvedPreparedWithTiming timing label finalCheckMode diagnosticsMode traceCfg polySyms extPrepared =
+  runPipelineElabWithResolvedPreparedWithTimingFromSupply
+    timing
+    label
+    finalCheckMode
+    diagnosticsMode
+    traceCfg
+    (preparedExternalIdentityGenerator [extPrepared])
+    polySyms
+    extPrepared
+
+runPipelineElabWithResolvedPreparedWithTimingFromSupply ::
+  TimingConfig ->
+  String ->
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TraceConfig ->
+  IdentityGenerator ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  ResolvedNormSurfaceExpr ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabWithResolvedPreparedWithTimingFromSupply timing label finalCheckMode diagnosticsMode traceCfg suppliedGenerator polySyms extPrepared =
+  runPipelineElabWithPreparedGeneratedWithTiming
+    timing
+    label
+    finalCheckMode
+    diagnosticsMode
+    traceCfg
+    extPrepared
+    ( generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+        (preparedExternalIdentityGeneratorFrom suppliedGenerator [extPrepared])
+        polySyms
+        (preparedSourceTypeHeadIdentities extPrepared)
+        (preparedSourceTypeBinderIdentities extPrepared)
+        (preparedExternalSourceBindings extPrepared)
     )
 
 runPipelineElabWithPreparedGeneratedWithTiming ::
@@ -843,14 +1737,23 @@ runPipelineElabWithPreparedGeneratedWithTiming ::
   ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
-  (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
-  NormSurfaceExpr ->
+  (NormSurfaceExprOf references -> Either ConstraintError (ConstraintResult 'Raw)) ->
+  NormSurfaceExprOf references ->
   IO (Either PipelineError PipelineElabDetailedResult)
 runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared generateConstraints expr =
   runExceptT $ do
     evaluatePipelineEitherSuffix timing label ".validate_annotations" $
       fromConstraintError (validateDirectRecursiveAnnotations expr)
-    ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
+    ConstraintResult
+      { crConstraint = c0,
+        crAnnotated = ann,
+        crIdentityGenerator = packetIdentityGenerator,
+        crAnnSourceTypes = annSourceTypes,
+        crExactProducerTypes = exactProducerTypes,
+        crSourceTypeBinderIdentities = sourceTypeBinderIdentities,
+        crSourceTypeBinderAliases = sourceTypeBinderAliases,
+        crInitialEnv = _initialBindings
+      } <-
       evaluatePipelineEitherSuffix timing label ".generate_constraints" $
         fromConstraintError (generateConstraints expr)
     normalizeResult <-
@@ -862,20 +1765,52 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
     pres <-
       let presolutionLabel = label ++ ".presolution"
        in timePipelineEither timing presolutionLabel $
-            fromPresolutionError <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
-    prepared <-
+            fromPresolutionError
+              <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
+    prepared0 <-
       evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
-        fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann)
-    let annCanon = preparedAnnotated prepared
+        do
+          (annExpectedTypes, preparationIdentityGenerator) <-
+            fromElabError
+              ( preparedAnnotationExpectedTypesWithSourceBinderAliases
+                  packetIdentityGenerator
+                  sourceTypeBinderAliases
+                  extPrepared
+                  annSourceTypes
+              )
+          fromSolveError
+            ( prepareGeneralizationArtifact
+              traceCfg
+              preparationIdentityGenerator
+              exactProducerTypes
+              annExpectedTypes
+              sourceTypeBinderIdentities
+              cAcyclic
+              pres
+              ann
+            )
+    let prepared =
+          withPreparedResolvedTermSchemes
+            (preparedExternalSchemesByIdentity extPrepared)
+            prepared0
+        annCanon = preparedAnnotated prepared
         elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
-          preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
+          preparedElaborationEnvWithSourceBinderAliases
+            sourceTypeBinderAliases
+            annSourceTypes
+            extPrepared
+            prepared
+    identityGenerator <-
+      evaluatePipelineEitherSuffix timing label ".identity_supply" $
+        fromElabError (preparedIdentityGenerator prepared)
     finishPreparedPipelineRootStage
       timing
       label
       finalCheckMode
       diagnosticsMode
       traceCfg
+      identityGenerator
       extPrepared
       prepared
       elabConfig
@@ -883,32 +1818,95 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
       annCanon
       ann
 
-runPipelineElabWithPreparedConstraintWithTiming ::
+prepareRootPresolutionContextWithTiming ::
   TimingConfig ->
   String ->
-  PipelineFinalCheckMode ->
-  ResultTypeDiagnosticsMode ->
   TraceConfig ->
-  PreparedExternalBindings ->
-  Constraint 'Raw ->
-  AnnExpr ->
-  IntMap.IntMap NormSrcType ->
-  IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared c0 ann annSourceTypes =
+  RootFinalizationContext 'Raw ->
+  IO (Either PipelineError RootPresolutionContext)
+prepareRootPresolutionContextWithTiming timing label traceCfg finalizationContext =
   runExceptT $ do
     normalizeResult <-
       timePipelineValueSuffix timing label ".constraint_normalize" $
-        evaluate (normalize c0)
+        evaluate (normalize (rpConstraint partition))
     (cAcyclic, acyc) <-
       evaluatePipelineEitherSuffix timing label ".acyclicity" $
         fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult)
     pres <-
       let presolutionLabel = label ++ ".presolution"
        in timePipelineEither timing presolutionLabel $
-            fromPresolutionError <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
-    prepared <-
-      evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
-        fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann)
+            fromPresolutionError
+              <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
+    pure
+      RootPresolutionContext
+        { rpcFinalizationContext = finalizationContext,
+          rpcAcyclicConstraint = cAcyclic,
+          rpcPresolution = pres
+        }
+  where
+    partition = rfcPartition finalizationContext
+
+-- | Allocate packet identities only after every independent root has completed
+-- presolution.  The caller invokes this function in stable root order and
+-- threads the returned supply to the next root, so worker scheduling cannot
+-- change which generated identities appear in a root's checked IR.
+prepareRootGeneralizationContextWithTiming
+  :: TimingConfig
+  -> String
+  -> TraceConfig
+  -> IdentityGenerator
+  -> RootPresolutionContext
+  -> IO (Either PipelineError (PreparedRootFinalizationContext, IdentityGenerator))
+prepareRootGeneralizationContextWithTiming timing label traceCfg identityGenerator presolutionContext =
+  timeProgramOperationWithSuffixIO timing label ".prepare_generalization" $
+    evaluate $ do
+      (annExpectedTypes, preparationIdentityGenerator) <-
+        fromElabError
+          ( preparedAnnotationExpectedTypesWithSourceBinderAliases
+              identityGenerator
+              (rpSourceTypeBinderAliases partition)
+              (rfcPreparedExternalBindings finalizationContext)
+              (rpAnnSourceTypes partition)
+          )
+      prepared0 <-
+        fromSolveError
+          ( prepareGeneralizationArtifact
+              traceCfg
+              preparationIdentityGenerator
+              (rpExactProducerTypes partition)
+              annExpectedTypes
+              (rpSourceTypeBinderIdentities partition)
+              (rpcAcyclicConstraint presolutionContext)
+              (rpcPresolution presolutionContext)
+              (rpAnnotated partition)
+          )
+      let prepared =
+            withPreparedResolvedTermSchemes
+              ( preparedExternalSchemesByIdentity
+                  (rfcPreparedExternalBindings finalizationContext)
+              )
+              prepared0
+      identityGenerator' <-
+        fromElabError (preparedIdentityGenerator prepared)
+      pure
+        ( PreparedRootFinalizationContext
+            { prfcFinalizationContext = finalizationContext,
+              prfcPreparedGeneralization = prepared
+            },
+          identityGenerator'
+        )
+  where
+    finalizationContext = rpcFinalizationContext presolutionContext
+    partition = rfcPartition finalizationContext
+
+prepareRootFinalizationStageWithTiming
+  :: TimingConfig
+  -> String
+  -> TraceConfig
+  -> PreparedRootFinalizationContext
+  -> IO (Either PipelineError PreparedPipelineRootStage)
+prepareRootFinalizationStageWithTiming timing label traceCfg preparedContext =
+  runExceptT $ do
     readContextResult <-
       evaluatePipelineAttemptSuffix timing label ".root_finalization.prepare_read_context" $
         fromElabError (preparedReadContextReady prepared)
@@ -922,12 +1920,14 @@ runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode diag
     let annCanon = preparedAnnotated prepared
         elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
-          preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
-    finishPreparedPipelineRootStage
+          preparedElaborationEnvWithSourceBinderAliases
+            (rpSourceTypeBinderAliases partition)
+            annSourceTypes
+            extPrepared
+            prepared
+    preparePipelineRootStage
       timing
       label
-      finalCheckMode
-      diagnosticsMode
       traceCfg
       extPrepared
       prepared
@@ -935,6 +1935,13 @@ runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode diag
       elabEnv
       annCanon
       ann
+  where
+    finalizationContext = prfcFinalizationContext preparedContext
+    partition = rfcPartition finalizationContext
+    extPrepared = rfcPreparedExternalBindings finalizationContext
+    prepared = prfcPreparedGeneralization preparedContext
+    ann = rpAnnotated partition
+    annSourceTypes = rpAnnSourceTypes partition
 
 runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsWithTiming ::
   (Ord key) =>
@@ -960,6 +1967,93 @@ runPipelineElabDetailedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWit
 runPipelineElabDetailedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming =
   runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled
 
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTiming ::
+  (Ord key) =>
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTiming =
+  runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTiming FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTimingFromSupply ::
+  (Ord key) =>
+  TimingConfig ->
+  String ->
+  IdentityGenerator ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsWithTimingFromSupply =
+  runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTimingFromSupply FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig)
+
+runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming ::
+  (Ord key) =>
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming =
+  runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTiming FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled
+
+runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTimingFromSupply ::
+  (Ord key) =>
+  TimingConfig ->
+  String ->
+  IdentityGenerator ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTimingFromSupply =
+  runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTimingFromSupply FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled
+
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTiming ::
+  (Ord key) =>
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTiming =
+  runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGenerated
+    generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+    Nothing
+
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTimingFromSupply ::
+  (Ord key) =>
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TimingConfig ->
+  String ->
+  IdentityGenerator ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, ResolvedNormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedResolvedModuleKeyedWithPreparedExternalBindingsModeWithTimingFromSupply finalCheckMode diagnosticsMode timing label identityGenerator =
+  runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGenerated
+    generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+    (Just identityGenerator)
+    finalCheckMode
+    diagnosticsMode
+    timing
+    label
+
 runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming ::
   (Ord key) =>
   PipelineFinalCheckMode ->
@@ -971,33 +2065,93 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming ::
   Map.Map key PreparedExternalBindings ->
   [(key, VarName, NormSurfaceExpr)] ->
   IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
-runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming finalCheckMode diagnosticsMode timing label polySyms extPrepared rootPrepared keyedNamedExprs =
+runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming =
+  runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGenerated
+    generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply
+    Nothing
+
+runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGenerated ::
+  (Ord key) =>
+  ( IdentityGenerator ->
+    PolySyms ->
+    Map.Map String SymbolIdentity ->
+    Map.Map String TypeBinderIdentity ->
+    Map.Map key (Map.Map String TypeBinderIdentity) ->
+    ExternalBindings ->
+    [(key, VarName, NormSurfaceExprOf references)] ->
+    Either ConstraintError (ModuleConstraintResult key 'Raw)
+  ) ->
+  Maybe IdentityGenerator ->
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map key PreparedExternalBindings ->
+  [(key, VarName, NormSurfaceExprOf references)] ->
+  IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
+runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGenerated generateModuleConstraints suppliedGenerator finalCheckMode diagnosticsMode timing label polySyms extPrepared rootPrepared keyedNamedExprs =
   runExceptT $ do
     let traceCfg = pcTraceConfig defaultPipelineConfig
+        preparedEnvironments = extPrepared : Map.elems rootPrepared
         namedExprs = [(name, expr) | (_, name, expr) <- keyedNamedExprs]
         rootPreparedForKey key =
           Map.findWithDefault extPrepared key rootPrepared
         rootPreparedSchemeUseCount =
           sum
-            [ Map.size (pebSchemeInfos prepared)
+            [ Map.size (pebBindingsByAlias prepared)
             | (key, _, _) <- keyedNamedExprs,
               Just prepared <- [Map.lookup key rootPrepared]
             ]
+        sourceTypeHeadIdentities =
+          resolvedSymbolIdentityCandidates $
+            mergeSymbolIdentityCandidates
+              ( pebSourceTypeHeadIdentityCandidates extPrepared
+                  : map pebSourceTypeHeadIdentityCandidates (Map.elems rootPrepared)
+              )
+        sourceTypeBinderIdentityAliases =
+          preparedSourceTypeBinderIdentities extPrepared
+        rootSourceTypeBinderIdentityAliases =
+          Map.map preparedSourceTypeBinderIdentities rootPrepared
     evaluatePipelineEitherSuffix timing label ".validate_annotations" $
       mapM_ (fromConstraintError . validateDirectRecursiveAnnotations . snd) namedExprs
-    ModuleConstraintResult {mcrConstraint = c0, mcrRoots = roots, mcrAnnSourceTypes = annSourceTypes, mcrRootOwnership = rootOwnership} <-
+    ModuleConstraintResult
+      { mcrConstraint = c0,
+        mcrRoots = roots,
+        mcrIdentityGenerator = packetIdentityGenerator,
+        mcrAnnSourceTypes = annSourceTypes,
+        mcrExactProducerTypes = exactProducerTypes,
+        mcrSourceTypeBinderIdentities = sourceTypeBinderIdentities,
+        mcrRootOwnership = rootOwnership
+      } <-
       evaluatePipelineEitherSuffix timing label ".generate_constraints" $
         fromConstraintError
-          ( generateModuleConstraintsKeyedWithExternalBindingsFromSupply
-              (preparedExternalIdentityGenerator (extPrepared : Map.elems rootPrepared))
+          ( generateModuleConstraints
+              ( case suppliedGenerator of
+                  Nothing -> preparedExternalIdentityGenerator preparedEnvironments
+                  Just generator -> preparedExternalIdentityGeneratorFrom generator preparedEnvironments
+              )
               polySyms
-              (pebBindings extPrepared)
+              sourceTypeHeadIdentities
+              sourceTypeBinderIdentityAliases
+              rootSourceTypeBinderIdentityAliases
+              (preparedExternalSourceBindings extPrepared)
               keyedNamedExprs
           )
     liftIO $
       whenProgramOperationsIO timing $
         emitModuleBatchGraphMetrics timing (label ++ ".graph") c0 rootOwnership roots annSourceTypes extPrepared rootPreparedSchemeUseCount
-    let batchPlan = buildModuleBatchPlan rootPreparedForKey c0 rootOwnership roots annSourceTypes
+    let batchPlan =
+          buildModuleBatchPlan
+            rootPreparedForKey
+            packetIdentityGenerator
+            c0
+            rootOwnership
+            roots
+            annSourceTypes
+            exactProducerTypes
+            sourceTypeBinderIdentities
     liftIO $
       whenProgramOperationsIO timing $
         emitModuleBatchPlanMetrics timing (label ++ ".partition") batchPlan
@@ -1007,7 +2161,19 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming fin
           runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") finalCheckMode diagnosticsMode traceCfg batchPlan
       else
         ExceptT $
-          runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg c0 rootOwnership (mbpRoots batchPlan) annSourceTypes
+          runModuleBatchPlanGlobalWithTiming
+            timing
+            label
+            finalCheckMode
+            diagnosticsMode
+            traceCfg
+            packetIdentityGenerator
+            c0
+            rootOwnership
+            (mbpRoots batchPlan)
+            annSourceTypes
+            exactProducerTypes
+            sourceTypeBinderIdentities
 
 runModuleBatchPlanGlobalWithTiming ::
   (Ord key) =>
@@ -1016,12 +2182,15 @@ runModuleBatchPlanGlobalWithTiming ::
   PipelineFinalCheckMode ->
   ResultTypeDiagnosticsMode ->
   TraceConfig ->
+  IdentityGenerator ->
   Constraint 'Raw ->
   RootOwnershipIndex ->
   [(key, PreparedExternalBindings, ModuleConstraintRoot)] ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ResolvedSrcType ->
+  IntMap.IntMap TypeBinderIdentity ->
   IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
-runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg c0 rootOwnership roots annSourceTypes =
+runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg packetIdentityGenerator c0 rootOwnership roots annSourceTypes exactProducerTypes sourceTypeBinderIdentities =
   runExceptT $ do
     normalizeResult <-
       timePipelineValueSuffix timing label ".constraint_normalize" $
@@ -1032,16 +2201,43 @@ runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode t
     pres <-
       let presolutionLabel = label ++ ".presolution"
        in timePipelineEither timing presolutionLabel $
-            fromPresolutionError <$> computePresolutionWithTimingAndRootOwnership timing presolutionLabel traceCfg rootOwnership acyc cAcyclic
-    prepared <-
+            fromPresolutionError
+              <$> computePresolutionWithTimingAndRootOwnership
+                timing
+                presolutionLabel
+                traceCfg
+                rootOwnership
+                acyc
+                cAcyclic
+    prepared0 <-
       evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
-        fromSolveError $
-          prepareGeneralizationArtifactForRoots
-            traceCfg
-            cAcyclic
-            pres
-            [mcrAnnotated root | (_, _, root) <- roots]
-    let elabConfig = preparedElaborationConfig traceCfg prepared
+        do
+          (annExpectedTypes, preparationIdentityGenerator) <-
+            fromElabError
+              ( preparedAnnotationExpectedTypesForRoots
+                  packetIdentityGenerator
+                  roots
+                  annSourceTypes
+              )
+          fromSolveError $
+            prepareGeneralizationArtifactForRoots
+              traceCfg
+              preparationIdentityGenerator
+              exactProducerTypes
+              annExpectedTypes
+              sourceTypeBinderIdentities
+              cAcyclic
+              pres
+              [mcrAnnotated root | (_, _, root) <- roots]
+    let prepared =
+          withPreparedResolvedTermSchemes
+            ( Map.unions
+                [ preparedExternalSchemesByIdentity externalBindings
+                | (_, externalBindings, _) <- roots
+                ]
+            )
+            prepared0
+        elabConfig = preparedElaborationConfig traceCfg prepared
         rootsLabel = label ++ ".roots"
     timePipelineEither timing rootsLabel $
       finishPreparedPipelineRootsWithTiming
@@ -1064,48 +2260,87 @@ runModuleBatchPlanRootLocalWithTiming ::
   TraceConfig ->
   ModuleBatchPlan key 'Raw ->
   IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
-runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode diagnosticsMode traceCfg plan =
-  timeProgramOperationIO timing label $
-    case mbpPartitions plan of
-      [] -> pure (Right Map.empty)
-      [_] -> runExceptT (goSequential (1 :: Int) Map.empty (mbpPartitions plan))
-      partitions -> goConcurrent partitions
+runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode diagnosticsMode traceCfg plan = do
+  timeProgramOperationIO timing label $ do
+    let rootContexts =
+          [ ( key,
+              rootTimingLabel label index,
+              mkRootFinalizationContext partition
+            )
+          | (index, (key, partition)) <-
+              zip [(1 :: Int) ..] (mbpPartitions plan)
+          ]
+        presolutionActions =
+          [ ( key,
+              fmap (fmap (\context -> (rootLabel, context))) $
+                prepareRootPresolutionContextWithTiming
+                  timing
+                  rootLabel
+                  traceCfg
+                  finalizationContext
+            )
+          | (key, rootLabel, finalizationContext) <- rootContexts
+          ]
+    presolutionResult <- runRootStage presolutionActions
+    case presolutionResult of
+      Left err -> pure (Left err)
+      Right presolutionContexts -> do
+        preparedResult <-
+          prepareRootsInOrder
+            (mbpIdentityGenerator plan)
+            presolutionContexts
+        case preparedResult of
+          Left err -> pure (Left err)
+          Right (preparedContexts, finalPacketGenerator) -> do
+            preparedFinalizationResult <-
+              runRootStage
+                [ ( key,
+                    fmap (fmap (\preparedRoot -> (rootLabel, preparedRoot))) $
+                      prepareRootFinalizationStageWithTiming
+                        timing
+                        rootLabel
+                        traceCfg
+                        preparedContext
+                  )
+                | (key, (rootLabel, preparedContext)) <- preparedContexts
+                ]
+            case preparedFinalizationResult of
+              Left err -> pure (Left err)
+              Right preparedRoots -> do
+                freshenedResult <-
+                  freshenRootsInOrder finalPacketGenerator preparedRoots
+                case freshenedResult of
+                  Left err -> pure (Left err)
+                  Right freshenedRoots ->
+                    fmap (fmap Map.fromList) $
+                      runRootStage
+                        [ ( key,
+                            runExceptT $
+                              finishFreshenedPipelineRootStage
+                                timing
+                                rootLabel
+                                finalCheckMode
+                                diagnosticsMode
+                                freshenedRoot
+                          )
+                        | (key, (rootLabel, freshenedRoot)) <- freshenedRoots
+                        ]
   where
-    goSequential _ acc [] =
-      pure acc
-    goSequential index acc ((key, partition) : rest) = do
-      out <-
-        ExceptT $
-          runRootFinalizationContextWithTiming
-            timing
-            (rootTimingLabel label index)
-            finalCheckMode
-            diagnosticsMode
-            traceCfg
-            (mkRootFinalizationContext partition)
-      goSequential (index + 1) (Map.insert key out acc) rest
-
-    goConcurrent partitions = do
-      ensureConcurrentCapabilities (length partitions)
+    runRootStage [] = pure (Right [])
+    runRootStage [(key, action)] =
+      fmap (fmap (\result -> [(key, result)])) action
+    runRootStage actions = do
+      ensureConcurrentCapabilities (length actions)
       workers <-
         mapM
-          ( \(index, (key, partition)) -> do
+          ( \(key, action) -> do
               done <- newEmptyMVar
               _ <-
                 forkIO $
-                  try
-                    ( runRootFinalizationContextWithTiming
-                        timing
-                        (rootTimingLabel label index)
-                        finalCheckMode
-                        diagnosticsMode
-                        traceCfg
-                        (mkRootFinalizationContext partition)
-                    )
-                    >>= putMVar done
+                  try action >>= putMVar done
               pure (key, done)
           )
-          (zip [(1 :: Int) ..] partitions)
+          actions
       settled <- mapM (\(key, done) -> (\result -> (key, result)) <$> takeMVar done) workers
       case [ex | (_, Left ex) <- settled] of
         ex : _ -> throwIO (ex :: SomeException)
@@ -1113,12 +2348,52 @@ runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode diagnosticsMod
           case [err | (_, Right (Left err)) <- settled] of
             err : _ -> pure (Left err)
             [] ->
-              pure $
-                Right $
-                  Map.fromList
+              pure
+                ( Right
                     [ (key, out)
                     | (key, Right (Right out)) <- settled
                     ]
+                )
+
+    prepareRootsInOrder identityGenerator [] = pure (Right ([], identityGenerator))
+    prepareRootsInOrder identityGenerator ((key, (rootLabel, presolutionContext)) : rest) = do
+      preparedResult <-
+        prepareRootGeneralizationContextWithTiming
+          timing
+          rootLabel
+          traceCfg
+          identityGenerator
+          presolutionContext
+      case preparedResult of
+        Left err -> pure (Left err)
+        Right (preparedContext, identityGenerator') -> do
+          restResult <- prepareRootsInOrder identityGenerator' rest
+          pure
+            ( do
+                (preparedRest, finalGenerator) <- restResult
+                pure
+                  ( (key, (rootLabel, preparedContext)) : preparedRest
+                  , finalGenerator
+                  )
+            )
+
+    freshenRootsInOrder _ [] = pure (Right [])
+    freshenRootsInOrder identityGenerator ((key, (rootLabel, preparedRoot)) : rest) = do
+      result <-
+        runExceptT $
+          closeAndFreshenPipelineRootStage
+            timing
+            rootLabel
+            identityGenerator
+            preparedRoot
+      case result of
+        Left err -> pure (Left err)
+        Right freshenedRoot -> do
+          restResult <-
+            freshenRootsInOrder
+              (fprsIdentityGenerator freshenedRoot)
+              rest
+          pure (fmap ((key, (rootLabel, freshenedRoot)) :) restResult)
 
     mkRootFinalizationContext partition =
       RootFinalizationContext
@@ -1141,35 +2416,6 @@ rootTimingLabel :: String -> Int -> String
 rootTimingLabel label index =
   label ++ ".root_" ++ show index
 
-runRootFinalizationContextWithTiming ::
-  TimingConfig ->
-  String ->
-  PipelineFinalCheckMode ->
-  ResultTypeDiagnosticsMode ->
-  TraceConfig ->
-  RootFinalizationContext 'Raw ->
-  IO (Either PipelineError PipelineElabDetailedResult)
-runRootFinalizationContextWithTiming
-  timing
-  label
-  finalCheckMode
-  diagnosticsMode
-  traceCfg
-  RootFinalizationContext
-    { rfcPartition = partition,
-      rfcPreparedExternalBindings = extPrepared
-    } =
-    runPipelineElabWithPreparedConstraintWithTiming
-      timing
-      label
-      finalCheckMode
-      diagnosticsMode
-      traceCfg
-      extPrepared
-      (rpConstraint partition)
-      (rpAnnotated partition)
-      (rpAnnSourceTypes partition)
-
 moduleBatchPlanRootLocalEligible :: ModuleBatchPlan key p -> Bool
 moduleBatchPlanRootLocalEligible plan =
   mbpSharedEdgeCount plan == 0
@@ -1178,15 +2424,19 @@ moduleBatchPlanRootLocalEligible plan =
 
 buildModuleBatchPlan ::
   (key -> PreparedExternalBindings) ->
+  IdentityGenerator ->
   Constraint 'Raw ->
   RootOwnershipIndex ->
   Map.Map key ModuleConstraintRoot ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ResolvedSrcType ->
+  IntMap.IntMap TypeBinderIdentity ->
   ModuleBatchPlan key 'Raw
-buildModuleBatchPlan rootPrepared constraint rootOwnership roots annSourceTypes =
+buildModuleBatchPlan rootPrepared packetIdentityGenerator constraint rootOwnership roots annSourceTypes exactProducerTypes sourceTypeBinderIdentities =
   ModuleBatchPlan
     { mbpRoots = orderedRoots,
       mbpPartitions = partitions,
+      mbpIdentityGenerator = packetIdentityGenerator,
       mbpSharedEdgeCount = rootOwnershipSharedEdgeCount rootOwnership,
       mbpUnknownEdgeCount =
         length
@@ -1206,6 +2456,8 @@ buildModuleBatchPlan rootPrepared constraint rootOwnership roots annSourceTypes 
           buildRootPartitionFromBucket
             constraint
             annSourceTypes
+            exactProducerTypes
+            sourceTypeBinderIdentities
             rootExtPrepared
             root
             (IntMap.findWithDefault emptyRootPartitionBucket (getModuleRootId (mcrRootId root)) partitionBuckets)
@@ -1346,19 +2598,26 @@ ownersForRefKey rootOwnership key
 buildRootPartitionFromBucket ::
   Constraint 'Raw ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ResolvedSrcType ->
+  IntMap.IntMap TypeBinderIdentity ->
   PreparedExternalBindings ->
   ModuleConstraintRoot ->
   RootPartitionBucket ->
   RootPartition 'Raw
-buildRootPartitionFromBucket constraint annSourceTypes rootExtPrepared root bucket =
+buildRootPartitionFromBucket constraint annSourceTypes exactProducerTypes sourceTypeBinderIdentities rootExtPrepared root bucket =
   RootPartition
     { rpRootId = rootId,
       rpConstraint = partitionConstraint,
       rpAnnotated = mcrAnnotated root,
       rpAnnSourceTypes = IntMap.restrictKeys annSourceTypes (rpbNodeKeys bucket),
+      rpExactProducerTypes =
+        IntMap.restrictKeys exactProducerTypes (rpbEdgeKeys bucket),
+      rpSourceTypeBinderIdentities =
+        IntMap.restrictKeys sourceTypeBinderIdentities (rpbNodeKeys bucket),
+      rpSourceTypeBinderAliases = mcrSourceTypeBinderAliases root,
       rpPreparedExternalBindings = rootExtPrepared,
       rpOwnedEdgeCount = IntSet.size (rpbEdgeKeys bucket),
-      rpExternalSchemeUseCount = Map.size (pebSchemeInfos rootExtPrepared)
+      rpExternalSchemeUseCount = Map.size (pebBindingsByAlias rootExtPrepared)
     }
   where
     rootId = mcrRootId root
@@ -1410,7 +2669,7 @@ emitModuleBatchGraphMetrics timing label constraint rootOwnership roots annSourc
     emitProgramOperationMetricIO timing (label ++ ".unify_edges") (fromIntegral (length (cUnifyEdges constraint)))
     emitProgramOperationMetricIO timing (label ++ ".bind_parents") (fromIntegral (IntMap.size (cBindParents constraint)))
     emitProgramOperationMetricIO timing (label ++ ".annotation_roots") (fromIntegral (IntMap.size annSourceTypes))
-    emitProgramOperationMetricIO timing (label ++ ".external_scheme_unique") (fromIntegral (Map.size (pebSchemeInfos extPrepared)))
+    emitProgramOperationMetricIO timing (label ++ ".external_scheme_unique") (fromIntegral (Map.size (pebBindingsByAlias extPrepared)))
     emitProgramOperationMetricIO timing (label ++ ".external_scheme_uses") (fromIntegral rootPreparedSchemeUseCount)
     emitProgramOperationMetricIO timing (label ++ ".owned_roots") (fromIntegral (rootOwnershipRootCount rootOwnership))
     emitProgramOperationMetricIO timing (label ++ ".owned_nodes") (fromIntegral (rootOwnershipOwnedNodeCount rootOwnership))
@@ -1437,13 +2696,21 @@ finishPreparedPipelineRootsWithTiming ::
   [(key, PreparedExternalBindings, ModuleConstraintRoot)] ->
   IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
 finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMode traceCfg prepared elabConfig annSourceTypes roots =
-  runExceptT (go (1 :: Int) Map.empty roots)
+  runExceptT $ do
+    identityGenerator <-
+      evaluatePipelineEitherSuffix timing label ".identity_supply" $
+        fromElabError (preparedIdentityGenerator prepared)
+    go identityGenerator (1 :: Int) Map.empty roots
   where
-    go _ acc [] =
+    go _ _ acc [] =
       pure acc
-    go index acc ((key, rootExtPrepared, root) : rest) = do
+    go identityGenerator index acc ((key, rootExtPrepared, root) : rest) = do
       let elabEnv =
-            preparedElaborationEnvWithExternalIdentities annSourceTypes rootExtPrepared prepared
+            preparedElaborationEnvWithSourceBinderAliases
+              (mcrSourceTypeBinderAliases root)
+              annSourceTypes
+              rootExtPrepared
+              prepared
           rootLabel = rootTimingLabel label index
       out <-
         ExceptT $
@@ -1453,12 +2720,13 @@ finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMod
             finalCheckMode
             diagnosticsMode
             traceCfg
+            identityGenerator
             rootExtPrepared
             prepared
             elabConfig
             elabEnv
             (mcrAnnotated root)
-      go (index + 1) (Map.insert key out acc) rest
+      go (pedIdentityGenerator out) (index + 1) (Map.insert key out acc) rest
 
 finishPreparedPipelineRootWithTiming ::
   TimingConfig ->
@@ -1466,13 +2734,14 @@ finishPreparedPipelineRootWithTiming ::
   PipelineFinalCheckMode ->
   ResultTypeDiagnosticsMode ->
   TraceConfig ->
+  IdentityGenerator ->
   PreparedExternalBindings ->
   PreparedGeneralizationArtifact ->
   ElabConfig 'Presolved ->
   ElabEnv 'Presolved ->
   AnnExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared prepared elabConfig elabEnv annPre =
+finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv annPre =
   runExceptT $
     finishPreparedPipelineRootStage
       timing
@@ -1480,6 +2749,7 @@ finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode
       finalCheckMode
       diagnosticsMode
       traceCfg
+      identityGenerator
       extPrepared
       prepared
       elabConfig
@@ -1493,6 +2763,7 @@ finishPreparedPipelineRootStage ::
   PipelineFinalCheckMode ->
   ResultTypeDiagnosticsMode ->
   TraceConfig ->
+  IdentityGenerator ->
   PreparedExternalBindings ->
   PreparedGeneralizationArtifact ->
   ElabConfig 'Presolved ->
@@ -1500,38 +2771,324 @@ finishPreparedPipelineRootStage ::
   AnnExpr ->
   AnnExpr ->
   PipelineStage PipelineElabDetailedResult
-finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode traceCfg extPrepared prepared elabConfig elabEnv annCanon annPre = do
-  let initialTcEnv = pebTypeCheckEnv extPrepared
-  term <-
+finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv annCanon annPre = do
+  preparedRoot <-
+    preparePipelineRootStage
+      timing
+      label
+      traceCfg
+      extPrepared
+      prepared
+      elabConfig
+      elabEnv
+      annCanon
+      annPre
+  freshenedRoot <-
+    closeAndFreshenPipelineRootStage
+      timing
+      label
+      identityGenerator
+      preparedRoot
+  finishFreshenedPipelineRootStage
+    timing
+    label
+    finalCheckMode
+    diagnosticsMode
+    freshenedRoot
+
+preparePipelineRootStage ::
+  TimingConfig ->
+  String ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  PreparedGeneralizationArtifact ->
+  ElabConfig 'Presolved ->
+  ElabEnv 'Presolved ->
+  AnnExpr ->
+  AnnExpr ->
+  PipelineStage PreparedPipelineRootStage
+preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig elabEnv annCanon annPre = do
+  let initialTcEnv = preparedExternalTypeCheckEnv extPrepared
+  rootPlan <-
+    evaluatePipelineEitherSuffix timing label ".plan_root_exact" $
+      fromElabError (rootElaborationPlan annCanon annPre)
+  preparedRootConstruction <-
+    evaluatePipelineEitherSuffix timing label ".generalize_root_construction" $
+      fromElabError
+        ( prepareRootConstruction
+            prepared
+            rootPlan
+        )
+  constructionElabEnv <-
+    evaluatePipelineEitherSuffix timing label ".install_root_construction" $
+      fromElabError
+        ( elabEnvWithRootConstructionScope
+            preparedRootConstruction
+            (repElaborationCanonicalAnn rootPlan)
+            elabEnv
+        )
+  case preparedRootConstruction of
+    PreparedExactRootConstruction{} ->
+      evaluatePipelineEitherSuffix timing label ".validate_root_exact" $
+        fromElabError (validateElaborationWithEnv constructionElabEnv annCanon)
+    PreparedOrdinaryRootConstruction{} -> pure ()
+  elaboration <-
     evaluatePipelineEitherSuffix timing label ".elaborate" $
-      fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
+      case
+          elaborateWithEnvDetailed
+            elabConfig
+            constructionElabEnv
+            (repElaborationCanonicalAnn rootPlan)
+        of
+          Right elaborated -> pure elaborated
+          Left err ->
+            fromElabError
+              ( Left
+                  ( ValidationFailed
+                      [ "root construction elaboration failed",
+                        "  cause=" ++ show err,
+                        "  prepared exact root="
+                          ++ preparedRootConstructionDiagnostic preparedRootConstruction,
+                        "  construction Gamma binders="
+                          ++ show
+                            ( preparedRootConstructionScopeBinders
+                                (rootConstructionScope preparedRootConstruction)
+                            )
+                      ]
+                  )
+              )
+  let term = elaboratedTerm elaboration
+      mbOwnerFinalConstruction =
+        elaboratedOwnerFinalConstruction elaboration
+      localGammaConstructionCertificates =
+        elaboratedLocalGammaConstructionCertificates elaboration
+      compilerExactResultBoundCertificates =
+        elaboratedCompilerExactResultBoundCertificates elaboration
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
     () -> pure ()
-  let authoritativeAnnCanon = authoritativeRootAnn term annCanon
-      authoritativeAnnPre = authoritativeRootAnn term annPre
+  let sourceAuthoritativeAnnCanon =
+        authoritativeRootAnn term (repElaborationCanonicalAnn rootPlan)
+      sourceAuthoritativeAnnPre =
+        authoritativeRootAnn term (repElaborationPrecanonicalAnn rootPlan)
+      (sourceAuthoritativeAnnCanonFinal, sourceAuthoritativeAnnPreFinal) =
+        stripPreparedWitnesslessAuthoritativeAnn
+          prepared
+          sourceAuthoritativeAnnCanon
+          sourceAuthoritativeAnnPre
       (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-        stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-  rootGeneralization <-
+        case rootPlan of
+          ExactRootElaborationPlan
+            { repResultCanonicalAnn = resultCanon,
+              repResultPrecanonicalAnn = resultPre
+            } ->
+              (resultCanon, resultPre)
+          OrdinaryRootElaborationPlan{} ->
+            (sourceAuthoritativeAnnCanonFinal, sourceAuthoritativeAnnPreFinal)
+  rootGeneralization0 <-
     evaluatePipelineEitherSuffix timing label ".generalize_root" $
-      fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
-  let rootScheme0 = prgScheme rootGeneralization
-      rootSubst = prgSubst rootGeneralization
-      rootScheme = siScheme (schemeInfoFromRefSubst rootScheme0 rootSubst)
+      fromElabError
+        ( generalizePreparedRootDetailedWithConstructionResult
+            prepared
+            (repElaborationCanonicalAnn rootPlan)
+            (repElaborationPrecanonicalAnn rootPlan)
+            authoritativeAnnCanonFinal
+            mbOwnerFinalConstruction
+            localGammaConstructionCertificates
+        )
+  rootGeneralization <-
+    evaluatePipelineEitherSuffix timing label ".project_root_source_binders" $
+      fromElabError
+        ( applyPreparedRootSourceTypeBinderIdentities
+            rootGeneralization0
+        )
+  let rootSubst0 = prgSubst rootGeneralization
+  rootSubstAliased <-
+    evaluatePipelineEitherSuffix timing label ".project_term_source_binders" $
+      fromElabError
+        (applyPreparedTermSourceBinderAliases prepared rootSubst0 term)
+  rootGeneralizationFinal <-
+    case preparedRootConstruction of
+      PreparedExactRootConstruction deferred _ ->
+        evaluatePipelineEitherSuffix timing label ".project_root_exact_binders" $
+          fromElabError
+            ( applyPreparedCompilerExactRootBinderIdentities
+                prepared
+                (dreaEdgeId deferred)
+                rootGeneralization
+                rootSubstAliased
+            )
+      PreparedOrdinaryRootConstruction{} ->
+        evaluatePipelineEitherSuffix timing label ".project_root_term_binders" $
+          fromElabError
+            ( applyPreparedRootBinderIdentities
+                rootSubstAliased
+                rootGeneralization
+            )
+  let
+      rootScheme = prgScheme rootGeneralizationFinal
+      rootSubst = prgSubst rootGeneralizationFinal
   termSubst <-
     timePipelineValueSuffix timing label ".subst_root" $
       evaluate (substInTermRefs rootSubst term)
-  termClosed <-
+  pure
+    PreparedPipelineRootStage
+      { pprsPreparedGeneralization = prepared,
+        pprsInitialTypeCheckEnv = initialTcEnv,
+        pprsRootGeneralization = rootGeneralizationFinal,
+        pprsRootScheme = rootScheme,
+        pprsRootSubstitution = rootSubst,
+        pprsElaboratedTerm = term,
+        pprsSubstitutedTerm = termSubst,
+        pprsCompilerExactResultBoundCertificates =
+          projectCompilerExactResultBoundCertificates
+            rootSubst
+            compilerExactResultBoundCertificates,
+        pprsAuthoritativeCanonicalAnn = authoritativeAnnCanonFinal,
+        pprsAuthoritativePrecanonicalAnn = authoritativeAnnPreFinal,
+        pprsRootExactness =
+          case preparedRootConstruction of
+            PreparedOrdinaryRootConstruction{} -> PreparedOrdinaryRoot
+            PreparedExactRootConstruction deferred _ -> PreparedExactRoot deferred
+      }
+
+closeAndFreshenPipelineRootStage ::
+  TimingConfig ->
+  String ->
+  IdentityGenerator ->
+  PreparedPipelineRootStage ->
+  PipelineStage FreshenedPipelineRootStage
+closeAndFreshenPipelineRootStage timing label identityGenerator preparedRoot = do
+  (termClosed, closedGenerator) <-
     timePipelineValueSuffix timing label ".close_term" $
-      evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
+      evaluate
+        ( closePipelineTermFromSupply
+            identityGenerator
+            (pprsRootExactness preparedRoot)
+            initialTcEnv
+            rootSubst
+            rootClosure
+            term
+            termSubst
+        )
+  (termConstructed, authoritativeResultType) <-
+    case pprsRootExactness preparedRoot of
+      PreparedOrdinaryRoot -> pure (termClosed, schemeToType rootScheme)
+      PreparedExactRoot deferred ->
+        evaluatePipelineEitherSuffix timing label ".construct_root_exact" $ do
+          sourceCompletedTerm <-
+            fromElabError
+              ( completePreparedCompilerExactSubtermResults
+                  prepared
+                  (pprsCompilerExactResultBoundCertificates preparedRoot)
+                  CompleteBeforeCompilerExact
+                  (dreaEdgeId deferred)
+                  termClosed
+              )
+          expectedExactType <-
+            fromElabError
+              ( preparedCompilerExactExpectedType
+                  prepared
+                  (dreaEdgeId deferred)
+              )
+          let closedExpectedExactType =
+                closePreparedExactExpectedType
+                  rootClosure
+                  expectedExactType
+          exactTerm <-
+            case
+                elaborateClosedExactAnnotationTermAtType
+                  initialTcEnv
+                  closedExpectedExactType
+                  (dreaEdgeId deferred)
+                  sourceCompletedTerm
+              of
+                Left err ->
+                  fromElabError
+                    ( Left
+                        ( ValidationFailed
+                            [ "root compiler-exact construction failed"
+                            , "  cause: " ++ show err
+                            ]
+                        )
+                    )
+                Right result -> pure result
+          completedTerm <-
+            fromElabError
+              ( completePreparedCompilerExactSubtermResults
+                  prepared
+                  (pprsCompilerExactResultBoundCertificates preparedRoot)
+                  CompleteAfterCompilerExact
+                  (dreaEdgeId deferred)
+                  exactTerm
+              )
+          exactTy <-
+            case typeCheckWithEnv initialTcEnv completedTerm of
+              Right ty -> pure ty
+              Left err ->
+                fromElabError
+                  ( Left
+                      ( ValidationFailed
+                          [ "root compiler-exact completion failed"
+                          , "  cause: " ++ show err
+                          ]
+                      )
+                  )
+          pure (completedTerm, exactTy)
+  (termClosedFresh0, freshenedGenerator) <-
+    case pprsRootExactness preparedRoot of
+      PreparedExactRoot{} -> pure (termConstructed, closedGenerator)
+      PreparedOrdinaryRoot ->
+        timePipelineValueSuffix timing label ".freshen_type_abs" $
+          evaluate
+            (freshenTypeAbsAgainstEnvFromSupply closedGenerator initialTcEnv termConstructed)
+  let reservedGenerator =
+        advanceIdentityGeneratorPastMany
+          ( generatedIdentitiesInTerm termClosedFresh0
+              ++ generatedIdentitiesInType (schemeToType rootScheme)
+          )
+          freshenedGenerator
+  pure
+    FreshenedPipelineRootStage
+      { fprsPreparedRoot = preparedRoot,
+        fprsClosedTerm = termClosedFresh0,
+        fprsAuthoritativeResultType = authoritativeResultType,
+        fprsIdentityGenerator = reservedGenerator
+      }
+  where
+    initialTcEnv = pprsInitialTypeCheckEnv preparedRoot
+    prepared = pprsPreparedGeneralization preparedRoot
+    rootSubst = pprsRootSubstitution preparedRoot
+    rootScheme = pprsRootScheme preparedRoot
+    rootClosure = prgClosure (pprsRootGeneralization preparedRoot)
+    term = pprsElaboratedTerm preparedRoot
+    termSubst = pprsSubstitutedTerm preparedRoot
+
+finishFreshenedPipelineRootStage ::
+  TimingConfig ->
+  String ->
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  FreshenedPipelineRootStage ->
+  PipelineStage PipelineElabDetailedResult
+finishFreshenedPipelineRootStage timing label finalCheckMode diagnosticsMode freshenedRoot = do
   termClosedFresh <-
-    timePipelineValueSuffix timing label ".freshen_type_abs" $
-      evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
-  let uncheckedAuthoritative =
+    case pprsRootExactness preparedRoot of
+      PreparedExactRoot{} -> pure termClosedFresh0
+      PreparedOrdinaryRoot ->
+        timePipelineValueSuffix timing label ".canonicalize_term_types" $
+          evaluate (TypeCheck.canonicalizeResolvedTermTypes initialTcEnv termClosedFresh0)
+  let resultGenerator resultType =
+        advanceIdentityGeneratorPastMany
+          (generatedIdentitiesInTerm termClosedFresh ++ generatedIdentitiesInType resultType)
+          identityGenerator
+      uncheckedResultType = fprsAuthoritativeResultType freshenedRoot
+      uncheckedAuthoritative =
         PipelineElabDetailedResult
           { pedTerm = termClosedFresh,
-            pedType = schemeToType rootScheme,
+            pedType = uncheckedResultType,
             pedRootAnn = authoritativeAnnCanonFinal,
-            pedTypeCheckEnv = initialTcEnv
+            pedTypeCheckEnv = initialTcEnv,
+            pedIdentityGenerator = resultGenerator uncheckedResultType
           }
 
   authoritativeResult <-
@@ -1548,7 +3105,8 @@ finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode trac
                 { pedTerm = termClosedFresh,
                   pedType = tyChecked,
                   pedRootAnn = authoritativeAnnCanonFinal,
-                  pedTypeCheckEnv = initialTcEnv
+                  pedTypeCheckEnv = initialTcEnv,
+                  pedIdentityGenerator = resultGenerator tyChecked
                 }
       FinalCheckAfterDeferredRewrite ->
         pure (Right uncheckedAuthoritative)
@@ -1559,53 +3117,185 @@ finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode trac
           fromElabError (computePreparedResultTypeWithRootGeneralization prepared rootGeneralization authoritativeAnnCanonFinal authoritativeAnnPreFinal)
       fromPipelineEither authoritativeResult
     else fromPipelineEither authoritativeResult
+  where
+    preparedRoot = fprsPreparedRoot freshenedRoot
+    prepared = pprsPreparedGeneralization preparedRoot
+    initialTcEnv = pprsInitialTypeCheckEnv preparedRoot
+    rootGeneralization = pprsRootGeneralization preparedRoot
+    authoritativeAnnCanonFinal = pprsAuthoritativeCanonicalAnn preparedRoot
+    authoritativeAnnPreFinal = pprsAuthoritativePrecanonicalAnn preparedRoot
+    termClosedFresh0 = fprsClosedTerm freshenedRoot
+    identityGenerator = fprsIdentityGenerator freshenedRoot
 
 closePipelineTerm :: TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> XmlfTerm -> XmlfTerm
 closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
-  let retainedChildAuthoritativeCandidate =
-        case preserveRetainedChildAuthoritativeResult termSubst of
-          Just _ -> True
-          Nothing -> False
-      termClosed0 =
-        if retainedChildAuthoritativeCandidate
-          then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme term
-          else case typeCheckWithEnv initialTcEnv termSubst of
-            Right ty ->
-              let freeTyVarRefs = freeTypeVarRefsType ty
-               in if null freeTyVarRefs
-                    then termSubst
-                    else
-                      if null (schemeBinderRefs rootScheme)
-                        then
-                          let freeBinds =
-                                [ (ref, Nothing)
-                                  | ref <- freeTyVarRefs
-                                ]
-                              freeScheme = mkElabSchemeWithRefs freeBinds ty
-                           in closeTermWithSchemeSubstRefsIfNeeded IntMap.empty freeScheme termSubst
-                        else closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme term
-            Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme term
-   in case preserveRetainedChildAuthoritativeResult termClosed0 of
-        Just termAdjusted ->
-          closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termAdjusted
-        Nothing
-          | retainedChildAuthoritativeCandidate ->
-              closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termClosed0
-        Nothing -> termClosed0
+  fst
+    ( closePipelineTermFromSupply
+        (identityGeneratorAfter closeInputs)
+        PreparedOrdinaryRoot
+        initialTcEnv
+        rootSubst
+        (PreparedWholeRootClosure [] rootScheme)
+        term
+        termSubst
+    )
+  where
+    closeInputs =
+      generatedIdentitiesInTerm term
+        ++ generatedIdentitiesInTerm termSubst
+        ++ generatedIdentitiesInType (schemeToType rootScheme)
+        ++ pipelineTypeCheckEnvGeneratedIdentities initialTcEnv
 
-closeRetainedChildAuthoritativeTerm :: TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> XmlfTerm
-closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termAdjusted =
+-- | A compiler-exact root is checked after its prepared closure has already
+-- emitted the root type abstractions.  Close the source-owned expected type
+-- with exactly that prepared binder spine before comparing the two endpoints;
+-- a post-hoc rule that merely peels matching foralls would lose both Gamma
+-- ownership and bound authority.
+closePreparedExactExpectedType :: PreparedRootClosure -> ElabType -> ElabType
+closePreparedExactExpectedType rootClosure expectedType =
+  foldr closeIfFree expectedType (schemeBinderRefs rootClosureScheme)
+  where
+    rootClosureScheme = preparedRootClosureScheme rootClosure
+
+    closeIfFree (ref, mbBound) ty
+      | any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType ty) =
+          TForallRef ref mbBound ty
+      | otherwise = ty
+
+closePipelineTermFromSupply :: IdentityGenerator -> PreparedRootExactness -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> PreparedRootClosure -> XmlfTerm -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
+closePipelineTermFromSupply suppliedGenerator rootExactness initialTcEnv rootSubst rootClosure term termSubst =
+  let termSubstType = typeCheckWithEnv initialTcEnv termSubst
+      rootClosureScheme = preparedRootClosureScheme rootClosure
+      rootType = schemeToType rootClosureScheme
+      generator0 =
+        advanceIdentityGeneratorPastMany
+          ( generatedIdentitiesInTerm term
+              ++ generatedIdentitiesInTerm termSubst
+              ++ generatedIdentitiesInType rootType
+              ++ pipelineTypeCheckEnvGeneratedIdentities initialTcEnv
+          )
+          suppliedGenerator
+      retainedChildAuthoritativeCandidate =
+        case rootClosure of
+          PreparedLocalRootClosure{} -> False
+          PreparedWholeRootClosure{} ->
+            case preserveRetainedChildAuthoritativeResult termSubst of
+              Just _ -> True
+              Nothing -> False
+      termClosed0 =
+        case (rootExactness, rootClosure) of
+          (PreparedExactRoot{}, _) ->
+            constructTermWithSchemeSubstRefs rootSubst rootClosureScheme term
+          -- A local root closure has already constructed the leading forall
+          -- spine stored in the scheme body.  Its explicit scheme binders are
+          -- the distinct outer/root-owned spine, so emit exactly those here.
+          -- The generic "if needed" closer cannot infer this split from the
+          -- finished term: it would align the first local abstraction with the
+          -- first root binder and then decline to add the missing outer binder.
+          (PreparedOrdinaryRoot, PreparedLocalRootClosure{}) ->
+            constructTermWithSchemeSubstRefs rootSubst rootClosureScheme term
+          (PreparedOrdinaryRoot, PreparedWholeRootClosure{}) ->
+            if retainedChildAuthoritativeCandidate
+              then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
+              else if rootSchemeHasPolymorphicBound rootClosureScheme
+                then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme termSubst
+              else
+                case termSubstType of
+                  Right ty
+                    | ty == rootType
+                        || alphaEqType ty rootType
+                        || churchAwareEqType ty rootType ->
+                        -- Type equality aligns the published endpoint with the
+                        -- prepared scheme, but it does not prove that the term
+                        -- constructed the scheme's Lambda spine.  In
+                        -- particular, an application can return a forall
+                        -- directly.  At a publication boundary that value must
+                        -- still be abstracted to the scheme body and wrapped
+                        -- with the prepared binders.  Preserve an existing
+                        -- explicit spine, including source-owned binder
+                        -- identities, and construct only when it is absent.
+                        if termConstructsRootForallSpine rootClosureScheme termSubst
+                          then termSubst
+                          else
+                            closeTermWithSchemeSubstRefsIfNeeded
+                              rootSubst
+                              rootClosureScheme
+                              termSubst
+                    | not (null (freeTypeVarRefsType ty)),
+                      rootSchemeMatchesOpenTerm rootClosureScheme ty ->
+                        closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
+                    | otherwise -> termSubst
+                  Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
+   in case rootClosure of
+        PreparedLocalRootClosure{} -> (termClosed0, generator0)
+        PreparedWholeRootClosure{} ->
+          case preserveRetainedChildAuthoritativeResult termClosed0 of
+            Just termAdjusted ->
+              closeRetainedChildAuthoritativeTermFromSupply generator0 initialTcEnv rootSubst rootClosureScheme termAdjusted
+            Nothing
+              | retainedChildAuthoritativeCandidate ->
+                  closeRetainedChildAuthoritativeTermFromSupply generator0 initialTcEnv rootSubst rootClosureScheme termClosed0
+            Nothing -> (termClosed0, generator0)
+
+rootSchemeMatchesOpenTerm :: ElabScheme -> ElabType -> Bool
+rootSchemeMatchesOpenTerm scheme ty =
+  case
+      matchTypeRefs
+        (map fst (schemeBinderRefs scheme))
+        (schemeBody scheme)
+        ty
+    of
+      Right _ -> True
+      Left _ -> False
+
+-- | A term whose result path already spells the root's forall spine owns that
+-- construction, even when an explicit source annotation chose binder
+-- identities different from the graph presentation.  A bare producer whose
+-- type merely happens to be forall-shaped does not: closing it must emit the
+-- root Lambda/applications explicitly so the term and published scheme share
+-- one operational binder identity.
+termConstructsRootForallSpine :: ElabScheme -> XmlfTerm -> Bool
+termConstructsRootForallSpine scheme =
+  go (length (schemeBinderRefs scheme))
+  where
+    go 0 _ = True
+    go remaining term =
+      case term of
+        ETyAbsRef _ _ body -> go (remaining - 1) body
+        ELet resolved _ rhs body ->
+          case body of
+            EVarNode occurrence
+              | resolvedVarSameIdentity resolved occurrence ->
+                  go remaining rhs
+            _ -> go remaining body
+        _ -> False
+
+rootSchemeHasPolymorphicBound :: ElabScheme -> Bool
+rootSchemeHasPolymorphicBound =
+  any (maybe False (containsForall . tyToElab) . snd) . schemeBinderRefs
+  where
+    containsForall ty =
+      case ty of
+        TForallRef {} -> True
+        TArrow dom cod -> containsForall dom || containsForall cod
+        TConWithIdentity _ _ args -> any containsForall args
+        TVarAppRef _ args -> any containsForall args
+        TMuRef _ body -> containsForall body
+        _ -> False
+
+closeRetainedChildAuthoritativeTermFromSupply :: IdentityGenerator -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
+closeRetainedChildAuthoritativeTermFromSupply generator initialTcEnv rootSubst rootScheme termAdjusted =
   let closed = closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme termAdjusted
    in if retainedChildCanUseRepresentativeScheme rootScheme
-        then case retainedChildRepresentativeTerm initialTcEnv closed of
+        then case retainedChildRepresentativeTermFromSupply generator initialTcEnv closed of
           Just representativeClosed -> representativeClosed
           Nothing
             | retainedChildIdentityRootScheme rootScheme ->
-                case retainedChildRepresentativeTerm initialTcEnv termAdjusted of
+                case retainedChildRepresentativeTermFromSupply generator initialTcEnv termAdjusted of
                   Just representativeAdjusted -> representativeAdjusted
-                  Nothing -> closed
-          Nothing -> closed
-        else closed
+                  Nothing -> (closed, generator)
+          Nothing -> (closed, generator)
+        else (closed, generator)
 
 retainedChildCanUseRepresentativeScheme :: ElabScheme -> Bool
 retainedChildCanUseRepresentativeScheme rootScheme =
@@ -1616,30 +3306,34 @@ retainedChildIdentityRootScheme rootScheme = case schemeToType rootScheme of
   TForallRef ref Nothing (TVarRef bodyRef) -> typeBinderRefsSameIdentity ref bodyRef
   _ -> False
 
-retainedChildRepresentativeTerm :: TypeCheck.Env -> XmlfTerm -> Maybe XmlfTerm
-retainedChildRepresentativeTerm initialTcEnv term =
+retainedChildRepresentativeTermFromSupply :: IdentityGenerator -> TypeCheck.Env -> XmlfTerm -> Maybe (XmlfTerm, IdentityGenerator)
+retainedChildRepresentativeTermFromSupply generator initialTcEnv term =
   case typeCheckWithEnv initialTcEnv term of
     Right ty
       | containsRecursiveType ty,
         countLeadingUnboundedForalls ty == 0 ->
-          let representativeScheme = retainedChildRepresentativeScheme term ty
+          let (representativeScheme, generator') =
+                retainedChildRepresentativeSchemeFromSupply generator term ty
               representativeClosed =
                 closeTermWithSchemeSubstRefsIfNeeded IntMap.empty representativeScheme term
            in case typeCheckWithEnv initialTcEnv representativeClosed of
                 Right representativeTy
                   | countLeadingUnboundedForalls representativeTy == 2 ->
-                      Just representativeClosed
+                      Just (representativeClosed, generator')
                 _ -> Nothing
     _ -> Nothing
 
-retainedChildRepresentativeScheme :: XmlfTerm -> ElabType -> ElabScheme
-retainedChildRepresentativeScheme term ty =
-  let generator0 = identityGeneratorAfterTerm term
+retainedChildRepresentativeSchemeFromSupply :: IdentityGenerator -> XmlfTerm -> ElabType -> (ElabScheme, IdentityGenerator)
+retainedChildRepresentativeSchemeFromSupply suppliedGenerator term ty =
+  let generator0 =
+        advanceIdentityGeneratorPastMany
+          (generatedIdentitiesInTerm term ++ generatedIdentitiesInType ty)
+          suppliedGenerator
       used0 = freeTypeVarAliasNamesType ty
       (outerRef, generator1) = freshTypeBinderRefFromNames used0 generator0
       used1 = typeBinderRefAliasNames outerRef `Set.union` used0
-      (innerRef, _generator2) = freshTypeBinderRefFromNames used1 generator1
-   in mkElabSchemeWithRefs [(outerRef, Nothing), (innerRef, Nothing)] ty
+      (innerRef, generator2) = freshTypeBinderRefFromNames used1 generator1
+   in (mkElabSchemeWithRefs [(outerRef, Nothing), (innerRef, Nothing)] ty, generator2)
 
 countLeadingUnboundedForalls :: ElabType -> Int
 countLeadingUnboundedForalls ty = case ty of
@@ -1648,21 +3342,42 @@ countLeadingUnboundedForalls ty = case ty of
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
 freshenTypeAbsAgainstEnv env term0 =
+  fst
+    ( freshenTypeAbsAgainstEnvFromSupply
+        (identityGeneratorAfterTerm seedTerm)
+        env
+        term0
+    )
+  where
+    summary = summarizePipelineTypeCheckEnv env
+    visibleRefs = pipelineVisibleTypeVarRefs summary
+    seedTerm = foldr (`ETyAbsRef` Nothing) term0 visibleRefs
+
+freshenTypeAbsAgainstEnvFromSupply :: IdentityGenerator -> TypeCheck.Env -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
+freshenTypeAbsAgainstEnvFromSupply suppliedGenerator env term0 =
   let summary = summarizePipelineTypeCheckEnv env
       visibleRefs = pipelineVisibleTypeVarRefs summary
       seedTerm = foldr (`ETyAbsRef` Nothing) term0 visibleRefs
-      generator0 = identityGeneratorAfterTerm seedTerm
-      (term1, _) = go generator0 (pipelineFreshenReservedTypeVars summary) visibleRefs term0
-   in pruneVacuousLeadingTyAbsAgainstEnv summary env term1
+      generator0 =
+        advanceIdentityGeneratorPastMany
+          ( generatedIdentitiesInTerm seedTerm
+              ++ pipelineTypeCheckEnvGeneratedIdentities env
+          )
+          suppliedGenerator
+   in go generator0 (pipelineFreshenReservedTypeVars summary) visibleRefs env term0
   where
-    go generator used visibleRefs term = case term of
+    go generator used visibleRefs tcEnv term = case term of
       ETyAbsRef ref mb body ->
         let name = typeBinderRefName ref
             usedForBinder = Set.union used (maybe Set.empty freeTypeVarAliasNamesType mb)
             refInScope =
               any (typeBinderRefsSameIdentity ref) visibleRefs
-            needsFreshening =
-              refInScope || Set.member name usedForBinder
+            -- Exact identity determines lexical capture.  A display-name or
+            -- stable-alias collision still needs alpha-renaming for the
+            -- identity-erasing xMLF projection, but it must retain the graph
+            -- binder identity.  Only an exact in-scope identity collision
+            -- allocates a fresh identity below.
+            needsFreshening = refInScope || Set.member name usedForBinder
             (ref', generator', bodyForName) =
               if needsFreshening
                 then
@@ -1671,40 +3386,90 @@ freshenTypeAbsAgainstEnv env term0 =
                         if refInScope
                           then freshTypeBinderRef fresh generator
                           else (renameTypeBinderRef fresh ref, generator)
-                      bodyRenamed = renameTypeVarInTerm ref freshRef body
+                      bodyRenamed = renameTypeVarInTermAgainstEnv tcEnv ref freshRef body
                    in (freshRef, generator1, bodyRenamed)
                 else (ref, generator, body)
             usedBody = typeBinderRefAliasNames ref' `Set.union` usedForBinder
             visibleBody = unionTypeRefs [ref'] visibleRefs
-            (body', generator'') = go generator' usedBody visibleBody bodyForName
+            tcEnv' = TypeCheck.insertTypeBindingRef ref' (maybe TBottom tyToElab mb) tcEnv
+            (body', generator'') = go generator' usedBody visibleBody tcEnv' bodyForName
          in (ETyAbsRef ref' mb body', generator'')
       ELam resolved body ->
         let ty = resolvedVarType resolved
             used' = Set.union used (freeTypeVarAliasNamesType ty)
             visibleRefs' = unionTypeRefs (freeTypeVarRefsType ty) visibleRefs
-            (body', generator') = go generator used' visibleRefs' body
+            tcEnv' = TypeCheck.insertResolvedTermBinding resolved ty tcEnv
+            (body', generator') = go generator used' visibleRefs' tcEnv' body
          in (ELam resolved body', generator')
       EApp f a ->
-        let (f', generator') = go generator used visibleRefs f
-            (a', generator'') = go generator' used visibleRefs a
+        let (f', generator') = go generator used visibleRefs tcEnv f
+            (a', generator'') = go generator' used visibleRefs tcEnv a
          in (EApp f' a', generator'')
       ELet resolved sch rhs body ->
         let ty = schemeToType sch
             used' = Set.union used (freeTypeVarAliasNamesType ty)
             visibleRefs' = unionTypeRefs (freeTypeVarRefsType ty) visibleRefs
-            (rhs', generator') = go generator used' visibleRefs' rhs
-            (body', generator'') = go generator' used' visibleRefs' body
+            tcEnv' = TypeCheck.insertResolvedTermBinding resolved ty tcEnv
+            (rhs', generator') = go generator used' visibleRefs' tcEnv' rhs
+            (body', generator'') = go generator' used' visibleRefs' tcEnv' body
          in (ELet resolved sch rhs' body', generator'')
       ETyInst t inst ->
-        let (t', generator') = go generator used visibleRefs t
+        let (t', generator') = go generator used visibleRefs tcEnv t
          in (ETyInst t' inst, generator')
       ERoll ty body ->
-        let (body', generator') = go generator used visibleRefs body
+        let (body', generator') = go generator used visibleRefs tcEnv body
          in (ERoll ty body', generator')
       EUnroll body ->
-        let (body', generator') = go generator used visibleRefs body
+        let (body', generator') = go generator used visibleRefs tcEnv body
          in (EUnroll body', generator')
       _ -> (term, generator)
+
+renameTypeVarInTermAgainstEnv :: TypeCheck.Env -> TypeBinderRef -> TypeBinderRef -> XmlfTerm -> XmlfTerm
+renameTypeVarInTermAgainstEnv env oldRef newRef = go env
+  where
+    renameTy = substTypeCaptureRef oldRef (TVarRef newRef)
+    renameBound = mapBoundType renameTy
+    renameScheme sch = schemeFromType (renameTy (schemeToType sch))
+    renameRef ref
+      | typeBinderRefsSameIdentity ref oldRef = newRef
+      | otherwise = ref
+    renameInst inst = case project inst of
+      InstIdF -> InstId
+      InstAppF ty -> InstApp (renameTy ty)
+      InstIntroF -> InstIntro
+      InstElimF -> InstElim
+      InstInsideF inner -> InstInside (renameInst inner)
+      InstSeqF a b -> InstSeq (renameInst a) (renameInst b)
+      InstUnderFRef ref inner -> instUnderWithRef (renameRef ref) (renameInst inner)
+      InstBotF ty -> InstBot (renameTy ty)
+      InstAbstrFRef ref -> instAbstrWithRef (renameRef ref)
+
+    go tcEnv term = case project term of
+      EVarNodeF resolved ->
+        case TypeCheck.lookupResolvedTermEnvEntry (TypeCheck.resolvedTermEnv tcEnv) resolved of
+          Just (_, ty) -> EVarNode (mapResolvedVarType (const ty) resolved)
+          Nothing -> EVarNode (mapResolvedVarType renameTy resolved)
+      ELitF lit -> ELit lit
+      ELamF resolved body ->
+        let resolved' = mapResolvedVarType renameTy resolved
+            tcEnv' = TypeCheck.insertResolvedTermBinding resolved' (resolvedVarType resolved') tcEnv
+         in ELam resolved' (go tcEnv' body)
+      EAppF f a -> EApp (go tcEnv f) (go tcEnv a)
+      ELetF resolved sch rhs body ->
+        let sch' = renameScheme sch
+            schTy = schemeToType sch'
+            resolved' = mapResolvedVarType (const schTy) resolved
+            tcEnv' = TypeCheck.insertResolvedTermBinding resolved' schTy tcEnv
+         in ELet resolved' sch' (go tcEnv' rhs) (go tcEnv' body)
+      ETyAbsFRef ref mb body
+        | typeBinderRefsSameIdentity ref oldRef -> eTyAbsWithRef ref (fmap renameBound mb) body
+        | otherwise ->
+            let mb' = fmap renameBound mb
+                tcEnv' = TypeCheck.insertTypeBindingRef ref (maybe TBottom tyToElab mb') tcEnv
+             in eTyAbsWithRef ref mb' (go tcEnv' body)
+      ETyInstF t inst -> ETyInst (go tcEnv t) (renameInst inst)
+      ERollF ty body -> ERoll (renameTy ty) (go tcEnv body)
+      EUnrollF body -> EUnroll (go tcEnv body)
 
 data PipelineTypeCheckEnvSummary = PipelineTypeCheckEnvSummary
   { ptcesTermFreeVars :: FreeVarCounts,
@@ -1722,13 +3487,17 @@ summarizePipelineTypeCheckEnv env =
       ptcesTypeRefs = Map.keys (TypeCheck.typeEnv env)
     }
 
-insertPipelineTypeSummary :: TypeBinderRef -> ElabType -> TypeCheck.Env -> PipelineTypeCheckEnvSummary -> PipelineTypeCheckEnvSummary
-insertPipelineTypeSummary ref ty env summary =
-  summary
-    { ptcesTypeFreeVars =
-        replaceTypeFreeVars (TypeCheck.lookupTypeBindingRef ref env) ty (ptcesTypeFreeVars summary),
-      ptcesTypeRefs = unionTypeRefs [ref] (ptcesTypeRefs summary)
-    }
+pipelineTypeCheckEnvGeneratedIdentities :: TypeCheck.Env -> [UniqueIdentity]
+pipelineTypeCheckEnvGeneratedIdentities env =
+  concat
+    [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+        ++ generatedIdentitiesInType ty
+    | (resolved, ty) <- TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv env)
+    ]
+    ++ concatMap generatedIdentitiesInType (Map.elems (TypeCheck.typeEnv env))
+    ++ concatMap
+      (typeBinderGeneratedIdentities . typeBinderRefIdentity)
+      (Map.keys (TypeCheck.typeEnv env))
 
 pipelineFreshenReservedTypeVars :: PipelineTypeCheckEnvSummary -> Set.Set String
 pipelineFreshenReservedTypeVars summary =
@@ -1762,11 +3531,6 @@ freeVarCountsNames :: FreeVarCounts -> Set.Set String
 freeVarCountsNames =
   typeVarRefAliasNames . freeVarCountsRefs
 
-replaceTypeFreeVars :: Maybe ElabType -> ElabType -> FreeVarCounts -> FreeVarCounts
-replaceTypeFreeVars oldTy newTy =
-  insertFreeVarRefs (freeTypeVarRefsType newTy)
-    . maybe id (deleteFreeVarRefs . freeTypeVarRefsType) oldTy
-
 insertFreeVarRefs :: [TypeBinderRef] -> FreeVarCounts -> FreeVarCounts
 insertFreeVarRefs refs (FreeVarCounts counts) =
   FreeVarCounts (foldl' insertOne counts refs)
@@ -1776,17 +3540,6 @@ insertFreeVarRefs refs (FreeVarCounts counts) =
       | typeBinderRefsSameIdentity existing ref = (existing, count + 1) : rest
       | otherwise = (existing, count) : insertOne rest ref
 
-deleteFreeVarRefs :: [TypeBinderRef] -> FreeVarCounts -> FreeVarCounts
-deleteFreeVarRefs refs (FreeVarCounts counts) =
-  FreeVarCounts (foldl' deleteOne counts refs)
-  where
-    deleteOne [] _ = []
-    deleteOne ((existing, count) : rest) ref
-      | typeBinderRefsSameIdentity existing ref =
-          let count' = count - 1
-           in if count' <= 0 then rest else (existing, count') : rest
-      | otherwise = (existing, count) : deleteOne rest ref
-
 unionTypeRefs :: [TypeBinderRef] -> [TypeBinderRef] -> [TypeBinderRef]
 unionTypeRefs left right =
   foldr insertRef right left
@@ -1794,37 +3547,6 @@ unionTypeRefs left right =
     insertRef ref refs
       | any (typeBinderRefsSameIdentity ref) refs = refs
       | otherwise = ref : refs
-
-pruneVacuousLeadingTyAbsAgainstEnv :: PipelineTypeCheckEnvSummary -> TypeCheck.Env -> XmlfTerm -> XmlfTerm
-pruneVacuousLeadingTyAbsAgainstEnv summary env term = case term of
-  ETyAbsRef ref mb body ->
-    let boundTy = maybe TBottom tyToElab mb
-        summary' = insertPipelineTypeSummary ref boundTy env summary
-        env' = TypeCheck.insertTypeBindingRef ref boundTy env
-        body' = pruneVacuousLeadingTyAbsAgainstEnv summary' env' body
-     in case typeCheckWithEnv env' body' of
-          Right bodyTy
-            | not (any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType bodyTy)),
-              not (containsRecursiveType bodyTy) ->
-                case mb of
-                  Nothing -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
-                  Just _ ->
-                    case
-                      [ freeRef
-                        | freeRef <- freeTypeVarRefsType bodyTy,
-                          not (any (typeBinderRefsSameIdentity freeRef) (pipelineVisibleTypeVarRefs summary))
-                      ]
-                    of
-                      [freeRef] ->
-                        let bodyRenamed = renameTypeVarInTerm freeRef ref body'
-                         in case typeCheckWithEnv env' bodyRenamed of
-                              Right renamedTy
-                                | any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType renamedTy) ->
-                                    ETyAbsRef ref mb bodyRenamed
-                              _ -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
-                      _ -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
-          _ -> ETyAbsRef ref mb body'
-  _ -> term
 
 containsRecursiveType :: ElabType -> Bool
 containsRecursiveType ty = case ty of
@@ -1843,45 +3565,6 @@ containsRecursiveType ty = case ty of
       TMuRef {} -> True
       _ -> False
 
-renameTypeVarInTerm :: TypeBinderRef -> TypeBinderRef -> XmlfTerm -> XmlfTerm
-renameTypeVarInTerm oldRef newRef term =
-  let renameTy = substTypeCaptureRef oldRef (TVarRef newRef)
-      renameBound = mapBoundType renameTy
-      renameScheme sch = schemeFromType (renameTy (schemeToType sch))
-      renameRef ref
-        | typeBinderRefsSameIdentity ref oldRef = newRef
-        | otherwise = ref
-      renameInst inst = case project inst of
-        InstIdF -> InstId
-        InstAppF ty -> InstApp (renameTy ty)
-        InstIntroF -> InstIntro
-        InstElimF -> InstElim
-        InstInsideF inner -> InstInside (renameInst inner)
-        InstSeqF a b -> InstSeq (renameInst a) (renameInst b)
-        InstUnderFRef ref inner -> instUnderWithRef (renameRef ref) (renameInst inner)
-        InstBotF ty -> InstBot (renameTy ty)
-        InstAbstrFRef ref -> instAbstrWithRef (renameRef ref)
-   in case project term of
-        EVarNodeF resolved -> EVarNode (mapResolvedVarType renameTy resolved)
-        ELitF lit -> ELit lit
-        ELamF resolved body ->
-          ELam
-            (mapResolvedVarType renameTy resolved)
-            (renameTypeVarInTerm oldRef newRef body)
-        EAppF f a -> EApp (renameTypeVarInTerm oldRef newRef f) (renameTypeVarInTerm oldRef newRef a)
-        ELetF resolved sch rhs body ->
-          ELet
-            (mapResolvedVarType renameTy resolved)
-            (renameScheme sch)
-            (renameTypeVarInTerm oldRef newRef rhs)
-            (renameTypeVarInTerm oldRef newRef body)
-        ETyAbsFRef ref mb body
-          | typeBinderRefsSameIdentity ref oldRef -> eTyAbsWithRef ref (fmap renameBound mb) body
-          | otherwise -> eTyAbsWithRef ref (fmap renameBound mb) (renameTypeVarInTerm oldRef newRef body)
-        ETyInstF t inst -> ETyInst (renameTypeVarInTerm oldRef newRef t) (renameInst inst)
-        ERollF ty body -> ERoll (renameTy ty) (renameTypeVarInTerm oldRef newRef body)
-        EUnrollF body -> EUnroll (renameTypeVarInTerm oldRef newRef body)
-
 authoritativeRootAnn :: XmlfTerm -> AnnExpr -> AnnExpr
 authoritativeRootAnn term annExpr =
   case (stripLeadingTyAbs term, annExpr) of
@@ -1891,9 +3574,15 @@ authoritativeRootAnn term annExpr =
     (term0, AUnfold inner _ _)
       | shouldStripAuthoritativeAnn term0 ->
           authoritativeRootAnn term0 inner
-    (ELet resolved _ _ bodyTerm, ALet _ _ _ schemeRootId _ _ _ bodyAnn _)
-      | resolvedVarMatchesAnnNode resolved schemeRootId ->
-          authoritativeRootAnn bodyTerm bodyAnn
+    (term0, ALetScope inner _ _) ->
+      authoritativeRootAnn term0 inner
+    (term0, ALet _ binderDetails _ _ _ _ _ bodyAnn _) ->
+      case term0 of
+        ELet resolved _ _ bodyTerm
+          | idDetailsSameIdentity binderDetails (resolvedVarDetails resolved) ->
+              authoritativeRootAnn bodyTerm bodyAnn
+        ELet {} -> annExpr
+        _ -> authoritativeRootAnn term0 bodyAnn
     (EApp (ELam param (EVarNode bodyVar)) argTerm, AApp _ argAnn _ _ _)
       | sameResolvedLocalVar param bodyVar ->
           authoritativeRootAnn argTerm argAnn
@@ -1916,19 +3605,11 @@ annProducesResolvedVar resolved = go
   where
     go annExpr =
       case annExpr of
-        AVar _ nodeId -> resolvedVarMatchesAnnNode resolved nodeId
         AResolvedVar details _ _ ->
           idDetailsSameIdentity details (resolvedVarDetails resolved)
         AAnn inner _ _ -> go inner
         AUnfold inner _ _ -> go inner
         _ -> False
-
-resolvedVarMatchesAnnNode :: ResolvedVar -> NodeId -> Bool
-resolvedVarMatchesAnnNode resolved nodeId =
-  case resolvedVarDetails resolved of
-    LocalId ref -> localRefMatchesNodeId ref nodeId
-    EvidenceId ref -> localRefMatchesNodeId ref nodeId
-    _ -> False
 
 sameResolvedLocalVar :: ResolvedVar -> ResolvedVar -> Bool
 sameResolvedLocalVar left right =
@@ -1950,68 +3631,167 @@ stripLeadingTyAbs term =
    MLF.Frontend.Program.Elaborate (also internal, not exported).
    We keep this local to avoid widening production facades. -}
 
-externalBindingSchemeInfos :: IdentityGenerator -> ExternalBindings -> Either ConstraintError (IdentityGenerator, Map.Map VarName SchemeInfo)
-externalBindingSchemeInfos generator0 extBindings = do
-  (generator, schemeInfos, _) <- foldM addBinding (generator0, Map.empty, []) (Map.toList extBindings)
-  pure (generator, schemeInfos)
+prepareExternalBindingEntries ::
+  Map.Map String SymbolIdentity ->
+  Map.Map String TypeBinderIdentity ->
+  IdentityGenerator ->
+  ExternalBindings ->
+  Either ConstraintError (IdentityGenerator, Map.Map VarName PreparedExternalBinding)
+prepareExternalBindingEntries sharedHeadIdentities sharedBinderIdentities generator0 extBindings = do
+  (generator, preparedBindings, _) <- foldM addBinding (generator0, Map.empty, Map.empty) (Map.toList extBindings)
+  pure (generator, preparedBindings)
   where
     addBinding (generator, acc, identitySchemes) (name, binding) =
-      case externalBindingIdentity binding >>= \_ -> lookup binding identitySchemes of
-        Just schemeInfo ->
-          pure (generator, Map.insert name schemeInfo acc, identitySchemes)
+      case Map.lookup (externalBindingKey binding) identitySchemes of
+        Just (cachedBinding, schemeInfo, inferredBinderIdentities)
+          | cachedBinding /= binding ->
+              Left
+                ( InternalConstraintError
+                    "external bindings with one semantic identity carry conflicting type payloads"
+                )
+          | otherwise ->
+              let binding' = attachInferredBinderIdentities binding inferredBinderIdentities
+               in pure
+                    ( generator,
+                      Map.insert name (PreparedExternalBinding binding' schemeInfo) acc,
+                      identitySchemes
+                    )
         Nothing -> do
-          (schemeInfo, generator') <- externalBindingSchemeInfoWithGenerator generator binding
-          let identitySchemes' =
-                case externalBindingIdentity binding of
-                  Just {} -> (binding, schemeInfo) : identitySchemes
-                  Nothing -> identitySchemes
-          pure (generator', Map.insert name schemeInfo acc, identitySchemes')
+          (schemeInfo, inferredBinderIdentities, generator') <-
+            externalBindingSchemeInfoWithGenerator
+              generator
+              binding
+                { externalBindingTypeHeadIdentities =
+                    mergeSymbolIdentityMaps
+                      [ externalBindingTypeHeadIdentities binding,
+                        sharedHeadIdentities
+                      ],
+                  externalBindingTypeBinderIdentities =
+                    mergeTypeBinderIdentityMaps
+                      [ externalBindingTypeBinderIdentities binding,
+                        sharedBinderIdentities
+                      ]
+                }
+          let binding' = attachInferredBinderIdentities binding inferredBinderIdentities
+              identitySchemes' =
+                Map.insert
+                  (externalBindingKey binding)
+                  (binding, schemeInfo, inferredBinderIdentities)
+                  identitySchemes
+          pure
+            ( generator',
+              Map.insert name (PreparedExternalBinding binding' schemeInfo) acc,
+              identitySchemes'
+            )
 
-externalBindingSchemeInfoWithGenerator :: IdentityGenerator -> ExternalBinding -> Either ConstraintError (SchemeInfo, IdentityGenerator)
+    attachInferredBinderIdentities binding inferred =
+      binding
+        { externalBindingTypeBinderIdentities =
+            mergeTypeBinderIdentityMaps
+              [ externalBindingTypeBinderIdentities binding,
+                inferred
+              ]
+        }
+
+    externalBindingKey =
+      idDetailsIdentityKey
+        . externalBindingDetails
+        . externalBindingIdentity
+
+externalBindingSchemeInfoWithGenerator :: IdentityGenerator -> ExternalBinding -> Either ConstraintError (SchemeInfo, Map.Map String TypeBinderIdentity, IdentityGenerator)
 externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindingType = srcTy, externalBindingTypeHeadIdentities = headIdentities, externalBindingTypeBinderIdentities = binderIdentities} = do
-  (scheme, generator) <- srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy
-  pure (schemeInfoFromRefSubst scheme IntMap.empty, generator)
+  (scheme, inferredBinderIdentities, generator) <- srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy
+  pure (schemeInfoFromRefSubst scheme IntMap.empty, inferredBinderIdentities, generator)
 
-srcTypeToElabSchemeWithFresh :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabScheme, IdentityGenerator)
+srcTypeToElabSchemeWithFresh :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabScheme, Map.Map String TypeBinderIdentity, IdentityGenerator)
 srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy = do
-  let (refs, generator1) = sourceTypeBinderRefsFromIdentities binderIdentities (Set.toList (freeSrcTypeVars srcTy)) generator0
+  let freeNames = freeSrcTypeVarsInOrder srcTy
+      (refs, generator1) = sourceTypeBinderRefsFromIdentities binderIdentities freeNames generator0
   (ty, generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 srcTy
   let explicitScheme = schemeFromType ty
       explicitRefs = map fst (schemeBinderRefs explicitScheme)
       freeBinds =
         [ (ref, Nothing)
-        | ref <- Map.elems refs,
+        | name <- freeNames,
+          Just ref <- [Map.lookup name refs],
           any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType (schemeBody explicitScheme)),
           not (any (typeBinderRefsSameIdentity ref) explicitRefs)
         ]
-  pure (mkElabSchemeWithRefs (freeBinds ++ schemeBinderRefs explicitScheme) (schemeBody explicitScheme), generator2)
+      inferredBinderIdentities =
+        mergeTypeBinderIdentityMaps
+          [ Map.fromList
+              [ (name, typeBinderRefIdentity ref)
+              | name <- freeNames,
+                Just ref <- [Map.lookup name refs]
+              ],
+            sourceDeclarationBinderIdentities ty
+          ]
+  pure
+    ( mkElabSchemeWithRefs (freeBinds ++ schemeBinderRefs explicitScheme) (schemeBody explicitScheme),
+      inferredBinderIdentities,
+      generator2
+    )
 
-freeSrcTypeVars :: Surface.SrcTy n v -> Set.Set String
-freeSrcTypeVars ty =
-  go Set.empty ty
+-- | Recover the exact identities allocated for binder declarations while
+-- preparing an external scheme.  Constraint generation internalizes the
+-- source type again, so these declaration-copy identities must travel on the
+-- external binding rather than being rediscovered from graph roots later.
+--
+-- Ambiguous display aliases are deliberately removed by
+-- 'typeBinderIdentityAliasMap'; each identity's stable alias remains exact.
+sourceDeclarationBinderIdentities :: ElabType -> Map.Map String TypeBinderIdentity
+sourceDeclarationBinderIdentities =
+  typeBinderIdentityAliasMap
+    . map
+      ( \ref ->
+          (typeBinderRefName ref, typeBinderRefIdentity ref)
+      )
+    . declarationBinderRefs
   where
-    go :: Set.Set String -> Surface.SrcTy n0 v0 -> Set.Set String
-    go bound srcTy =
+    declarationBinderRefs ty =
+      case ty of
+        TVarRef {} -> []
+        TArrow dom cod ->
+          declarationBinderRefs dom ++ declarationBinderRefs cod
+        TBaseWithIdentity {} -> []
+        TConWithIdentity _ _ args ->
+          foldMap declarationBinderRefs args
+        TVarAppRef _ args ->
+          foldMap declarationBinderRefs args
+        TForallRef ref mbBound body ->
+          ref
+            : foldMap (declarationBinderRefs . tyToElab) mbBound
+              ++ declarationBinderRefs body
+        TMuRef ref body ->
+          ref : declarationBinderRefs body
+        TBottom -> []
+
+freeSrcTypeVarsInOrder :: Surface.SrcTy n v -> [String]
+freeSrcTypeVarsInOrder = orderedNub . collect Set.empty
+  where
+    collect :: Set.Set String -> Surface.SrcTy n0 v0 -> [String]
+    collect bound srcTy =
       case srcTy of
         Surface.STVar name
-          | name `Set.member` bound -> Set.empty
-          | otherwise -> Set.singleton name
-        Surface.STArrow dom cod -> go bound dom `Set.union` go bound cod
-        Surface.STBase {} -> Set.empty
-        Surface.STCon _ args -> foldMap (go bound) args
+          | name `Set.member` bound -> []
+          | otherwise -> [name]
+        Surface.STArrow dom cod -> collect bound dom ++ collect bound cod
+        Surface.STBase {} -> []
+        Surface.STCon _ args -> foldMap (collect bound) args
         Surface.STVarApp name args ->
-          let headVars =
-                if name `Set.member` bound
-                  then Set.empty
-                  else Set.singleton name
-           in headVars `Set.union` foldMap (go bound) args
-        Surface.STTyLam name body -> go (Set.insert name bound) body
-        Surface.STTyApp fun arg -> go bound fun `Set.union` go bound arg
+          [name | name `Set.notMember` bound] ++ foldMap (collect bound) args
+        Surface.STTyLam name body -> collect (Set.insert name bound) body
+        Surface.STTyApp fun arg -> collect bound fun ++ collect bound arg
         Surface.STForall name mb body ->
-          maybe Set.empty (go bound . Surface.unSrcBound) mb
-            `Set.union` go (Set.insert name bound) body
-        Surface.STMu name body -> go (Set.insert name bound) body
-        Surface.STBottom -> Set.empty
+          maybe [] (collect bound . Surface.unSrcBound) mb
+            ++ collect (Set.insert name bound) body
+        Surface.STMu name body -> collect (Set.insert name bound) body
+        Surface.STBottom -> []
+
+    orderedNub = reverse . snd . foldl add (Set.empty, [])
+    add (seen, acc) name
+      | name `Set.member` seen = (seen, acc)
+      | otherwise = (Set.insert name seen, name : acc)
 
 srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
@@ -2033,10 +3813,13 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
     (dom', generator1) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator dom
     (cod', generator2) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator1 cod
     Right (TArrow dom' cod', generator2)
-  Surface.STBase name -> Right (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name), generator)
+  Surface.STBase name -> do
+    identity <- sourceTypeHeadIdentity name
+    Right (TBaseWithIdentity identity (builtinBaseTy name), generator)
   Surface.STCon name args -> do
     (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
-    Right (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args', generator')
+    identity <- sourceTypeHeadIdentity name
+    Right (TConWithIdentity identity (builtinBaseTy name) args', generator')
   Surface.STVarApp name args -> do
     (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
     ref <- sourceTypeBinderRef refs name
@@ -2067,7 +3850,9 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
 
     sourceTypeHeadIdentity name =
-      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
+      case lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name of
+        Just identity -> Right identity
+        Nothing -> Left (InternalConstraintError ("unresolved source type head `" ++ name ++ "` reached pipeline external binding preparation"))
 
     srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
@@ -2090,10 +3875,13 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         (dom', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator0 dom
         (cod', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator1 cod
         Right (Just (TArrow dom' cod'), generator2)
-      Surface.STBase name -> Right (Just (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name)), generator0)
+      Surface.STBase name -> do
+        identity <- sourceTypeHeadIdentity name
+        Right (Just (TBaseWithIdentity identity (builtinBaseTy name)), generator0)
       Surface.STCon name args -> do
         (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
-        Right (Just (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
+        identity <- sourceTypeHeadIdentity name
+        Right (Just (TConWithIdentity identity (builtinBaseTy name) args'), generator1)
       Surface.STVarApp name args -> do
         (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
         ref <- sourceTypeBinderRef refs' name

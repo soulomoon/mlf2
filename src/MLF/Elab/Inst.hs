@@ -6,6 +6,7 @@ module MLF.Elab.Inst
     composeInst,
     evalInstantiationWith,
     identityGeneratorAfterTypeAndInstantiation,
+    instForLeadingTypeArgument,
     instMany,
     renameInstBoundRef,
     schemeToType,
@@ -37,6 +38,20 @@ instMany = foldr composeInst InstId
 identityGeneratorAfterTypeAndInstantiation :: ElabType -> Instantiation -> IdentityGenerator
 identityGeneratorAfterTypeAndInstantiation ty inst =
   identityGeneratorAfter (generatedIdentitiesInType ty ++ generatedIdentitiesInInstantiation inst)
+
+-- | Construct the computation for applying the leading quantifier to an
+-- argument type.  A flexible quantifier instantiated at its own explicit
+-- bound is eliminated with @N@; grafting that bound with 'InstApp' would try
+-- to apply 'InstBot' to a non-bottom bound when the computation is reduced.
+--
+-- This is the direct xMLF construction used by the thesis's bounded
+-- application examples (for example, @f[N;N]v@ in section 15.2.5.1).
+instForLeadingTypeArgument :: ElabType -> ElabType -> Instantiation
+instForLeadingTypeArgument sourceTy argTy =
+  case sourceTy of
+    TForallRef _ (Just bound) _
+      | alphaEqType argTy (tyToElab bound) -> InstElim
+    _ -> InstApp argTy
 
 data InstEvalSpec env err = InstEvalSpec
   { instBot :: ElabType -> (IdentityGenerator, env, ElabType) -> Either err (IdentityGenerator, env, ElabType),
@@ -113,8 +128,6 @@ evalInstantiationWith spec inst = eval inst
         \(k, env', t) ->
           case (left, right) of
             (InstInside (InstBot tyArg), InstElim) ->
-              instAppFn tyArg (k, env', t)
-            (InstInside (InstApp tyArg), InstElim) ->
               instAppFn tyArg (k, env', t)
             (InstInside abstr, InstElim)
               | Just ref <- instAbstrRefArg abstr ->

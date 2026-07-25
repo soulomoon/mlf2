@@ -105,16 +105,33 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         allSchemeRoots =
             IntSet.fromList
                 (IntMap.keys schemeRootOwnersBase)
+        explicitForallsSolved =
+            IntSet.fromList
+                [ nidInt
+                | (nidInt, TyForall {}) <- IntMap.toList nodesSolved
+                ]
+        explicitForallsBase =
+            IntSet.fromList
+                [ nidInt
+                | (nidInt, TyForall {}) <- IntMap.toList baseNodes
+                ]
         reachableFromWithBoundsStop start =
-            let stopSet = allSchemeRoots
+            let startC = canonical start
+                startKey = getNodeId startC
+                stopSet = IntSet.union allSchemeRoots explicitForallsSolved
                 shouldStop nid = IntSet.member (getNodeId nid) stopSet
                 children nid = childrenFrom nodesSolved (getNodeId nid)
-            in reachableFromStop getNodeId canonical children shouldStop start
+            in if IntSet.member startKey explicitForallsSolved
+                then IntSet.singleton startKey
+                else reachableFromStop getNodeId canonical children shouldStop startC
         reachableFromWithBoundsBaseStop start =
-            let stopSet = schemeRootsBaseSet
+            let startKey = getNodeId start
+                stopSet = IntSet.union schemeRootsBaseSet explicitForallsBase
                 shouldStop nid = IntSet.member (getNodeId nid) stopSet
                 children nid = childrenFrom baseNodes (getNodeId nid)
-            in reachableFromStopWith getNodeId (getNodeId . adoptNodeId) id children shouldStop start
+            in if IntSet.member startKey explicitForallsBase
+                then IntSet.singleton (getNodeId (adoptNodeId start))
+                else reachableFromStopWith getNodeId (getNodeId . adoptNodeId) id children shouldStop start
         boundSchemeRoots =
             IntSet.fromList
                 [ getNodeId (canonical bnd)

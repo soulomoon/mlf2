@@ -3,7 +3,10 @@ module MLF.Elab.Run.TypeOps (
     InlineBoundVarsContext,
     mkInlineBoundVarsContext,
     mkInlineBoundVarsContextWithReadModel,
+    mkInlineBoundVarsContextWithReadModelCanonical,
     inlineBoundVarsType,
+    inlineBoundVarsTypeWithCanonical,
+    inlineBoundVarsTypeWithCanonicalExcept,
     inlineBoundVarsTypeForBound,
     inlineBoundVarsTypeWithContext,
     inlineBoundVarsTypeForBoundWithContext,
@@ -16,9 +19,8 @@ import qualified Data.Map.Strict as Map
 
 import MLF.Constraint.Presolution (PresolutionView(..))
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types.Graph (BaseTy(..), NodeMap, TyNode(..), cNodes, fromListNode, toListNode)
+import MLF.Constraint.Types.Graph (NodeId, NodeMap, TyNode, cNodes)
 import MLF.Elab.ReadModel (ElabReadModel(..))
-import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.Core
     ( namedNodes
     )
@@ -29,6 +31,7 @@ import MLF.Reify.Type
 import MLF.Reify.TypeOps (
     freeTypeVarRefsType,
     inlineAliasBoundsWithBySeen,
+    inlineAliasBoundsWithBySeenProtected,
     inlineBaseBoundsType,
     resolveBoundBodyConstraint,
     splitForallsRefs,
@@ -47,7 +50,8 @@ import MLF.Elab.Types
 data InlineBoundVarsContext p = InlineBoundVarsContext
     { ibvcPresolutionView :: PresolutionView p
     , ibvcNamedSet :: IntSet.IntSet
-    , ibvcNodesVarOnly :: NodeMap TyNode
+    , ibvcNodes :: NodeMap TyNode
+    , ibvcCanonical :: NodeId -> NodeId
     , ibvcReadModel :: Maybe (ElabReadModel p)
     }
 
@@ -56,26 +60,29 @@ mkInlineBoundVarsContext presolutionView namedSet =
     InlineBoundVarsContext
         { ibvcPresolutionView = presolutionView
         , ibvcNamedSet = namedSet
-        , ibvcNodesVarOnly =
-            fromListNode
-                [ (nid, node)
-                | (nid, node) <- toListNode (cNodes constraint)
-                , isTyVar node
-                ]
+        , ibvcNodes = cNodes constraint
+        , ibvcCanonical = pvCanonical presolutionView
         , ibvcReadModel = Nothing
         }
   where
     constraint = pvConstraint presolutionView
-    isTyVar node = case node of
-        TyVar{} -> True
-        _ -> False
 
 mkInlineBoundVarsContextWithReadModel :: ElabReadModel p -> InlineBoundVarsContext p
 mkInlineBoundVarsContextWithReadModel readModel =
+    mkInlineBoundVarsContextWithReadModelCanonical
+        (pvCanonical (ermPresolutionView readModel))
+        readModel
+
+mkInlineBoundVarsContextWithReadModelCanonical
+    :: (NodeId -> NodeId)
+    -> ElabReadModel p
+    -> InlineBoundVarsContext p
+mkInlineBoundVarsContextWithReadModelCanonical canonical readModel =
     InlineBoundVarsContext
         { ibvcPresolutionView = presolutionView
         , ibvcNamedSet = ermNamedNodes readModel
-        , ibvcNodesVarOnly = ermNodesVarOnly readModel
+        , ibvcNodes = ermNodes readModel
+        , ibvcCanonical = canonical
         , ibvcReadModel = Just readModel
         }
   where
@@ -83,6 +90,45 @@ mkInlineBoundVarsContextWithReadModel readModel =
 
 inlineBoundVarsType :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsType = inlineBoundVarsTypeWith False
+
+-- | Inline graph aliases and bounds using the construction's authoritative
+-- canonicalizer.  The plain 'PresolutionView' canonicalizer does not include
+-- annotation redirects, so using it at a prepared edge can leave an alias to
+-- a concrete TyMu/TyBase owner as a free graph variable.
+inlineBoundVarsTypeWithCanonical
+    :: (NodeId -> NodeId)
+    -> PresolutionView p
+    -> ElabType
+    -> ElabType
+inlineBoundVarsTypeWithCanonical canonical presolutionView =
+    inlineBoundVarsTypeWithCanonicalExcept [] canonical presolutionView
+
+-- | Inline graph bounds while preserving references that an independently
+-- checked construction endpoint proves are ambient Gamma binders.
+inlineBoundVarsTypeWithCanonicalExcept
+    :: [TypeBinderRef]
+    -> (NodeId -> NodeId)
+    -> PresolutionView p
+    -> ElabType
+    -> ElabType
+inlineBoundVarsTypeWithCanonicalExcept protectedRefs canonical presolutionView =
+    inlineAliasBoundsWithBySeenProtected
+        protectedRefs
+        False
+        (ibvcCanonical context)
+        (ibvcNodes context)
+        (VarStore.lookupVarBound constraint)
+        reifyBoundWithSeen
+  where
+    baseContext =
+        mkInlineBoundVarsContext presolutionView
+            (either (const IntSet.empty) id (namedNodes presolutionView))
+    context = baseContext { ibvcCanonical = canonical }
+    constraint = pvConstraint presolutionView
+    reifyBoundWithSeen seen bnd = do
+        let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
+        t0 <- reifyTypeWithNamedSetRefsNoFallback presolutionView IntMap.empty (ibvcNamedSet context) bndRoot
+        pure (inlineBaseBoundsType constraint canonical t0)
 
 inlineBoundVarsTypeForBound :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
@@ -106,15 +152,15 @@ inlineBoundVarsTypeWithPrepared unboundToBottom context =
     inlineAliasBoundsWithBySeen
         unboundToBottom
         canonical
-        nodesVarOnly
+        nodes
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
     presolutionView = ibvcPresolutionView context
     constraint = pvConstraint presolutionView
-    canonical = pvCanonical presolutionView
+    canonical = ibvcCanonical context
     namedSet = ibvcNamedSet context
-    nodesVarOnly = ibvcNodesVarOnly context
+    nodes = ibvcNodes context
     reifyBoundWithSeen seen bnd = do
         let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
         t0 <-
@@ -154,10 +200,8 @@ simplifyAnnotationType = go
 
     mergeBaseBounds binds body =
         let baseEntry bound = case bound of
-                TBaseWithIdentity (Just identity) base ->
-                    Just (Just (Left identity), TBaseWithIdentity (Just identity) base)
-                TBaseWithIdentity Nothing base@(BaseTy name) ->
-                    Just (Just (Right base), TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base)
+                TBaseWithIdentity identity base ->
+                    Just (Just identity, TBaseWithIdentity identity base)
                 TBottom -> Just (Nothing, TBottom)
                 _ -> Nothing
             usedInBounds =

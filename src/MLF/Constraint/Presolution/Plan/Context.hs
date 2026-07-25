@@ -24,7 +24,11 @@ Related thesis sections:
 -}
 
 module MLF.Constraint.Presolution.Plan.Context
-  ( GaBindParents (..),
+  ( ExpansionConstructionPlacements,
+    emptyExpansionConstructionPlacements,
+    GaBindParents (..),
+    GeneralizationRequirements (..),
+    RequiredGammaBinder (..),
     SolvedToBaseResolution (..),
     GeneralizeEnv (..),
     GeneralizeCtx (..),
@@ -34,6 +38,7 @@ module MLF.Constraint.Presolution.Plan.Context
     traceGeneralizeEnabled,
     traceGeneralize,
     traceGeneralizeM,
+    emptyGeneralizationRequirements,
   )
 where
 
@@ -41,9 +46,16 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.List (nub)
 import Data.Maybe (isNothing, listToMaybe)
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
+import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo (..))
+import MLF.Constraint.Presolution.Plan.Requirements
+  ( ExpansionConstructionPlacements,
+    GeneralizationRequirements (..),
+    RequiredGammaBinder (..),
+    emptyExpansionConstructionPlacements,
+    emptyGeneralizationRequirements,
+  )
 import MLF.Constraint.Presolution.Plan.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph hiding (lookupNode)
@@ -54,7 +66,15 @@ data GaBindParents p = GaBindParents
   { gaBindParentsBase :: BindParents,
     gaBaseConstraint :: Constraint p,
     gaBaseToSolved :: IntMap.IntMap NodeId,
-    gaSolvedToBase :: IntMap.IntMap NodeId
+    gaSolvedToBase :: IntMap.IntMap NodeId,
+    -- | Administrative alternative-let roots whose typed identity redirects
+    -- were restored to live structural scheme targets during generalization.
+    gaRestoredSchemeRootTargets :: IntMap.IntMap NodeId,
+    -- | Conflict-checked creation ownership for solve-created instantiation
+    -- arguments.  Unlike base-to-solved provenance, these nodes have no base
+    -- representative; the certificate is their construction-time Gamma
+    -- authority across the solve boundary.
+    gaExpansionConstructionPlacements :: ExpansionConstructionPlacements
   }
 
 data SolvedToBaseResolution
@@ -143,7 +163,9 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 { gbiBindParentsBase = gaBindParentsBase ga,
                   gbiBaseConstraint = gaBaseConstraint ga,
                   gbiBaseToSolved = gaBaseToSolved ga,
-                  gbiSolvedToBase = gaSolvedToBase ga
+                  gbiSolvedToBase = gaSolvedToBase ga,
+                  gbiRestoredSchemeRootTargets = gaRestoredSchemeRootTargets ga,
+                  gbiExpansionConstructionPlacements = gaExpansionConstructionPlacements ga
                 }
           )
           mbBindParentsGa'
@@ -151,10 +173,25 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         TypeRef nid -> TypeRef (canonical nid)
         GenRef gid -> GenRef gid
   -- Phase 1: canonicalize roots/targets and choose order roots.
-  let resolveTarget node =
-        case lookupNode (canonKey node) of
+  let resolveLiveTarget node =
+        let nodeC = canonical node
+         in case lookupNode (getNodeId nodeC) of
+              Just _ -> nodeC
+              Nothing ->
+                case mbBindParentsGa' of
+                  Just ga ->
+                    canonical
+                      ( IntMap.findWithDefault
+                          nodeC
+                          (getNodeId nodeC)
+                          (gaBaseToSolved ga)
+                      )
+                  Nothing -> nodeC
+      resolveTarget node =
+        let liveTarget = resolveLiveTarget node
+         in case lookupNode (getNodeId liveTarget) of
           Just TyExp {tnBody = b} -> canonical b
-          _ -> canonical node
+          _ -> liveTarget
       resolveTargetBase target =
         case mbBindParentsGa' of
           Nothing -> target
@@ -350,7 +387,14 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                     baseParents
              in do
                   validateCrossGenMapping gidScope (firstGenAncestor baseParents) baseParents findSolvedKey
-                  pure (IntMap.union bindParentsGaFix bindParentsSoft)
+                  pure
+                    ( IntMap.unionWith
+                        ( \(parentGa, flagGa) (_parentSolved, flagSolved) ->
+                            (parentGa, max flagGa flagSolved)
+                        )
+                        bindParentsGaFix
+                        bindParentsSoft
+                    )
           _ -> pure bindParentsSoft
       resolveFirstGenAncestor bindParents' =
         case mbBindParentsGa' of
@@ -361,13 +405,21 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
                 GenRef gid -> Just gid
                 TypeRef nid ->
                   let keyNid = NodeId (getNodeId (canonical nid))
-                   in case resolveGaSolvedToBase ga keyNid of
-                        SolvedToBaseMapped baseNid ->
-                          firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
-                        SolvedToBaseSameDomain baseNid ->
-                          firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
-                        SolvedToBaseMissing ->
-                          Nothing
+                   in case firstGenAncestor bindParentsSoft (TypeRef keyNid) of
+                        -- The solved tree owns destination scope.  In
+                        -- particular, instantiation arguments are deliberately
+                        -- rebound at the use-site gen; following their base
+                        -- provenance would move them back under the source
+                        -- scheme and let an inner binder escape.
+                        Just gid -> Just gid
+                        Nothing ->
+                          case resolveGaSolvedToBase ga keyNid of
+                            SolvedToBaseMapped baseNid ->
+                              firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
+                            SolvedToBaseSameDomain baseNid ->
+                              firstGenAncestor (gaBindParentsBase ga) (TypeRef baseNid)
+                            SolvedToBaseMissing ->
+                              firstGenAncestor bindParents' (TypeRef keyNid)
       resolveBindsPhase scopeGen' = do
         bindParents <- resolveBindParents scopeGen'
         let firstGenAncestorGa = resolveFirstGenAncestor bindParents
@@ -393,8 +445,8 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
           canonical
           constraint
           nodes
+          firstGenAncestorGa
           mbBindParentsGaInfo
-          firstGenAncestorFrom
   pure
     GeneralizeCtx
       { gcTarget0 = target0,

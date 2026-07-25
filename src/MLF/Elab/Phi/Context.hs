@@ -192,6 +192,9 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                                         TyExp{ tnBody = body } -> do
                                             (memo', res) <- go visiting' memo body
                                             finish res memo'
+                                        TyVar{ tnBound = Just bound } -> do
+                                            (memo', res) <- go visiting' memo bound
+                                            finish (fmap (StepInside :) res) memo'
                                         TyVar{} ->
                                             finish Nothing memo
                                         TyBase{} ->

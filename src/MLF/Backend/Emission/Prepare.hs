@@ -36,7 +36,7 @@ import MLF.Frontend.Program.Package
     , ProgramPackage
     , trivialLocatedProgramPackage
     )
-import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackageIfImported)
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
@@ -87,7 +87,7 @@ prepareBackendEmissionFromSource path source = do
         first BackendEmissionProgramParseError
             (parseLocatedProgramWithFile path source)
     prepareBackendEmissionFromLocatedPackage
-        (withPreludeLocatedPackage (trivialLocatedProgramPackage program))
+        (withPreludeLocatedPackageIfImported (trivialLocatedProgramPackage program))
 
 prepareBackendEmissionFromProgramPackage ::
     ProgramPackage -> Either BackendEmissionPreparationError CheckedProgram
@@ -103,10 +103,10 @@ prepareBackendEmissionFromLocatedPackage package =
 
 prepareCheckedProgramForBackendEmission :: CheckedProgram -> Either BackendEmissionPreparationError CheckedProgram
 prepareCheckedProgramForBackendEmission checked = do
-    first BackendEmissionProgramError $
-        mapCheckedProgramModules
-            (map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData))
-            checked
+    pure $
+      mapCheckedProgramModules
+        (map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData))
+        checked
   where
     modules0 = checkedProgramModules checked
     preludeIdentity = preludeModuleIdentity modules0
@@ -318,12 +318,12 @@ elabTypeHeadIdentities =
         TArrow dom cod ->
             Set.union (elabTypeHeadIdentities dom) (elabTypeHeadIdentities cod)
         TConWithIdentity identity _ args ->
-            maybe Set.empty Set.singleton identity
+            Set.singleton identity
                 `Set.union` foldMap elabTypeHeadIdentities args
         TVarAppRef _ args ->
             foldMap elabTypeHeadIdentities args
         TBaseWithIdentity identity _ ->
-            maybe Set.empty Set.singleton identity
+            Set.singleton identity
         TForallRef _ mbBound body ->
             maybe Set.empty elabTypeHeadIdentities mbBound
                 `Set.union` elabTypeHeadIdentities body

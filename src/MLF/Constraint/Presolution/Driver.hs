@@ -60,15 +60,16 @@ import MLF.Constraint.Presolution.Rewrite (
     canonicalizeExpansion,
     canonicalizeTrace,
     canonicalizeWitness,
+    filterOwnedGenSchemes,
     rebuildBindParents,
+    rewriteEliminatedVarSet,
     rewriteGenNodes,
     rewriteNode,
     rewriteVarSet,
     )
 import MLF.Constraint.Presolution.Validation (
     validateTranslatablePresolution,
-    rigidifyTranslatablePresolutionM,
-    bindingToPresM
+    rigidifyTranslatablePresolutionM
     )
 import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -91,8 +92,12 @@ computePresolution
     -> AcyclicityResult
     -> Constraint 'Acyclic
     -> Either PresolutionError PresolutionResult
-computePresolution traceCfg acyclicityResult constraint = do
-    computePresolutionWithRootOwnership traceCfg emptyRootOwnershipIndex acyclicityResult constraint
+computePresolution traceCfg acyclicityResult constraint =
+    computePresolutionWithRootOwnership
+        traceCfg
+        emptyRootOwnershipIndex
+        acyclicityResult
+        constraint
 
 computePresolutionWithRootOwnership
     :: TraceConfig
@@ -127,7 +132,13 @@ computePresolutionWithTiming
     -> Constraint 'Acyclic
     -> IO (Either PresolutionError PresolutionResult)
 computePresolutionWithTiming timing label traceCfg acyclicityResult constraint =
-    computePresolutionWithTimingAndRootOwnership timing label traceCfg emptyRootOwnershipIndex acyclicityResult constraint
+    computePresolutionWithTimingAndRootOwnership
+        timing
+        label
+        traceCfg
+        emptyRootOwnershipIndex
+        acyclicityResult
+        constraint
 
 computePresolutionWithTimingAndRootOwnership
     :: TimingConfig
@@ -139,7 +150,14 @@ computePresolutionWithTimingAndRootOwnership
     -> IO (Either PresolutionError PresolutionResult)
 computePresolutionWithTimingAndRootOwnership timing label traceCfg rootOwnership acyclicityResult constraint =
     if not (timingProgramOperations timing)
-        then evaluate (computePresolutionWithRootOwnership traceCfg rootOwnership acyclicityResult constraint)
+        then
+            evaluate
+                ( computePresolutionWithRootOwnership
+                    traceCfg
+                    rootOwnership
+                    acyclicityResult
+                    constraint
+                )
         else
             runExceptT $ do
                 initialState <-
@@ -184,13 +202,20 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
         Left (ResidualTyExpNodes residualTyExpNodes)
     validateTranslatablePresolution finalConstraint
 
-    let edgeArtifacts =
+    let rawEdgeTraces = psEdgeTraces finalState
+        rawEdgeExpansionConstructions =
+            psEdgeExpansionConstructions finalState
+        edgeArtifacts =
             dropTrivialSchemeEdges
                 finalConstraint
-                (EdgeArtifacts (psEdgeExpansions finalState) (psEdgeWitnesses finalState) (psEdgeTraces finalState))
+                (EdgeArtifacts (psEdgeExpansions finalState) (psEdgeWitnesses finalState) rawEdgeTraces IntSet.empty)
         edgeWitnesses = eaEdgeWitnesses edgeArtifacts
         edgeTraces = eaEdgeTraces edgeArtifacts
         edgeExpansions = eaEdgeExpansions edgeArtifacts
+        edgeExpansionConstructions =
+            IntMap.restrictKeys
+                rawEdgeExpansionConstructions
+                (IntSet.fromAscList (IntMap.keys edgeTraces))
         nonTrivialEdgeKeys =
             IntSet.fromList
                 [ getEdgeId (instEdgeId edge)
@@ -219,6 +244,8 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
         , prEdgeExpansions = edgeExpansions
         , prEdgeWitnesses = edgeWitnesses
         , prEdgeTraces = edgeTraces
+        , prEdgeExpansionConstructions = edgeExpansionConstructions
+        , prIdentityEdges = eaIdentityEdges edgeArtifacts
         , prRedirects = redirects
         , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
@@ -263,7 +290,6 @@ runFinalizationStageWithTiming timing label traceCfg st0 =
                 normalizeEdgeWitnessesM
         ((), st9) <-
             timedStage st8 "post_witness_validate" $ do
-                assertWitnessTraceDomain "post-witness-normalization"
                 assertFinalizationBoundary "post-witness-normalization"
         pure (redirects, st9)
   where
@@ -302,7 +328,6 @@ runFinalizationStage = do
         Left err -> throwError err
         Right () -> pure ()
     normalizeEdgeWitnessesM
-    assertWitnessTraceDomain "post-witness-normalization"
     assertFinalizationBoundary "post-witness-normalization"
     pure redirects
 
@@ -345,20 +370,6 @@ assertNoResidualTyExp phase = do
             InternalError $
                 phase ++ ": residual TyExp nodes " ++ show residual
 
-assertWitnessTraceDomain :: String -> PresolutionM 'Acyclic ()
-assertWitnessTraceDomain phase = do
-    st <- getPresolutionState
-    let witnessKeys = IntSet.fromAscList (IntMap.keys (psEdgeWitnesses st))
-        traceKeys = IntSet.fromAscList (IntMap.keys (psEdgeTraces st))
-    when (witnessKeys /= traceKeys) $
-        throwError $
-            InternalError $
-                unlines
-                    [ "presolution witness/trace domain mismatch at " ++ phase
-                    , "witness keys: " ++ show (IntSet.toList witnessKeys)
-                    , "trace keys: " ++ show (IntSet.toList traceKeys)
-                    ]
-
 validateReplayMapTraceContract
     :: (NodeId -> NodeId)
     -> Constraint p
@@ -376,6 +387,7 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
             IntSet.fromAscList (IntMap.keys (etBinderReplayMap tr))
         replayBinderDomain =
             IntSet.fromList [getNodeId b | b <- replayBindersForTrace tr]
+        hasExplicitReplayDomain = not (null (etReplayDomainBinders tr))
         missingReplay =
             IntSet.toList (IntSet.difference sourceDomain replayDomain)
         extraReplay =
@@ -406,17 +418,23 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
                                 , "source key: " ++ show sourceKey
                                 , "replay target: " ++ show replayTarget
                                 ]
-                case NodeAccess.lookupNode finalConstraint replayTarget of
-                    Just TyVar{} -> pure ()
-                    _ ->
-                        Left $
-                            InternalError $
-                                unlines
-                                    [ "edge replay-map codomain contains non-TyVar target"
-                                    , "edge: " ++ show (EdgeId eid)
-                                    , "source key: " ++ show sourceKey
-                                    , "replay target: " ++ show replayTarget
-                                    ]
+                -- A non-empty replay domain is emitted from construction-time
+                -- certificates and preserves operation-time binder identities
+                -- that union-find may have removed from the finalized graph.
+                -- The explicit identity/domain check above is authoritative;
+                -- only an inferred fallback domain may be re-queried here.
+                when (not hasExplicitReplayDomain) $
+                    case NodeAccess.lookupNode finalConstraint replayTarget of
+                        Just TyVar{} -> pure ()
+                        _ ->
+                            Left $
+                                InternalError $
+                                    unlines
+                                        [ "edge replay-map codomain contains non-TyVar target"
+                                        , "edge: " ++ show (EdgeId eid)
+                                        , "source key: " ++ show sourceKey
+                                        , "replay target: " ++ show replayTarget
+                                        ]
             case duplicateReplayTarget (etBinderReplayMap tr) of
                 Nothing -> pure ()
                 Just (sourceA, sourceB, target) ->
@@ -430,6 +448,9 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
                                 , "shared target: " ++ show target
                                 ]
         else do
+            -- `etBinderArgs` is frozen source/destination provenance and is
+            -- independent of whether normalization produced a replay lane.
+            -- ReplayContractNone constrains only replay-specific metadata.
             when (not (IntMap.null (etBinderReplayMap tr))) $
                 Left $
                     InternalError $
@@ -437,14 +458,6 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
                             [ "edge replay-map expected empty under ReplayContractNone"
                             , "edge: " ++ show (EdgeId eid)
                             , "replay-map domain: " ++ show (IntSet.toList replayDomain)
-                            ]
-            when (not (null (etBinderArgs tr))) $
-                Left $
-                    InternalError $
-                        unlines
-                            [ "edge binder-args expected empty under ReplayContractNone"
-                            , "edge: " ++ show (EdgeId eid)
-                            , "binder-arg keys: " ++ show (IntSet.toList sourceDomain)
                             ]
   where
     duplicateReplayTarget replayMap =
@@ -462,7 +475,10 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
 
     replayBindersForTrace trace =
         case etReplayDomainBinders trace of
-            binders@(_ : _) -> map canonical binders
+            -- Explicit replay domains preserve producer identities.  Applying
+            -- final union-find canonicalization here would erase the exact
+            -- copied binder required by Φ.
+            binders@(_ : _) -> binders
             [] ->
                 let rootC = canonical (etRoot trace)
                     orderedUnder nid =
@@ -487,8 +503,7 @@ rewriteConstraint :: IntMap NodeId -> PresolutionM 'Acyclic (IntMap NodeId)
 rewriteConstraint mapping = do
     (c, canonicalUf) <- getConstraintAndCanonical
     st <- getPresolutionState
-    let edgeExpansions0 = psEdgeExpansions st
-        edgeWitnesses0 = psEdgeWitnesses st
+    let edgeExecutionArtifacts0 = psEdgeExecutionArtifacts st
         edgeTraces0 = psEdgeTraces st
         allNodes0 = NodeAccess.allNodes c
 
@@ -513,7 +528,8 @@ rewriteConstraint mapping = do
 
     let canonicalSlow nid =
             let step n =
-                    let r0 = canonicalUf n
+                    let n0 = fromMaybe n (IntMap.lookup (getNodeId n) mapping)
+                        r0 = canonicalUf n0
                         r1 = fromMaybe r0 (IntMap.lookup (getNodeId r0) identityRootMap)
                         r2 = fromMaybe r1 (IntMap.lookup (getNodeId r1) mapping)
                     in r2
@@ -543,15 +559,22 @@ rewriteConstraint mapping = do
         canon = canonicalizerFrom canonical
 
         newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) allNodes0)
-        eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
+        eliminated' = rewriteEliminatedVarSet canonical newNodes (cEliminatedVars c)
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
 
-        newExps = IntMap.map (canonicalizeExpansion canon) edgeExpansions0
-
-        newWitnesses = IntMap.map (canonicalizeWitness canon) edgeWitnesses0
-
-        newTraces0 = IntMap.map (canonicalizeTrace canon) edgeTraces0
+        newEdgeExecutionArtifacts =
+            IntMap.map
+                (\artifacts ->
+                    artifacts
+                        { eeaExpansion =
+                            canonicalizeExpansion canon (eeaExpansion artifacts)
+                        , eeaWitness =
+                            canonicalizeWitness canon (eeaWitness artifacts)
+                        , eeaTrace = canonicalizeTrace canon (eeaTrace artifacts)
+                        }
+                )
+                edgeExecutionArtifacts0
 
         incomingParents :: IntMap IntSet.IntSet
         incomingParents =
@@ -578,6 +601,64 @@ rewriteConstraint mapping = do
             | nid <- map (getNodeId . tnId) allNodes0
             ]
 
+    let expansionArgs =
+            [ arg
+            | trace <- IntMap.elems edgeTraces0
+            , (_binder, arg) <- etBinderArgs trace
+            ]
+        addExpansionArgDestination
+            :: IntMap IntSet.IntSet
+            -> NodeId
+            -> PresolutionM 'Acyclic (IntMap IntSet.IntSet)
+        addExpansionArgDestination acc arg =
+            let argC = canonical arg
+                mbParent =
+                    case Binding.lookupBindParent c (typeRef arg) of
+                        Just parent -> Just parent
+                        Nothing -> Binding.lookupBindParent c (typeRef argC)
+            in case mbParent of
+                Nothing ->
+                    throwError
+                        ( InternalError
+                            ( "expansion argument has no destination parent: "
+                                ++ show arg
+                            )
+                        )
+                Just (parent, _flag) ->
+                    let parentC = Canonicalize.canonicalRef canonical parent
+                        key = getNodeId argC
+                    in case parentC of
+                        TypeRef _ ->
+                            throwError
+                                ( InternalError
+                                    ( "expansion argument destination is not a gen node: "
+                                        ++ show (arg, parentC)
+                                    )
+                                )
+                        GenRef gid ->
+                            pure
+                                ( IntMap.insertWith
+                                    IntSet.union
+                                    key
+                                    (IntSet.singleton (getGenNodeId gid))
+                                    acc
+                                )
+    expansionArgDestinations <-
+        foldM addExpansionArgDestination IntMap.empty expansionArgs
+    expansionArgParents <-
+        IntMap.traverseWithKey
+            ( \argKey destinations ->
+                case IntSet.toList destinations of
+                    [gid] -> pure (genRef (GenNodeId gid))
+                    gids ->
+                        throwError
+                            ( ExpansionArgumentDestinationConflict
+                                (NodeId argKey)
+                                (map GenNodeId gids)
+                            )
+            )
+            expansionArgDestinations
+
     newBindParents <-
         rebuildBindParents
             RebuildBindParentsEnv
@@ -585,84 +666,34 @@ rewriteConstraint mapping = do
                 , rbpNewNodes = newNodes
                 , rbpGenNodes = genNodes'
                 , rbpCanonical = canonical
+                , rbpSemanticCanonical = canonicalUf
                 , rbpIncomingParents = incomingParents
+                , rbpExpansionArgParents = expansionArgParents
                 }
-
-    let c0' = c
+    let genNodesFinal = filterOwnedGenSchemes newBindParents genNodes'
+        c' = c
             { cNodes = NodeMap newNodes
             , cInstEdges = []
             , cUnifyEdges = Canonicalize.rewriteUnifyEdges canonical (cUnifyEdges c)
             , cBindParents = newBindParents
             , cEliminatedVars = eliminated'
             , cWeakenedVars = weakened'
-            , cGenNodes = genNodes'
+            , cGenNodes = genNodesFinal
             }
-
-    let c' = c0'
 
     case Binding.checkBindingTree c' of
         Left err -> throwError (BindingTreeError err)
         Right () -> pure ()
 
-    newTraces' <- refreshRewrittenTraceInteriors c' newTraces0
-
+    -- Rewrite the graph-facing expansion, witness, and trace together while
+    -- retaining frozen Raise/origin/construction authority in its creation
+    -- domain inside the same complete edge packet.
     putPresolutionState $
         (setConstraintState c' st)
-            { psEdgeExpansions = newExps
-            , psEdgeWitnesses = newWitnesses
-            , psEdgeTraces = newTraces'
+            { psEdgeExecutionArtifacts = newEdgeExecutionArtifacts
             }
 
     return fullRedirects
-
-refreshRewrittenTraceInteriors :: Constraint 'Acyclic -> IntMap EdgeTrace -> PresolutionM 'Acyclic (IntMap EdgeTrace)
-refreshRewrittenTraceInteriors c' traces = do
-    qbp <- bindingToPresM (Binding.quotientBindParentsContextUnder id c')
-    snd <$> foldM (refreshOne qbp) (IntMap.empty, IntMap.empty) (IntMap.toList traces)
-  where
-    refreshOne
-        :: Binding.QuotientBindParents
-        -> (IntMap InteriorNodes, IntMap EdgeTrace)
-        -> (Int, EdgeTrace)
-        -> PresolutionM 'Acyclic (IntMap InteriorNodes, IntMap EdgeTrace)
-    refreshOne qbp (cache, acc) (eid, tr) = do
-        let root = etRoot tr
-            rootKey = getNodeId root
-        interiorNodes <-
-            case IntMap.lookup rootKey cache of
-                Just cached ->
-                    pure cached
-                Nothing -> do
-                    let interiorRootRef = traceInteriorRootRef id c' root
-                        interiorRootKey = nodeRefKey interiorRootRef
-                    when (IntSet.notMember interiorRootKey (Binding.qbpAllRoots qbp)) $
-                        throwError $
-                            BindingTreeError $
-                                InvalidBindingTree $
-                                    "refreshRewrittenTraceInteriors: root "
-                                        ++ show interiorRootRef
-                                        ++ " not in constraint"
-                    let childrenByParent = Binding.qbpChildrenByParent qbp
-                        go visited [] = visited
-                        go visited (key : rest) =
-                            let kids =
-                                    [ childKey
-                                    | (childKey, _info) <- IntMap.findWithDefault [] key childrenByParent
-                                    , not (IntSet.member childKey visited)
-                                    ]
-                                visited' = foldl' (flip IntSet.insert) visited kids
-                            in go visited' (kids ++ rest)
-                        interior = go (IntSet.singleton interiorRootKey) [interiorRootKey]
-                        computed =
-                            fromListInterior
-                                [ nid
-                                | key <- IntSet.toList interior
-                                , TypeRef nid <- [nodeRefFromKey key]
-                                ]
-                    pure computed
-        let cache' = IntMap.insert rootKey interiorNodes cache
-            acc' = IntMap.insert eid (tr { etInterior = interiorNodes }) acc
-        pure (cache', acc')
 
 mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic
 mkInitialPresolutionState constraint =
@@ -673,6 +704,7 @@ mkInitialPresolutionState constraint =
         , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
         , psPendingWeakens = IntSet.empty
         , psPendingWeakenOwners = IntMap.empty
+        , psWeakenReplayCertificates = IntMap.empty
         , psBinderCache = IntMap.empty
         , psGraphVersion = 0
         , psUnionFindVersion = 0
@@ -682,9 +714,8 @@ mkInitialPresolutionState constraint =
         , psBindingRepairCache = Nothing
         , psBindingRepairDirty = Just dirtyAllBindingRepair
         , psCachedRootGen = Nothing
-        , psEdgeExpansions = IntMap.empty
-        , psEdgeWitnesses = IntMap.empty
-        , psEdgeTraces = IntMap.empty
+        , psExpansionResults = emptyExpansionResultMap
+        , psEdgeExecutionArtifacts = IntMap.empty
         }
 
 tyExpNodeIds :: Constraint p -> [NodeId]

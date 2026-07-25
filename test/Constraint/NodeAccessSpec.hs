@@ -2,6 +2,7 @@
 
 module Constraint.NodeAccessSpec (spec) where
 
+import IdentityTestSupport
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
@@ -28,11 +29,11 @@ import Test.Hspec
 sampleNodes :: [TyNode]
 sampleNodes =
   [ TyVar (NodeId 0) (Just (NodeId 1)),
-    TyBase (NodeId 1) (BaseTy "Int"),
+    TestTyBase (NodeId 1) (BaseTy "Int"),
     TyArrow (NodeId 2) (NodeId 0) (NodeId 1),
     TyForall (NodeId 3) (NodeId 2),
     TyBottom (NodeId 4),
-    TyCon (NodeId 5) (BaseTy "Box") (NodeId 1 :| [NodeId 4]),
+    TestTyCon (NodeId 5) (BaseTy "Box") (NodeId 1 :| [NodeId 4]),
     TyVarApp (NodeId 6) (NodeId 0) (NodeId 1 :| []),
     TyExp (NodeId 7) (ExpVarId 0) (NodeId 2),
     TyMu (NodeId 8) (NodeId 2)
@@ -59,10 +60,10 @@ spec = describe "MLF.Constraint.NodeAccess" $ do
   describe "node and gen-node lookup" $ do
     it "returns nodes through Maybe and Either APIs" $ do
       NodeAccess.lookupNode sampleConstraint (NodeId 1)
-        `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+        `shouldBe` Just (TestTyBase (NodeId 1) (BaseTy "Int"))
       NodeAccess.lookupNode sampleConstraint (NodeId 99) `shouldBe` Nothing
       NodeAccess.lookupNodeSafe sampleConstraint (NodeId 1)
-        `shouldBe` Right (TyBase (NodeId 1) (BaseTy "Int"))
+        `shouldBe` Right (TestTyBase (NodeId 1) (BaseTy "Int"))
       NodeAccess.lookupNodeSafe sampleConstraint (NodeId 99)
         `shouldBe` Left "Node not found: 99"
 
@@ -77,13 +78,13 @@ spec = describe "MLF.Constraint.NodeAccess" $ do
 
     it "applies canonicalizers before lookup" $ do
       NodeAccess.lookupNodeCanon (const (NodeId 1)) sampleConstraint (NodeId 99)
-        `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+        `shouldBe` Just (TestTyBase (NodeId 1) (BaseTy "Int"))
       NodeAccess.lookupGenNodeCanon (const (GenNodeId 0)) sampleConstraint (GenNodeId 99)
         `shouldBe` Just sampleGen
 
     it "reports binding-tree errors for required lookups" $ do
       NodeAccess.requireNode sampleConstraint (NodeId 1)
-        `shouldBe` Right (TyBase (NodeId 1) (BaseTy "Int"))
+        `shouldBe` Right (TestTyBase (NodeId 1) (BaseTy "Int"))
       NodeAccess.requireNode sampleConstraint (NodeId 99)
         `shouldBe` Left (InvalidBindingTree "Node not found: 99")
       NodeAccess.requireGenNode sampleConstraint (GenNodeId 0)
@@ -142,9 +143,9 @@ spec = describe "MLF.Constraint.NodeAccess" $ do
     it "looks up only present nodes or substitutes a default for missing nodes" $ do
       let fallback = TyBottom (NodeId 99)
       NodeAccess.lookupNodes sampleConstraint [NodeId 0, NodeId 99, NodeId 1]
-        `shouldBe` [TyVar (NodeId 0) (Just (NodeId 1)), TyBase (NodeId 1) (BaseTy "Int")]
+        `shouldBe` [TyVar (NodeId 0) (Just (NodeId 1)), TestTyBase (NodeId 1) (BaseTy "Int")]
       NodeAccess.lookupNodesWithDefault sampleConstraint fallback [NodeId 99, NodeId 1]
-        `shouldBe` [fallback, TyBase (NodeId 1) (BaseTy "Int")]
+        `shouldBe` [fallback, TestTyBase (NodeId 1) (BaseTy "Int")]
 
     it "returns stable node and gen-node collections" $ do
       NodeAccess.allNodes sampleConstraint `shouldBe` sampleNodes

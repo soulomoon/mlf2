@@ -4,8 +4,11 @@
 
 module MLF.Elab.Elaborate.Scope
   ( GeneralizeAtWith,
+    GeneralizeAtWithRequirements,
+    GeneralizeAtWithResultCertificate,
     ScopeContext (..),
     generalizeAtNode,
+    generalizeAtNodeWithRequirements,
     normalizeSchemeSubstPair,
     normalizeSubstForScheme,
     reifyNodeTypeDirect,
@@ -13,28 +16,43 @@ module MLF.Elab.Elaborate.Scope
     reifyTargetType,
     reifyTargetNodeType,
     scopeRootForNode,
+    scopeRootForBoundary,
+    scopeTypeBinderIdentityRepresentative,
   )
 where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (listToMaybe)
-import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Constraint.Presolution (PresolutionView (..))
+import MLF.Constraint.Presolution.Plan.Context
+  ( SolvedToBaseResolution (..),
+    resolveGaSolvedToBase,
+  )
+import MLF.Constraint.Presolution.Plan.Requirements (GeneralizationRequirements)
 import MLF.Constraint.Types.Graph
-  ( NodeId,
+  ( EdgeId,
+    NodeId,
     NodeRef (..),
     getNodeId,
-    typeRef,
   )
 import MLF.Constraint.Types.Phase (Phase)
-import MLF.Elab.Generalize (GaBindParents (..))
+import MLF.Elab.Generalize
+  ( GaBindParents (..),
+    GeneralizedResultRoute,
+    GeneralizedResultRouteRequest,
+  )
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.ReadModel (ElabReadModel)
-import MLF.Elab.Run.Scope (generalizeTargetNode, schemeBodyTarget)
+import MLF.Elab.Run.Scope
+  ( ConstructionScopes,
+    generalizeTargetNode,
+    resolveConstructionScopeForBoundary,
+    resolveConstructionScopeForNode,
+    schemeBodyTarget,
+  )
 import MLF.Elab.Run.TypeOps (InlineBoundVarsContext, inlineBoundVarsTypeWithContext)
 import MLF.Elab.Types
-  ( ElabError,
+  ( ElabError (..),
     ElabScheme,
     ElabType,
     SchemeInfo (..),
@@ -54,11 +72,35 @@ type GeneralizeAtWith (p :: Phase) =
   NodeId ->
   Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 
+type GeneralizeAtWithRequirements (p :: Phase) =
+  GeneralizationRequirements ->
+  Maybe (GaBindParents p) ->
+  NodeRef ->
+  NodeId ->
+  Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
+
+type GeneralizeAtWithResultCertificate (p :: Phase) =
+  GeneralizedResultRouteRequest ->
+  GeneralizationRequirements ->
+  Maybe (GaBindParents p) ->
+  NodeRef ->
+  NodeId ->
+  Either
+    ElabError
+    ( ElabScheme,
+      IntMap.IntMap TypeBinderRef,
+      GeneralizedResultRoute
+    )
+
 data ScopeContext (p :: Phase) = ScopeContext
   { scPresolutionView :: PresolutionView p,
+    scCanonical :: NodeId -> NodeId,
     scGaParents :: GaBindParents p,
-    scScopeOverrides :: IntMap.IntMap NodeRef,
+    scScopeOverrides :: ConstructionScopes,
     scGeneralizeAtWith :: GeneralizeAtWith p,
+    scGeneralizeAtWithRequirements :: GeneralizeAtWithRequirements p,
+    scGeneralizeAtWithResultCertificate ::
+      GeneralizeAtWithResultCertificate p,
     scReadModel :: ElabReadModel p,
     scNamedSetReify :: IntSet.IntSet,
     scInlineBoundVarsContext :: InlineBoundVarsContext p
@@ -66,32 +108,61 @@ data ScopeContext (p :: Phase) = ScopeContext
 
 scopeRootForNode :: ScopeContext p -> NodeId -> Either ElabError NodeRef
 scopeRootForNode scopeContext nodeId =
-  case IntMap.lookup (getNodeId (canonical nodeId)) (scScopeOverrides scopeContext) of
-    Just ref -> pure ref
-    Nothing -> scopeRootFromBase scopeContext nodeId
-  where
-    canonical = pvCanonical presolutionView
-    presolutionView = scPresolutionView scopeContext
+  resolveConstructionScopeForNode
+    (scCanonical scopeContext)
+    (scGaParents scopeContext)
+    (scScopeOverrides scopeContext)
+    nodeId
 
-scopeRootFromBase :: ScopeContext p -> NodeId -> Either ElabError NodeRef
-scopeRootFromBase scopeContext root =
-  case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
-    Nothing -> pure (typeRef root)
-    Just baseNode -> do
-      path <- bindingPathToRootLocal (gaBindParentsBase gaParents) (typeRef baseNode)
-      pure $ case listToMaybe [gid | GenRef gid <- drop 1 path] of
-        Just gid -> GenRef gid
-        Nothing -> typeRef root
+-- | Resolve an exact source-constructor occurrence before using its result
+-- node. Boundary edges remain unique when canonicalization merges result nodes
+-- from distinct applications and nested lets.
+scopeRootForBoundary
+  :: ScopeContext p
+  -> EdgeId
+  -> NodeId
+  -> Either ElabError NodeRef
+scopeRootForBoundary scopeContext edgeId fallbackNode =
+  resolveConstructionScopeForBoundary
+    (scCanonical scopeContext)
+    (scGaParents scopeContext)
+    (scScopeOverrides scopeContext)
+    edgeId
+    fallbackNode
+
+-- | Project graph refs onto the base identity class used by generalization.
+-- Redirect/UF canonicalization alone cannot identify distinct solved copies
+-- of one lexical binder; 'gaSolvedToBase' retains that source provenance.
+scopeTypeBinderIdentityRepresentative :: ScopeContext p -> NodeId -> NodeId
+scopeTypeBinderIdentityRepresentative scopeContext nodeId =
+  case resolveGaSolvedToBase (scGaParents scopeContext) nodeC of
+    SolvedToBaseMapped baseNode -> baseNode
+    SolvedToBaseSameDomain baseNode -> baseNode
+    SolvedToBaseMissing -> nodeC
   where
-    presolutionView = scPresolutionView scopeContext
-    gaParents = scGaParents scopeContext
-    canonical = pvCanonical presolutionView
+    nodeC = scCanonical scopeContext nodeId
 
 generalizeAtNode :: ScopeContext p -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizeAtNode scopeContext nodeId = do
   scopeRoot <- scopeRootForNode scopeContext nodeId
-  let targetC = generalizeTargetNode presolutionView nodeId
+  let targetC = generalizeTargetNode presolutionView (scCanonical scopeContext nodeId)
   scGeneralizeAtWith scopeContext (Just (scGaParents scopeContext)) scopeRoot targetC
+  where
+    presolutionView = scPresolutionView scopeContext
+
+generalizeAtNodeWithRequirements
+  :: ScopeContext p
+  -> GeneralizationRequirements
+  -> NodeId
+  -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
+generalizeAtNodeWithRequirements scopeContext requirements nodeId = do
+  scopeRoot <- scopeRootForNode scopeContext nodeId
+  let targetC = generalizeTargetNode presolutionView (scCanonical scopeContext nodeId)
+  scGeneralizeAtWithRequirements scopeContext
+    requirements
+    (Just (scGaParents scopeContext))
+    scopeRoot
+    targetC
   where
     presolutionView = scPresolutionView scopeContext
 
@@ -122,8 +193,7 @@ reifyNodeTypeDirect :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypeDirect scopeContext nodeId = do
   reifyTypeForParam scopeContext (canonical nodeId)
   where
-    presolutionView = scPresolutionView scopeContext
-    canonical = pvCanonical presolutionView
+    canonical = scCanonical scopeContext
 
 reifyNodeTypePreferringBound :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypePreferringBound scopeContext nodeId = do
@@ -133,19 +203,18 @@ reifyNodeTypePreferringBound scopeContext nodeId = do
     Nothing -> reifyTypeForParam scopeContext nodeC
   where
     presolutionView = scPresolutionView scopeContext
-    canonical = pvCanonical presolutionView
+    canonical = scCanonical scopeContext
 
 reifyTargetType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
       subst = schemeInfoBinderRefSubst schemeInfo
-      targetNode = schemeBodyTarget presolutionView nodeId
+      targetNode = schemeBodyTarget presolutionView (scCanonical scopeContext nodeId)
    in reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
 
 reifyTargetNodeType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
-  let presolutionView = scPresolutionView scopeContext
-      canonical = pvCanonical presolutionView
+  let canonical = scCanonical scopeContext
       subst = schemeInfoBinderRefSubst schemeInfo
       targetNode = canonical nodeId
    in reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
@@ -153,14 +222,14 @@ reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
 reifyTypeForParam :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyTypeForParam scopeContext nodeId = do
   ty <- reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) IntMap.empty namedSet nodeId
-  let ty' = inlineBaseBounds presolutionView ty
+  let ty' = inlineBaseBounds (scCanonical scopeContext) presolutionView ty
   pure (inlineBoundVarsTypeWithContext (scInlineBoundVarsContext scopeContext) ty')
   where
     presolutionView = scPresolutionView scopeContext
     namedSet = scNamedSetReify scopeContext
 
-inlineBaseBounds :: PresolutionView p -> ElabType -> ElabType
-inlineBaseBounds presolutionView =
+inlineBaseBounds :: (NodeId -> NodeId) -> PresolutionView p -> ElabType -> ElabType
+inlineBaseBounds canonical presolutionView =
   inlineBaseBoundsType
     (pvConstraint presolutionView)
-    (pvCanonical presolutionView)
+    canonical

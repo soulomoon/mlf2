@@ -28,6 +28,8 @@ import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph
   ( BindFlag (..),
     Constraint (..),
+    EdgeId (..),
+    GraftResultConstruction (..),
     GenNode (..),
     InstEdge (..),
     NodeId (..),
@@ -110,6 +112,11 @@ graftInstEdges = do
   results <- mapM graftEdge toGraft
   let (errors, successes) = partitionResults (zip toGraft results)
       newUnifyEdges = concat successes
+      graftedEdgeIds =
+        IntSet.fromList
+          [ getEdgeId (instEdgeId edge)
+          | (edge, Just _) <- zip toGraft results
+          ]
 
   -- Update constraint: keep non-graftable edges + error edges
   modify' $ \s ->
@@ -118,7 +125,8 @@ graftInstEdges = do
           { nsConstraint =
               c'
                 { cInstEdges = toKeep ++ errors,
-                  cUnifyEdges = cUnifyEdges c' ++ newUnifyEdges
+                  cUnifyEdges = cUnifyEdges c' ++ newUnifyEdges,
+                  cGraftedEdges = cGraftedEdges c' `IntSet.union` graftedEdgeIds
                 }
           }
   where
@@ -141,12 +149,16 @@ partitionGraftable edges nodes = do
             leftNode = lookupNodeIn nodes leftId
             rightNode = lookupNodeIn nodes rightId
          in case (leftNode, rightNode) of
-              (Just TyVar {}, Just TyArrow {}) -> True
-              (Just TyVar {}, Just TyBase {tnBase = base}) ->
-                not (Set.member base polySyms)
-              (Just TyVar {}, Just TyCon {tnCon = con}) ->
-                not (Set.member con polySyms)
-              (Just TyVar {}, Just TyVarApp {}) -> True
+              (Just source@TyVar {}, Just TyArrow {}) ->
+                not (hasForallLowerBoundHead nodes uf source)
+              (Just source@TyVar {}, Just TyBase {tnBaseIdentity = identity}) ->
+                not (hasForallLowerBoundHead nodes uf source)
+                  && not (Set.member identity polySyms)
+              (Just source@TyVar {}, Just TyCon {tnConIdentity = identity}) ->
+                not (hasForallLowerBoundHead nodes uf source)
+                  && not (Set.member identity polySyms)
+              (Just source@TyVar {}, Just TyVarApp {}) ->
+                not (hasForallLowerBoundHead nodes uf source)
               (Just TyArrow {}, Just TyArrow {}) -> True
               (Just TyBase {}, Just TyBase {}) -> True
               (Just TyCon {}, Just TyCon {}) -> True
@@ -175,6 +187,31 @@ partitionGraftable edges nodes = do
               _ -> False
   pure (filter isGraftable edges, filter (not . isGraftable) edges)
 
+-- | A bounded variable whose lower-bound head is a forall is not an
+-- unconstrained bottom node.  Its instance edge first needs the presolution
+-- decision that instantiates the lower-bound scheme; grafting it directly
+-- would overwrite the variable with the target structure and emit the
+-- ill-formed equality @forall ... = constructor ...@.
+--
+-- Source-type internalization can add more than one variable boundary, so
+-- follow variable bounds transitively.  Malformed cyclic bounds are treated
+-- as non-forall here and left to the normal cycle/error checks.
+hasForallLowerBoundHead :: NodeMap TyNode -> IntMap NodeId -> TyNode -> Bool
+hasForallLowerBoundHead nodes uf TyVar {tnBound = Just bound} =
+  go IntSet.empty bound
+  where
+    go seen nodeId =
+      let canonicalId = findRoot uf nodeId
+          key = getNodeId canonicalId
+       in if IntSet.member key seen
+            then False
+            else case lookupNodeIn nodes canonicalId of
+              Just TyForall {} -> True
+              Just TyVar {tnBound = Just nextBound} ->
+                go (IntSet.insert key seen) nextBound
+              _ -> False
+hasForallLowerBoundHead _ _ _ = False
+
 {- Note [Grafting Cases]
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Grafting transforms instantiation edges (≤) into unification edges (=) by
@@ -186,8 +223,15 @@ a type constructor κ, then the variable α must also begin with κ."
 
 Cases handled during normalization (Phase 2):
 ──────────────────────────────────────────────
-  Var ≤ Arrow    → Graft: rewrite α into (α₁ → α₂), then unify α₁/α₂ with
-                   the arrow's components (core grafting operation).
+  Var ≤ Arrow    → Graft an unbounded/monomorphic variable: rewrite α into
+                   (α₁ → α₂), then unify α₁/α₂ with the arrow's
+                   components (core grafting operation).
+
+  Bounded Var ≤ Structure
+                → If the variable's lower-bound head is forall, keep the
+                   edge for Phase 4.  Presolution must decide the required
+                   instantiation before matching any Arrow/Base/TyCon/VarApp
+                   target structure.
 
   Var ≤ Base     → Graft if the base is rigid; keep for presolution only when
                    the base symbol is polymorphic (paper Poly set).
@@ -261,6 +305,34 @@ graftEdge edge = do
       | otherwise -> do
           domVar <- freshVar
           codVar <- freshVar
+          let sourceBoundRoot = findRoot uf <$> mbBound
+              sourceResultRoot =
+                sourceBoundRoot
+                  >>= firstArrowCodomain nodes uf IntSet.empty
+              construction =
+                GraftArrowResultConstruction
+                  { grcEdgeId = instEdgeId edge
+                  , grcSourceRoot = leftId
+                  , grcSourceBoundRoot = sourceBoundRoot
+                  , grcSourceResultRoot = sourceResultRoot
+                  , grcTargetRoot = rightId
+                  , grcTargetDomain = findRoot uf rDom
+                  , grcTargetCodomain = findRoot uf rCod
+                  , grcConstructionDomain = domVar
+                  , grcConstructionCodomain = codVar
+                  }
+          modify' $ \st ->
+            let current = nsConstraint st
+             in st
+                  { nsConstraint =
+                      current
+                        { cGraftResultConstructions =
+                            IntMap.insert
+                              (getEdgeId (instEdgeId edge))
+                              construction
+                              (cGraftResultConstructions current)
+                        }
+                  }
           insertNode TyArrow {tnId = leftId, tnDom = domVar, tnCod = codVar}
           setBindParentNorm domVar leftId BindFlex
           setBindParentNorm codVar leftId BindFlex
@@ -304,12 +376,12 @@ graftEdge edge = do
                     [UnifyEdge bnd rightId]
               _ -> []
        in pure $ Just (UnifyEdge leftId rightId : boundEdges)
-    (Just TyVar {tnBound = mbBound}, Just (TyCon {tnCon = con, tnArgs = rArgs}))
+    (Just TyVar {tnBound = mbBound}, Just (TyCon {tnConIdentity = identity, tnCon = con, tnArgs = rArgs}))
       | occursIn nodes uf leftId rightId -> pure Nothing
       | otherwise -> do
           argVars <- mapM (const freshVar) (NE.toList rArgs)
           let argVarsNE = NE.fromList argVars
-          insertNode TyCon {tnId = leftId, tnCon = con, tnArgs = argVarsNE}
+          insertNode TyCon {tnId = leftId, tnConIdentity = identity, tnCon = con, tnArgs = argVarsNE}
           mapM_ (\v -> setBindParentNorm v leftId BindFlex) argVars
           case mbBound of
             Nothing -> pure ()
@@ -362,11 +434,11 @@ graftEdge edge = do
           [ UnifyEdge (findRoot uf lDom) (findRoot uf rDom),
             UnifyEdge (findRoot uf lCod) (findRoot uf rCod)
           ]
-    (Just (TyBase {tnBase = lBase}), Just (TyBase {tnBase = rBase}))
-      | lBase == rBase -> pure $ Just []
+    (Just (TyBase {tnBaseIdentity = leftIdentity}), Just (TyBase {tnBaseIdentity = rightIdentity}))
+      | leftIdentity == rightIdentity -> pure $ Just []
       | otherwise -> pure Nothing
-    (Just (TyCon {tnCon = lCon, tnArgs = lArgs}), Just (TyCon {tnCon = rCon, tnArgs = rArgs}))
-      | lCon == rCon,
+    (Just (TyCon {tnConIdentity = leftIdentity, tnArgs = lArgs}), Just (TyCon {tnConIdentity = rightIdentity, tnArgs = rArgs}))
+      | leftIdentity == rightIdentity,
         NE.length lArgs == NE.length rArgs ->
           let argEdges =
                 zipWith
@@ -407,6 +479,33 @@ graftEdge edge = do
     (Just TyVarApp {}, Just TyBottom {}) -> pure Nothing
     (Just TyBottom {}, Just TyVarApp {}) -> pure Nothing
     _ -> pure $ Just []
+
+-- | Locate the first arrow codomain in the exact pre-graft source bound.
+-- This runs before the variable root is overwritten, so the result is
+-- construction provenance rather than a reconstruction from solved shape.
+firstArrowCodomain
+  :: NodeMap TyNode
+  -> IntMap NodeId
+  -> IntSet.IntSet
+  -> NodeId
+  -> Maybe NodeId
+firstArrowCodomain nodes uf seen node
+  | IntSet.member nodeKey seen = Nothing
+  | otherwise =
+      case lookupNodeIn nodes nodeC of
+        Just TyArrow {tnCod = codomain} ->
+          Just (findRoot uf codomain)
+        Just TyVar {tnBound = Just bound} ->
+          firstArrowCodomain nodes uf seen' bound
+        Just TyForall {tnBody = body} ->
+          firstArrowCodomain nodes uf seen' body
+        Just TyExp {tnBody = body} ->
+          firstArrowCodomain nodes uf seen' body
+        _ -> Nothing
+  where
+    nodeC = findRoot uf node
+    nodeKey = getNodeId nodeC
+    seen' = IntSet.insert nodeKey seen
 
 -- | Check whether target (under UF reps) contains the variable.
 occursIn :: NodeMap TyNode -> IntMap NodeId -> NodeId -> NodeId -> Bool

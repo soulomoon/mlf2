@@ -10,6 +10,8 @@ module MLF.Elab.Run.ResultType
     rtcEdgeExpansions,
     generalizeWithPlan,
     inferInstAppArgsFromSchemeRefs,
+    inferInstAppArgsFromSchemeRefsExact,
+    residualTopologyAgreesExact,
     substTypeSelectiveRefs,
     mkResultTypeInputs,
     buildResultTypeView,
@@ -31,6 +33,8 @@ import MLF.Constraint.Types.Graph
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Run.Instantiation
   ( inferInstAppArgsFromSchemeRefs,
+    inferInstAppArgsFromSchemeRefsExact,
+    residualTopologyAgreesExact,
     substTypeSelectiveRefs,
   )
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
@@ -155,6 +159,15 @@ computeResultTypeDispatch ctx view annCanon ann = do
       let innerPre =
             case rootForTypePreAnn of
               AAnn innerPre0 _ _ -> innerPre0
+              AExactAnn innerPre0 _ _ _ -> innerPre0
+              AUnfold innerPre0 _ _ -> innerPre0
+              _ -> rootForTypePreAnn
+      Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
+    AExactAnn inner _ annNodeId eid -> do
+      let innerPre =
+            case rootForTypePreAnn of
+              AExactAnn innerPre0 _ _ _ -> innerPre0
+              AAnn innerPre0 _ _ -> innerPre0
               AUnfold innerPre0 _ _ -> innerPre0
               _ -> rootForTypePreAnn
       Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
@@ -162,6 +175,7 @@ computeResultTypeDispatch ctx view annCanon ann = do
       let innerPre =
             case rootForTypePreAnn of
               AAnn innerPre0 _ _ -> innerPre0
+              AExactAnn innerPre0 _ _ _ -> innerPre0
               AUnfold innerPre0 _ _ -> innerPre0
               _ -> rootForTypePreAnn
       Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid

@@ -78,6 +78,7 @@ module MLF.Constraint.Types.Graph (
     lookupNodeIn,
     InstEdge (..),
     UnifyEdge (..),
+    GraftResultConstruction (..),
     -- * Re-exports from Binding
     BindFlag (..),
     BindParents,
@@ -95,6 +96,7 @@ module MLF.Constraint.Types.Graph (
     toSolvedConstraint,
 ) where
 
+import qualified Data.IntMap.Strict as IntMap
 import Data.IntSet (IntSet)
 import qualified MLF.Constraint.Types.Graph.Accessors as Accessors
 import MLF.Constraint.Types.Graph.Binding
@@ -110,6 +112,23 @@ Quantifier binders (paper Q(n)) are represented by the direct flexibly-bound
 `TyVar` children of a binder node (`TyForall`), optionally carrying instance
 bounds on the `TyVar` itself.
 -}
+
+-- | Exact construction authority emitted when normalization grafts an arrow
+-- onto a variable.  The original instantiation edge is then erased, so this
+-- record is the only phase-stable proof that the fresh codomain was
+-- constructed for that exact application result.
+data GraftResultConstruction = GraftArrowResultConstruction
+        { grcEdgeId :: !EdgeId
+        , grcSourceRoot :: !NodeId
+        , grcSourceBoundRoot :: !(Maybe NodeId)
+        , grcSourceResultRoot :: !(Maybe NodeId)
+        , grcTargetRoot :: !NodeId
+        , grcTargetDomain :: !NodeId
+        , grcTargetCodomain :: !NodeId
+        , grcConstructionDomain :: !NodeId
+        , grcConstructionCodomain :: !NodeId
+        }
+    deriving (Eq, Show)
 
 -- | Snapshot of the entire graphic constraint graph produced by Phase 1. Each
 -- solver phase mutates/consumes different slices of this structure, so we keep
@@ -175,6 +194,17 @@ data Constraint (p :: Phase) = Constraint
             --
             -- These are internal edges for the alternative let-typing translation
             -- and should be ignored when translating witnesses.
+        , cGraftedEdges :: IntSet
+            -- ^ Monomorphic instantiation edges discharged by normalization.
+            --
+            -- Their graph effect has been compiled into unification, so their
+            -- xMLF computation is identity by construction.  The edge IDs are
+            -- retained as provenance for elaboration after 'cInstEdges' drops
+            -- the discharged edges.
+        , cGraftResultConstructions :: IntMap.IntMap GraftResultConstruction
+            -- ^ Exact arrow-result construction facts produced by grafting.
+            -- Unlike 'cGraftedEdges', this map is typed provenance rather than
+            -- an identity-computation marker.
         , cGenNodes :: GenNodeMap GenNode
             -- ^ Gen node map (paper G constructors).
             --
@@ -206,6 +236,8 @@ rephaseConstraint c =
         , cWeakenedVars = cWeakenedVars c
         , cAnnEdges = cAnnEdges c
         , cLetEdges = cLetEdges c
+        , cGraftedEdges = cGraftedEdges c
+        , cGraftResultConstructions = cGraftResultConstructions c
         , cGenNodes = cGenNodes c
         }
 

@@ -160,7 +160,7 @@ bindersForGen env renderAllChildren aliasBinderNodes traceM gid = do
         [ canonical child
         | (child, node) <- toListNode nodes,
           TyVar {} <- [node],
-          let childKey = getNodeId child,
+          let childKey = nodeRefKey (typeRef child),
           isBindable childKey child,
           bindingScopeFor constraint (typeRef child) == Just gid
         ]

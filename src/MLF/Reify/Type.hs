@@ -4,6 +4,10 @@ module MLF.Reify.Type
     ( reifyType
     , reifyTypeWithRefsNoFallback
     , reifyTypeWithRefsNoFallbackOnConstraint
+    , reifyTypeWithExternalRefsNoFallback
+    , reifyTypeWithExternalRefsNoFallbackOnConstraint
+    , reifyTypeWithOuterBinderRefsNoFallback
+    , reifyTypeWithOuterBinderRefsNoFallbackOnConstraint
     , reifyTypeWithNamedSetRefs
     , reifyTypeWithNamedSetRefsNoFallback
     , reifyTypeWithRefsNoFallbackReadModel
@@ -27,7 +31,7 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import MLF.Elab.ReadModel (ElabReadModel, ermPresolutionView)
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Reify.Type.Core (ReifyRoot (..), reifyWithAsRefs, reifyWithReadModelRefs, reifyWithRefs)
+import MLF.Reify.Type.Core (ReifyRoot (..), reifyWithAsRefs, reifyWithExternalRefs, reifyWithOuterBinderRefs, reifyWithReadModelRefs, reifyWithRefs)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
 
@@ -75,6 +79,82 @@ reifyTypeWithRefsNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap TypeBin
 reifyTypeWithRefsNoFallbackOnConstraint constraint subst nid =
   let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
    in reifyTypeWithRefsNoFallback presolutionView subst nid
+
+reifyTypeWithExternalRefsNoFallback ::
+  PresolutionView p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  IntMap.IntMap [NodeId] ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithExternalRefsNoFallback presolutionView subst externalKeys structuralBinders nid =
+  reifyWithExternalRefs
+    "reifyTypeWithExternalRefsNoFallback"
+    presolutionView
+    (refForSubstRefs canonical subst)
+    (\nodeId -> IntMap.member (getNodeId (canonical nodeId)) subst)
+    (\nodeId -> IntSet.member (getNodeId (canonical nodeId)) externalKeys)
+    structuralBinders
+    RootTypeNoFallback
+    nid
+  where
+    canonical = pvCanonical presolutionView
+
+reifyTypeWithExternalRefsNoFallbackOnConstraint ::
+  Constraint p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  IntMap.IntMap [NodeId] ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithExternalRefsNoFallbackOnConstraint constraint subst externalKeys structuralBinders nid =
+  let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
+   in reifyTypeWithExternalRefsNoFallback presolutionView subst externalKeys structuralBinders nid
+
+-- | Reify the body of a scheme while treating the supplied binder identities
+-- as declarations already owned by that enclosing scheme.  This differs from
+-- inherited external references: structural source binders still bind
+-- locally unless their exact identity is present in @outerBinderRefs@.
+reifyTypeWithOuterBinderRefsNoFallback ::
+  PresolutionView p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  [TypeBinderRef] ->
+  IntMap.IntMap [NodeId] ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithOuterBinderRefsNoFallback presolutionView subst externalKeys outerBinderRefs structuralBinders nid =
+  reifyWithOuterBinderRefs
+    "reifyTypeWithOuterBinderRefsNoFallback"
+    presolutionView
+    refForVar
+    isNamed
+    isExternal
+    isOuterOwned
+    structuralBinders
+    RootTypeNoFallback
+    nid
+  where
+    canonical = pvCanonical presolutionView
+    refForVar = refForSubstRefs canonical subst
+    isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
+    isExternal nodeId = IntSet.member (getNodeId (canonical nodeId)) externalKeys
+    isOuterOwned nodeId =
+      any
+        (typeBinderRefsSameIdentity (refForVar nodeId))
+        outerBinderRefs
+
+reifyTypeWithOuterBinderRefsNoFallbackOnConstraint ::
+  Constraint p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  [TypeBinderRef] ->
+  IntMap.IntMap [NodeId] ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithOuterBinderRefsNoFallbackOnConstraint constraint subst externalKeys outerBinderRefs structuralBinders nid =
+  let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
+   in reifyTypeWithOuterBinderRefsNoFallback presolutionView subst externalKeys outerBinderRefs structuralBinders nid
 
 reifyTypeWithNamedSetRefs :: PresolutionView p -> IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamedSetRefs presolutionView subst namedSet =

@@ -2,6 +2,8 @@
 
 module Research.SameLaneRetainedChildRepresentativeGapSpec (spec) where
 
+import Control.Monad (forM_, unless)
+import qualified ElabTypeTestSupport as TestElab
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -10,233 +12,50 @@ import MLF.Elab.Pipeline
     ( runPipelineElab
     )
 import MLF.Frontend.Syntax
-import MLF.Types.Elab (ElabType, Ty(..), XmlfTerm, tBase, tCon)
+import MLF.Types.Elab
+    ( ElabType
+    , Ty(..)
+    , XmlfTerm
+    , tyToElab
+    , typeBinderRefsSameIdentity
+    )
 import ElabTermTestSupport (testTForall, testTMu, testTVar, testTVarApp)
 import SpecUtil (unsafeNormalizeExpr)
 
 spec :: Spec
 spec =
     describe "same-lane retained-child representative-gap probes" $ do
-        it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
+        forM_ retainedChildCases $ \(label, expr) ->
+            it (label ++ " preserves recursive output on runPipelineElab") $
+                expectExactRetainedChildAuthoritativeOutput
+                    label
+                    (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
-        it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
-
-        it "sameLaneDoubleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneDoubleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneTripleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneTripleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneQuadrupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneQuadrupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneQuintupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneQuintupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneSextupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneSextupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneSeptupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneSeptupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneOctupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneOctupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneNonupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneNonupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneDecupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
-
-        it "sameLaneDecupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
-
-        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
-
-        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
-
-        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
-
-        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
-
-        it "sameWrapperNestedForallTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallMixedStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallMixedStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallMixedStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallMixedStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr))
-
-        it "sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "unchecked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr))
-
-        it "sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr preserves recursive output on runPipelineElab" $
-            expectExactRetainedChildAuthoritativeOutput
-                "checked"
-                (runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr))
-
+retainedChildCases :: [(String, SurfaceExpr)]
+retainedChildCases =
+    [ ("sameLaneAliasFrameClearBoundaryExpr", sameLaneAliasFrameClearBoundaryExpr)
+    , ("sameLaneDoubleAliasFrameClearBoundaryExpr", sameLaneDoubleAliasFrameClearBoundaryExpr)
+    , ("sameLaneTripleAliasFrameClearBoundaryExpr", sameLaneTripleAliasFrameClearBoundaryExpr)
+    , ("sameLaneQuadrupleAliasFrameClearBoundaryExpr", sameLaneQuadrupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneQuintupleAliasFrameClearBoundaryExpr", sameLaneQuintupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneSextupleAliasFrameClearBoundaryExpr", sameLaneSextupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneSeptupleAliasFrameClearBoundaryExpr", sameLaneSeptupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneOctupleAliasFrameClearBoundaryExpr", sameLaneOctupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneNonupleAliasFrameClearBoundaryExpr", sameLaneNonupleAliasFrameClearBoundaryExpr)
+    , ("sameLaneDecupleAliasFrameClearBoundaryExpr", sameLaneDecupleAliasFrameClearBoundaryExpr)
+    , ("sameWrapperNestedForallAliasFrameClearBoundaryExpr", sameWrapperNestedForallAliasFrameClearBoundaryExpr)
+    , ("sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr", sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr)
+    , ("sameWrapperNestedForallTransparentMediatorExpr", sameWrapperNestedForallTransparentMediatorExpr)
+    , ("sameWrapperNestedForallTransparentMediatorDecupleAliasExpr", sameWrapperNestedForallTransparentMediatorDecupleAliasExpr)
+    , ("sameWrapperNestedForallStackedTransparentMediatorExpr", sameWrapperNestedForallStackedTransparentMediatorExpr)
+    , ("sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr", sameWrapperNestedForallStackedTransparentMediatorDecupleAliasExpr)
+    , ("sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr", sameWrapperNestedForallStackedLetAliasedTransparentMediatorExpr)
+    , ("sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr", sameWrapperNestedForallStackedLetAliasedTransparentMediatorDecupleAliasExpr)
+    , ("sameWrapperNestedForallMixedStackedTransparentMediatorExpr", sameWrapperNestedForallMixedStackedTransparentMediatorExpr)
+    , ("sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr", sameWrapperNestedForallMixedStackedTransparentMediatorDecupleAliasExpr)
+    , ("sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr", sameWrapperNestedForallReverseMixedStackedTransparentMediatorExpr)
+    , ("sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr", sameWrapperNestedForallReverseMixedStackedTransparentMediatorDecupleAliasExpr)
+    ]
 
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
@@ -248,14 +67,11 @@ expectExactRetainedChildAuthoritativeOutput label result =
         Left err ->
             expectationFailure (label ++ ": expected recursive success, got " ++ show err)
         Right (_term, ty) -> do
-            countLeadingUnboundedForalls ty `shouldBe` 2
-            matchesRecursiveArrow (stripLeadingUnboundedForalls ty) expectedRecursiveArrow
-                `shouldBe` True
-
-countLeadingUnboundedForalls :: ElabType -> Int
-countLeadingUnboundedForalls ty = case ty of
-    TForallRef _ Nothing body -> 1 + countLeadingUnboundedForalls body
-    _ -> 0
+            unless
+                (matchesRecursiveArrow (stripLeadingUnboundedForalls ty) expectedRecursiveArrow)
+                ( expectationFailure
+                    (label ++ ": expected " ++ show expectedRecursiveArrow ++ ", got " ++ show ty)
+                )
 
 stripLeadingUnboundedForalls :: ElabType -> ElabType
 stripLeadingUnboundedForalls ty = case ty of
@@ -266,6 +82,12 @@ matchesRecursiveArrow :: ElabType -> ElabType -> Bool
 matchesRecursiveArrow actual expected = case (actual, expected) of
     (TArrow domA codA, TArrow domE codE) ->
         matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
+    ( TForallRef resultRef (Just resultBound) (TArrow domA (TVarRef resultUseRef))
+      , TArrow domE codE
+      ) ->
+        typeBinderRefsSameIdentity resultRef resultUseRef
+            && matchesRecursiveMu domA domE
+            && matchesRecursiveMu (tyToElab resultBound) codE
     _ -> False
   where
     matchesRecursiveMu tyA tyE = case (tyA, tyE) of
@@ -275,8 +97,8 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
     stripMuRefs ty = case ty of
         TVarRef _ -> testTVar "_"
         TArrow dom cod -> TArrow (stripMuRefs dom) (stripMuRefs cod)
-        TBaseWithIdentity _ base -> tBase base
-        TConWithIdentity _ con args -> tCon con (fmap stripMuRefs args)
+        TBaseWithIdentity identity base -> TBaseWithIdentity identity base
+        TConWithIdentity identity con args -> TConWithIdentity identity con (fmap stripMuRefs args)
         TVarAppRef _ args -> testTVarApp "_" (fmap stripMuRefs args)
         TForallRef _ mb body -> testTForall "_" (fmap stripBoundRefs mb) (stripMuRefs body)
         TMuRef _ body -> testTMu "_" (stripMuRefs body)
@@ -284,8 +106,8 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
 
     stripBoundRefs bound = case bound of
         TArrow dom cod -> TArrow (stripMuRefs dom) (stripMuRefs cod)
-        TBaseWithIdentity _ base -> tBase base
-        TConWithIdentity _ con args -> tCon con (fmap stripMuRefs args)
+        TBaseWithIdentity identity base -> TBaseWithIdentity identity base
+        TConWithIdentity identity con args -> TConWithIdentity identity con (fmap stripMuRefs args)
         TVarAppRef _ args -> testTVarApp "_" (fmap stripMuRefs args)
         TForallRef _ mb body -> testTForall "_" (fmap stripBoundRefs mb) (stripMuRefs body)
         TMuRef _ body -> testTMu "_" (stripMuRefs body)
@@ -293,7 +115,7 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
 
 expectedRecursiveArrow :: ElabType
 expectedRecursiveArrow =
-    let recursiveTy = testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int")))
+    let recursiveTy = testTMu "a" (TArrow (testTVar "a") (TestElab.tBase (BaseTy "Int")))
     in TArrow recursiveTy recursiveTy
 
 sameLaneAliasFrameClearBoundaryExpr :: SurfaceExpr

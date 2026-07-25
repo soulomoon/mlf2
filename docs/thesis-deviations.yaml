@@ -84,8 +84,8 @@ deviations:
       - src/MLF/Constraint/Types.hs
       - src/MLF/Constraint/Presolution/Driver.hs
     test_evidence:
-      - matcher: "Phase 4"
-        file: test/PresolutionSpec.hs
+      - matcher: "materializes expansions and clears inst edges for strict solve"
+        file: test/Presolution/ExpansionSpec.hs
     status: implementation-choice
 
   - id: DEV-AUTO-ISO-RECURSIVE

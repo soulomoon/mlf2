@@ -34,7 +34,7 @@ module MLF.Constraint.Presolution.Plan
   )
 where
 
-import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..))
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..), GeneralizationRequirements)
 import MLF.Constraint.Presolution.Plan.Env (PresolutionEnv (..))
 import MLF.Constraint.Presolution.Plan.Generalize (GeneralizePlan (..), planGeneralizeAt)
 import MLF.Constraint.Presolution.Plan.ReifyStep (ReifyPlan (..), planReify)
@@ -47,10 +47,11 @@ buildGeneralizePlans ::
   TraceConfig ->
   PresolutionView p ->
   Maybe (GaBindParents p) ->
+  GeneralizationRequirements ->
   NodeRef ->
   NodeId ->
   Either ElabError (GeneralizePlan p, ReifyPlan)
-buildGeneralizePlans traceCfg presolutionView mbBindParentsGa scopeRoot targetNode = do
+buildGeneralizePlans traceCfg presolutionView mbBindParentsGa requirements scopeRoot targetNode = do
   let constraint = pvCanonicalConstraint presolutionView
       canonical = pvCanonical presolutionView
       presEnv =
@@ -60,6 +61,7 @@ buildGeneralizePlans traceCfg presolutionView mbBindParentsGa scopeRoot targetNo
             peCanonical = canonical,
             peBindParents = cBindParents constraint,
             peBindParentsGa = mbBindParentsGa,
+            peRequirements = requirements,
             peScopeRoot = scopeRoot,
             peTargetNode = targetNode,
             peTraceConfig = traceCfg

@@ -32,6 +32,7 @@ reification details.
 -}
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Plan.BinderPlan
   ( BinderPlan (..),
     isQuantifiable,
@@ -52,15 +53,11 @@ import MLF.Constraint.Presolution.Plan.Target
     TypeRootPlan (..),
   )
 import MLF.Constraint.Types.Graph hiding (lookupNode)
-import MLF.Types.Elab (TypeBinderRef)
-import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError (..))
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
 data ReifyPlan = ReifyPlan
-  { rpPlan :: Reify.ReifyPlan,
-    rpTypeRootForReifyAdjusted :: NodeId,
-    rpSubstForReifyAdjusted :: IntMap.IntMap TypeBinderRef
+  { rpPlan :: Reify.ReifyPlan
   }
 
 planReify :: PresolutionEnv p -> GeneralizePlan p -> Either ElabError ReifyPlan
@@ -71,6 +68,7 @@ planReify _ plan = do
           gpBinderPlan = binderPlan,
           gpGammaPlan = gammaPlan,
           gpTypeRootPlan = typeRootPlan,
+          gpRigidBindParents = rigidBindParents,
           gpBindParents = bindParents,
           gpTargetPlan = targetPlan,
           gpSchemeRootsPlan = schemeRootsPlan,
@@ -92,20 +90,26 @@ planReify _ plan = do
         } = targetPlan
       TypeRootPlan
         { trTypeRoot = typeRoot,
-          trTargetIsBaseLike = targetIsBaseLike
+          trTargetIsBaseLike = targetIsBaseLike,
+          trReifyRootSource = reifyRootSource
         } = typeRootPlan
       GammaPlan
         { gpSolvedToBasePref = solvedToBasePrefPlan
         } = gammaPlan
       BinderPlan
-        { bpBinderNames = binderNames,
-          bpSubst0 = subst0',
+        { bpOrderedBinders = orderedBinderEntries,
+          bpBinderRefRoutes = binderRefRoutes,
+          bpLocallyClosedGammaKeys = locallyClosedGammaKeys,
           bpGammaAlias = gammaAliasPlan,
+          bpNamedUnderGaSet = namedUnderGaSetPlan,
           bpNestedSchemeInteriorSet = nestedSchemeInteriorSetPlan,
           bpBaseGammaRep = baseGammaRepPlan,
           bpAliasBinderBases = aliasBinderBasesPlan,
+          bpRequiredGamma = requiredGammaPlan,
+          bpSourceBinderRefs = sourceBinderRefsPlan,
           bpOrderBinders = orderBinders
         } = binderPlan
+  let subst0' = binderRefRoutes
       isQuantifiable' = isQuantifiable canonical constraint isTyVarKey
       extraCandidates =
         case scopeRootC of
@@ -116,22 +120,26 @@ planReify _ plan = do
                 [ canonical child
                 | child <- IntMapUtils.typeChildrenOf bindParents (typeRef (canonical typeRoot)),
                   isQuantifiable' child,
+                  not (IntSet.member (getNodeId (canonical child)) locallyClosedGammaKeys),
                   not (IntMap.member (getNodeId (canonical child)) subst0')
                 ]
               Just TyMu {} ->
                 [ canonical child
                 | child <- IntMapUtils.typeChildrenOf bindParents (typeRef (canonical typeRoot)),
                   isQuantifiable' child,
+                  not (IntSet.member (getNodeId (canonical child)) locallyClosedGammaKeys),
                   not (IntMap.member (getNodeId (canonical child)) subst0')
                 ]
               _ -> []
   orderedExtra <- orderBinders (map getNodeId extraCandidates)
-  let reifyPlan =
-        Reify.buildReifyPlan
+  reifyPlan <-
+    Reify.buildReifyPlan
           Reify.ReifyPlanInput
             { Reify.rpiConstraint = constraint,
               Reify.rpiNodes = nodes,
               Reify.rpiCanonical = canonical,
+              Reify.rpiBindParents = bindParents,
+              Reify.rpiRigidBindParents = rigidBindParents,
               Reify.rpiScopeRootC = scopeRootC,
               Reify.rpiScopeGen = scopeGen,
               Reify.rpiSchemeRootsPlan = schemeRootsPlan,
@@ -140,35 +148,22 @@ planReify _ plan = do
               Reify.rpiTargetBound = targetBound,
               Reify.rpiReachableFromWithBounds = reachableFromWithBounds,
               Reify.rpiBindParentsGa = mbBindParentsGaInfo,
-              Reify.rpiExtraNameStart = length binderNames,
+              Reify.rpiExtraNameStart = length orderedBinderEntries,
               Reify.rpiOrderedExtra = orderedExtra,
               Reify.rpiSubst0 = subst0',
               Reify.rpiGammaAlias = gammaAliasPlan,
+              Reify.rpiNamedUnderGaSet = namedUnderGaSetPlan,
               Reify.rpiNestedSchemeInteriorSet = nestedSchemeInteriorSetPlan,
               Reify.rpiBaseGammaRep = baseGammaRepPlan,
               Reify.rpiAliasBinderBases = aliasBinderBasesPlan,
               Reify.rpiSolvedToBasePref = solvedToBasePrefPlan,
-              Reify.rpiTypeRoot = typeRoot
+              Reify.rpiTypeRoot = typeRoot,
+              Reify.rpiReifyRootSource = reifyRootSource
+              , Reify.rpiRequiredGamma = requiredGammaPlan
+              , Reify.rpiLocallyClosedGammaKeys = locallyClosedGammaKeys
+              , Reify.rpiSourceBinderRefs = sourceBinderRefsPlan
             }
-  let Reify.ReifyPlan
-        { Reify.rpSubst = substRefs,
-          Reify.rpTypeRootForReify = typeRootForReify,
-          Reify.rpSubstForReify = substForReify
-        } = reifyPlan
-      typeRootForReifyAdjustedPair =
-        case lookupNodeInMap nodes (canonical typeRootForReify) of
-          Just TyVar {} ->
-            case VarStore.lookupVarBound constraint (canonical typeRootForReify) of
-              Just bnd
-                | canonical bnd == canonical typeRoot ->
-                    (typeRoot, substRefs)
-              _ -> (typeRootForReify, substForReify)
-          _ -> (typeRootForReify, substForReify)
-      (typeRootForReifyAdjusted, substForReifyAdjusted) =
-        typeRootForReifyAdjustedPair
   pure
     ReifyPlan
-      { rpPlan = reifyPlan,
-        rpTypeRootForReifyAdjusted = typeRootForReifyAdjusted,
-        rpSubstForReifyAdjusted = substForReifyAdjusted
+      { rpPlan = reifyPlan
       }

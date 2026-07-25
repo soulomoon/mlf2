@@ -78,7 +78,7 @@ computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
   -- For simple (non-rank-2) annotations, the result type is:
   --   paramTy -> bodyTy
   --
-  -- Pattern: ALam paramName _ _ (ALet letName _ _ _ _ (AAnn _ annNode _) bodyAnn _) _
+  -- Pattern: ALam paramName _ _ (ALet letName _ _ _ _ (AAnn _ annNode _) bodyAnn _) _ _
   -- where paramName == letName
   case annCanon of
     ALam
@@ -87,6 +87,7 @@ computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
       _paramNode
       _scopeRoot
       (ALet letName _letDetails _schemeGen _schemeRoot _expVar _rhsGen rhsAnn bodyAnn _letNode)
+      _bodyEid
       _lamNode
         | paramName == letName,
           AAnn _innerAnn annNodeId _eid <- rhsAnn -> do
@@ -158,6 +159,7 @@ computeBodyResultType ::
 computeBodyResultType recurse ctx view bodyAnn =
   case bodyAnn of
     AAnn inner _ _ -> recurse ctx view inner inner
+    AExactAnn inner _ _ _ -> recurse ctx view inner inner
     AUnfold inner _ _ -> recurse ctx view inner inner
     _ ->
       computeResultTypeFallbackCore ctx view bodyAnn bodyAnn

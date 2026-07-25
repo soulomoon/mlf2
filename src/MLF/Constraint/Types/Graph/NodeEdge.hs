@@ -85,6 +85,7 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
+import MLF.Frontend.Symbol (SymbolIdentity)
 
 -- | Stable identifier for a node in the term-DAG (`TyNode`).
 --
@@ -319,6 +320,7 @@ data TyNode
     -- | Base type constant (e.g. Int/Bool/String).
     | TyBase
         { tnId :: NodeId
+        , tnBaseIdentity :: SymbolIdentity
         , tnBase :: BaseTy
         }
     -- | Type constructor application (C σ₁ … σₙ).
@@ -329,6 +331,7 @@ data TyNode
     -- to the same argument subgraphs.
     | TyCon
         { tnId :: NodeId
+        , tnConIdentity :: SymbolIdentity
         , tnCon :: BaseTy
         , tnArgs :: NonEmpty NodeId
         }

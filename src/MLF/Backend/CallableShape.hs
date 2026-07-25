@@ -15,14 +15,12 @@ module MLF.Backend.CallableShape
     backendCallableClosureRef,
     backendCallableRefIdentity,
     backendCallableRefName,
-    backendCallableRefMatchesWith,
     backendCallableRefMatches,
     BackendCallableHead (..),
   )
 where
 
 import MLF.Types.Identity (IdDetails, UniqueIdentity, idDetailsSameIdentity)
-import MLF.Types.Reference (ReferenceMode (..), referenceMatchesWith)
 
 data BackendCallableBindingKind
   = BackendCallableBindingDirect
@@ -30,53 +28,43 @@ data BackendCallableBindingKind
   | BackendCallableBindingUnknown
   deriving (Eq, Show)
 
-data BackendCallableIdentity
-  = BackendCallableTermIdentity IdDetails
-  | BackendCallableClosureIdentity UniqueIdentity
-  deriving (Show)
-
 data BackendCallableRef
-  = BackendCallableRef (Maybe BackendCallableIdentity) String
+  = BackendCallableTermRef IdDetails String
+  | BackendCallableClosureRef UniqueIdentity String
   deriving (Show)
 
 instance Eq BackendCallableRef where
   left == right =
-    backendCallableRefMatchesWith MetadataLight left right
+    backendCallableRefMatches left right
 
-backendCallableRef :: Maybe IdDetails -> String -> BackendCallableRef
-backendCallableRef mbIdentity name =
-  BackendCallableRef (BackendCallableTermIdentity <$> mbIdentity) name
+backendCallableRef :: IdDetails -> String -> BackendCallableRef
+backendCallableRef =
+  BackendCallableTermRef
 
-backendCallableClosureRef :: Maybe UniqueIdentity -> String -> BackendCallableRef
-backendCallableClosureRef mbIdentity name =
-  BackendCallableRef (BackendCallableClosureIdentity <$> mbIdentity) name
+backendCallableClosureRef :: UniqueIdentity -> String -> BackendCallableRef
+backendCallableClosureRef =
+  BackendCallableClosureRef
 
 backendCallableRefName :: BackendCallableRef -> String
 backendCallableRefName =
   \case
-    BackendCallableRef _ name -> name
+    BackendCallableTermRef _ name -> name
+    BackendCallableClosureRef _ name -> name
 
 backendCallableRefIdentity :: BackendCallableRef -> Maybe IdDetails
 backendCallableRefIdentity =
   \case
-    BackendCallableRef (Just (BackendCallableTermIdentity identity)) _ -> Just identity
-    BackendCallableRef {} -> Nothing
-
-backendCallableRefMatchesWith :: ReferenceMode -> BackendCallableRef -> BackendCallableRef -> Bool
-backendCallableRefMatchesWith mode (BackendCallableRef leftIdentity leftName) (BackendCallableRef rightIdentity rightName) =
-  referenceMatchesWith sameCallableIdentity mode leftIdentity leftName rightIdentity rightName
-
-sameCallableIdentity :: BackendCallableIdentity -> BackendCallableIdentity -> Bool
-sameCallableIdentity (BackendCallableTermIdentity left) (BackendCallableTermIdentity right) =
-  idDetailsSameIdentity left right
-sameCallableIdentity (BackendCallableClosureIdentity left) (BackendCallableClosureIdentity right) =
-  left == right
-sameCallableIdentity _ _ =
-  False
+    BackendCallableTermRef identity _ -> Just identity
+    BackendCallableClosureRef {} -> Nothing
 
 backendCallableRefMatches :: BackendCallableRef -> BackendCallableRef -> Bool
-backendCallableRefMatches =
-  backendCallableRefMatchesWith IdentityOnly
+backendCallableRefMatches left right =
+  case (left, right) of
+    (BackendCallableTermRef leftIdentity _, BackendCallableTermRef rightIdentity _) ->
+      idDetailsSameIdentity leftIdentity rightIdentity
+    (BackendCallableClosureRef leftIdentity _, BackendCallableClosureRef rightIdentity _) ->
+      leftIdentity == rightIdentity
+    _ -> False
 
 data BackendCallableHead
   = BackendDirectCallableHead (Maybe BackendCallableRef)

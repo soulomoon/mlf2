@@ -1,12 +1,12 @@
 module Research.P2RepresentativeSupportSpec (spec) where
 
+import Control.Monad (forM_)
 import qualified Data.Set as Set
 import Test.Hspec
 
 import ElabTermTestSupport (testTForall, testTVar)
 import MLF.Elab.Pipeline
     ( runPipelineElab
-    , runPipelineElab
     )
 import MLF.Frontend.Syntax
 import MLF.Types.Elab
@@ -22,89 +22,45 @@ import SpecUtil
 spec :: Spec
 spec =
     describe "P2 representative-support harness" $ do
-        it "keeps the exact non-local C1 Int packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport c1IntExpr
+        forM_ representativeSupportCases $ \(label, expr) ->
+            it (label ++ " is recursive on runPipelineElab") $
+                expectRecursiveCanonicalSupport expr
 
-        it "keeps a second route-pure non-local Bool packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport c1BoolExpr
+representativeSupportCases :: [(String, SurfaceExpr)]
+representativeSupportCases =
+    [ ("exact non-local C1 Int packet", c1IntExpr)
+    , ("second route-pure non-local Bool packet", c1BoolExpr)
+    , ("owner-sensitive non-local Int identity-consumer packet", identityWrappedExpr recursiveIntAnn)
+    , ("owner-sensitive non-local Bool identity-consumer packet", identityWrappedExpr recursiveBoolAnn)
+    , ("owner-sensitive non-local Int transparent-mediator packet", transparentWrappedExpr recursiveIntAnn)
+    , ("owner-sensitive non-local Bool transparent-mediator packet", transparentWrappedExpr recursiveBoolAnn)
+    , ("owner-sensitive non-local Int let-aliased transparent-mediator packet", aliasedTransparentWrappedExpr recursiveIntAnn)
+    , ("owner-sensitive non-local Bool let-aliased transparent-mediator packet", aliasedTransparentWrappedExpr recursiveBoolAnn)
+    , ("owner-sensitive non-local Int stacked transparent-mediator packet", stackedTransparentWrappedExpr recursiveIntAnn)
+    , ("owner-sensitive non-local Bool stacked transparent-mediator packet", stackedTransparentWrappedExpr recursiveBoolAnn)
+    , ("owner-sensitive non-local Int stacked let-aliased transparent-mediator packet", stackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool stacked let-aliased transparent-mediator packet", stackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int mixed direct/let-aliased stacked transparent-mediator packet", stackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool mixed direct/let-aliased stacked transparent-mediator packet", stackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int mixed let-aliased/direct stacked transparent-mediator packet", stackedTransparentWrappedExprWith aliasedTransparentWrap transparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool mixed let-aliased/direct stacked transparent-mediator packet", stackedTransparentWrappedExprWith aliasedTransparentWrap transparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int combined-wrapper transparent-mediator packet", combinedTransparentWrappedExprWith transparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool combined-wrapper transparent-mediator packet", combinedTransparentWrappedExprWith transparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int combined-wrapper let-aliased transparent-mediator packet", combinedTransparentWrappedExprWith aliasedTransparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool combined-wrapper let-aliased transparent-mediator packet", combinedTransparentWrappedExprWith aliasedTransparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int combined-wrapper stacked let-aliased transparent-mediator packet", combinedStackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool combined-wrapper stacked let-aliased transparent-mediator packet", combinedStackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveBoolAnn)
+    , ("owner-sensitive non-local Int combined-wrapper mixed direct/let-aliased stacked transparent-mediator packet", combinedStackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveIntAnn)
+    , ("owner-sensitive non-local Bool combined-wrapper mixed direct/let-aliased stacked transparent-mediator packet", combinedStackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveBoolAnn)
+    ]
 
-        it "keeps the owner-sensitive non-local Int identity-consumer packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (identityWrappedExpr recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool identity-consumer packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (identityWrappedExpr recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (transparentWrappedExpr recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (transparentWrappedExpr recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (aliasedTransparentWrappedExpr recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (aliasedTransparentWrappedExpr recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExpr recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExpr recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int stacked let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool stacked let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int mixed direct/let-aliased stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool mixed direct/let-aliased stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int mixed let-aliased/direct stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith aliasedTransparentWrap transparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool mixed let-aliased/direct stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (stackedTransparentWrappedExprWith aliasedTransparentWrap transparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int combined-wrapper transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedTransparentWrappedExprWith transparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool combined-wrapper transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedTransparentWrappedExprWith transparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int combined-wrapper let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedTransparentWrappedExprWith aliasedTransparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool combined-wrapper let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedTransparentWrappedExprWith aliasedTransparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int combined-wrapper stacked let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedStackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool combined-wrapper stacked let-aliased transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedStackedTransparentWrappedExprWith aliasedTransparentWrap aliasedTransparentWrap recursiveBoolAnn)
-
-        it "keeps the owner-sensitive non-local Int combined-wrapper mixed direct/let-aliased stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedStackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveIntAnn)
-
-        it "keeps the owner-sensitive non-local Bool combined-wrapper mixed direct/let-aliased stacked transparent-mediator packet recursive on both authoritative entrypoints" $
-            expectRecursiveAuthoritativeSupport (combinedStackedTransparentWrappedExprWith transparentWrap aliasedTransparentWrap recursiveBoolAnn)
-
-expectRecursiveAuthoritativeSupport :: SurfaceExpr -> IO ()
-expectRecursiveAuthoritativeSupport expr = do
+expectRecursiveCanonicalSupport :: SurfaceExpr -> IO ()
+expectRecursiveCanonicalSupport expr = do
     let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
-    (_uncheckedTerm, uncheckedTy) <-
+    (_term, ty) <-
         requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-    (_checkedTerm, checkedTy) <-
-        requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-    uncheckedTy `shouldNotBe` blocked
-    checkedTy `shouldNotBe` blocked
-    containsMu uncheckedTy `shouldBe` True
-    containsMu checkedTy `shouldBe` True
+    ty `shouldNotBe` blocked
+    containsMu ty `shouldBe` True
 
 c1IntExpr :: SurfaceExpr
 c1IntExpr = ELet "k" (ELamAnn "x" recursiveIntAnn (EVar "x")) (EVar "k")

@@ -9,7 +9,6 @@ module MLF.Elab.Phi.Omega.Domain
     , OmegaDomainEnv
     , mkOmegaDomainEnv
     , isTraceBinderSource
-    , isTyVarNode
     , isBinderNode
     , lookupBinderIndex
     , resolveTraceBinderTarget
@@ -34,6 +33,11 @@ import MLF.Util.Trace (TraceConfig)
 data OmegaContext (p :: Phase) = OmegaContext
     { ocTraceConfig :: TraceConfig
     , ocPresolutionView :: PresolutionView p
+    -- | Exact construction endpoints published by already checked sibling
+    -- edges.  Keys stay in the frozen witness domain: canonicalizing them
+    -- would conflate independent occurrences that merely share a solved
+    -- representative.
+    , ocFrozenEndpointTypes :: IntMap.IntMap ElabType
     , ocReifyBoundWithRefs :: IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
     , ocReifyTypeWithNamedSetRefsNoFallback :: IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
@@ -41,6 +45,7 @@ data OmegaContext (p :: Phase) = OmegaContext
     , ocTrace :: Maybe EdgeTrace
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet
+    , ocReplaySpineSources :: IntSet.IntSet
     , ocTraceBinderReplayMap :: IntMap.IntMap NodeId
     , ocTraceBinderMapDomain :: IntSet.IntSet
     , ocReplayContract :: ReplayContract
@@ -76,20 +81,15 @@ isTraceBinderSource :: OmegaDomainEnv -> NodeId -> Bool
 isTraceBinderSource env nid =
     IntSet.member (getNodeId nid) (odeTraceBinderSources env)
 
-isTyVarNode :: OmegaDomainEnv -> NodeId -> Bool
-isTyVarNode env nid =
-    case odeLookupNodePV env nid of
-        Just TyVar{} -> True
-        _ -> False
-
+-- A scheme-spine identity remains authoritative after its graph TyVar has
+-- been solved to a structural canonical representative.
 isBinderNode :: OmegaDomainEnv -> IntSet.IntSet -> NodeId -> Bool
-isBinderNode env binderKeys nid =
+isBinderNode _ binderKeys nid =
     IntSet.member (getNodeId nid) binderKeys
-        && isTyVarNode env nid
 
 lookupBinderIndex :: OmegaDomainEnv -> IntSet.IntSet -> [Maybe NodeId] -> NodeId -> Maybe Int
-lookupBinderIndex env binderKeys ids nid
-    | IntSet.member (getNodeId nid) binderKeys && isTyVarNode env nid =
+lookupBinderIndex _ binderKeys ids nid
+    | IntSet.member (getNodeId nid) binderKeys =
         listToMaybe
             [ i
             | (i, Just binderNid) <- zip [0 :: Int ..] ids
@@ -133,7 +133,9 @@ resolveTraceBinderTarget env requireBinder opName replayBinderKeys isSchemeBinde
                                     , "op: " ++ opName
                                     , "source target: " ++ show rawTarget
                                     , "replay target: " ++ show replayTarget
+                                    , "scheme binder keys: " ++ show replayBinderKeys
                                     , "replay-map domain: " ++ show (IntMap.keys (odeTraceBinderReplayMap env))
+                                    , "trace: " ++ show (odeTrace env)
                                     ]
                     else Right replayTarget
     | otherwise = Right rawTarget
@@ -164,6 +166,15 @@ resolveNonRootGraftBinder env binderKeys ids lookupBinder sourceTarget replayTar
             , "  ids: " ++ show ids
             , "  replayMapDomain: " ++ show (IntMap.keys (odeTraceBinderReplayMap env))
             , "  replayMapKeys: " ++ show (IntSet.toList (odeTraceBinderMapDomain env))
+            , "  copyMap: " ++ show (IntMap.toList (odeCopyMap env))
+            , "  binderKeys: " ++ show (IntSet.toList binderKeys)
+            , "  trace: " ++ show (odeTrace env)
+            , "  replay-node: " ++ show (odeLookupNodePV env replayTarget)
+            , "  replay-bound-node: " ++ show
+                (case odeLookupNodePV env replayTarget of
+                    Just TyVar {tnBound = Just bound} -> odeLookupNodePV env (odeCanonicalNode env bound)
+                    _ -> Nothing)
+            , "  copied-node: " ++ show (IntMap.lookup (getNodeId replayTarget) (odeCopyMap env) >>= odeLookupNodePV env)
             ]
 
 resolveNonRootWeakenBinder
@@ -196,6 +207,15 @@ resolveNonRootWeakenBinder env binderKeys ids sourceTarget replayTarget
             , "  ids: " ++ show ids
             , "  replayMapDomain: " ++ show (IntMap.keys (odeTraceBinderReplayMap env))
             , "  replayMapKeys: " ++ show (IntSet.toList (odeTraceBinderMapDomain env))
+            , "  copyMap: " ++ show (IntMap.toList (odeCopyMap env))
+            , "  binderKeys: " ++ show (IntSet.toList binderKeys)
+            , "  trace: " ++ show (odeTrace env)
+            , "  replay-node: " ++ show (odeLookupNodePV env replayTarget)
+            , "  replay-bound-node: " ++ show
+                (case odeLookupNodePV env replayTarget of
+                    Just TyVar {tnBound = Just bound} -> odeLookupNodePV env (odeCanonicalNode env bound)
+                    _ -> Nothing)
+            , "  copied-node: " ++ show (IntMap.lookup (getNodeId replayTarget) (odeCopyMap env) >>= odeLookupNodePV env)
             ]
 
 traceBinderOrder :: OmegaDomainEnv -> [Int]

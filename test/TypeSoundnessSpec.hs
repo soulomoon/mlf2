@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module TypeSoundnessSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Test.Hspec
@@ -40,7 +41,6 @@ import MLF.Types.Elab
     , instUnderWithRef
     , renameResolvedLocalVar
     , resolvedVarSameIdentity
-    , tBase
     , typeBinderIdentityFromNode
     , typeBinderRefFromIdentity
     )
@@ -49,7 +49,7 @@ import MLF.Frontend.Syntax (Lit(..))
 spec :: Spec
 spec = describe "Phase 7 theorem obligations" $ do
     it "checks closedness by resolved identity when names are stale" $ do
-        let intType = tBase (BaseTy "Int")
+        let intType = TestElab.tBase (BaseTy "Int")
             binder = generatedResolvedLocal 91701 "x" "x" intType
             occurrence = renameResolvedLocalVar "$stale_x" binder
         isClosedTerm (ELam binder (EVarNode occurrence)) `shouldBe` True
@@ -225,11 +225,11 @@ spec = describe "Phase 7 theorem obligations" $ do
                                         False
                                 Right ty
                                     | not valueTerm -> property True  -- only check values
-                                    | ty == tBase (BaseTy "Int") ->
+                                    | ty == TestElab.tBase (BaseTy "Int") ->
                                         counterexample
                                             ("canonical-forms (Int) failed on value: " ++ show term)
                                             (isLitInt term)
-                                    | ty == tBase (BaseTy "Bool") ->
+                                    | ty == TestElab.tBase (BaseTy "Bool") ->
                                         counterexample
                                             ("canonical-forms (Bool) failed on value: " ++ show term)
                                             (isLitBool term)
@@ -397,8 +397,8 @@ type TyCtx = Map.Map String ElabType
 
 -- | Base types used in generation.
 intTy, boolTy :: ElabType
-intTy  = tBase (BaseTy "Int")
-boolTy = tBase (BaseTy "Bool")
+intTy  = TestElab.tBase (BaseTy "Int")
+boolTy = TestElab.tBase (BaseTy "Bool")
 
 -- | Pick a random ground type.
 genGroundTy :: Gen ElabType
@@ -571,7 +571,7 @@ genInstUnderTrivial fresh term = do
 
 -- | Generate a ground BoundType (tBase is polymorphic in TopVar).
 genGroundBound :: Gen BoundType
-genGroundBound = elements [tBase (BaseTy "Int"), tBase (BaseTy "Bool")]
+genGroundBound = elements [TestElab.tBase (BaseTy "Int"), TestElab.tBase (BaseTy "Bool")]
 
 typeRef :: Int -> String -> TypeBinderRef
 typeRef key name =

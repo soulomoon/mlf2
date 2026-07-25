@@ -13,6 +13,7 @@ import MLF.Constraint.Types.Graph
     , cNodes
     , getNodeId
     , gnSchemes
+    , nodeRefFromKey
     , typeRef
     )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -42,18 +43,23 @@ buildNodeMappings env phase1 =
         adoptRef = geAdoptRef env
         instCopyMap = geInstCopyMap env
         genSolved = Types.getGenNodeMap (cGenNodes solvedConstraint)
-        genMerged = IntMap.union (Types.getGenNodeMap (cGenNodes base)) genSolved
+        -- Solving may move a live type variable across a gen boundary.  Its
+        -- finalized binding tree therefore owns scheme-root metadata; taking
+        -- the base entry here would resurrect stale pre-solution ownership.
+        -- Base-only gen nodes are still retained for ga' projection.
+        genMerged = IntMap.union genSolved (Types.getGenNodeMap (cGenNodes base))
         bindParentsBase = cBindParents base
         bindParentsSolved = cBindParents solvedConstraint
         stickyTypeParentsBase =
             IntSet.fromList
-                [ childKey
+                [ getNodeId child
                 | (childKey, _parent, _flag) <- IntMapUtils.childrenWithTypeParent bindParentsBase
+                , TypeRef child <- [nodeRefFromKey childKey]
                 ]
         baseNamedKeys =
             IntSet.fromList
-                [ childKey
-                | (childKey, child) <- IntMapUtils.allTypeChildrenWithKey bindParentsBase
+                [ getNodeId child
+                | (_childKey, child) <- IntMapUtils.allTypeChildrenWithKey bindParentsBase
                 , isTyVarAt baseNodes (getNodeId child)
                 ]
         copyOverrides =

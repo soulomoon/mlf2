@@ -36,7 +36,8 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 import Data.Set (Set)
 
-import MLF.Constraint.Types.Graph.NodeEdge (BaseTy, GenNodeId, NodeId, NodeRef)
+import MLF.Constraint.Types.Graph.NodeEdge (GenNodeId, NodeId, NodeRef)
+import MLF.Frontend.Symbol (SymbolIdentity)
 
 -- | Flag indicating whether a binding edge is flexible or rigid.
 --
@@ -65,6 +66,14 @@ data BindingError
         -- First NodeId is the child, second is the parent.
     | OperationOnLockedNode NodeRef
         -- ^ Attempted to raise/weaken a node that is locked (rigidly bound path).
+    | FreeBoundFrontierLocked NodeId NodeId
+        -- ^ A bounded variable was raised, but a free node in its lower-bound
+        -- frontier could not follow it across a rigid binding edge.
+    | FreeBoundFrontierInSiblingScope NodeId NodeId NodeRef NodeRef
+        -- ^ Bound installation found the variable and a free node in sibling
+        -- scopes.  Installing a bound does not implicitly Raise across an LCA;
+        -- scope-move repair is the operation that may do so.
+        -- Arguments are variable, frontier, target parent, current parent.
     | RaiseNotPossible NodeRef
         -- ^ Raise step not possible (e.g., parent is already a root).
     | GenFallbackRequired
@@ -90,4 +99,4 @@ type EliminatedVars = IntSet
 type WeakenedVars = IntSet
 
 -- | Polymorphic type constructor symbols (paper Poly set).
-type PolySyms = Set BaseTy
+type PolySyms = Set SymbolIdentity

@@ -1,20 +1,37 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module MLF.Frontend.Program.Package
     ( PackageId (..)
     , PackageModuleId (..)
     , PackageRoot (..)
     , PackageSearchPath (..)
     , ProgramPackageDiscoveryError (..)
-    , ProgramSourceUnit (..)
-    , LocatedProgramSourceUnit (..)
+    , ProgramSourceUnit
+        ( ProgramSourceUnit
+        , programSourceUnitPath
+        , programSourceUnitModules
+        )
+    , LocatedProgramSourceUnit
+        ( LocatedProgramSourceUnit
+        , locatedProgramSourceUnitPath
+        , locatedProgramSourceUnitModules
+        , locatedProgramSourceUnitSpans
+        )
     , ProgramPackage (..)
     , LocatedProgramPackage (..)
     , PackageModuleGraph (..)
-    , PackageModuleGraphNode (..)
+    , PackageModuleGraphNode
+        ( PackageModuleGraphNode
+        , packageModuleGraphNodeId
+        , packageModuleGraphNodeSourcePath
+        , packageModuleGraphNodeImports
+        )
     , trivialPackageId
     , discoverLocatedProgramPackage
     , discoverLocatedProgramPackageFromSearchPath
     , programSourceUnitFromProgram
     , locatedProgramSourceUnitFromLocated
+    , packageModuleGraphNodeIsBuiltinPrelude
     , trivialProgramPackage
     , trivialLocatedProgramPackage
     , programPackageModuleGraph
@@ -41,6 +58,11 @@ import MLF.Frontend.Parse.Program
     , parseLocatedProgramWithFile
     )
 import MLF.Frontend.Program.Types (ProgramError (..))
+import MLF.Frontend.Program.Package.Internal
+    ( LocatedProgramSourceUnit (..)
+    , PackageSourceOrigin (..)
+    , ProgramSourceUnit (..)
+    )
 import qualified MLF.Frontend.Syntax.Program as P
 import System.Directory
     ( doesDirectoryExist
@@ -76,18 +98,39 @@ data ProgramPackageDiscoveryError
     | ProgramPackageDiscoveryDuplicateModule P.ModuleName [FilePath]
     deriving (Show)
 
-data ProgramSourceUnit = ProgramSourceUnit
-    { programSourceUnitPath :: Maybe FilePath
-    , programSourceUnitModules :: [P.Module]
-    }
-    deriving (Eq, Show)
+pattern ProgramSourceUnit :: Maybe FilePath -> [P.Module] -> ProgramSourceUnit
+pattern ProgramSourceUnit
+    { programSourceUnitPath
+    , programSourceUnitModules
+    } <- ProgramSourceUnitInternal
+        programSourceUnitPath
+        programSourceUnitModules
+        _
+  where
+    ProgramSourceUnit path modules =
+        ProgramSourceUnitInternal path modules OrdinaryPackageSource
 
-data LocatedProgramSourceUnit = LocatedProgramSourceUnit
-    { locatedProgramSourceUnitPath :: Maybe FilePath
-    , locatedProgramSourceUnitModules :: [P.Module]
-    , locatedProgramSourceUnitSpans :: P.ProgramSpanIndex
-    }
-    deriving (Eq, Show)
+{-# COMPLETE ProgramSourceUnit #-}
+
+pattern LocatedProgramSourceUnit ::
+    Maybe FilePath ->
+    [P.Module] ->
+    P.ProgramSpanIndex ->
+    LocatedProgramSourceUnit
+pattern LocatedProgramSourceUnit
+    { locatedProgramSourceUnitPath
+    , locatedProgramSourceUnitModules
+    , locatedProgramSourceUnitSpans
+    } <- LocatedProgramSourceUnitInternal
+        locatedProgramSourceUnitPath
+        locatedProgramSourceUnitModules
+        locatedProgramSourceUnitSpans
+        _
+  where
+    LocatedProgramSourceUnit path modules spans =
+        LocatedProgramSourceUnitInternal path modules spans OrdinaryPackageSource
+
+{-# COMPLETE LocatedProgramSourceUnit #-}
 
 data ProgramPackage = ProgramPackage
     { programPackageId :: PackageId
@@ -107,17 +150,43 @@ data PackageModuleGraph = PackageModuleGraph
     }
     deriving (Eq, Show)
 
-data PackageModuleGraphNode = PackageModuleGraphNode
-    { packageModuleGraphNodeId :: PackageModuleId
-    , packageModuleGraphNodeSourcePath :: Maybe FilePath
-    , packageModuleGraphNodeImports :: [PackageModuleId]
+data PackageModuleGraphNode = PackageModuleGraphNodeInternal
+    { internalPackageModuleGraphNodeId :: PackageModuleId
+    , internalPackageModuleGraphNodeSourcePath :: Maybe FilePath
+    , internalPackageModuleGraphNodeImports :: [PackageModuleId]
+    , internalPackageModuleGraphNodeOrigin :: PackageSourceOrigin
     }
     deriving (Eq, Show)
+
+pattern PackageModuleGraphNode ::
+    PackageModuleId ->
+    Maybe FilePath ->
+    [PackageModuleId] ->
+    PackageModuleGraphNode
+pattern PackageModuleGraphNode
+    { packageModuleGraphNodeId
+    , packageModuleGraphNodeSourcePath
+    , packageModuleGraphNodeImports
+    } <- PackageModuleGraphNodeInternal
+        packageModuleGraphNodeId
+        packageModuleGraphNodeSourcePath
+        packageModuleGraphNodeImports
+        _
+  where
+    PackageModuleGraphNode moduleId sourcePath imports =
+        PackageModuleGraphNodeInternal
+            moduleId
+            sourcePath
+            imports
+            OrdinaryPackageSource
+
+{-# COMPLETE PackageModuleGraphNode #-}
 
 data ModuleEntry = ModuleEntry
     { moduleEntryId :: PackageModuleId
     , moduleEntrySourcePath :: Maybe FilePath
     , moduleEntryModule :: P.Module
+    , moduleEntrySourceOrigin :: PackageSourceOrigin
     }
     deriving (Eq, Show)
 
@@ -177,6 +246,10 @@ locatedProgramSourceUnitFromLocated located =
         , locatedProgramSourceUnitSpans = P.locatedProgramSpans located
         }
 
+packageModuleGraphNodeIsBuiltinPrelude :: PackageModuleGraphNode -> Bool
+packageModuleGraphNodeIsBuiltinPrelude node =
+    internalPackageModuleGraphNodeOrigin node == BuiltinPreludePackageSource
+
 trivialProgramPackage :: P.Program -> ProgramPackage
 trivialProgramPackage program =
     ProgramPackage
@@ -207,7 +280,10 @@ programPackageModuleGraph :: ProgramPackage -> Either ProgramError PackageModule
 programPackageModuleGraph package =
     packageModuleGraph
         (programPackageId package)
-        [ (programSourceUnitPath sourceUnit, programSourceUnitModules sourceUnit)
+        [ ( programSourceUnitOrigin sourceUnit
+          , programSourceUnitPath sourceUnit
+          , programSourceUnitModules sourceUnit
+          )
         | sourceUnit <- programPackageSourceUnits package
         ]
 
@@ -215,7 +291,10 @@ locatedProgramPackageModuleGraph :: LocatedProgramPackage -> Either ProgramError
 locatedProgramPackageModuleGraph package =
     packageModuleGraph
         (locatedProgramPackageId package)
-        [ (locatedProgramSourceUnitPath sourceUnit, locatedProgramSourceUnitModules sourceUnit)
+        [ ( locatedProgramSourceUnitOrigin sourceUnit
+          , locatedProgramSourceUnitPath sourceUnit
+          , locatedProgramSourceUnitModules sourceUnit
+          )
         | sourceUnit <- locatedProgramPackageSourceUnits package
         ]
 
@@ -239,7 +318,10 @@ programPackageOrderedProgram package =
     P.Program . map moduleEntryModule
         <$> orderedPackageModules
             (programPackageId package)
-            [ (programSourceUnitPath sourceUnit, programSourceUnitModules sourceUnit)
+            [ ( programSourceUnitOrigin sourceUnit
+              , programSourceUnitPath sourceUnit
+              , programSourceUnitModules sourceUnit
+              )
             | sourceUnit <- programPackageSourceUnits package
             ]
 
@@ -266,7 +348,10 @@ locatedProgramPackageOrderedProgram package = do
     orderedModules <-
         orderedPackageModules
             (locatedProgramPackageId package)
-            [ (locatedProgramSourceUnitPath sourceUnit, locatedProgramSourceUnitModules sourceUnit)
+            [ ( locatedProgramSourceUnitOrigin sourceUnit
+              , locatedProgramSourceUnitPath sourceUnit
+              , locatedProgramSourceUnitModules sourceUnit
+              )
             | sourceUnit <- locatedProgramPackageSourceUnits package
             ]
     pure
@@ -336,7 +421,7 @@ parsePackageSourceFile path = do
 
 packageModuleGraph ::
     PackageId ->
-    [(Maybe FilePath, [P.Module])] ->
+    [(PackageSourceOrigin, Maybe FilePath, [P.Module])] ->
     Either ProgramError PackageModuleGraph
 packageModuleGraph packageId sourceUnits = do
     entries <- moduleEntries packageId sourceUnits
@@ -349,14 +434,14 @@ packageModuleGraph packageId sourceUnits = do
 
 orderedPackageModules ::
     PackageId ->
-    [(Maybe FilePath, [P.Module])] ->
+    [(PackageSourceOrigin, Maybe FilePath, [P.Module])] ->
     Either ProgramError [ModuleEntry]
 orderedPackageModules packageId sourceUnits =
     moduleEntries packageId sourceUnits >>= topoSortModuleEntries
 
 moduleEntries ::
     PackageId ->
-    [(Maybe FilePath, [P.Module])] ->
+    [(PackageSourceOrigin, Maybe FilePath, [P.Module])] ->
     Either ProgramError [ModuleEntry]
 moduleEntries packageId sourceUnits = do
     let entries =
@@ -364,8 +449,9 @@ moduleEntries packageId sourceUnits = do
                 { moduleEntryId = PackageModuleId packageId (P.moduleName mod0)
                 , moduleEntrySourcePath = sourcePath
                 , moduleEntryModule = mod0
+                , moduleEntrySourceOrigin = sourceOrigin
                 }
-            | (sourcePath, modules0) <- sourceUnits
+            | (sourceOrigin, sourcePath, modules0) <- sourceUnits
             , mod0 <- modules0
             ]
     case firstDuplicate (map (P.moduleName . moduleEntryModule) entries) of
@@ -401,10 +487,23 @@ topoSortModuleEntries entries = do
         foldM
             (visit [])
             (Set.empty, Set.empty, [])
-            (map (P.moduleName . moduleEntryModule) entries)
+            moduleVisitOrder
     pure (reverse orderedRev)
   where
     moduleMap = Map.fromList [(P.moduleName (moduleEntryModule entry), entry) | entry <- entries]
+    moduleVisitOrder =
+        map (P.moduleName . moduleEntryModule) $
+            filter moduleEntryIsBuiltinPrelude entries
+                ++ filter (not . moduleEntryIsBuiltinPrelude) entries
+
+    -- The process cache owns one checked builtin Prelude artifact.  Resolve the
+    -- tagged, import-free Prelude root before unrelated package roots so every
+    -- nested source identity is independent of caller source-unit order.
+    -- Dependency traversal still takes precedence if a tagged test Prelude has
+    -- imports; such a module is rejected by the cache owner later.
+    moduleEntryIsBuiltinPrelude entry =
+        moduleEntrySourceOrigin entry == BuiltinPreludePackageSource
+            && P.moduleName (moduleEntryModule entry) == "Prelude"
 
     visit stack (tempMarks, permMarks, ordered) moduleName0
         | moduleName0 `Set.member` permMarks = pure (tempMarks, permMarks, ordered)
@@ -437,13 +536,14 @@ takeUntil target (item : items)
 
 packageModuleGraphNode :: ModuleEntry -> PackageModuleGraphNode
 packageModuleGraphNode entry =
-    PackageModuleGraphNode
-        { packageModuleGraphNodeId = moduleEntryId entry
-        , packageModuleGraphNodeSourcePath = moduleEntrySourcePath entry
-        , packageModuleGraphNodeImports =
+    PackageModuleGraphNodeInternal
+        { internalPackageModuleGraphNodeId = moduleEntryId entry
+        , internalPackageModuleGraphNodeSourcePath = moduleEntrySourcePath entry
+        , internalPackageModuleGraphNodeImports =
             [ PackageModuleId (packageModulePackageId (moduleEntryId entry)) importName
             | importName <- moduleEntryImportNames entry
             ]
+        , internalPackageModuleGraphNodeOrigin = moduleEntrySourceOrigin entry
         }
 
 moduleEntryImportNames :: ModuleEntry -> [P.ModuleName]
@@ -466,10 +566,17 @@ locatedProgramSourceUnitModuleIds packageId sourceUnit =
 
 locatedProgramSourceUnitProgramSourceUnit :: LocatedProgramSourceUnit -> ProgramSourceUnit
 locatedProgramSourceUnitProgramSourceUnit sourceUnit =
-    ProgramSourceUnit
-        { programSourceUnitPath = locatedProgramSourceUnitPath sourceUnit
-        , programSourceUnitModules = locatedProgramSourceUnitModules sourceUnit
+    ProgramSourceUnitInternal
+        { internalProgramSourceUnitPath = locatedProgramSourceUnitPath sourceUnit
+        , internalProgramSourceUnitModules = locatedProgramSourceUnitModules sourceUnit
+        , internalProgramSourceUnitOrigin = locatedProgramSourceUnitOrigin sourceUnit
         }
+
+programSourceUnitOrigin :: ProgramSourceUnit -> PackageSourceOrigin
+programSourceUnitOrigin = internalProgramSourceUnitOrigin
+
+locatedProgramSourceUnitOrigin :: LocatedProgramSourceUnit -> PackageSourceOrigin
+locatedProgramSourceUnitOrigin = internalLocatedProgramSourceUnitOrigin
 
 locatedProgramSourcePath :: P.LocatedProgram -> Maybe FilePath
 locatedProgramSourcePath located =

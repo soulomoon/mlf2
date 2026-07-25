@@ -12,6 +12,9 @@
 module MLF.Constraint.Presolution.Witness
   ( EdgeWitnessInput (..),
     EdgeWitnessPlan (..),
+    EdgeWitnessOp (..),
+    EdgeWitnessNonSourceOrigin (..),
+    edgeWitnessInstanceOp,
     binderArgsFromExpansion,
     binderArgsFromKnownBinders,
     filterTyVarBinders,
@@ -19,6 +22,7 @@ module MLF.Constraint.Presolution.Witness
     edgeWitnessPlanFromBinders,
     buildEdgeWitness,
     buildEdgeTrace,
+    integrateEdgeWitnessOps,
     integratePhase2Ops,
     integratePhase2Steps,
     witnessFromExpansion,
@@ -42,9 +46,8 @@ import qualified Data.IntSet as IntSet
 import Data.List (mapAccumL, partition, sortOn)
 import qualified Data.List.NonEmpty as NE
 import Data.Ord (Down (..))
-import MLF.Constraint.Presolution.Base (CopyMap, EdgeTrace (..), FrontierSet, InteriorSet, PresolutionError (..), PresolutionM, fromListInterior, instantiationBindersM, interiorOfUnderCachedM)
-import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, lookupVarBound)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
+import MLF.Constraint.Presolution.Base (CopyMap, EdgeSourceInterior (..), EdgeTrace (..), EdgeWitnessNonSourceOrigin (..), PresolutionError (..), PresolutionM, instantiationBindersM, lookupCopy)
+import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import MLF.Constraint.Presolution.WitnessCanon
   ( assertNoStandaloneGrafts,
     coalesceRaiseMergeWithEnv,
@@ -57,11 +60,8 @@ import MLF.Constraint.Types.Graph
   ( EdgeId,
     GenNodeId,
     NodeId,
-    NodeRef (TypeRef),
     TyNode (..),
-    genRef,
     getNodeId,
-    nodeRefFromKey,
   )
 import qualified MLF.Constraint.Types.Witness.Internal as WitnessInternal
 import MLF.Constraint.Types.Witness
@@ -79,8 +79,34 @@ import MLF.Util.RecursionSchemes (cataM)
 -- | Precompute the base forall-intro count and ops for a witness.
 data EdgeWitnessPlan = EdgeWitnessPlan
   { ewpForallIntros :: Int,
-    ewpBaseOps :: [InstanceOp]
+    ewpBaseOps :: [EdgeWitnessOp]
   }
+
+-- | The node-id domain in which an operation was emitted.
+--
+-- Expansion-derived binder operations normally name the frozen source graph,
+-- but an instantiation Graft is deliberately mixed: its type argument belongs
+-- to the destination graph while its quantified binder belongs to the source.
+-- Operations emitted while executing a constructed chi_e normally name its
+-- destination copy, except for identity expansion, which executes structural
+-- equalities in place.  Carry the domain with each operation so witness
+-- normalization never has to guess it from the finalized graph.
+data EdgeWitnessOp
+  = SourceEdgeWitnessOp InstanceOp
+  | DestinationEdgeWitnessOp InstanceOp
+  | SourceDestinationEdgeWitnessMerge NodeId NodeId
+  | DestinationSourceEdgeWitnessGraft NodeId NodeId
+  | FlexibleTerminalSourceEdgeWitnessOp InstanceOp
+  deriving (Eq, Show)
+
+edgeWitnessInstanceOp :: EdgeWitnessOp -> InstanceOp
+edgeWitnessInstanceOp edgeOp =
+  case edgeOp of
+    SourceEdgeWitnessOp op -> op
+    DestinationEdgeWitnessOp op -> op
+    SourceDestinationEdgeWitnessMerge operated other -> OpMerge operated other
+    DestinationSourceEdgeWitnessGraft argument binder -> OpGraft argument binder
+    FlexibleTerminalSourceEdgeWitnessOp op -> op
 
 -- | Input bundle for building per-edge witness metadata.
 data EdgeWitnessInput = EdgeWitnessInput
@@ -90,8 +116,10 @@ data EdgeWitnessInput = EdgeWitnessInput
     ewiSrcNode :: NodeId,
     -- | Target (right) node of the edge
     ewiTgtNode :: NodeId,
-    -- | Raw type at the source node before canonicalization
-    ewiLeftRaw :: TyNode,
+    -- | Frozen source root selected by edge planning.  This is the identity
+    -- named by expansion-derived operations and may differ from the raw
+    -- TyExp body's administrative node.
+    ewiRoot :: NodeId,
     -- | Nesting depth for forall-intro tracking
     ewiDepth :: Int
   }
@@ -106,69 +134,98 @@ edgeWitnessPlan gid _leftId leftRaw expn = do
           pure binders
         _ -> pure []
       else pure []
-  (introCount, baseOps) <- witnessFromExpansionWithBinders boundVars expn
+  (introCount, baseOps) <- witnessOpsFromExpansionWithBinders boundVars expn
   pure EdgeWitnessPlan {ewpForallIntros = introCount, ewpBaseOps = baseOps}
 
 edgeWitnessPlanFromBinders :: [NodeId] -> Expansion -> PresolutionM p EdgeWitnessPlan
 edgeWitnessPlanFromBinders binders expn = do
-  (introCount, baseOps) <- witnessFromExpansionWithBinders binders expn
+  (introCount, baseOps) <- witnessOpsFromExpansionWithBinders binders expn
   pure EdgeWitnessPlan {ewpForallIntros = introCount, ewpBaseOps = baseOps}
 
 buildEdgeWitness ::
   EdgeWitnessInput ->
-  [InstanceOp] ->
-  [InstanceOp] ->
-  PresolutionM p EdgeWitness
+  [EdgeWitnessOp] ->
+  [EdgeWitnessOp] ->
+  PresolutionM p (EdgeWitness, IntMap.IntMap EdgeWitnessNonSourceOrigin)
 buildEdgeWitness input baseOps extraOps = do
   let eid = ewiEdgeId input
       left = ewiSrcNode input
       right = ewiTgtNode input
-      leftRaw = ewiLeftRaw input
+      root = ewiRoot input
       introCount = ewiDepth input
-      root = case leftRaw of
-        TyExp {tnBody = b} -> b
-        _ -> left
-      (intros, ops) = integratePhase2Steps (introCount, baseOps) extraOps
+      (ops, nonSourceOpOrigins) =
+        integrateTaggedEdgeWitnessOps root baseOps extraOps
+      intros = introCount
   let iw = WitnessInternal.mkUncheckedInstanceWitness ops
   case mkEdgeWitness eid left right root intros iw of
     Left err -> throwError (InternalError ("buildEdgeWitness: " ++ show err))
-    Right w -> pure w
+    Right w -> pure (w, nonSourceOpOrigins)
+
+-- | Integrate source-domain expansion ops with execution-emitted ops while
+-- keeping destination-domain indices aligned with the final reordered list.
+integrateEdgeWitnessOps ::
+  NodeId ->
+  [InstanceOp] ->
+  [EdgeWitnessOp] ->
+  ([InstanceOp], IntMap.IntMap EdgeWitnessNonSourceOrigin)
+integrateEdgeWitnessOps root baseOps extraOps =
+  integrateTaggedEdgeWitnessOps root (map SourceEdgeWitnessOp baseOps) extraOps
+
+-- | Integrate already domain-tagged expansion operations.  Unlike the public
+-- plain-op adapter above, this is the construction path used by edge plans:
+-- an 'ExpInstantiate' Graft carries a destination-domain argument and a
+-- frozen-source binder from the moment it is produced.
+integrateTaggedEdgeWitnessOps ::
+  NodeId ->
+  [EdgeWitnessOp] ->
+  [EdgeWitnessOp] ->
+  ([InstanceOp], IntMap.IntMap EdgeWitnessNonSourceOrigin)
+integrateTaggedEdgeWitnessOps root baseOps extraOps =
+  let taggedOps =
+        integratePhase2OpsBy
+          (Just root)
+          edgeWitnessInstanceOp
+          baseOps
+          extraOps
+      ops = map edgeWitnessInstanceOp taggedOps
+      nonSourceOpOrigins =
+        IntMap.fromList
+          [ (index, origin)
+          | (index, taggedOp) <- zip [0 :: Int ..] taggedOps
+          , origin <- case taggedOp of
+              SourceEdgeWitnessOp _ -> []
+              DestinationEdgeWitnessOp _ -> [DestinationEdgeOperation]
+              SourceDestinationEdgeWitnessMerge _ _ -> [SourceDestinationMergeOperation]
+              DestinationSourceEdgeWitnessGraft _ _ -> [DestinationSourceGraftOperation]
+              FlexibleTerminalSourceEdgeWitnessOp _ -> [FlexibleTerminalSourceOperation]
+          ]
+   in (ops, nonSourceOpOrigins)
 
 validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps
 validatedInstanceOpsAfterNormalization =
   WitnessInternal.validatedInstanceOpsAfterNormalization
 
 buildEdgeTrace ::
-  EdgeWitnessInput ->
-  GenNodeId ->
+  NodeId ->
+  EdgeSourceInterior ->
   [(NodeId, NodeId)] ->
-  (CopyMap, InteriorSet, FrontierSet) ->
+  NodeId ->
+  CopyMap ->
   PresolutionM p EdgeTrace
-buildEdgeTrace input gid bas (copyMap0, _interior0, _frontier0) = do
-  let left = ewiSrcNode input
-      leftRaw = ewiLeftRaw input
-  let rootSeed = case leftRaw of
-        TyExp {tnBody = b} -> b
-        _ -> left
-  root <- findRoot rootSeed
-  (_constraint0, canonicalizeNode) <- getConstraintAndCanonical
-  let interiorRootRef = genRef gid
-  interiorNodesRaw <- do
-    s <- interiorOfUnderCachedM canonicalizeNode interiorRootRef
-    pure
-      [ nid
-      | key <- IntSet.toList s,
-        TypeRef nid <- [nodeRefFromKey key]
-      ]
-  let interiorNodes = fromListInterior (map canonicalizeNode interiorNodesRaw)
+buildEdgeTrace sourceRoot sourceInterior bas resultRoot0 copyMap0 = do
   pure
     EdgeTrace
-      { etRoot = root,
+      { etRoot = sourceRoot,
+        etResultRoot = resultRoot0,
         etBinderArgs = bas,
-        etInterior = interiorNodes,
+        etInterior = sourceInterior,
         etReplayContract = ReplayContractNone,
         etBinderReplayMap = mempty,
-        etReplayDomainBinders = [],
+        etReplayDomainBinders =
+          [ copiedBinder
+          | (sourceBinder, _argument) <- bas,
+            Just copiedBinder <- [lookupCopy sourceBinder copyMap0]
+          ],
         etCopyMap = copyMap0
       }
 
@@ -204,12 +261,10 @@ binderArgsFromKnownBinders context binders expn =
     ExpForallF _ -> pure []
     ExpComposeF es -> pure (concat (NE.toList es))
     ExpInstantiateF args ->
-      if null binders
-        then pure []
+      if length binders /= length args
+        then throwError (ArityMismatch context (length binders) (length args))
         else
-          if length binders > length args
-            then throwError (ArityMismatch context (length binders) (length args))
-            else pure (zip binders (take (length binders) args))
+          pure (zip binders args)
 
 -- | Convert a presolution expansion recipe into a forall-intro count and omega ops.
 witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p (Int, [InstanceOp])
@@ -222,10 +277,11 @@ witnessFromExpansion gid _root leftRaw expn = do
           pure binders
         _ -> pure []
       else pure []
-  witnessFromExpansionWithBinders boundVars expn
+  (introCount, taggedOps) <- witnessOpsFromExpansionWithBinders boundVars expn
+  pure (introCount, map edgeWitnessInstanceOp taggedOps)
 
-witnessFromExpansionWithBinders :: [NodeId] -> Expansion -> PresolutionM p (Int, [InstanceOp])
-witnessFromExpansionWithBinders boundVars expn = do
+witnessOpsFromExpansionWithBinders :: [NodeId] -> Expansion -> PresolutionM p (Int, [EdgeWitnessOp])
+witnessOpsFromExpansionWithBinders boundVars expn = do
   let (_hasForall, stepper) = cata witnessAlg expn
   steps <- stepper
   let introCount = fst steps
@@ -233,8 +289,8 @@ witnessFromExpansionWithBinders boundVars expn = do
   pure (introCount, ops)
   where
     witnessAlg ::
-      ExpansionF (Bool, PresolutionM p (Int, [InstanceOp])) ->
-      (Bool, PresolutionM p (Int, [InstanceOp]))
+      ExpansionF (Bool, PresolutionM p (Int, [EdgeWitnessOp])) ->
+      (Bool, PresolutionM p (Int, [EdgeWitnessOp]))
     witnessAlg layer = case layer of
       ExpIdentityF ->
         (False, pure (0, []))
@@ -243,16 +299,13 @@ witnessFromExpansionWithBinders boundVars expn = do
          in (True, pure (count, []))
       ExpInstantiateF args ->
         ( False,
-          if null boundVars
-            then pure (0, [])
+          if length boundVars /= length args
+            then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
             else
-              if length boundVars > length args
-                then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
-                else do
-                  let args' = take (length boundVars) args
-                      pairs = zip args' boundVars
-                  (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
-                  pure (0, grafts ++ merges ++ weakens)
+              do
+                let pairs = zip args boundVars
+                (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
+                pure (0, grafts ++ merges ++ weakens)
         )
       ExpComposeF es ->
         let children = NE.toList es
@@ -267,21 +320,25 @@ witnessFromExpansionWithBinders boundVars expn = do
 
     classify ::
       [NodeId] -> -- binders at this instantiation site
-      ([InstanceOp], [InstanceOp], [InstanceOp]) ->
+      ([EdgeWitnessOp], [EdgeWitnessOp], [EdgeWitnessOp]) ->
       (NodeId, NodeId) -> -- (arg, binder)
-      PresolutionM p ([InstanceOp], [InstanceOp], [InstanceOp])
+      PresolutionM p ([EdgeWitnessOp], [EdgeWitnessOp], [EdgeWitnessOp])
     classify binders (gAcc, mAcc, wAcc) (arg, bv) = do
       mbBound <- binderBound bv
-      let weakenOp = [OpWeaken bv]
+      let weakenOp = [SourceEdgeWitnessOp (OpWeaken bv)]
       case mbBound of
         Nothing ->
           -- Unbounded binder: graft then eliminate later via weaken.
-          pure (gAcc ++ [OpGraft arg bv], mAcc, wAcc ++ weakenOp)
+          pure
+            ( gAcc ++ [DestinationSourceEdgeWitnessGraft arg bv]
+            , mAcc
+            , wAcc ++ weakenOp
+            )
         Just bnd -> do
           isVarBound <- isTyVar bnd
           if isVarBound && bnd `elem` binders
             -- Bounded by an in-scope variable: alias + eliminate via Merge (Fig. 10).
-            then pure (gAcc, mAcc ++ [OpMerge bv bnd], wAcc)
+            then pure (gAcc, mAcc ++ [SourceEdgeWitnessOp (OpMerge bv bnd)], wAcc)
             -- Bounded by structure: suppress OpGraft (InstBot can't target a
             -- non-⊥ bound, Def. 15.3.4) but emit OpWeaken to eliminate the
             -- quantifier via InstElim — thesis-exact behavior.
@@ -311,30 +368,37 @@ expansionHasInstantiate =
     ExpComposeF es -> or (NE.toList es)
 
 integratePhase2Ops :: [InstanceOp] -> [InstanceOp] -> [InstanceOp]
-integratePhase2Ops baseOps extraOps =
+integratePhase2Ops = integratePhase2OpsBy Nothing id
+
+integratePhase2OpsBy :: Maybe NodeId -> (op -> InstanceOp) -> [op] -> [op] -> [op]
+integratePhase2OpsBy mbRoot project baseOps extraOps =
   let isBarrier = \case
-        OpRaise {} -> True
-        _ -> False
+        op -> case project op of
+          OpRaise {} -> True
+          _ -> False
 
       isGraft = \case
-        OpGraft {} -> True
-        _ -> False
+        op -> case project op of
+          OpGraft {} -> True
+          _ -> False
 
       isWeaken = \case
-        OpWeaken {} -> True
-        _ -> False
+        op -> case project op of
+          OpWeaken {} -> True
+          _ -> False
 
       isMergeLike = \case
-        OpMerge {} -> True
-        OpRaiseMerge {} -> True
-        _ -> False
+        op -> case project op of
+          OpMerge {} -> True
+          OpRaiseMerge {} -> True
+          _ -> False
 
-      elimBinderByMerge = \case
+      elimBinderByMerge op = case project op of
         OpMerge n _ -> Just n
         OpRaiseMerge n _ -> Just n
         _ -> Nothing
 
-      elimBinder = \case
+      elimBinder op = case project op of
         OpMerge n _ -> Just n
         OpRaiseMerge n _ -> Just n
         OpWeaken n -> Just n
@@ -349,7 +413,7 @@ integratePhase2Ops baseOps extraOps =
 
       (extraRaises, extraOps') =
         partition
-          ( \case
+          ( \op -> case project op of
               OpRaise {} -> True
               _ -> False
           )
@@ -357,7 +421,7 @@ integratePhase2Ops baseOps extraOps =
 
       raisesByBinder0 =
         foldl'
-          ( \m op -> case op of
+          ( \m op -> case project op of
               OpRaise n -> IntMap.insertWith (++) (getNodeId n) [op] m
               _ -> m
           )
@@ -397,12 +461,33 @@ integratePhase2Ops baseOps extraOps =
 
       mergesAll = mergesBaseBlocks ++ extraElimBlocks
 
-      elimKey op = case op of
+      elimKey op = case project op of
         OpMerge n _ -> getNodeId n
         OpRaiseMerge n _ -> getNodeId n
         _ -> -1
 
-      mergesSorted = concat (sortOn (Down . elimKey . last) mergesAll)
+      rootWeakenPresent =
+        case mbRoot of
+          Nothing -> False
+          Just root ->
+            any
+              (\op -> case project op of
+                  OpWeaken target -> target == root
+                  _ -> False
+              )
+              (weakens ++ extraElimOps)
+
+      (terminalRootMergeBlocks, ordinaryMergeBlocks) =
+        case (mbRoot, rootWeakenPresent) of
+          (Just root, True) ->
+            partition
+              (\block -> elimKey (last block) == getNodeId root)
+              mergesAll
+          _ -> ([], mergesAll)
+
+      mergesSorted = concat (sortOn (Down . elimKey . last) ordinaryMergeBlocks)
+      terminalRootMerges =
+        concat (sortOn (Down . elimKey . last) terminalRootMergeBlocks)
       (raisesAfterWeakens, weakensWithRaises) =
         foldl'
           ( \(raisesMap, acc) op -> case elimBinder op of
@@ -416,7 +501,13 @@ integratePhase2Ops baseOps extraOps =
           weakens
 
       leftoverRaises = concat (IntMap.elems raisesAfterWeakens)
-   in grafts ++ mergesSorted ++ others ++ leftoverRaises ++ weakensWithRaises ++ afterBarrier
+   in grafts
+        ++ mergesSorted
+        ++ others
+        ++ leftoverRaises
+        ++ weakensWithRaises
+        ++ terminalRootMerges
+        ++ afterBarrier
 
 -- | Integrate phase-2 ops into a witness. The intro count passes through
 -- unchanged; phase-2 ops are merged into the ops list.

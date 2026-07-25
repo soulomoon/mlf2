@@ -6,9 +6,8 @@ module MLF.Elab.Run.Provenance (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (EdgeTrace(..))
-import MLF.Constraint.Presolution.Base (CopyMapping(..), toListInterior)
+import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeSourceInterior(..), toListInterior)
 import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
@@ -19,7 +18,6 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , lookupNodeIn
     , nodeRefFromKey
-    , typeRef
     )
 
 -- | Collect base named keys (variables bound by Gen nodes).
@@ -39,21 +37,6 @@ collectBaseNamedKeys c =
             _ -> False
         ]
 
--- | Build interior set from edge trace root.
-buildInteriorSet :: Constraint p -> (NodeId -> NodeId) -> NodeId -> IntSet.IntSet
-buildInteriorSet c _adoptNode rootBase =
-    case Binding.interiorOf c (typeRef rootBase) of
-        Right s ->
-            IntSet.insert
-                (getNodeId rootBase)
-                (IntSet.fromList
-                    [ getNodeId nid
-                    | key <- IntSet.toList s
-                    , TypeRef nid <- [nodeRefFromKey key]
-                    ]
-                )
-        Left _ -> IntSet.singleton (getNodeId rootBase)
-
 -- | Build copy map from a single edge trace.
 buildTraceCopyMap
     :: Constraint p
@@ -65,7 +48,6 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
     let copyMap0 = getCopyMapping (etCopyMap tr)
         rootBase = etRoot tr
         baseNodes = cNodes c
-        baseInteriorSet = buildInteriorSet c adoptNode rootBase
         binderCopyOverrides =
             IntMap.fromList
                 [ (getNodeId (adoptNode copyN), NodeId baseKey)
@@ -93,16 +75,20 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
             let rootCopyKey = getNodeId (adoptNode rootBase)
             in IntMap.insertWith (\_ old -> old) rootCopyKey rootBase acc
         addInterior acc baseN =
-            let baseKey = getNodeId baseN
-                copyKey = getNodeId (adoptNode baseN)
+            let copyKey = getNodeId (adoptNode baseN)
             in if IntMap.member copyKey acc
                 then acc
-                else if case lookupNodeIn baseNodes baseN of
-                        Just _ -> True
-                        Nothing -> False
-                    && IntSet.member baseKey baseInteriorSet
-                    then IntMap.insert copyKey baseN acc
-                else IntMap.insert copyKey rootBase acc
+                else case lookupNodeIn baseNodes baseN of
+                    -- A trace may retain original source nodes alongside its
+                    -- fresh expansion nodes. Their provenance is their own
+                    -- source identity, even when they are not direct binding
+                    -- descendants of the scheme root.
+                    Just _ -> IntMap.insert copyKey baseN acc
+                    -- Fresh interior nodes have provenance only when an
+                    -- explicit copy/replay map says so.  Finalized trace
+                    -- interiors may overlap, so guessing the trace root here
+                    -- can steal a node owned by a different instantiation.
+                    Nothing -> acc
     in foldl'
             addInterior
             ( ensureRoot
@@ -110,4 +96,4 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
                     (IntMap.union binderMetaOverrides (IntMap.union binderCopyOverrides invMap))
                 )
             )
-            (toListInterior (etInterior tr))
+            (toListInterior (getEdgeSourceInterior (etInterior tr)))

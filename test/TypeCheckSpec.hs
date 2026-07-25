@@ -4,6 +4,7 @@
 -- TypeSoundnessSpec / PipelineSpec into fixed regression tests here.
 module TypeCheckSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import qualified Data.IntMap.Strict as IntMap
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Map.Strict as Map
@@ -17,7 +18,9 @@ import MLF.Elab.Pipeline
     , Ty(..)
     , Env(..)
     , Instantiation(..)
+    , PipelineError(..)
     , TypeCheckError(..)
+    , insertTypeBindingRef
     , mkTypeCheckEnvWithResolvedTerms
     , resolvedTermEnvEntries
     , freshenTypeAbsAgainstEnv
@@ -25,20 +28,29 @@ import MLF.Elab.Pipeline
     , restrictResolvedTermBindings
     , runPipelineElab
     , schemeFromType
+    , schemeToType
     , typeCheck
     , typeCheckWithEnv
     , unionEnvs
     )
 import MLF.Elab.Run.Pipeline.TestSupport
     ( PipelineElabDetailedResult(..)
+    , closePipelineTerm
+    , extendPreparedExternalBindingTypeIdentities
+    , extendPreparedExternalBindingTypeIdentityCandidates
+    , preferPreparedExternalBindingTypeIdentities
     , prepareExternalBindings
     , preparedExternalTypeCheckEnv
+    , preparedSourceTypeIdentityMaps
+    , freshenTypeAbsAgainstEnvFromSupply
     , restrictPreparedExternalBindings
     , runPipelineElabDetailedWithExternalBindings
+    , runPipelineElabDetailedWithPreparedExternalBindings
     , unionPreparedExternalBindings
     )
 import MLF.Elab.TermClosure
     ( alignTermTypeVarsToScheme
+    , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
     , substInTermRefs
     )
@@ -47,6 +59,7 @@ import MLF.Types.Elab
     , TypeBinderRef
     , deferredResolvedVarFromRef
     , eTyAbsWithRef
+    , elabToBound
     , generatedIdentitiesInType
     , identityGeneratorAfterTerm
     , instAbstrWithRef
@@ -59,8 +72,6 @@ import MLF.Types.Elab
     , resolvedVarIsLocal
     , resolvedVarReferenceName
     , resolvedVarRuntimeName
-    , tBase
-    , tCon
     , schemeBinderRefs
     , tForallWithRef
     , tVarWithRef
@@ -73,18 +84,17 @@ import MLF.Types.Elab
     )
 import qualified MLF.Types.Elab as ElabTypes
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), SymbolOwnerIdentity(..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
-import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingIdentity, ExternalBindingMode(..), externalBindingIdentityFromResolvedVar, externalBindingRuntimeName)
+import MLF.Frontend.ConstraintGen (ConstraintError(..), ExternalBinding(..), ExternalBindingIdentity, ExternalBindingMode(..), ModuleConstraintResult(..), externalBindingIdentityFromResolvedVar, externalBindingRuntimeName, generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply)
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
-import MLF.Frontend.Program.Types (LoweredBindingIdentity, loweredBindingIdentityFromResolvedVar)
 import MLF.Frontend.Syntax (Lit(..), SrcBound(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import MLF.Primitive.Inventory (stringLengthPrimitiveName)
 import qualified MLF.Reify.TypeOps as TypeOps
 import MLF.Types.Identity
-    ( constructorRefFromSymbol
+    ( EnvRef
+    , constructorRefFromSymbol
     , deferredRefFromIdentity
     , envRefFromIdentity
-    , envRefIdentity
     , IdDetails(..)
     , LocalIdentity(..)
     , localRefFromIdentity
@@ -100,8 +110,6 @@ import MLF.Types.Identity
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
-    , idDetailsRefMatchesWith
-    , idDetailsRefMatches
     , idDetailsSameIdentity
     , initialIdentityGenerator
     , StructuralTypeBinderRole(..)
@@ -109,7 +117,6 @@ import MLF.Types.Identity
     , typeBinderIdentityStableName
     , uniqueIdentityStableName
     )
-import MLF.Types.Reference (ReferenceMode(..))
 import ElabTermTestSupport
     ( generatedLocalRef
     , generatedLocalRefForName
@@ -134,14 +141,26 @@ shouldBeRightAlphaEq actual expected =
         Right ty | TypeOps.alphaEqType ty expected -> pure ()
         other -> other `shouldBe` Right expected
 
-loweredBindingIdentityFromDetails :: String -> IdDetails -> LoweredBindingIdentity
-loweredBindingIdentityFromDetails _runtimeName details =
-    loweredBindingIdentityFromResolvedVar
-        ResolvedVar
-            {
-            resolvedVarType = TBottom
-            , resolvedVarDetails = details
-            }
+termInstAppTypes :: XmlfTerm -> [ElabType]
+termInstAppTypes term =
+    case term of
+        EVarNode {} -> []
+        ELit {} -> []
+        ELam _ body -> termInstAppTypes body
+        EApp fun arg -> termInstAppTypes fun ++ termInstAppTypes arg
+        ELet _ _ rhs body -> termInstAppTypes rhs ++ termInstAppTypes body
+        ETyAbsRef _ _ body -> termInstAppTypes body
+        ETyInst body inst -> termInstAppTypes body ++ instAppTypes inst
+        ERoll _ body -> termInstAppTypes body
+        EUnroll body -> termInstAppTypes body
+  where
+    instAppTypes inst =
+        case inst of
+            InstApp ty -> [ty]
+            InstUnderRef _ inner -> instAppTypes inner
+            InstInside inner -> instAppTypes inner
+            InstSeq left right -> instAppTypes left ++ instAppTypes right
+            _ -> []
 
 externalBindingIdentityFromDetails :: String -> IdDetails -> ExternalBindingIdentity
 externalBindingIdentityFromDetails _runtimeName details =
@@ -152,16 +171,28 @@ externalBindingIdentityFromDetails _runtimeName details =
             , resolvedVarDetails = details
             }
 
+fixtureExternalBindingIdentity :: String -> ExternalBindingIdentity
+fixtureExternalBindingIdentity name =
+    externalBindingIdentityFromDetails
+        name
+        (EnvId (fixtureExternalEnvRef name))
+
+fixtureExternalEnvRef :: String -> EnvRef
+fixtureExternalEnvRef name =
+    envRefFromIdentity (UniqueIdentity (negate (900000 + stableNameKey name))) name
+  where
+    stableNameKey = foldl (\acc char -> (acc * 131 + fromEnum char) `mod` 100000) 0
+
 spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
-    let intTy = tBase (BaseTy "Int")
+    let intTy = TestElab.tBase (BaseTy "Int")
         builtinIntTy =
-            ElabTypes.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int")
-        listSelfTy = testTMu "self" (tCon (BaseTy "List") (testTVar "self" :| []))
+            ElabTypes.TBaseWithIdentity (builtinTypeIdentity "Int") (BaseTy "Int")
+        listSelfTy = testTMu "self" (TestElab.tCon (BaseTy "List") (testTVar "self" :| []))
         bareRecursiveTy = testTMu "self" (testTVar "self")
         forallRecursiveTy = testTMu "self" (testTForall "b" Nothing (testTVar "self"))
         recursiveIntTy = testTMu "self" (TArrow (testTVar "self") intTy)
-        boolTy = tBase (BaseTy "Bool")
+        boolTy = TestElab.tBase (BaseTy "Bool")
         recursiveBody = mkTestLocalLam "self" recursiveIntTy (ELit (LInt 1))
         resolvedLocal ref runtime ty =
             generatedResolvedLocal 0 ref runtime ty
@@ -170,22 +201,20 @@ spec = describe "Phase 7 typecheck" $ do
             typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
 
     it "promotes builtin elab type patterns to stored identities" $ do
-        tBase (BaseTy "Int")
-            `shouldBe` ElabTypes.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int")
-        tCon (BaseTy "String") (intTy :| [])
-            `shouldBe` ElabTypes.TConWithIdentity (Just (builtinTypeIdentity "String")) (BaseTy "String") (intTy :| [])
+        TestElab.tBase (BaseTy "Int")
+            `shouldBe` ElabTypes.TBaseWithIdentity (builtinTypeIdentity "Int") (BaseTy "Int")
+        TestElab.tCon (BaseTy "String") (intTy :| [])
+            `shouldBe` ElabTypes.TConWithIdentity (builtinTypeIdentity "String") (BaseTy "String") (intTy :| [])
 
     it "compares checked type heads by identity when names are stale" $ do
         let tokenIdentity = generatedSymbolIdentity 991826 SymbolType "Main" "Token" Nothing
             otherTokenIdentity = generatedSymbolIdentity 991827 SymbolType "Main" "Token" Nothing
-        ElabTypes.TBaseWithIdentity (Just tokenIdentity) (BaseTy "Token")
-            `shouldBe` ElabTypes.TBaseWithIdentity (Just tokenIdentity) (BaseTy "$stale.Token")
-        ElabTypes.TBaseWithIdentity (Just tokenIdentity) (BaseTy "Token")
-            `shouldNotBe` ElabTypes.TBaseWithIdentity Nothing (BaseTy "Token")
-        ElabTypes.TBaseWithIdentity (Just tokenIdentity) (BaseTy "Token")
-            `shouldNotBe` ElabTypes.TBaseWithIdentity (Just otherTokenIdentity) (BaseTy "Token")
-        ElabTypes.TConWithIdentity (Just tokenIdentity) (BaseTy "Token") (intTy :| [])
-            `shouldBe` ElabTypes.TConWithIdentity (Just tokenIdentity) (BaseTy "$stale.Token") (intTy :| [])
+        ElabTypes.TBaseWithIdentity tokenIdentity (BaseTy "Token")
+            `shouldBe` ElabTypes.TBaseWithIdentity tokenIdentity (BaseTy "$stale.Token")
+        ElabTypes.TBaseWithIdentity tokenIdentity (BaseTy "Token")
+            `shouldNotBe` ElabTypes.TBaseWithIdentity otherTokenIdentity (BaseTy "Token")
+        ElabTypes.TConWithIdentity tokenIdentity (BaseTy "Token") (intTy :| [])
+            `shouldBe` ElabTypes.TConWithIdentity tokenIdentity (BaseTy "$stale.Token") (intTy :| [])
 
     it "keeps graph and generated type-binder keys and stable names disjoint" $ do
         let graphIdentity = typeBinderIdentityFromNode (NodeId 0)
@@ -265,7 +294,7 @@ spec = describe "Phase 7 typecheck" $ do
                 typeBinderRefFromIdentity
                     (typeBinderIdentityFromStructural (symbolUniqueIdentity tokenIdentity) StructuralResultBinder)
                     "$not_the_token_result_suffix"
-            nominalTokenTy = ElabTypes.TBaseWithIdentity (Just tokenIdentity) (BaseTy "Main.Token")
+            nominalTokenTy = ElabTypes.TBaseWithIdentity tokenIdentity (BaseTy "Main.Token")
             structuralTokenTy =
                 ElabTypes.TMuRef
                     selfRef
@@ -273,6 +302,56 @@ spec = describe "Phase 7 typecheck" $ do
             arg = resolvedLocal "$arg#identity" "arg" structuralTokenTy
             env = mkTypeCheckEnvWithResolvedTerms [(arg, structuralTokenTy)] Map.empty
             term = EApp (mkTestLocalLam "x" nominalTokenTy (ELit (LInt 0))) (EVarNode arg)
+        typeCheckWithEnv env term `shouldBe` Right builtinIntTy
+
+    it "propagates nominal/structural data identity through structural types" $ do
+        let boxIdentity = generatedSymbolIdentity 991829 SymbolType "Core" "Box" Nothing
+            boxSelfRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromStructural (symbolUniqueIdentity boxIdentity) StructuralSelfBinder)
+                    "$Core.Box_self"
+            boxResultRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromStructural (symbolUniqueIdentity boxIdentity) StructuralResultBinder)
+                    "$Core.Box_result"
+            nominalBoxTy =
+                ElabTypes.TConWithIdentity
+                    boxIdentity
+                    (BaseTy "$stale_box_name")
+                    (boolTy :| [])
+            structuralBoxTy =
+                ElabTypes.TMuRef
+                    boxSelfRef
+                    ( ElabTypes.TForallRef
+                        boxResultRef
+                        Nothing
+                        (TArrow (TArrow boolTy (ElabTypes.TVarRef boxResultRef)) (ElabTypes.TVarRef boxResultRef))
+                    )
+            wrapperIdentity = generatedSymbolIdentity 991830 SymbolType "Core" "Wrapper" Nothing
+            wrapperSelfRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromStructural (symbolUniqueIdentity wrapperIdentity) StructuralSelfBinder)
+                    "$Core.Wrapper_self"
+            wrapperResultRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromStructural (symbolUniqueIdentity wrapperIdentity) StructuralResultBinder)
+                    "$Core.Wrapper_result"
+            wrapperTy fieldTy =
+                ElabTypes.TMuRef
+                    wrapperSelfRef
+                    ( ElabTypes.TForallRef
+                        wrapperResultRef
+                        Nothing
+                        (TArrow (TArrow fieldTy (ElabTypes.TVarRef wrapperResultRef)) (ElabTypes.TVarRef wrapperResultRef))
+                    )
+            expectedWrapperTy = wrapperTy structuralBoxTy
+            actualWrapperTy = wrapperTy nominalBoxTy
+            arg = generatedResolvedLocal 991831 "$arg#nested-identity" "arg" actualWrapperTy
+            env = mkTypeCheckEnvWithResolvedTerms [(arg, actualWrapperTy)] Map.empty
+            term =
+                EApp
+                    (mkTestLocalLam "x" expectedWrapperTy (ELit (LInt 0)))
+                    (EVarNode arg)
         typeCheckWithEnv env term `shouldBe` Right builtinIntTy
 
     it "keeps same-spelled resolved local binders distinct by identity" $ do
@@ -497,7 +576,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Just externalIdentity
+                    , externalBindingIdentity = externalIdentity
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -522,7 +601,7 @@ spec = describe "Phase 7 typecheck" $ do
                             (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
                     , externalBindingMode = ExternalBindingScheme
                     , externalBindingIdentity =
-                        Just (externalBindingIdentityFromDetails "poly" (TopLevelId symbol))
+                        externalBindingIdentityFromDetails "poly" (TopLevelId symbol)
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -531,16 +610,37 @@ spec = describe "Phase 7 typecheck" $ do
                     [ ("poly", externalBinding)
                     , (stableName, externalBinding)
                     ]
-        case runPipelineElabDetailedWithExternalBindings
-            Set.empty
-            externalBindings
-            (unsafeNormalizeExpr (Surf.EVar "poly")) of
-            Right PipelineElabDetailedResult {pedTerm = EVarNode resolved} ->
-                resolvedVarDetails resolved `shouldBe` TopLevelId symbol
-            Right result ->
-                expectationFailure ("Expected external variable term, got: " ++ show (pedTerm result))
+        case prepareExternalBindings externalBindings of
             Left err ->
-                expectationFailure ("Expected shared external alias scheme, got: " ++ renderPipelineError err)
+                expectationFailure ("Expected external binding preparation, got: " ++ show err)
+            Right prepared -> do
+                let (_, binderIdentities) =
+                        preparedSourceTypeIdentityMaps prepared
+                    declarationRefs =
+                        [ ref
+                        | (resolved, ty) <-
+                            resolvedTermEnvEntries
+                                (resolvedTermEnv (preparedExternalTypeCheckEnv prepared))
+                        , resolvedVarDetails resolved == TopLevelId symbol
+                        , (ref, _) <- schemeBinderRefs (schemeFromType ty)
+                        ]
+                case declarationRefs of
+                    declarationRef : _ ->
+                        Map.lookup "a" binderIdentities
+                            `shouldBe` Just (typeBinderRefIdentity declarationRef)
+                    [] ->
+                        expectationFailure
+                            "Expected prepared external scheme declaration binder"
+                case runPipelineElabDetailedWithPreparedExternalBindings
+                    Set.empty
+                    prepared
+                    (unsafeNormalizeExpr (Surf.EVar "poly")) of
+                    Right PipelineElabDetailedResult {pedTerm = EVarNode resolved} ->
+                        resolvedVarDetails resolved `shouldBe` TopLevelId symbol
+                    Right result ->
+                        expectationFailure ("Expected external variable term, got: " ++ show (pedTerm result))
+                    Left err ->
+                        expectationFailure ("Expected shared external alias scheme, got: " ++ renderPipelineError err)
 
     it "uses external binding identity aliases during constraint generation" $ do
         let symbol =
@@ -552,7 +652,7 @@ spec = describe "Phase 7 typecheck" $ do
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
                     , externalBindingIdentity =
-                        Just (externalBindingIdentityFromDetails "$runtime_x" (TopLevelId symbol))
+                        externalBindingIdentityFromDetails "$runtime_x" (TopLevelId symbol)
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -575,7 +675,7 @@ spec = describe "Phase 7 typecheck" $ do
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
                     , externalBindingIdentity =
-                        Just (externalBindingIdentityFromDetails runtimeName (TopLevelId (symbol unique moduleName)))
+                        externalBindingIdentityFromDetails runtimeName (TopLevelId (symbol unique moduleName))
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -597,7 +697,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "x"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -615,7 +715,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "int"
                     , externalBindingTypeHeadIdentities = Map.singleton "Int" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -623,14 +723,249 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
             Right prepared ->
                 case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "int" ] of
-                    [ElabTypes.TBaseWithIdentity (Just actualIdentity) (BaseTy "Int")] ->
+                    [ElabTypes.TBaseWithIdentity actualIdentity (BaseTy "Int")] ->
                         actualIdentity `shouldBe` typeIdentity
                     other -> expectationFailure ("Expected supplied Int identity in prepared external binding, got: " ++ show other)
+
+    it "keeps a three-way type-head conflict ambiguous after extension" $ do
+        let headA = generatedSymbolIdentity 991840 SymbolType "A" "Clash" Nothing
+            headB = generatedSymbolIdentity 991841 SymbolType "B" "Clash" Nothing
+            headC = generatedSymbolIdentity 991842 SymbolType "C" "Clash" Nothing
+            externalBinding name identity =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase "Clash"
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = fixtureExternalBindingIdentity name
+                    , externalBindingTypeHeadIdentities = Map.singleton "Clash" identity
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    ( Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STArrow (Surf.STBase "Clash") (Surf.STBase "Clash"))
+                    )
+        case
+            ( prepareExternalBindings (Map.singleton "left" (externalBinding "left" headA))
+            , prepareExternalBindings (Map.singleton "right" (externalBinding "right" headB))
+            ) of
+            (Right preparedA, Right preparedB) -> do
+                let preparedAB = unionPreparedExternalBindings preparedA preparedB
+                    preparedABC =
+                        extendPreparedExternalBindingTypeIdentities
+                            (Map.singleton "Clash" headC)
+                            Map.empty
+                            preparedAB
+                case runPipelineElabDetailedWithPreparedExternalBindings Set.empty preparedABC expr of
+                    Left (PipelineConstraintError (UnknownTypeHead "Clash")) -> pure ()
+                    Left err -> expectationFailure ("Expected ambiguous Clash head, got: " ++ renderPipelineError err)
+                    Right result -> expectationFailure ("Expected ambiguous Clash head rejection, got: " ++ show (pedType result))
+            (Left err, _) -> expectationFailure ("Expected left external binding preparation, got: " ++ show err)
+            (_, Left err) -> expectationFailure ("Expected right external binding preparation, got: " ++ show err)
+
+    it "keeps every lowered binder candidate before resolving a singleton" $ do
+        let binderA = typeBinderIdentityFromUnique (UniqueIdentity 991843)
+            binderB = typeBinderIdentityFromUnique (UniqueIdentity 991844)
+            binderC = typeBinderIdentityFromUnique (UniqueIdentity 991845)
+        case prepareExternalBindings Map.empty of
+            Left err -> expectationFailure ("Expected empty external binding preparation, got: " ++ show err)
+            Right prepared0 -> do
+                let preparedAB =
+                        extendPreparedExternalBindingTypeIdentityCandidates
+                            []
+                            [Map.singleton "a" binderA, Map.singleton "a" binderB]
+                            prepared0
+                    preparedABC =
+                        extendPreparedExternalBindingTypeIdentities
+                            Map.empty
+                            (Map.singleton "a" binderC)
+                            preparedAB
+                    (_, resolvedBinderIdentities) =
+                        preparedSourceTypeIdentityMaps preparedABC
+                Map.lookup "a" resolvedBinderIdentities `shouldBe` Nothing
+
+    it "prefers the current root binder identity over inherited same-spelled candidates" $ do
+        let inheritedA = typeBinderIdentityFromUnique (UniqueIdentity 991848)
+            inheritedB = typeBinderIdentityFromUnique (UniqueIdentity 991849)
+            rootBinder = typeBinderIdentityFromUnique (UniqueIdentity 991850)
+        case prepareExternalBindings Map.empty of
+            Left err -> expectationFailure ("Expected empty external binding preparation, got: " ++ show err)
+            Right prepared0 -> do
+                let inherited =
+                        extendPreparedExternalBindingTypeIdentityCandidates
+                            []
+                            [ Map.singleton "a" inheritedA
+                            , Map.singleton "a" inheritedB
+                            ]
+                            prepared0
+                    rootPrepared =
+                        preferPreparedExternalBindingTypeIdentities
+                            Map.empty
+                            (Map.singleton "a" rootBinder)
+                            inherited
+                    (_, resolvedBinderIdentities) =
+                        preparedSourceTypeIdentityMaps rootPrepared
+                Map.lookup "a" resolvedBinderIdentities `shouldBe` Just rootBinder
+
+    it "preserves source binder identity per module root" $ do
+        let binderA = typeBinderIdentityFromUnique (UniqueIdentity 991846)
+            binderB = typeBinderIdentityFromUnique (UniqueIdentity 991847)
+            expr =
+                unsafeNormalizeExpr
+                    ( Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
+                    )
+        case
+            generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply
+                initialIdentityGenerator
+                Set.empty
+                Map.empty
+                Map.empty
+                (Map.fromList [(1 :: Int, Map.singleton "a" binderA), (2, Map.singleton "a" binderB)])
+                Map.empty
+                [(1, "left", expr), (2, "right", expr)] of
+            Right ModuleConstraintResult {mcrSourceTypeBinderIdentities = identities} ->
+                Set.fromList (IntMap.elems identities)
+                    `shouldBe` Set.fromList [binderA, binderB]
+            Left err -> expectationFailure ("Expected per-root module constraints, got: " ++ show err)
+
+    it "does not invent a forall to hide a root-scheme mismatch" $ do
+        let freeRef = typeBinderRefFromIdentity (typeBinderIdentityFromUnique (UniqueIdentity 991848)) "a"
+            freeTy = tVarWithRef freeRef
+            binder = generatedResolvedLocal 991849 "x" "x" freeTy
+            term = ELam binder (EVarNode binder)
+            initialEnv =
+                insertTypeBindingRef
+                    freeRef
+                    TBottom
+                    (mkTypeCheckEnvWithResolvedTerms [] Map.empty)
+        closePipelineTerm
+            initialEnv
+            IntMap.empty
+            (schemeFromType intTy)
+            term
+            term
+            `shouldBe` term
+
+    it "retains genuinely independent root binders" $ do
+        let refA = typeRef 991853 "a"
+            refB = typeRef 991854 "b"
+            paramA = generatedResolvedLocal 991855 "$x#root-independent" "x" (tVarWithRef refA)
+            paramB = generatedResolvedLocal 991856 "$y#root-independent" "y" (tVarWithRef refB)
+            term = ELam paramA (ELam paramB (EVarNode paramA))
+            rootScheme =
+                mkElabSchemeWithRefs
+                    [(refA, Nothing), (refB, Nothing)]
+                    ( TArrow
+                        (tVarWithRef refA)
+                        (TArrow (tVarWithRef refB) (tVarWithRef refA))
+                    )
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+            closed =
+                closePipelineTerm
+                    emptyTcEnv
+                    IntMap.empty
+                    rootScheme
+                    term
+                    term
+        case closed of
+            ETyAbsRef retainedA Nothing (ETyAbsRef retainedB Nothing _) -> do
+                retainedA `shouldBe` refA
+                retainedB `shouldBe` refB
+            other -> expectationFailure ("Expected both independent root abstractions, got: " ++ show other)
+        typeCheckWithEnv emptyTcEnv closed `shouldBe` Right (schemeToType rootScheme)
+
+    it "does not quotient root binders with incompatible bounds" $ do
+        let refA = typeRef 991857 "a"
+            refB = typeRef 991858 "b"
+            param = generatedResolvedLocal 991859 "$x#root-bounds" "x" (tVarWithRef refA)
+            term = ELam param (EVarNode param)
+            rootScheme =
+                mkElabSchemeWithRefs
+                    [(refA, Nothing), (refB, Just builtinIntTy)]
+                    (TArrow (tVarWithRef refA) (tVarWithRef refB))
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+        closePipelineTerm
+            emptyTcEnv
+            IntMap.empty
+            rootScheme
+            term
+            term
+            `shouldBe` term
+
+    it "does not quotient root binders onto an externally visible type identity" $ do
+        let refA = typeRef 991860 "a"
+            refB = typeRef 991861 "b"
+            externalRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromUnique (UniqueIdentity 991862))
+                    "external"
+            param = generatedResolvedLocal 991863 "$x#root-external" "x" (tVarWithRef externalRef)
+            term = ELam param (EVarNode param)
+            rootScheme =
+                mkElabSchemeWithRefs
+                    [(refA, Nothing), (refB, Nothing)]
+                    (TArrow (tVarWithRef refA) (tVarWithRef refB))
+            initialEnv =
+                insertTypeBindingRef
+                    externalRef
+                    TBottom
+                    (mkTypeCheckEnvWithResolvedTerms [] Map.empty)
+        closePipelineTerm
+            initialEnv
+            IntMap.empty
+            rootScheme
+            term
+            term
+            `shouldBe` term
+
+    it "closes a bounded result over an annotated polymorphic self-application" $ do
+        let annotationRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromUnique (UniqueIdentity 0))
+                    "a"
+            resultRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromNode (NodeId 11))
+                    "result"
+            annotationTy =
+                TForallRef
+                    annotationRef
+                    Nothing
+                    (TArrow (tVarWithRef annotationRef) (tVarWithRef annotationRef))
+            binder = generatedResolvedLocal 0 "g" "g" annotationTy
+            openTerm =
+                ELam
+                    binder
+                    ( EApp
+                        (ETyInst (EVarNode binder) (InstApp annotationTy))
+                        (EVarNode binder)
+                    )
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+        case elabToBound annotationTy of
+            Left err -> expectationFailure err
+            Right annotationBound -> do
+                let rootScheme =
+                        mkElabSchemeWithRefs
+                            [(resultRef, Just annotationBound)]
+                            (TArrow annotationTy (tVarWithRef resultRef))
+                    rootSubst = IntMap.singleton 11 resultRef
+                    closed =
+                        closePipelineTerm
+                            emptyTcEnv
+                            rootSubst
+                            rootScheme
+                            openTerm
+                            openTerm
+                closed `shouldBe` openTerm
+                typeCheckWithEnv emptyTcEnv closed
+                    `shouldBe` Right (TArrow annotationTy annotationTy)
 
     it "collects owner identities from type heads" $ do
         let ownerIdentity = generatedSymbolIdentity 6001 SymbolType "Main" "Box" Nothing
             headIdentity = generatedSymbolIdentity 6002 SymbolType "Main" "Box.Alias" (Just (SymbolOwnerType ownerIdentity))
-            ty = ElabTypes.TBaseWithIdentity (Just headIdentity) (BaseTy "Box")
+            ty = ElabTypes.TBaseWithIdentity headIdentity (BaseTy "Box")
         generatedIdentitiesInType ty `shouldBe` [UniqueIdentity 6002, UniqueIdentity 6001]
 
     it "restricts prepared external typecheck bindings by identity after same-name union" $ do
@@ -647,7 +982,7 @@ spec = describe "Phase 7 typecheck" $ do
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
                     , externalBindingIdentity =
-                        Just (externalBindingIdentityFromDetails "x" (TopLevelId (symbol unique moduleName)))
+                        externalBindingIdentityFromDetails "x" (TopLevelId (symbol unique moduleName))
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -670,7 +1005,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -691,7 +1026,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -716,7 +1051,7 @@ spec = describe "Phase 7 typecheck" $ do
                             Nothing
                             (Surf.STForall "a" Nothing (Surf.STVar "a"))
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -752,7 +1087,7 @@ spec = describe "Phase 7 typecheck" $ do
                                 (Surf.STVar "b")
                             )
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -776,7 +1111,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar stableName) (Surf.STVar stableName)
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -796,7 +1131,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Box"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "box"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -804,7 +1139,7 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
             Right prepared ->
                 case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "box" ] of
-                    [ElabTypes.TBaseWithIdentity (Just actualIdentity) (BaseTy "Box")] ->
+                    [ElabTypes.TBaseWithIdentity actualIdentity (BaseTy "Box")] ->
                         actualIdentity `shouldBe` typeIdentity
                     other -> expectationFailure ("Expected Box identity type with supplied head ref, got: " ++ show other)
 
@@ -815,7 +1150,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase stableName
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "box"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -823,7 +1158,7 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
             Right prepared ->
                 case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "box" ] of
-                    [ElabTypes.TBaseWithIdentity (Just actualIdentity) (BaseTy actualName)] -> do
+                    [ElabTypes.TBaseWithIdentity actualIdentity (BaseTy actualName)] -> do
                         actualIdentity `shouldBe` typeIdentity
                         actualName `shouldBe` stableName
                     other -> expectationFailure ("Expected stable head name to resolve through supplied identity, got: " ++ show other)
@@ -834,7 +1169,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Box"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "box"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -845,9 +1180,15 @@ spec = describe "Phase 7 typecheck" $ do
                         (Surf.STArrow (Surf.STBase "Box") (Surf.STBase "Box")))
         case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "box" externalBinding) expr of
             Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
-            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef _ (Just bound) _} ->
-                bound `shouldBe` ElabTypes.TBaseWithIdentity (Just typeIdentity) (BaseTy "Box")
-            Right other -> expectationFailure ("Expected annotated Box identity bound, got: " ++ show (pedType other))
+            Right PipelineElabDetailedResult
+                { pedType =
+                    ElabTypes.TArrow
+                        (ElabTypes.TBaseWithIdentity domIdentity (BaseTy "Box"))
+                        (ElabTypes.TBaseWithIdentity codIdentity (BaseTy "Box"))
+                } -> do
+                    domIdentity `shouldBe` typeIdentity
+                    codIdentity `shouldBe` typeIdentity
+            Right other -> expectationFailure ("Expected annotated Box identity arrow, got: " ++ show (pedType other))
 
     it "preserves supplied type binder identities in source annotations" $ do
         let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 146)
@@ -855,7 +1196,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -878,7 +1219,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -911,7 +1252,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase stableName
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "box"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -922,9 +1263,17 @@ spec = describe "Phase 7 typecheck" $ do
                         (Surf.STArrow (Surf.STBase stableName) (Surf.STBase stableName)))
         case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "box" externalBinding) expr of
             Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
-            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef _ (Just bound) _} ->
-                bound `shouldBe` ElabTypes.TBaseWithIdentity (Just typeIdentity) (BaseTy stableName)
-            Right other -> expectationFailure ("Expected annotated stable Box identity bound, got: " ++ show (pedType other))
+            Right PipelineElabDetailedResult
+                { pedType =
+                    ElabTypes.TArrow
+                        (ElabTypes.TBaseWithIdentity domIdentity (BaseTy domName))
+                        (ElabTypes.TBaseWithIdentity codIdentity (BaseTy codName))
+                } -> do
+                    domIdentity `shouldBe` typeIdentity
+                    codIdentity `shouldBe` typeIdentity
+                    domName `shouldBe` stableName
+                    codName `shouldBe` stableName
+            Right other -> expectationFailure ("Expected annotated stable Box identity arrow, got: " ++ show (pedType other))
 
     it "resolves source annotation type variables through stable binder identity aliases" $ do
         let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 147)
@@ -933,7 +1282,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STArrow (Surf.STVar stableName) (Surf.STVar stableName)
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "id"
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
                     }
@@ -950,13 +1299,13 @@ spec = describe "Phase 7 typecheck" $ do
                 typeBinderRefIdentity resultRef `shouldBe` binderIdentity
             Right other -> expectationFailure ("Expected annotated stable identity type, got: " ++ show (pedType other))
 
-    it "seeds generated external identities after supplied type head identities" $ do
+    it "keeps the supplied external identity when type-head identities are also present" $ do
         let typeIdentity = generatedSymbolIdentity 43 SymbolType "Main" "Box" Nothing
             externalBinding =
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Box"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Nothing
+                    , externalBindingIdentity = fixtureExternalBindingIdentity "box"
                     , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -964,10 +1313,10 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
             Right prepared ->
                 case [ ref | (resolved, _) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "box", EnvId ref <- [resolvedVarDetails resolved] ] of
-                    [ref] -> envRefIdentity ref `shouldBe` UniqueIdentity 44
+                    [ref] -> ref `shouldBe` fixtureExternalEnvRef "box"
                     other -> expectationFailure ("Expected generated external env ref after supplied head identity, got: " ++ show other)
 
-    it "seeds generated external typecheck identities after provided deferred identities" $ do
+    it "keeps supplied external typecheck identities alongside deferred identities" $ do
         let (deferredRef, _) = freshDeferredRef "z" initialIdentityGenerator
             deferredIdentity =
                 externalBindingIdentityFromDetails "z" (DeferredId deferredRef)
@@ -977,7 +1326,7 @@ spec = describe "Phase 7 typecheck" $ do
                       , ExternalBinding
                             { externalBindingType = Surf.STBase "Int"
                             , externalBindingMode = ExternalBindingScheme
-                            , externalBindingIdentity = Nothing
+                            , externalBindingIdentity = fixtureExternalBindingIdentity "a"
                             , externalBindingTypeHeadIdentities = Map.empty
                             , externalBindingTypeBinderIdentities = Map.empty
                             }
@@ -986,7 +1335,7 @@ spec = describe "Phase 7 typecheck" $ do
                       , ExternalBinding
                             { externalBindingType = Surf.STBase "Int"
                             , externalBindingMode = ExternalBindingScheme
-                            , externalBindingIdentity = Just deferredIdentity
+                            , externalBindingIdentity = deferredIdentity
                             , externalBindingTypeHeadIdentities = Map.empty
                             , externalBindingTypeBinderIdentities = Map.empty
                             }
@@ -1002,10 +1351,10 @@ spec = describe "Phase 7 typecheck" $ do
                         , resolvedVarReferenceName resolved == "a"
                         , EnvId ref <- [resolvedVarDetails resolved]
                         ]
-                map envRefIdentity generatedRefs `shouldBe` [UniqueIdentity 1]
+                generatedRefs `shouldBe` [fixtureExternalEnvRef "a"]
                 typeCheckWithEnv env (mkDeferredVarWithRef deferredRef) `shouldBe` Right builtinIntTy
 
-    it "seeds generated external elaboration identities after provided deferred identities" $ do
+    it "keeps supplied external elaboration identities alongside deferred identities" $ do
         let (deferredRef, _) = freshDeferredRef "z" initialIdentityGenerator
             deferredIdentity =
                 externalBindingIdentityFromDetails "z" (DeferredId deferredRef)
@@ -1015,7 +1364,7 @@ spec = describe "Phase 7 typecheck" $ do
                       , ExternalBinding
                             { externalBindingType = Surf.STBase "Int"
                             , externalBindingMode = ExternalBindingScheme
-                            , externalBindingIdentity = Nothing
+                            , externalBindingIdentity = fixtureExternalBindingIdentity "a"
                             , externalBindingTypeHeadIdentities = Map.empty
                             , externalBindingTypeBinderIdentities = Map.empty
                             }
@@ -1024,7 +1373,7 @@ spec = describe "Phase 7 typecheck" $ do
                       , ExternalBinding
                             { externalBindingType = Surf.STBase "Int"
                             , externalBindingMode = ExternalBindingScheme
-                            , externalBindingIdentity = Just deferredIdentity
+                            , externalBindingIdentity = deferredIdentity
                             , externalBindingTypeHeadIdentities = Map.empty
                             , externalBindingTypeBinderIdentities = Map.empty
                             }
@@ -1037,7 +1386,7 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding elaboration, got: " ++ renderPipelineError err)
             Right PipelineElabDetailedResult {pedTerm = EVarNode resolved, pedType = ty} -> do
                 ty `shouldBe` builtinIntTy
-                resolvedVarDetails resolved `shouldBe` EnvId (envRefFromIdentity (UniqueIdentity 1) "a")
+                resolvedVarDetails resolved `shouldBe` EnvId (fixtureExternalEnvRef "a")
             Right other -> expectationFailure ("Expected resolved external variable term, got: " ++ show (pedTerm other))
 
     it "elaborates external binding references with prepared identity" $ do
@@ -1049,7 +1398,7 @@ spec = describe "Phase 7 typecheck" $ do
                 ExternalBinding
                     { externalBindingType = Surf.STBase "Int"
                     , externalBindingMode = ExternalBindingScheme
-                    , externalBindingIdentity = Just externalIdentity
+                    , externalBindingIdentity = externalIdentity
                     , externalBindingTypeHeadIdentities = Map.empty
                     , externalBindingTypeBinderIdentities = Map.empty
                     }
@@ -1084,10 +1433,6 @@ spec = describe "Phase 7 typecheck" $ do
                 TopLevelId (generatedSymbolIdentity 42 SymbolValue "Main" "value" Nothing)
             conflictingTopLevelDetails =
                 TopLevelId (generatedSymbolIdentity 42 SymbolValue "Main" "stale-value" Nothing)
-            loweredIdentity =
-                loweredBindingIdentityFromDetails "$Box" constructorDetails
-            renamedLoweredIdentity =
-                loweredBindingIdentityFromDetails "$RenamedBox" constructorDetails
             localResolved =
                 ResolvedVar
                     {
@@ -1119,7 +1464,6 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsIsLocal primitiveDetails `shouldBe` False
         idDetailsConstructorRef localDetails `shouldBe` Nothing
         idDetailsConstructorRef constructorDetails `shouldBe` Just ctorRef
-        renamedLoweredIdentity `shouldBe` loweredIdentity
         idDetailsReferenceName (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` "$x#1"
         idDetailsSameIdentity localDetails (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` True
         idDetailsSameIdentity localDetails (LocalId (generatedLocalRef 1 "$x#1")) `shouldBe` False
@@ -1127,13 +1471,8 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsSameIdentity primitiveDetails renamedPrimitiveDetails `shouldBe` True
         idDetailsSameIdentity topLevelDetails conflictingTopLevelDetails `shouldBe` False
         idDetailsSameIdentity deferredDetails sameNamedDeferredDetails `shouldBe` False
-        idDetailsRefMatches (Just localDetails) "$x#0" (Just (idDetailsRenameLocal "$x#1" localDetails)) "$x#1" `shouldBe` True
-        idDetailsRefMatches (Just topLevelDetails) "value" (Just conflictingTopLevelDetails) "stale-value" `shouldBe` False
-        idDetailsRefMatches (Just localDetails) "$x#0" Nothing "$x#0" `shouldBe` False
-        idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
-        idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` False
-        idDetailsRefMatchesWith IdentityOnly Nothing "$x#0" Nothing "$x#0" `shouldBe` False
-        idDetailsRefMatchesWith MetadataLight Nothing "$x#0" Nothing "$x#0" `shouldBe` True
+        idDetailsSameIdentity localDetails (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` True
+        idDetailsSameIdentity topLevelDetails conflictingTopLevelDetails `shouldBe` False
         let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
             renamedSameIdentityDetails = idDetailsRenameLocal "$x#renamed" localDetails
             detailsByAlias = idDetailsAliasMapWith [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]
@@ -1260,6 +1599,15 @@ spec = describe "Phase 7 typecheck" $ do
                     (ETyInst (ELam binder (EVarNode binder)) (instUnderWithRef refInst InstId))
         substInTermRefs IntMap.empty term `shouldBe` term
 
+    it "does not rewrite InstAbstr to a different binder identity" $ do
+        let exteriorRef = typeRef 50 "exterior"
+            aliasedRef = typeRef 51 "alias"
+            term = ETyInst (ELit (LInt 1)) (instAbstrWithRef exteriorRef)
+        substInTermRefs
+            (IntMap.singleton 50 aliasedRef)
+            term
+            `shouldBe` term
+
     it "preserves type binder refs while aligning term type variables" $ do
         let refA = typeRef 43 "a"
             binder = resolvedLocal "$x#0" "runtime-x" (tVarWithRef refA)
@@ -1273,10 +1621,198 @@ spec = describe "Phase 7 typecheck" $ do
                     )
         alignTermTypeVarsToScheme scheme term `shouldBe` Just term
 
+    it "aligns an open term's existing type abstraction before closing its scheme" $ do
+        let refA = typeRef 64 "a"
+            external =
+                ResolvedVar
+                    { resolvedVarType = intTy
+                    , resolvedVarDetails = EnvId (fixtureExternalEnvRef "external-int")
+                    }
+            ignored = generatedResolvedLocal 65 "$ignored#0" "ignored" intTy
+            param = generatedResolvedLocal 66 "$x#0" "x" (tVarWithRef refA)
+            term =
+                eTyAbsWithRef
+                    refA
+                    Nothing
+                    ( EApp
+                        (ELam ignored (ELam param (EVarNode param)))
+                        (EVarNode external)
+                    )
+            scheme =
+                schemeFromType
+                    (tForallWithRef refA Nothing (TArrow (tVarWithRef refA) (tVarWithRef refA)))
+        alignTopTyAbsToScheme scheme term `shouldBe` Just term
+        closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term `shouldBe` term
+
+    it "does not duplicate an existing scheme abstraction around a deferred body" $ do
+        let refA = typeRef 643 "a"
+            deferredRef = deferredRefFromIdentity (UniqueIdentity 644) "$deferred"
+            deferredBody = ETyInst (mkDeferredVarWithRef deferredRef) InstElim
+            term = eTyAbsWithRef refA Nothing deferredBody
+            scheme = mkElabSchemeWithRefs [(refA, Nothing)] TBottom
+        alignTopTyAbsToScheme scheme term `shouldBe` Just term
+        closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term `shouldBe` term
+
+    it "completes only the missing suffix of a partially abstracted scheme" $ do
+        let sourceOuter = typeRef 645 "source-a"
+            targetOuter = typeRef 646 "a"
+            targetInner = typeRef 647 "b"
+            deferredRef = deferredRefFromIdentity (UniqueIdentity 648) "$deferred"
+            deferredBody = ETyInst (mkDeferredVarWithRef deferredRef) InstElim
+            term = eTyAbsWithRef sourceOuter Nothing deferredBody
+            scheme =
+                mkElabSchemeWithRefs
+                    [(targetOuter, Nothing), (targetInner, Nothing)]
+                    TBottom
+            expected =
+                eTyAbsWithRef
+                    targetOuter
+                    Nothing
+                    (eTyAbsWithRef targetInner Nothing deferredBody)
+        alignTopTyAbsToScheme scheme term `shouldBe` Just expected
+        closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term `shouldBe` expected
+
+    it "constructs a missing bounded forall after an existing abstraction prefix" $ do
+        let sourceOuter = typeRef 649 "source-a"
+            targetOuter = typeRef 650 "a"
+            targetInner = typeRef 651 "b"
+            term = eTyAbsWithRef sourceOuter Nothing (ELit (LInt 1))
+            scheme =
+                mkElabSchemeWithRefs
+                    [(targetOuter, Nothing), (targetInner, Just builtinIntTy)]
+                    builtinIntTy
+            expected =
+                eTyAbsWithRef
+                    targetOuter
+                    Nothing
+                    (eTyAbsWithRef targetInner (Just builtinIntTy) (ELit (LInt 1)))
+        alignTopTyAbsToScheme scheme term `shouldBe` Just expected
+        closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term `shouldBe` expected
+        typeCheck expected `shouldBe` Right (schemeToType scheme)
+
+    it "does not accept an ordinary ill-typed body as a structural abstraction spine" $ do
+        let refA = typeRef 652 "a"
+            badBody = EApp (ELit (LInt 1)) (ELit (LInt 2))
+            term = eTyAbsWithRef refA Nothing badBody
+            scheme = mkElabSchemeWithRefs [(refA, Nothing)] builtinIntTy
+        alignTopTyAbsToScheme scheme term `shouldBe` Nothing
+
+    it "does not let a deferred hole mask an ill-typed sibling" $ do
+        let refA = typeRef 655 "a"
+            deferredRef = deferredRefFromIdentity (UniqueIdentity 656) "$deferred"
+            deferredBody = ETyInst (mkDeferredVarWithRef deferredRef) InstElim
+            badFunction = EApp (ELit (LInt 1)) (ELit (LInt 2))
+            term = eTyAbsWithRef refA Nothing (EApp badFunction deferredBody)
+            scheme = mkElabSchemeWithRefs [(refA, Nothing)] builtinIntTy
+        alignTopTyAbsToScheme scheme term `shouldBe` Nothing
+
+    it "does not let a deferred argument mask an invalid abstraction instantiation" $ do
+        let sourceRef = typeRef 657 "source-a"
+            targetRef = typeRef 658 "a"
+            deferredRef = deferredRefFromIdentity (UniqueIdentity 659) "$deferred"
+            ignored = generatedResolvedLocal 660 "$ignored#0" "ignored" TBottom
+            stableIntBody =
+                EApp
+                    (ELam ignored (ELit (LInt 1)))
+                    (mkDeferredVarWithRef deferredRef)
+            term =
+                eTyAbsWithRef
+                    sourceRef
+                    (Just boolTy)
+                    (ETyInst stableIntBody (instAbstrWithRef sourceRef))
+            scheme =
+                mkElabSchemeWithRefs
+                    [(targetRef, Just boolTy)]
+                    (tVarWithRef targetRef)
+        alignTopTyAbsToScheme scheme term `shouldBe` Nothing
+
+    it "does not add a scheme abstraction solely because its binder was freshened" $ do
+        let refA = typeRef 653 "a"
+            refB = typeRef 654 "b"
+            term =
+                eTyAbsWithRef
+                    refA
+                    Nothing
+                    (eTyAbsWithRef refB Nothing (ELit (LInt 1)))
+            scheme = mkElabSchemeWithRefs [(refA, Nothing)] builtinIntTy
+            leadingTypeAbsCount :: XmlfTerm -> Int
+            leadingTypeAbsCount candidate =
+                case candidate of
+                    ETyAbsRef _ _ body -> 1 + leadingTypeAbsCount body
+                    _ -> 0
+        leadingTypeAbsCount
+            (closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term)
+            `shouldBe` 2
+
+    it "materializes vacuous scheme binders as operational type abstractions" $ do
+        let refA = typeRef 640 "a"
+            scheme = mkElabSchemeWithRefs [(refA, Nothing)] builtinIntTy
+            closed = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme (ELit (LInt 1))
+        closed `shouldBe` eTyAbsWithRef refA Nothing (ELit (LInt 1))
+        typeCheck closed `shouldBe` Right (tForallWithRef refA Nothing builtinIntTy)
+
+    it "rebinds a first-class forall result to the published scheme identity" $ do
+        let sourceRef = typeRef 661 "source"
+            targetRef = typeRef 662 "target"
+            sourceTy =
+                tForallWithRef
+                    sourceRef
+                    Nothing
+                    (TArrow (tVarWithRef sourceRef) builtinIntTy)
+            producer =
+                ResolvedVar
+                    { resolvedVarType = sourceTy
+                    , resolvedVarDetails = EnvId (fixtureExternalEnvRef "polymorphic-producer")
+                    }
+            term = EVarNode producer
+            scheme =
+                mkElabSchemeWithRefs
+                    [(targetRef, Nothing)]
+                    (TArrow (tVarWithRef targetRef) builtinIntTy)
+            expected =
+                eTyAbsWithRef
+                    targetRef
+                    Nothing
+                    (ETyInst term (InstApp (tVarWithRef targetRef)))
+            closed =
+                closeTermWithSchemeSubstRefsIfNeeded
+                    IntMap.empty
+                    scheme
+                    term
+            env = mkTypeCheckEnvWithResolvedTerms [(producer, sourceTy)] Map.empty
+        closed `shouldBe` expected
+        typeCheckWithEnv env closed `shouldBe` Right (schemeToType scheme)
+
     it "preserves type binder refs when deriving schemes from types" $ do
         let refA = typeRef 44 "a"
             scheme = schemeFromType (tForallWithRef refA Nothing (tVarWithRef refA))
         map fst (schemeBinderRefs scheme) `shouldBe` [refA]
+
+    it "does not capture external free refs into vacuous scheme binders" $ do
+        let quantified = typeRef 641 "a"
+            external = typeRef 642 "outer"
+            ty =
+                tForallWithRef
+                    quantified
+                    Nothing
+                    (TArrow (tVarWithRef external) (tVarWithRef external))
+        schemeToType (schemeFromType ty) `shouldBe` ty
+
+    it "specializes an eliminated flexible abstraction to its bound" $ do
+        let refA = typeRef 67 "a"
+            polymorphic =
+                eTyAbsWithRef
+                    refA
+                    (Just builtinIntTy)
+                    (ETyInst (ELit (LInt 1)) (instAbstrWithRef refA))
+            scheme = mkElabSchemeWithRefs [] builtinIntTy
+            closed = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme polymorphic
+        case closed of
+            ETyInst original (InstApp argument) -> do
+                original `shouldBe` polymorphic
+                argument `shouldBe` builtinIntTy
+            other -> expectationFailure ("Expected bound specialization, got: " ++ show other)
+        typeCheck closed `shouldBe` Right builtinIntTy
 
     it "checks type abstraction bounds by binder identity instead of spelling" $ do
         let refAbs = typeRef 45 "a"
@@ -1289,7 +1825,6 @@ spec = describe "Phase 7 typecheck" $ do
         let refA = typeRef 47 "a"
             refB = typeRef 48 "b"
             reservedA = typeRef 49 "a"
-            param = resolvedLocal "$x#0" "runtime-x" (tVarWithRef reservedA)
             scheme =
                 schemeFromType
                     ( tForallWithRef
@@ -1297,18 +1832,28 @@ spec = describe "Phase 7 typecheck" $ do
                         Nothing
                         (tForallWithRef refB (Just (TArrow (tVarWithRef refA) intTy)) intTy)
                     )
-            term = ELam param (ELit (LInt 1))
+            -- Keep the colliding binder inside a closed term whose result
+            -- actually matches the scheme body.  The former lambda fixture
+            -- had type @reservedA -> Int@ while the scheme body was @Int@,
+            -- so it only exercised the retired unchecked-wrap fallback.
+            term =
+                ETyInst
+                    (eTyAbsWithRef reservedA Nothing (ELit (LInt 1)))
+                    (InstApp intTy)
             closed = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term
         case closed of
-            ETyAbsRef outer Nothing (ETyAbsRef inner (Just bound) (ELam param' (ELit (LInt 1)))) -> do
+            ETyAbsRef outer Nothing (ETyAbsRef inner (Just bound) (ETyInst (ETyAbsRef reserved Nothing (ELit (LInt 1))) (InstApp instTy))) -> do
                 typeBinderRefIdentity outer `shouldBe` typeBinderRefIdentity refA
                 typeBinderRefName outer `shouldBe` "a1"
                 typeBinderRefIdentity inner `shouldBe` typeBinderRefIdentity refB
                 typeBinderRefName inner `shouldBe` "b"
                 bound `shouldBe` TArrow (tVarWithRef outer) intTy
-                resolvedVarType param' `shouldBe` tVarWithRef reservedA
-                param' `shouldBe` param
+                reserved `shouldBe` reservedA
+                instTy `shouldBe` intTy
             other -> expectationFailure ("Expected freshened two-binder closure, got: " ++ show other)
+        case typeCheck closed of
+            Right ty -> ty `shouldSatisfy` TypeOps.alphaEqType (schemeToType scheme)
+            Left err -> expectationFailure ("Freshened closure failed typecheck: " ++ show err)
 
     it "closes scheme refs through same-named term type abstractions by identity" $ do
         let refA = typeRef 53 "a"
@@ -1378,10 +1923,11 @@ spec = describe "Phase 7 typecheck" $ do
         let outer = typeRef 50 "a"
             inner = typeRef 51 "a"
             reserved = typeRef 52 "a"
-            captured = resolvedLocal "$env#0" "runtime-env" (tVarWithRef reserved)
+            captured = generatedResolvedLocal 50 "$env#0" "runtime-env" (tVarWithRef reserved)
             env = mkTypeCheckEnvWithResolvedTerms [(captured, tVarWithRef reserved)] Map.empty
             param =
-                resolvedLocal
+                generatedResolvedLocal
+                    51
                     "$x#0"
                     "runtime-x"
                     (TArrow (tVarWithRef outer) (tVarWithRef inner))
@@ -1401,13 +1947,38 @@ spec = describe "Phase 7 typecheck" $ do
                 resolvedVarType occurrence' `shouldBe` expectedTy
             other -> expectationFailure ("Expected nested freshened type abstractions, got: " ++ show other)
 
+    it "threads one identity supply across roots that collide with a visible binder" $ do
+        let capturedRef = typeRef 991870 "a"
+            captured = generatedResolvedLocal 991871 "$captured#0" "captured" (tVarWithRef capturedRef)
+            env = mkTypeCheckEnvWithResolvedTerms [(captured, tVarWithRef capturedRef)] Map.empty
+            param = generatedResolvedLocal 991872 "$x#0" "runtime-x" (tVarWithRef capturedRef)
+            root = eTyAbsWithRef capturedRef Nothing (ELam param (EVarNode param))
+            runRoots =
+                let (first, generator1) =
+                        freshenTypeAbsAgainstEnvFromSupply initialIdentityGenerator env root
+                    (second, _generator2) =
+                        freshenTypeAbsAgainstEnvFromSupply generator1 env root
+                 in (leadingRef first, leadingRef second)
+            leadingRef term =
+                case term of
+                    ETyAbsRef ref Nothing _ -> Just ref
+                    _ -> Nothing
+            expected = runRoots
+        replicate 8 runRoots `shouldBe` replicate 8 expected
+        case expected of
+            (Just firstRef, Just secondRef) -> do
+                typeBinderRefIdentity firstRef `shouldNotBe` typeBinderRefIdentity capturedRef
+                typeBinderRefIdentity secondRef `shouldNotBe` typeBinderRefIdentity capturedRef
+                typeBinderRefIdentity firstRef `shouldNotBe` typeBinderRefIdentity secondRef
+            other -> expectationFailure ("Expected two freshened root binders, got: " ++ show other)
+
     it "freshens type abstraction displays away from visible stable aliases" $ do
         let reserved = typeRef 61 "captured"
             stableAlias = typeBinderIdentityStableName (typeBinderRefIdentity reserved)
             binder = typeRef 62 stableAlias
-            captured = resolvedLocal "$env#0" "runtime-env" (tVarWithRef reserved)
+            captured = generatedResolvedLocal 61 "$env#0" "runtime-env" (tVarWithRef reserved)
             env = mkTypeCheckEnvWithResolvedTerms [(captured, tVarWithRef reserved)] Map.empty
-            param = resolvedLocal "$x#0" "runtime-x" (tVarWithRef binder)
+            param = generatedResolvedLocal 62 "$x#0" "runtime-x" (tVarWithRef binder)
             term = eTyAbsWithRef binder Nothing (ELam param (EVarNode param))
         case freshenTypeAbsAgainstEnv env term of
             ETyAbsRef binder' Nothing (ELam param' (EVarNode occurrence')) -> do
@@ -1417,14 +1988,138 @@ spec = describe "Phase 7 typecheck" $ do
                 resolvedVarType occurrence' `shouldBe` tVarWithRef binder'
             other -> expectationFailure ("Expected stable-alias freshened type abstraction, got: " ++ show other)
 
+    it "keeps captured term types authoritative while freshening colliding type binders" $ do
+        let capturedRef = typeRef 63 "a"
+            captured = generatedResolvedLocal 63 "$captured#0" "captured" (tVarWithRef capturedRef)
+            param = generatedResolvedLocal 64 "$x#0" "runtime-x" (tVarWithRef capturedRef)
+            term =
+                ELam
+                    captured
+                    ( eTyAbsWithRef
+                        capturedRef
+                        Nothing
+                        (ELam param (EApp (EVarNode param) (EVarNode captured)))
+                    )
+        case freshenTypeAbsAgainstEnv (mkTypeCheckEnvWithResolvedTerms [] Map.empty) term of
+            ELam captured' (ETyAbsRef freshRef Nothing (ELam param' (EApp (EVarNode localOccurrence) (EVarNode capturedOccurrence)))) -> do
+                typeBinderRefIdentity freshRef `shouldNotBe` typeBinderRefIdentity capturedRef
+                resolvedVarType captured' `shouldBe` tVarWithRef capturedRef
+                resolvedVarType param' `shouldBe` tVarWithRef freshRef
+                resolvedVarType localOccurrence `shouldBe` tVarWithRef freshRef
+                resolvedVarType capturedOccurrence `shouldBe` tVarWithRef capturedRef
+            other -> expectationFailure ("Expected environment-aware freshening, got: " ++ show other)
+
     it "typechecks applications" $ do
         let term = EApp (mkTestLocalLam "x" intTy (mkTestDeferredVar "x")) (ELit (LInt 1))
         typeCheck term `shouldBe` Right intTy
 
+    it "requires an explicit type computation before applying a vacuous forall value" $ do
+        let ref = typeRef 991824 "a"
+            function = mkTestLocalLam "x" intTy (mkTestDeferredVar "x")
+            polymorphicArgument = eTyAbsWithRef ref Nothing (ELit (LInt 1))
+        case typeCheck (EApp function polymorphicArgument) of
+            Left TCArgumentMismatch{} -> pure ()
+            other -> expectationFailure ("expected an explicit forall application boundary, got " ++ show other)
+        typeCheck (EApp function (ETyInst polymorphicArgument InstElim))
+            `shouldBe` Right intTy
+
+    it "does not erase a forall nested below an application argument arrow" $ do
+        let ref = typeRef 991825 "a"
+            expectedArgument = TArrow (tForallWithRef ref Nothing intTy) intTy
+            function = mkTestLocalLam "f" expectedArgument (ELit (LInt 1))
+            monomorphicArgument = mkTestLocalLam "x" intTy (mkTestDeferredVar "x")
+        case typeCheck (EApp function monomorphicArgument) of
+            Left TCArgumentMismatch{} -> pure ()
+            other -> expectationFailure ("expected the nested forall ABI to remain explicit, got " ++ show other)
+
+    it "accepts a nested Church representation transition in an application argument" $ do
+        let outerSourceSelf = typeRef 991851 "outer-source-self"
+            outerSourceResult = typeRef 991852 "outer-source-result"
+            innerSourceSelf = typeRef 991853 "inner-source-self"
+            innerSourceResult = typeRef 991854 "inner-source-result"
+            outerTargetSelf = typeRef 991855 "outer-target-self"
+            outerTargetResult = typeRef 991856 "outer-target-result"
+            innerTargetSelf = typeRef 991857 "inner-target-self"
+            innerTargetResult = typeRef 991858 "inner-target-result"
+            sourceType =
+                TMuRef outerSourceSelf $
+                    TForallRef outerSourceResult Nothing $
+                        TArrow
+                            ( TMuRef innerSourceSelf $
+                                TForallRef innerSourceResult Nothing $
+                                    TArrow
+                                        (TVarRef innerSourceResult)
+                                        (TVarRef innerSourceResult)
+                            )
+                            (TVarRef outerSourceResult)
+            targetType =
+                TMuRef outerTargetSelf $
+                    TForallRef outerTargetResult Nothing $
+                        TArrow
+                            ( TMuRef innerTargetSelf $
+                                TArrow
+                                    (TVarRef innerTargetResult)
+                                    (TVarRef innerTargetResult)
+                            )
+                            (TVarRef outerTargetResult)
+            expectedEvidenceType = TArrow sourceType intTy
+            actualEvidenceType = TArrow targetType intTy
+            argument =
+                generatedResolvedLocal
+                    991859
+                    "evidence"
+                    "evidence"
+                    actualEvidenceType
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    [(argument, actualEvidenceType)]
+                    Map.empty
+            function =
+                mkTestLocalLam
+                    "consume"
+                    expectedEvidenceType
+                    (ELit (LInt 1))
+        typeCheckWithEnv env (EApp function (EVarNode argument))
+            `shouldBe` Right intTy
+
+    it "specializes an unbound application variable to the complete impredicative type" $ do
+        let quantifiedRef = typeRef 991826 "a"
+            flexibleRef = typeRef 991827 "t"
+            argumentRef = typeRef 991828 "b"
+            polymorphicIdentity =
+                eTyAbsWithRef
+                    quantifiedRef
+                    Nothing
+                    (mkTestLocalLam "x" (tVarWithRef quantifiedRef) (mkTestDeferredVar "x"))
+            polymorphicArgument = eTyAbsWithRef argumentRef Nothing (ELit (LInt 1))
+            expectedResult = tForallWithRef argumentRef Nothing intTy
+            term =
+                EApp
+                    (ETyInst polymorphicIdentity (InstApp (tVarWithRef flexibleRef)))
+                    polymorphicArgument
+        typeCheck term `shouldBeRightAlphaEq` expectedResult
+
+    it "requires an explicit Hyp computation for a bounded application variable" $ do
+        let boundedRef = typeRef 991829 "a"
+            parameter = generatedResolvedLocal 991830 "x" "x" (tVarWithRef boundedRef)
+            env = mkTypeCheckEnvWithResolvedTerms [] (Map.singleton boundedRef intTy)
+            term = EApp (ELam parameter (EVarNode parameter)) (ELit (LInt 1))
+        case typeCheckWithEnv env term of
+            Left TCArgumentMismatch{} -> pure ()
+            other -> expectationFailure ("expected an explicit bounded-variable computation, got " ++ show other)
+
+    it "accepts an argument after its explicit Hyp computation" $ do
+        let boundedRef = typeRef 991831 "a"
+            parameter = generatedResolvedLocal 991832 "x" "x" (tVarWithRef boundedRef)
+            env = mkTypeCheckEnvWithResolvedTerms [] (Map.singleton boundedRef intTy)
+            argument = ETyInst (ELit (LInt 1)) (InstAbstrRef boundedRef)
+            term = EApp (ELam parameter (EVarNode parameter)) argument
+        typeCheckWithEnv env term `shouldBe` Right (tVarWithRef boundedRef)
+
     it "does not treat a same-named fake IO type identity as builtin opaque IO" $ do
         let fakeIOIdentity = generatedSymbolIdentity 991821 SymbolType "Other" "IO" Nothing
-            fakeIOTy = ElabTypes.TConWithIdentity (Just fakeIOIdentity) (BaseTy "IO") (intTy :| [])
-            builtinIOTy = ElabTypes.TConWithIdentity (Just (builtinTypeIdentity "IO")) (BaseTy "IO") (intTy :| [])
+            fakeIOTy = ElabTypes.TConWithIdentity fakeIOIdentity (BaseTy "IO") (intTy :| [])
+            builtinIOTy = ElabTypes.TConWithIdentity (builtinTypeIdentity "IO") (BaseTy "IO") (intTy :| [])
             binder = generatedResolvedLocal 991822 "x" "x" fakeIOTy
             arg = generatedResolvedLocal 991823 "arg" "arg" builtinIOTy
             env = mkTypeCheckEnvWithResolvedTerms [(arg, builtinIOTy)] Map.empty
@@ -1434,19 +2129,6 @@ spec = describe "Phase 7 typecheck" $ do
                 expected `shouldBe` fakeIOTy
                 actual `shouldBe` builtinIOTy
             other -> expectationFailure ("Expected fake IO identity mismatch, got: " ++ show other)
-
-    it "does not treat name-only IO type heads as builtin opaque IO" $ do
-        let nameOnlyIOTy = ElabTypes.TConWithIdentity Nothing (BaseTy "IO") (intTy :| [])
-            builtinIOTy = ElabTypes.TConWithIdentity (Just (builtinTypeIdentity "IO")) (BaseTy "IO") (intTy :| [])
-            binder = generatedResolvedLocal 991824 "x" "x" nameOnlyIOTy
-            arg = generatedResolvedLocal 991825 "arg" "arg" builtinIOTy
-            env = mkTypeCheckEnvWithResolvedTerms [(arg, builtinIOTy)] Map.empty
-            term = EApp (ELam binder (ELit (LInt 1))) (EVarNode arg)
-        case typeCheckWithEnv env term of
-            Left (TCArgumentMismatch expected actual) -> do
-                expected `shouldBe` nameOnlyIOTy
-                actual `shouldBe` builtinIOTy
-            other -> expectationFailure ("Expected name-only IO identity mismatch, got: " ++ show other)
 
     it "typechecks let bindings" $ do
         let term = mkTestLocalLet "x" (schemeFromType intTy) (ELit (LInt 1)) (mkTestDeferredVar "x")
@@ -1488,6 +2170,18 @@ spec = describe "Phase 7 typecheck" $ do
                 resultRef `shouldBe` ref
             other -> expectationFailure ("Expected identity-backed type abstraction type, got: " ++ show other)
 
+    it "rejects a locally emitted binder captured through a used ambient bound" $ do
+        let localRef = typeRef 991910 "local"
+            ambientRef = typeRef 991911 "ambient"
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    []
+                    (Map.singleton ambientRef (tVarWithRef localRef))
+            param = generatedResolvedLocal 991912 "$x" "x" (tVarWithRef ambientRef)
+            term = ETyAbsRef localRef Nothing (ELam param (EVarNode param))
+        typeCheckWithEnv env term
+            `shouldBe` Left (TCTypeAbsVarInScope "local")
+
     it "typechecks instantiations" $ do
         let term = ETyInst (mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))) (InstApp intTy)
         typeCheck term `shouldBe` Right (TArrow intTy intTy)
@@ -1496,6 +2190,21 @@ spec = describe "Phase 7 typecheck" $ do
         typeCheck (ERoll recursiveIntTy recursiveBody) `shouldBe` Right recursiveIntTy
         typeCheck (EUnroll (ERoll recursiveIntTy recursiveBody))
             `shouldBe` Right (TArrow recursiveIntTy intTy)
+
+    it "does not treat a recursive lower bound as an implicit downcast" $ do
+        let flexibleRef = typeRef 991900 "a"
+            env =
+                insertTypeBindingRef
+                    flexibleRef
+                    recursiveIntTy
+                    (mkTypeCheckEnvWithResolvedTerms [] Map.empty)
+            param = generatedResolvedLocal 991901 "$x" "x" (TVarRef flexibleRef)
+        case typeCheckWithEnv env (ELam param (EUnroll (EVarNode param))) of
+            Left (TCExpectedRecursive (TVarRef actualRef))
+                | actualRef == flexibleRef -> pure ()
+            other ->
+                expectationFailure
+                    ("Expected the bare flexible scrutinee to remain rejected, got: " ++ show other)
 
     it "accepts guarded recursive types in annotations and instantiation arguments" $ do
         let polyId = mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))
@@ -1538,6 +2247,11 @@ spec = describe "Phase 7 typecheck" $ do
         case typeCheck (ETyInst (ELit (LInt 1)) InstElim) of
             Left TCInstantiationError{} -> pure ()
             other -> expectationFailure ("Expected instantiation error, got: " ++ show other)
+
+    it "rejects InstApp when the term type has no leading forall" $ do
+        case typeCheck (ETyInst (ELit (LInt 1)) (InstApp intTy)) of
+            Left TCInstantiationError{} -> pure ()
+            other -> expectationFailure ("Expected non-forall InstApp rejection, got: " ++ show other)
 
     it "rejects InstApp that violates an explicit bound" $ do
         let term =
@@ -1616,7 +2330,7 @@ spec = describe "Phase 7 typecheck" $ do
                     ty `shouldSatisfy` isPolyBinaryId
                     typeCheck term `shouldBe` Right ty
 
-        it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
+        it "specializes dual annotated coercion consumers through normalized InstApp coercions" $ do
             let useInt =
                     Surf.ELamAnn "f" (Surf.STArrow (Surf.STBase "Int") (Surf.STBase "Int"))
                         (Surf.EApp (Surf.EVar "f") (Surf.ELit (LInt 0)))
@@ -1631,17 +2345,11 @@ spec = describe "Phase 7 typecheck" $ do
                                     (Surf.EApp (Surf.EVar "useB") (Surf.EVar "id")))))
                 normExpr = unsafeNormalizeExpr expr
 
-            let expectPipelineFailure label res =
-                    case res of
-                        Left err ->
-                            renderPipelineError err `shouldSatisfy`
-                                (\msg ->
-                                    "PhiTranslatabilityError" `elem` words msg
-                                        || "TCInstantiationError" `elem` words msg
-                                        || "TCLetTypeMismatch" `elem` words msg
-                                )
-                        Right (term, ty) ->
-                            expectationFailure
-                                (label ++ " unexpectedly succeeded with type-checked term: " ++ show (term, ty))
-
-            expectPipelineFailure "canonical pipeline" (runPipelineElab Set.empty normExpr)
+            case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err)
+                Right (term, ty) -> do
+                    ty `shouldSatisfy` TypeOps.alphaEqType boolTy
+                    typeCheck term `shouldBe` Right ty
+                    let instApps = termInstAppTypes term
+                    instApps `shouldSatisfy` any (TypeOps.alphaEqType intTy)
+                    instApps `shouldSatisfy` any (TypeOps.alphaEqType boolTy)

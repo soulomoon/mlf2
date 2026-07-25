@@ -12,17 +12,16 @@ and Interpreter.
 module MLF.Constraint.Presolution.EdgeProcessing.Solve (
     unifyStructure,
     solveNonExpInstantiation,
-    recordEdgeWitness,
-    recordEdgeTrace,
-    canonicalizeEdgeTraceInteriorsWith,
+    recordEdgeExecutionArtifacts,
 ) where
 
 import Control.Monad.State
 import Control.Monad.Reader (ask)
 import Control.Monad.Except (throwError)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.List.NonEmpty as NE
 import MLF.Util.Trace (traceBindingM)
 
 import qualified MLF.Binding.Tree as Binding
@@ -41,47 +40,68 @@ import MLF.Constraint.Presolution.Ops (
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Expansion (
-    applyExpansionEdgeTraced,
-    bindExpansionRootLikeTarget,
+    applyExpansionEdgeTracedAtTarget,
     decideMinimalExpansion,
     getExpansion,
     mergeExpansions,
     setExpansion
     )
-import MLF.Constraint.Presolution.Witness (binderArgsFromExpansion)
-import MLF.Constraint.Presolution.EdgeProcessing.Unify (
-    setBindParentIfUpper
-    )
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 
--- | Record a witness for an instantiation edge.
-{-# INLINE recordEdgeWitness #-}
-recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM p ()
-recordEdgeWitness (EdgeId eid) w =
-    modify $ \st -> st { psEdgeWitnesses = IntMap.insert eid w (psEdgeWitnesses st) }
-
-{-# INLINE recordEdgeTrace #-}
-recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM p ()
-recordEdgeTrace (EdgeId eid) tr =
-    modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
-
-canonicalizeEdgeTraceInteriorsWith :: (NodeId -> NodeId) -> EdgeId -> PresolutionM p ()
-canonicalizeEdgeTraceInteriorsWith canonical (EdgeId eid) = do
-    let canonInterior tr =
-            let InteriorNodes s = etInterior tr
-                interior'
-                    | IntSet.null s = InteriorNodes s
-                    | [x] <- IntSet.toList s =
-                        InteriorNodes (IntSet.singleton (getNodeId (canonical (NodeId x))))
-                    | otherwise =
-                        InteriorNodes
-                            (IntSet.fromList
-                                (Prelude.map (\i -> getNodeId (canonical (NodeId i)))
-                                    (IntSet.toList s)))
-            in tr { etInterior = interior' }
-    modify' $ \st -> st { psEdgeTraces = IntMap.adjust canonInterior eid (psEdgeTraces st) }
+-- | Commit all proof authority for one edge in one state transition.  Equal
+-- duplicate writes are replay-safe; any changed field is a hard conflict.
+{-# INLINE recordEdgeExecutionArtifacts #-}
+recordEdgeExecutionArtifacts
+    :: EdgeId
+    -> EdgeExecutionArtifacts
+    -> PresolutionM p ()
+recordEdgeExecutionArtifacts edgeId@(EdgeId eid) artifacts = do
+    unless (ewEdgeId (eeaWitness artifacts) == edgeId) $
+        throwError $
+            InternalError $
+                "edge execution artifact witness id mismatch for " ++ show edgeId
+    st <- get
+    case IntMap.lookup eid (psEdgeExecutionArtifacts st) of
+        Nothing ->
+            put
+                st
+                    { psEdgeExecutionArtifacts =
+                        IntMap.insert
+                            eid
+                            artifacts
+                            (psEdgeExecutionArtifacts st)
+                    }
+        Just prior
+            | prior == artifacts -> pure ()
+            | otherwise ->
+                throwError $
+                    InternalError $
+                        unlines
+                            [ "conflicting edge execution artifact write for " ++ show edgeId
+                            , "expansion changed: "
+                                ++ show (eeaExpansion prior /= eeaExpansion artifacts)
+                            , "witness changed: "
+                                ++ show (eeaWitness prior /= eeaWitness artifacts)
+                            , "raise authority changed: "
+                                ++ show
+                                    ( eeaRaiseAuthorityNodes prior
+                                        /= eeaRaiseAuthorityNodes artifacts
+                                    )
+                            , "non-source origins changed: "
+                                ++ show
+                                    ( eeaNonSourceOpOrigins prior
+                                        /= eeaNonSourceOpOrigins artifacts
+                                    )
+                            , "trace changed: "
+                                ++ show (eeaTrace prior /= eeaTrace artifacts)
+                            , "construction changed: "
+                                ++ show
+                                    ( eeaExpansionConstruction prior
+                                        /= eeaExpansionConstruction artifacts
+                                    )
+                            ]
 
 unifyStructure :: NodeId -> NodeId -> PresolutionM p ()
 unifyStructure n1 n2 = do
@@ -124,8 +144,6 @@ unifyStructure n1 n2 = do
                 ++ show expBody
                 ++ " target="
                 ++ show targetId
-                ++ " targetNode="
-                ++ nodeTag targetNode
             )
         (reqExp, unifications) <- decideMinimalExpansion canonical gid True expNode targetNode
         debugBindParents
@@ -149,8 +167,11 @@ unifyStructure n1 n2 = do
             ExpIdentity ->
                 unifyStructure expBody targetId
             _ -> do
-                (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced gid finalExp expNode
-                _targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
+                ( resNodeId
+                  , (copyMap, _interior, frontier)
+                  , _construction
+                  ) <-
+                    applyExpansionEdgeTracedAtTarget gid targetId finalExp expNode
                 canonicalizeNodeId <- getCanonical
                 let copyMapCanon =
                         IntMap.foldlWithKey'
@@ -163,15 +184,9 @@ unifyStructure n1 n2 = do
                 forM_ (IntSet.toList frontier) $ \nidInt -> do
                     case IntMap.lookup nidInt copyMapCanon of
                         Nothing -> pure ()
-                        Just copy -> setBindParentIfUpper copy _targetBinder
-                bas <- binderArgsFromExpansion gid expNode finalExp
-                bindExpansionArgs resNodeId bas
-                forM_ (IntSet.toList frontier) $ \nidInt -> do
-                    case IntMap.lookup nidInt copyMapCanon of
-                        Nothing -> pure ()
                         Just copy -> unifyStructure copy (NodeId nidInt)
                 unifyStructure resNodeId targetId
-                unifyAcyclic (tnId expNode) resNodeId
+                recordExpansionResult (tnId expNode) resNodeId
     unifyExpansionNode _ _ =
         error "unifyExpansionNode: expected TyExp node"
     unifyStructureNonExp :: TyNode -> TyNode -> PresolutionM p ()
@@ -191,6 +206,256 @@ unifyStructure n1 n2 = do
                     else
                         when (bndC /= targetC) $
                             setVarBound targetC (Just bndC)
+            isRigidNode :: Constraint p -> NodeId -> PresolutionM p Bool
+            isRigidNode constraint nodeId = do
+                underRigid <-
+                    either
+                        (throwError . BindingTreeError)
+                        pure
+                        (Binding.isUnderRigidBinder constraint (typeRef nodeId))
+                let restricted =
+                        case Binding.lookupBindParent constraint (typeRef nodeId) of
+                            Just (_, BindRigid) -> True
+                            _ -> False
+                pure (restricted || underRigid)
+            matchRigidStructure = go IntMap.empty IntMap.empty
+              where
+                go leftBinders rightBinders left right = do
+                    leftRoot <- findRoot left
+                    rightRoot <- findRoot right
+                    if leftRoot == rightRoot
+                        then pure ()
+                        else
+                            case
+                                ( IntMap.lookup (getNodeId leftRoot) leftBinders
+                                , IntMap.lookup (getNodeId rightRoot) rightBinders
+                                ) of
+                                (Just expectedRight, _) -> do
+                                    expectedRightRoot <- findRoot expectedRight
+                                    when (expectedRightRoot /= rightRoot) $
+                                        rigidMismatch leftRoot rightRoot "inconsistent forall binder occurrence"
+                                (_, Just expectedLeft) -> do
+                                    expectedLeftRoot <- findRoot expectedLeft
+                                    when (expectedLeftRoot /= leftRoot) $
+                                        rigidMismatch leftRoot rightRoot "non-injective forall binder match"
+                                _ -> do
+                                    leftNode <- getCanonicalNode leftRoot
+                                    rightNode <- getCanonicalNode rightRoot
+                                    matchNodes leftBinders rightBinders leftNode rightNode
+
+                matchNodes leftBinders rightBinders leftNode rightNode =
+                    case (leftNode, rightNode) of
+                        (TyForall {tnBody = leftBody}, TyForall {tnBody = rightBody}) -> do
+                            (constraint, canonical) <- getConstraintAndCanonical
+                            leftOrdered <-
+                                either
+                                    (throwError . BindingTreeError)
+                                    pure
+                                    (Binding.orderedBinders canonical constraint (typeRef (tnId leftNode)))
+                            rightOrdered <-
+                                either
+                                    (throwError . BindingTreeError)
+                                    pure
+                                    (Binding.orderedBinders canonical constraint (typeRef (tnId rightNode)))
+                            if length leftOrdered /= length rightOrdered
+                                then rigidMismatch (tnId leftNode) (tnId rightNode) "forall binder arity mismatch"
+                                else do
+                                    let binderPairs =
+                                            zip
+                                                (map canonical leftOrdered)
+                                                (map canonical rightOrdered)
+                                        leftBinders' =
+                                            foldr
+                                                (\(leftBinder, rightBinder) ->
+                                                    IntMap.insert (getNodeId leftBinder) rightBinder
+                                                )
+                                                leftBinders
+                                                binderPairs
+                                        rightBinders' =
+                                            foldr
+                                                (\(leftBinder, rightBinder) ->
+                                                    IntMap.insert (getNodeId rightBinder) leftBinder
+                                                )
+                                                rightBinders
+                                                binderPairs
+                                    forM_ binderPairs $ \(leftBinder, rightBinder) ->
+                                        matchBinderBounds
+                                            leftBinders'
+                                            rightBinders'
+                                            constraint
+                                            leftBinder
+                                            rightBinder
+                                    go leftBinders' rightBinders' leftBody rightBody
+                        (TyArrow {tnDom = leftDom, tnCod = leftCod}, TyArrow {tnDom = rightDom, tnCod = rightCod}) -> do
+                            go leftBinders rightBinders leftDom rightDom
+                            go leftBinders rightBinders leftCod rightCod
+                        (TyMu {tnBody = leftBody}, TyMu {tnBody = rightBody}) -> do
+                            (constraint, canonical) <- getConstraintAndCanonical
+                            let leftMuBinders =
+                                    recursiveBinders canonical constraint (tnId leftNode) leftBody
+                                rightMuBinders =
+                                    recursiveBinders canonical constraint (tnId rightNode) rightBody
+                            if length leftMuBinders /= length rightMuBinders
+                                then rigidMismatch (tnId leftNode) (tnId rightNode) "recursive binder arity mismatch"
+                                else do
+                                    let binderPairs = zip leftMuBinders rightMuBinders
+                                        leftBinders' =
+                                            foldr
+                                                (\(leftBinder, rightBinder) ->
+                                                    IntMap.insert (getNodeId leftBinder) rightBinder
+                                                )
+                                                leftBinders
+                                                binderPairs
+                                        rightBinders' =
+                                            foldr
+                                                (\(leftBinder, rightBinder) ->
+                                                    IntMap.insert (getNodeId rightBinder) leftBinder
+                                                )
+                                                rightBinders
+                                                binderPairs
+                                    go leftBinders' rightBinders' leftBody rightBody
+                        (TyBase {tnBaseIdentity = leftIdentity}, TyBase {tnBaseIdentity = rightIdentity})
+                            | leftIdentity == rightIdentity -> pure ()
+                        (TyBottom {}, TyBottom {}) -> pure ()
+                        (TyCon {tnConIdentity = leftIdentity, tnArgs = leftArgs}, TyCon {tnConIdentity = rightIdentity, tnArgs = rightArgs})
+                            | leftIdentity == rightIdentity
+                            , NE.length leftArgs == NE.length rightArgs ->
+                                forM_
+                                    (zip (NE.toList leftArgs) (NE.toList rightArgs))
+                                    (uncurry (go leftBinders rightBinders))
+                        (TyVarApp {tnVarHead = leftHead, tnArgs = leftArgs}, TyVarApp {tnVarHead = rightHead, tnArgs = rightArgs})
+                            | NE.length leftArgs == NE.length rightArgs -> do
+                                go leftBinders rightBinders leftHead rightHead
+                                forM_
+                                    (zip (NE.toList leftArgs) (NE.toList rightArgs))
+                                    (uncurry (go leftBinders rightBinders))
+                        (TyExp {tnExpVar = leftExp, tnBody = leftBody}, TyExp {tnExpVar = rightExp, tnBody = rightBody})
+                            | leftExp == rightExp ->
+                                go leftBinders rightBinders leftBody rightBody
+                        (leftExp@TyExp {}, _) ->
+                            -- A rigid outer structure can contain an
+                            -- instantiable child.  Resolve that child's
+                            -- expansion at this exact comparison boundary;
+                            -- treating the TyExp wrapper itself as rigid
+                            -- structure rejects valid nested schemes before
+                            -- their presolution recipe is applied.
+                            unifyStructure (tnId leftExp) (tnId rightNode)
+                        (_, rightExp@TyExp {}) ->
+                            unifyStructure (tnId leftNode) (tnId rightExp)
+                        (leftVar@TyVar {}, rightVar@TyVar {}) ->
+                            matchVariables leftBinders rightBinders leftVar rightVar
+                        (leftVar@TyVar {}, _) ->
+                            matchVariableWithType
+                                leftBinders
+                                rightBinders
+                                True
+                                leftVar
+                                rightNode
+                        (_, rightVar@TyVar {}) ->
+                            matchVariableWithType
+                                leftBinders
+                                rightBinders
+                                False
+                                rightVar
+                                leftNode
+                        _ ->
+                            rigidMismatch (tnId leftNode) (tnId rightNode) "rigid structural mismatch"
+
+                matchBinderBounds leftBinders rightBinders constraint leftBinder rightBinder =
+                    case
+                        ( NodeAccess.lookupVarBound constraint leftBinder
+                        , NodeAccess.lookupVarBound constraint rightBinder
+                        ) of
+                        (Nothing, Nothing) -> pure ()
+                        (Just leftBound, Just rightBound) ->
+                            go leftBinders rightBinders leftBound rightBound
+                        (Nothing, Just rightBound) ->
+                            requireBottom rightBound
+                        (Just leftBound, Nothing) ->
+                            requireBottom leftBound
+                  where
+                    requireBottom bound = do
+                        boundNode <- getCanonicalNode bound
+                        case boundNode of
+                            TyBottom {} -> pure ()
+                            _ -> rigidMismatch leftBinder rightBinder "forall binder bound mismatch"
+
+                matchVariables leftBinders rightBinders leftVar@TyVar {tnBound = leftBound0} rightVar@TyVar {tnBound = rightBound0} = do
+                    constraint <- getConstraint
+                    leftLocked <- isRigidNode constraint (tnId leftVar)
+                    rightLocked <- isRigidNode constraint (tnId rightVar)
+                    case (leftLocked, rightLocked) of
+                        (False, False) -> unifyStructure (tnId leftVar) (tnId rightVar)
+                        (True, False) -> trySetBound (tnId rightVar) (tnId leftVar)
+                        (False, True) -> trySetBound (tnId leftVar) (tnId rightVar)
+                        (True, True) ->
+                            case (leftBound0, rightBound0) of
+                                (Just leftBound, Just rightBound) ->
+                                    go leftBinders rightBinders leftBound rightBound
+                                _ -> do
+                                    matchedOwners <-
+                                        matchOwningBinderRoots
+                                            leftBinders
+                                            rightBinders
+                                            constraint
+                                            (tnId leftVar)
+                                            (tnId rightVar)
+                                    unless matchedOwners $
+                                        rigidMismatch (tnId leftVar) (tnId rightVar) "unmatched rigid variables"
+                matchVariables _ _ leftNode rightNode =
+                    rigidMismatch (tnId leftNode) (tnId rightNode) "internal rigid variable matcher expected variables"
+
+                matchOwningBinderRoots leftBinders rightBinders constraint left right =
+                    case
+                        ( Binding.lookupBindParent constraint (typeRef left)
+                        , Binding.lookupBindParent constraint (typeRef right)
+                        ) of
+                        (Just (TypeRef leftParent, _), Just (TypeRef rightParent, _)) -> do
+                            leftParentNode <- getCanonicalNode leftParent
+                            rightParentNode <- getCanonicalNode rightParent
+                            case (leftParentNode, rightParentNode) of
+                                (TyMu {}, TyMu {}) ->
+                                    go leftBinders rightBinders leftParent rightParent >> pure True
+                                (TyForall {}, TyForall {}) ->
+                                    go leftBinders rightBinders leftParent rightParent >> pure True
+                                _ -> pure False
+                        _ -> pure False
+
+                matchVariableWithType leftBinders rightBinders variableOnLeft variable@TyVar {tnBound = variableBound} otherNode = do
+                    constraint <- getConstraint
+                    variableLocked <- isRigidNode constraint (tnId variable)
+                    if variableLocked
+                        then
+                            case variableBound of
+                                Just bound ->
+                                    if variableOnLeft
+                                        then go leftBinders rightBinders bound (tnId otherNode)
+                                        else go leftBinders rightBinders (tnId otherNode) bound
+                                Nothing ->
+                                    rigidMismatch (tnId variable) (tnId otherNode) "unmatched rigid variable"
+                        else trySetBound (tnId variable) (tnId otherNode)
+                matchVariableWithType _ _ _ variable otherNode =
+                    rigidMismatch (tnId variable) (tnId otherNode) "internal rigid variable matcher expected a variable"
+
+                rigidMismatch :: NodeId -> NodeId -> String -> PresolutionM p a
+                rigidMismatch left right reason =
+                    throwError (UnmatchableTypes left right reason)
+
+                recursiveBinders canonical constraint root body =
+                    let rootC = canonical root
+                        reachable =
+                            Traversal.reachableFromWithBounds
+                                canonical
+                                (NodeAccess.lookupNode constraint)
+                                (canonical body)
+                     in [ binderC
+                        | (binder, TyVar {}) <- toListNode (cNodes constraint)
+                        , let binderC = canonical binder
+                        , IntSet.member (getNodeId binderC) reachable
+                        , case Binding.lookupBindParent constraint (typeRef binderC) of
+                            Just (TypeRef parent, _) -> canonical parent == rootC
+                            _ -> False
+                        ]
         case (node1, node2) of
             (TyVar { tnBound = mb1 }, _) | not (isVarNode node2) ->
                 case mb1 of
@@ -201,24 +466,30 @@ unifyStructure n1 n2 = do
                     Just b2 -> unifyStructure (tnId node1) b2
                     Nothing -> trySetBound (tnId node2) (tnId node1)
             _ -> do
-                unifyAcyclic n1 n2
-
-                case (node1, node2) of
-                    (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
-                        case (mb1, mb2) of
-                            (Just b1, Just b2) ->
-                                if b1 /= b2
-                                    then do
-                                        b1Node <- getCanonicalNode b1
-                                        b2Node <- getCanonicalNode b2
-                                        case (isVarNode b1Node, isVarNode b2Node) of
-                                            (True, False) -> trySetBound b1 b2
-                                            (False, True) -> trySetBound b2 b1
-                                            _ -> unifyStructure b1 b2
-                                    else pure ()
-                            _ -> pure ()
-                    _ ->
-                        unifyStructureChildren node1 node2
+                c0 <- getConstraint
+                locked1 <- isRigidNode c0 (tnId node1)
+                locked2 <- isRigidNode c0 (tnId node2)
+                if (locked1 || locked2) && not (isVarNode node1 || isVarNode node2)
+                    then
+                        matchRigidStructure (tnId node1) (tnId node2)
+                    else do
+                        unifyAcyclic n1 n2
+                        case (node1, node2) of
+                            (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
+                                case (mb1, mb2) of
+                                    (Just b1, Just b2) ->
+                                        if b1 /= b2
+                                            then do
+                                                b1Node <- getCanonicalNode b1
+                                                b2Node <- getCanonicalNode b2
+                                                case (isVarNode b1Node, isVarNode b2Node) of
+                                                    (True, False) -> trySetBound b1 b2
+                                                    (False, True) -> trySetBound b2 b1
+                                                    _ -> unifyStructure b1 b2
+                                            else pure ()
+                                    _ -> pure ()
+                            _ ->
+                                unifyStructureChildren node1 node2
 
     unifyStructureChildren :: TyNode -> TyNode -> PresolutionM p ()
     unifyStructureChildren node1 node2 =
@@ -298,15 +569,3 @@ debugBindParents :: String -> PresolutionM p ()
 debugBindParents msg = do
     cfg <- ask
     traceBindingM cfg msg
-
-nodeTag :: TyNode -> String
-nodeTag = \case
-    TyVar{} -> "TyVar"
-    TyBottom{} -> "TyBottom"
-    TyArrow{} -> "TyArrow"
-    TyBase{} -> "TyBase"
-    TyCon{} -> "TyCon"
-    TyVarApp{} -> "TyVarApp"
-    TyForall{} -> "TyForall"
-    TyExp{} -> "TyExp"
-    TyMu{} -> "TyMu"

@@ -30,19 +30,20 @@ import qualified Data.Set as Set
 import MLF.Elab.Types (Ty (..), TypeBinderRef, typeBinderRefIdentity, typeBinderRefName)
 import MLF.Frontend.Program.Types
   ( DataInfo (..),
+    CheckedTypeParam (..),
     ResolvedSymbol,
     SymbolIdentity,
     SymbolNamespace (..),
     SymbolOrigin (..),
     ValueInfo (..),
     mkResolvedSymbol,
-    typeViewFromSourceTypeWithIdentityMaps,
+    requireTypeViewFromSourceType,
     resolvedSymbolIdentity,
     valueInfoRuntimeName,
     typeViewDisplay,
   )
 import MLF.Frontend.Symbol (symbolIdentityAliasMapWith)
-import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity)
+import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Inventory as Inventory
 import MLF.Types.Identity (TypeBinderIdentity, UniqueIdentity (..), typeBinderIdentityAliasMap, typeBinderIdentityFromUnique)
@@ -116,11 +117,10 @@ builtinOrdinary name ty =
     { valueInfoSymbol = builtinIdentity SymbolValue name,
       valueRuntimeName = name,
       valueTypeView =
-        typeViewFromSourceTypeWithIdentityMaps
+        requireTypeViewFromSourceType
           (builtinSourceTypeHeadIdentities ty)
           (builtinValueTypeBinderIdentities name)
           ty,
-      valueConstraints = [],
       valueConstraintInfos = []
     }
 
@@ -163,7 +163,7 @@ builtinSourceTypeHeadIdentities =
     STBottom -> Map.empty
   where
     headIdentity name =
-      case builtinTypeHeadIdentity name of
+      case Inventory.primitiveTypeHeadIdentity name of
         Just identity ->
           symbolIdentityAliasMapWith [(identity, [name, normalizeBuiltinTypeReference name])]
         Nothing -> Map.empty
@@ -215,9 +215,9 @@ builtinIdentity namespace =
     SymbolValue -> builtinValueIdentity
     _ -> error ("unsupported builtin identity namespace " ++ show namespace)
 
-builtinTypeParam :: String -> Int -> String -> TypeParam
+builtinTypeParam :: String -> Int -> String -> CheckedTypeParam
 builtinTypeParam typeName index paramName =
-  ResolvedTypeParam
+  CheckedTypeParam
     (resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique (builtinTypeParamIdentity typeName index paramName)) paramName)
     KType
 

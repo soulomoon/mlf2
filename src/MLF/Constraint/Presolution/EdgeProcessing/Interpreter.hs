@@ -12,18 +12,14 @@ module MLF.Constraint.Presolution.EdgeProcessing.Interpreter
     executeEdgePlanWithoutTraceCanonicalizationWithOutcome,
     EdgeExecutionDecision (..),
     EdgeExecutionOutcome (..),
-    EdgeExecutionReplay (..),
     EdgeExecutionWitnessContext (..),
     prepareEdgeExecutionDecision,
     recordEdgeExecutionExpansion,
-    unifyEdgeExecutionStructure,
     prepareEdgeExecutionWitness,
-    edgeExecutionReplay,
-    recordEdgeExecutionReplayTraceFromDecision,
-    recordEdgeExecutionReplayTrace,
     runEdgeExecutionExpansionUnify,
     recordEdgeExecutionTrace,
     recordEdgeExecutionWitness,
+    sourceRaiseAuthorityNodes,
   )
 where
 
@@ -31,19 +27,23 @@ import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State.Strict (gets)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
-  ( EdgeTrace (..),
+  ( EdgeSourceInterior (..),
+    EdgeTrace (..),
+    InteriorNodes (..),
     PresolutionError (..),
     PresolutionM,
     PresolutionState (..),
-    emptyTrace,
+    EdgeExecutionArtifacts (..),
+    edgeInteriorExact,
+    getConstraint,
+    instantiationBindersM,
   )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.EdgeProcessing.Solve
-  ( canonicalizeEdgeTraceInteriorsWith,
-    recordEdgeTrace,
-    recordEdgeWitness,
-    unifyStructure,
+  ( recordEdgeExecutionArtifacts
   )
 import MLF.Constraint.Presolution.StateAccess (getCanonical)
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
@@ -56,7 +56,6 @@ import MLF.Constraint.Presolution.Expansion
     decideMinimalExpansionDetailed,
     getExpansion,
     mergeExpansions,
-    recordEdgeExpansion,
     setExpansion,
   )
 import MLF.Constraint.Presolution.Witness
@@ -65,6 +64,7 @@ import MLF.Constraint.Presolution.Witness
     buildEdgeTrace,
     buildEdgeWitness,
     binderArgsFromKnownBinders,
+    edgeWitnessInstanceOp,
     edgeWitnessPlanFromBinders,
     filterTyVarBinders,
   )
@@ -81,6 +81,9 @@ data EdgeExecutionDecision = EdgeExecutionDecision
     eedFinalExpansion :: Expansion,
     eedUnifications :: [(NodeId, NodeId)],
     eedBodyRoot :: NodeId,
+    eedSourceInterior :: EdgeSourceInterior,
+    eedLockedSourceNodes :: IntSet.IntSet,
+    eedSourceRaiseAuthorityNodes :: IntSet.IntSet,
     eedBoundVars :: [NodeId],
     eedBinderArgs :: [(NodeId, NodeId)],
     eedReplayTrace :: Maybe EdgeTrace
@@ -93,22 +96,14 @@ data EdgeExecutionWitnessContext = EdgeExecutionWitnessContext
     eewExpansionInput :: EdgeExpansionInput
   }
 
-data EdgeExecutionReplay
-  = EdgeExecutionFresh
-  | EdgeExecutionReplay !EdgeTrace
-
 data EdgeExecutionOutcome
   = EdgeExecutionFreshOutcome
-  | EdgeExecutionReplayTraceRebuilt
   | EdgeExecutionReplayNoop
   deriving (Eq, Show)
 
 -- | Execute a resolved edge plan.
 executeEdgePlan :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p ()
-executeEdgePlan canonical plan = do
-  executeEdgePlanWithoutTraceCanonicalization canonical plan
-  canonical' <- getCanonical
-  canonicalizeEdgeTraceInteriorsWith canonical' (instEdgeId (eprEdge plan))
+executeEdgePlan = executeEdgePlanWithoutTraceCanonicalization
 
 executeEdgePlanWithoutTraceCanonicalization :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p ()
 executeEdgePlanWithoutTraceCanonicalization canonical plan =
@@ -130,23 +125,21 @@ executeUnifiedExpansionPath :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p 
 executeUnifiedExpansionPath canonical plan = do
   decision <- prepareEdgeExecutionDecision canonical plan
   case eedReplayTrace decision of
-    Just previousTrace -> do
-      recordEdgeExecutionExpansion decision
-      unifyEdgeExecutionStructure decision
-      witnessContext <- prepareEdgeExecutionWitness decision
-      recordEdgeExecutionReplayTrace witnessContext previousTrace
-      pure EdgeExecutionReplayTraceRebuilt
+    -- A replay decision is admitted only when the recorded expansion,
+    -- endpoints, source root, witness, and trace still describe this exact
+    -- edge.  Preserve those artifacts verbatim: rerunning identity structural
+    -- equalities can erase a previously recorded source-domain Raise.
+    Just _previousTrace -> pure EdgeExecutionReplayNoop
     Nothing ->
       executeFreshDecision decision
 
 executeFreshDecision :: EdgeExecutionDecision -> PresolutionM p EdgeExecutionOutcome
 executeFreshDecision decision = do
   recordEdgeExecutionExpansion decision
-  unifyEdgeExecutionStructure decision
   witnessContext <- prepareEdgeExecutionWitness decision
   expansionResult <- runEdgeExecutionExpansionUnify witnessContext
-  recordEdgeExecutionTrace witnessContext expansionResult
-  recordEdgeExecutionWitness witnessContext expansionResult
+  trace <- recordEdgeExecutionTrace witnessContext expansionResult
+  recordEdgeExecutionWitness witnessContext expansionResult trace
   pure EdgeExecutionFreshOutcome
 
 {-# INLINABLE prepareEdgeExecutionDecision #-}
@@ -156,6 +149,48 @@ prepareEdgeExecutionDecision canonical plan = do
   case mbReplayDecision of
     Just decision -> pure decision
     Nothing -> prepareFreshEdgeExecutionDecision canonical plan
+
+lockedNodesInSourceInterior
+  :: EdgeSourceInterior
+  -> PresolutionM p IntSet.IntSet
+lockedNodesInSourceInterior (EdgeSourceInterior (InteriorNodes sourceKeys)) = do
+  constraint <- getConstraint
+  pure $
+    IntSet.filter
+      ( \sourceKey ->
+          Binding.nodeKind constraint (typeRef (NodeId sourceKey))
+            == Right Binding.NodeLocked
+      )
+      sourceKeys
+
+sourceRaiseAuthorityNodes
+  :: NodeId
+  -> EdgeSourceInterior
+  -> PresolutionM p IntSet.IntSet
+sourceRaiseAuthorityNodes sourceRoot (EdgeSourceInterior (InteriorNodes sourceKeys)) = do
+  constraint <- getConstraint
+  pure $
+    IntSet.filter
+      ( \sourceKey ->
+          let source = NodeId sourceKey
+           in source /= sourceRoot
+                && transitivelyFlexBoundTo constraint sourceRoot source
+      )
+      sourceKeys
+  where
+    -- Only semantic Raise work receives a certificate.  A restricted source
+    -- is the identity case in the paper and must be removed by construction,
+    -- not retained as though it had an all-flexible path.
+    transitivelyFlexBoundTo constraint authorityRoot = go IntSet.empty
+      where
+        go visited source
+          | source == authorityRoot = True
+          | IntSet.member (getNodeId source) visited = False
+          | otherwise =
+              case Binding.lookupBindParent constraint (typeRef source) of
+                Just (TypeRef parent, BindFlex) ->
+                  go (IntSet.insert (getNodeId source) visited) parent
+                _ -> False
 
 prepareFreshEdgeExecutionDecision :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionDecision
 prepareFreshEdgeExecutionDecision canonical plan = do
@@ -178,6 +213,15 @@ prepareFreshEdgeExecutionDecision canonical plan = do
       "prepareEdgeExecutionDecision/ExpInstantiate"
       binderArgVars
       finalExp
+  bodyInterior <- edgeInteriorExact (medBodyRoot minimal)
+  let sourceInterior =
+        EdgeSourceInterior . InteriorNodes $
+          IntSet.union
+            bodyInterior
+            (IntSet.fromList (map getNodeId binderArgVars))
+  lockedSourceNodes <- lockedNodesInSourceInterior sourceInterior
+  raiseAuthorityNodes <-
+    sourceRaiseAuthorityNodes (medBodyRoot minimal) sourceInterior
   pure
     EdgeExecutionDecision
       { eedEdgeId = edgeId,
@@ -189,6 +233,9 @@ prepareFreshEdgeExecutionDecision canonical plan = do
         eedFinalExpansion = finalExp,
         eedUnifications = medUnifications minimal,
         eedBodyRoot = medBodyRoot minimal,
+        eedSourceInterior = sourceInterior,
+        eedLockedSourceNodes = lockedSourceNodes,
+        eedSourceRaiseAuthorityNodes = raiseAuthorityNodes,
         eedBoundVars = medBoundVars minimal,
         eedBinderArgs = binderArgs,
         eedReplayTrace = Nothing
@@ -205,20 +252,23 @@ prepareRecordedEdgeExecutionDecision plan = do
       s = rteExpVar leftTyExp
       ownerGen = eprSchemeOwnerGen plan
   st <- gets id
+  canonical <- getCanonical
   currentExp <- getExpansion s
-  case ( IntMap.lookup edgeKey (psEdgeExpansions st)
-       , IntMap.member edgeKey (psEdgeWitnesses st)
-       , IntMap.lookup edgeKey (psEdgeTraces st)
-       ) of
-    (Just recordedExp, True, Just previousTrace)
-      | recordedExp /= ExpIdentity
-      , recordedExp == currentExp -> do
-          let bodyRoot =
-                case n1Raw of
-                  TyExp {tnBody = bodyId} -> bodyId
-                  _ -> tnId n1Raw
+  (expectedBodyRoot, _expectedBinders) <-
+    instantiationBindersM ownerGen (rteBodyId leftTyExp)
+  case IntMap.lookup edgeKey (psEdgeExecutionArtifacts st) of
+    Just artifacts
+      | recordedExp == currentExp
+      , ewEdgeId recordedWitness == edgeId
+      , ewLeft recordedWitness == instLeft edge
+      , ewRight recordedWitness == instRight edge
+      , canonical (ewRoot recordedWitness) == canonical expectedBodyRoot
+      , canonical (etRoot previousTrace) == canonical expectedBodyRoot -> do
+          let bodyRoot = etRoot previousTrace
               binderArgs = etBinderArgs previousTrace
               boundVars0 = map fst binderArgs
+          lockedSourceNodes <-
+            lockedNodesInSourceInterior (etInterior previousTrace)
           pure $
             Just
               EdgeExecutionDecision
@@ -231,12 +281,26 @@ prepareRecordedEdgeExecutionDecision plan = do
                   eedFinalExpansion = recordedExp,
                   eedUnifications = [],
                   eedBodyRoot = bodyRoot,
+                  eedSourceInterior = etInterior previousTrace,
+                  eedLockedSourceNodes = lockedSourceNodes,
+                  eedSourceRaiseAuthorityNodes = raiseAuthorityNodes,
                   eedBoundVars = boundVars0,
                   eedBinderArgs = binderArgs,
                   eedReplayTrace = Just previousTrace
                 }
-    _ ->
-      pure Nothing
+      where
+        recordedExp = eeaExpansion artifacts
+        recordedWitness = eeaWitness artifacts
+        raiseAuthorityNodes = eeaRaiseAuthorityNodes artifacts
+        previousTrace = eeaTrace artifacts
+    Just _ ->
+      throwError
+        ( InternalError
+            ( "conflicting committed edge execution artifacts for replay "
+                ++ show edgeId
+            )
+        )
+    Nothing -> pure Nothing
 
 {-# INLINE recordEdgeExecutionExpansion #-}
 recordEdgeExecutionExpansion :: EdgeExecutionDecision -> PresolutionM p ()
@@ -244,25 +308,25 @@ recordEdgeExecutionExpansion decision =
   case eedLeftRaw decision of
     TyExp {tnExpVar = s} -> do
       setExpansion s (eedFinalExpansion decision)
-      recordEdgeExpansion (eedEdgeId decision) (eedFinalExpansion decision)
     _ ->
       throwError (InternalError ("recordEdgeExecutionExpansion: expected TyExp for edge " ++ show (eedEdgeId decision)))
-
-{-# INLINE unifyEdgeExecutionStructure #-}
-unifyEdgeExecutionStructure :: EdgeExecutionDecision -> PresolutionM p ()
-unifyEdgeExecutionStructure decision =
-  mapM_ (uncurry unifyStructure) (eedUnifications decision)
 
 {-# INLINABLE prepareEdgeExecutionWitness #-}
 prepareEdgeExecutionWitness :: EdgeExecutionDecision -> PresolutionM p EdgeExecutionWitnessContext
 prepareEdgeExecutionWitness decision = do
   witnessPlan <- edgeWitnessPlanFromBinders (eedBoundVars decision) (eedFinalExpansion decision)
+  constraint <- getConstraint
+  let sourceNodeKeys =
+        IntSet.fromList
+          [ getNodeId (tnId node)
+          | node <- NodeAccess.allNodes constraint
+          ]
   let witnessInput =
         EdgeWitnessInput
           { ewiEdgeId = eedEdgeId decision,
             ewiSrcNode = eedLeftNodeId decision,
             ewiTgtNode = eedRightNodeId decision,
-            ewiLeftRaw = eedLeftRaw decision,
+            ewiRoot = eedBodyRoot decision,
             ewiDepth = ewpForallIntros witnessPlan
           }
       expansionInput =
@@ -273,8 +337,13 @@ prepareEdgeExecutionWitness decision = do
             eeiRightRaw = eedRightRaw decision,
             eeiExpansion = eedFinalExpansion decision,
             eeiBodyRoot = eedBodyRoot decision,
+            eeiSourceInterior = eedSourceInterior decision,
+            eeiLockedSourceNodes = eedLockedSourceNodes decision,
+            eeiSourceRaiseAuthorityNodes = eedSourceRaiseAuthorityNodes decision,
+            eeiSourceNodeKeys = sourceNodeKeys,
             eeiBoundVars = eedBoundVars decision,
-            eeiBinderArgs = eedBinderArgs decision
+            eeiBinderArgs = eedBinderArgs decision,
+            eeiStructuralUnifications = eedUnifications decision
           }
   pure
     EdgeExecutionWitnessContext
@@ -284,68 +353,45 @@ prepareEdgeExecutionWitness decision = do
         eewExpansionInput = expansionInput
       }
 
-edgeExecutionReplay :: EdgeExecutionWitnessContext -> PresolutionM p EdgeExecutionReplay
-edgeExecutionReplay context = do
-  st <- gets id
-  let decision = eewDecision context
-      edgeKey = getEdgeId (eedEdgeId decision)
-      mbExpansion = IntMap.lookup edgeKey (psEdgeExpansions st)
-      hasWitness = IntMap.member edgeKey (psEdgeWitnesses st)
-      mbTrace = IntMap.lookup edgeKey (psEdgeTraces st)
-  pure $
-    case (mbExpansion, hasWitness, mbTrace) of
-      (Just expn, True, Just trace)
-        | expn == eedFinalExpansion decision ->
-            EdgeExecutionReplay trace
-      _ ->
-        EdgeExecutionFresh
-
 runEdgeExecutionExpansionUnify :: EdgeExecutionWitnessContext -> PresolutionM p EdgeExpansionResult
-runEdgeExecutionExpansionUnify context = do
-  expansionResult <-
-    if eedFinalExpansion (eewDecision context) == ExpIdentity
-      then pure EdgeExpansionResult {eerTrace = emptyTrace, eerExtraOps = []}
-      else runExpansionUnify (eewExpansionInput context) (ewpBaseOps (eewWitnessPlan context))
-  pure expansionResult
+runEdgeExecutionExpansionUnify context =
+  runExpansionUnify
+    (eewExpansionInput context)
+    (map edgeWitnessInstanceOp (ewpBaseOps (eewWitnessPlan context)))
 
-recordEdgeExecutionReplayTrace :: EdgeExecutionWitnessContext -> EdgeTrace -> PresolutionM p ()
-recordEdgeExecutionReplayTrace context previousTrace =
-  recordEdgeExecutionReplayTraceFromDecision (eewDecision context) previousTrace
-
-recordEdgeExecutionReplayTraceFromDecision :: EdgeExecutionDecision -> EdgeTrace -> PresolutionM p ()
-recordEdgeExecutionReplayTraceFromDecision decision previousTrace = do
-  let witnessInput =
-        EdgeWitnessInput
-          { ewiEdgeId = eedEdgeId decision,
-            ewiSrcNode = eedLeftNodeId decision,
-            ewiTgtNode = eedRightNodeId decision,
-            ewiLeftRaw = eedLeftRaw decision,
-            ewiDepth = length (eedBinderArgs decision)
-          }
-  tr <-
-    buildEdgeTrace
-      witnessInput
-      (eedOwnerGen decision)
-      (eedBinderArgs decision)
-      (etCopyMap previousTrace, IntSet.empty, IntSet.empty)
-  recordEdgeTrace (eedEdgeId decision) tr
-
-recordEdgeExecutionTrace :: EdgeExecutionWitnessContext -> EdgeExpansionResult -> PresolutionM p ()
+recordEdgeExecutionTrace
+  :: EdgeExecutionWitnessContext
+  -> EdgeExpansionResult
+  -> PresolutionM p EdgeTrace
 recordEdgeExecutionTrace context expansionResult = do
-  let expTrace = eerTrace expansionResult
-      decision = eewDecision context
+  let decision = eewDecision context
   tr <-
     buildEdgeTrace
-      (eewWitnessInput context)
-      (eedOwnerGen decision)
+      (eedBodyRoot decision)
+      (eedSourceInterior decision)
       (eedBinderArgs decision)
-      expTrace
-  recordEdgeTrace (eedEdgeId decision) tr
+      (eerResultRoot expansionResult)
+      (eerCopyMap expansionResult)
+  pure tr
 
-recordEdgeExecutionWitness :: EdgeExecutionWitnessContext -> EdgeExpansionResult -> PresolutionM p ()
-recordEdgeExecutionWitness context expansionResult = do
+recordEdgeExecutionWitness
+  :: EdgeExecutionWitnessContext
+  -> EdgeExpansionResult
+  -> EdgeTrace
+  -> PresolutionM p ()
+recordEdgeExecutionWitness context expansionResult tr = do
   let extraOps = eerExtraOps expansionResult
       decision = eewDecision context
       witnessPlan = eewWitnessPlan context
-  w <- buildEdgeWitness (eewWitnessInput context) (ewpBaseOps witnessPlan) extraOps
-  recordEdgeWitness (eedEdgeId decision) w
+  (w, nonSourceOpOrigins) <-
+    buildEdgeWitness (eewWitnessInput context) (ewpBaseOps witnessPlan) extraOps
+  recordEdgeExecutionArtifacts
+    (eedEdgeId decision)
+    EdgeExecutionArtifacts
+      { eeaExpansion = eedFinalExpansion decision,
+        eeaWitness = w,
+        eeaRaiseAuthorityNodes = eedSourceRaiseAuthorityNodes decision,
+        eeaNonSourceOpOrigins = nonSourceOpOrigins,
+        eeaExpansionConstruction = eerConstruction expansionResult,
+        eeaTrace = tr
+      }

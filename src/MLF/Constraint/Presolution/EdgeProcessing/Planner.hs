@@ -57,7 +57,12 @@ planEdge canonical edge = do
     let allowTrivial =
             letEdgeTrivial || isSynthesizedExpVar (rteExpVar leftTyExp)
 
-    schemeOwnerGen <- resolveSchemeOwnerGen canonical constraint0 leftTyExp
+    schemeOwnerGen <-
+        resolveSchemeOwnerGen
+            canonical
+            constraint0
+            (IntSet.member eidInt (cAnnEdges constraint0))
+            leftTyExp
 
     n2 <- getCanonicalNode n2Id
 
@@ -107,12 +112,24 @@ planEdge canonical edge = do
 
 -- | Resolve the owning scheme introducer for a TyExp-left edge.
 --
--- Ownership is always derived from the wrapped body root.  Synthesized
--- wrappers no longer get a wrapper-root recovery path; missing body-root
--- ownership fails fast so the planner remains thesis-authoritative.
-resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint p -> ResolvedTyExp -> PresolutionM p GenNodeId
-resolveSchemeOwnerGen canonical constraint0 leftTyExp =
-    findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
+-- Ordinary occurrence expansions instantiate the scheme wrapped by 'TyExp',
+-- so their owner comes from the body.  A source annotation is different: its
+-- wrapper is the explicit coercion scheme introduced under the annotation gen
+-- node, while its body remains in the enclosing expression scope.  Resolving
+-- an annotation from the body would therefore erase the coercion boundary and
+-- turn its degenerate expansion into an ordinary local copy.
+resolveSchemeOwnerGen
+    :: (NodeId -> NodeId)
+    -> Constraint p
+    -> Bool
+    -> ResolvedTyExp
+    -> PresolutionM p GenNodeId
+resolveSchemeOwnerGen canonical constraint0 isAnnotationEdge leftTyExp =
+    findSchemeIntroducerM canonical constraint0 ownerRoot
+  where
+    ownerRoot
+        | isAnnotationEdge = rteNodeId leftTyExp
+        | otherwise = rteBodyId leftTyExp
 
 nodeTag :: TyNode -> String
 nodeTag = \case

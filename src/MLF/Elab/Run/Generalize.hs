@@ -1,11 +1,15 @@
 {-# LANGUAGE DataKinds #-}
 module MLF.Elab.Run.Generalize (
     GeneralizeAtView,
+    CertifiedGeneralizeAtView,
     pruneBindParentsConstraint,
     instantiationCopyNodes,
     constraintForGeneralization,
     mkGeneralizeAtWithBuilder,
-    generalizeAtWithBuilder
+    generalizeAtWithBuilder,
+    generalizeAtWithBuilderRequired,
+    generalizeAtWithBuilderRequiredCertified,
+    generalizeAtWithBuilderRequiredResultCertified
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -15,13 +19,25 @@ import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     , PresolutionView(..)
     )
+import MLF.Constraint.Presolution.Plan (ReifyPlan(..))
+import qualified MLF.Constraint.Presolution.Plan.ReifyPlan as Reify
 import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
     , NodeRef(..)
     , typeRef
     )
-import MLF.Elab.Generalize (GaBindParents(..), applyGeneralizePlan)
+import MLF.Elab.Generalize
+    ( GaBindParents(..)
+    , GeneralizedResultRoute
+    , GeneralizedResultRouteRequest
+    , applyGeneralizePlan
+    , certifyGeneralizedResultRoute
+    )
+import MLF.Constraint.Presolution.Plan.Context
+    ( GeneralizationRequirements
+    , emptyGeneralizationRequirements
+    )
 import MLF.Elab.Run.Generalize.Constraint
     ( instantiationCopyNodes
     , pruneBindParentsConstraint
@@ -32,20 +48,36 @@ import MLF.Elab.Run.Generalize.Phase2 (buildNodeMappings)
 import MLF.Elab.Run.Generalize.Phase3 (computeBindParentsBase)
 import MLF.Elab.Run.Generalize.Phase4 (computeSchemeOwnership)
 import MLF.Elab.Run.Generalize.Types
-    ( GeneralizeEnv(..)
+    ( ExpansionConstructionPlacements
+    , GeneralizeEnv(..)
     , NodeKeySet
     )
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Util.Trace (TraceConfig)
 import MLF.Frontend.ConstraintGen (AnnExpr)
-import MLF.Elab.Types (ElabScheme, TypeBinderRef)
-import MLF.Util.ElabError (ElabError)
+import MLF.Elab.Types
+    ( ElabScheme
+    , TypeBinderRef
+    , typeBinderRefsSameIdentity
+    )
+import MLF.Util.ElabError (ElabError(..))
 
 type GeneralizeAtView p =
     Maybe (GaBindParents p)
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
+
+type CertifiedGeneralizeAtView p =
+    Maybe (GaBindParents p)
+    -> NodeRef
+    -> NodeId
+    -> Either
+        ElabError
+        ( ElabScheme
+        , IntMap.IntMap TypeBinderRef
+        , Reify.InheritedGammaRoutes
+        )
 
 {- Note [binding-parent projection — ga′ invariants]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,19 +114,23 @@ Phase 3 (`computeBindParentsBase`, Generalize/Phase3.hs):
   `resolveScopeRoot` maps solved TypeRef through `gaSolvedToBase`, then runs
   `bindingPathToRootLocal` on base binding parents to find the gen ancestor.
   This is the authoritative ga′ recovery path.  The `Nothing -> root`
-  fallback (line 119) preserves the solved-domain scope when no base mapping
-  exists — this occurs only for nodes introduced during solving (not present
-  in the original constraint), which correctly have no thesis ga′.
+  fallback (line 119) preserves the solved-domain scope when neither base
+  ownership nor certified creation-time destination ownership exists.
 
-Conclusion: the binding-parent projection preserves ga′ for all nodes that
-existed in the original constraint.  The `keepOld`/`keep first parent`
-policies are safe because (a) redirects merge structurally equivalent nodes
-sharing the same gen ancestor, and (b) the base-domain binding parents
-(which define ga′) are computed independently of the solved-domain quotient.
+  Fresh arguments introduced by expansion do have thesis ownership even
+  though they are absent from the base node map: expansion constructs them at
+  the destination gen.  `ExpansionConstructionPlacements` preserves that fact before
+  later administrative Raise/Weaken steps can move their live solved parent.
+
+Conclusion: Phase 3 projects ownership in the order base ga′, certified fresh
+destination arguments, then final solved parents.  The `keepOld`/`keep first
+parent` policies are safe because (a) redirects merge structurally equivalent
+nodes sharing the same gen ancestor, and (b) base and creation-time ownership
+are computed independently of the solved-domain quotient.
 -}
-constraintForGeneralization :: TraceConfig -> PresolutionView p -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint p -> AnnExpr -> (Constraint p, GaBindParents p)
-constraintForGeneralization traceCfg presolutionView redirects instCopyNodes instCopyMap base _ann =
-    let env = buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base
+constraintForGeneralization :: TraceConfig -> PresolutionView p -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> ExpansionConstructionPlacements -> Constraint p -> AnnExpr -> (Constraint p, GaBindParents p)
+constraintForGeneralization traceCfg presolutionView redirects instCopyNodes instCopyMap expansionConstructionPlacements base _ann =
+    let env = buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap expansionConstructionPlacements base
         phase1 = restoreSchemeNodes env
         phase2 = buildNodeMappings env phase1
         phase3 = computeBindParentsBase env phase1 phase2
@@ -107,9 +143,10 @@ buildGeneralizeEnv
     -> IntMap.IntMap NodeId
     -> NodeKeySet
     -> IntMap.IntMap NodeId
+    -> ExpansionConstructionPlacements
     -> Constraint p
     -> GeneralizeEnv p
-buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base =
+buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap expansionConstructionPlacements base =
     let canonicalConstraint = pvCanonicalConstraint presolutionView
         canonical = pvCanonical presolutionView
         applyRedirectsToRef ref =
@@ -127,6 +164,7 @@ buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap 
         , geRedirects = redirects
         , geInstCopyNodes = instCopyNodes
         , geInstCopyMap = instCopyMap
+        , geExpansionConstructionPlacements = expansionConstructionPlacements
         , geCanonical = canonical
         , geApplyRedirectsToRef = applyRedirectsToRef
         , geAdoptRef = adoptRef
@@ -142,11 +180,160 @@ generalizeAtWithBuilder
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizeAtWithBuilder planBuilder mbBindParentsGa presolutionView scopeRoot targetNode =
+    generalizeAtWithBuilderRequired
+        planBuilder
+        emptyGeneralizationRequirements
+        mbBindParentsGa
+        presolutionView
+        scopeRoot
+        targetNode
+
+generalizeAtWithBuilderRequired
+    :: PresolutionPlanBuilder
+    -> GeneralizationRequirements
+    -> Maybe (GaBindParents p)
+    -> PresolutionView p
+    -> NodeRef
+    -> NodeId
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
+generalizeAtWithBuilderRequired planBuilder requirements mbBindParentsGa presolutionView scopeRoot targetNode =
+    fmap
+        (\(scheme, subst, _routes) -> (scheme, subst))
+        ( generalizeAtWithBuilderRequiredRouted
+            planBuilder
+            requirements
+            mbBindParentsGa
+            presolutionView
+            scopeRoot
+            targetNode
+        )
+
+generalizeAtWithBuilderRequiredCertified
+    :: PresolutionPlanBuilder
+    -> GeneralizationRequirements
+    -> Maybe (GaBindParents p)
+    -> PresolutionView p
+    -> NodeRef
+    -> NodeId
+    -> Either
+        ElabError
+        ( ElabScheme
+        , IntMap.IntMap TypeBinderRef
+        , Reify.InheritedGammaRoutes
+        )
+generalizeAtWithBuilderRequiredCertified planBuilder requirements mbBindParentsGa presolutionView scopeRoot targetNode = do
+    (scheme, subst, inheritedRoutes) <-
+        generalizeAtWithBuilderRequiredRouted
+            planBuilder
+            requirements
+            mbBindParentsGa
+            presolutionView
+            scopeRoot
+            targetNode
+    certifiedSubst <-
+        attachInheritedGammaBaseRoutes inheritedRoutes subst
+    pure (scheme, certifiedSubst, inheritedRoutes)
+
+-- | Generalize one exact source-constructor result and retain the planner
+-- certificate that connects its construction root to the finalized binder.
+-- This path deliberately applies and certifies the same plan in one scope;
+-- rebuilding a plan after finalization could observe a different graph view.
+generalizeAtWithBuilderRequiredResultCertified
+    :: PresolutionPlanBuilder
+    -> GeneralizedResultRouteRequest
+    -> GeneralizationRequirements
+    -> Maybe (GaBindParents p)
+    -> PresolutionView p
+    -> NodeRef
+    -> NodeId
+    -> Either
+        ElabError
+        ( ElabScheme
+        , IntMap.IntMap TypeBinderRef
+        , GeneralizedResultRoute
+        )
+generalizeAtWithBuilderRequiredResultCertified
+    planBuilder
+    request
+    requirements
+    mbBindParentsGa
+    presolutionView
+    scopeRoot
+    targetNode = do
+        let PresolutionPlanBuilder buildPlans = planBuilder
+        (genPlan, reifyPlan) <-
+            buildPlans
+                presolutionView
+                mbBindParentsGa
+                requirements
+                scopeRoot
+                targetNode
+        (scheme, subst) <- applyGeneralizePlan genPlan reifyPlan
+        route <-
+            certifyGeneralizedResultRoute
+                request
+                genPlan
+                scheme
+                subst
+        pure (scheme, subst, route)
+
+generalizeAtWithBuilderRequiredRouted
+    :: PresolutionPlanBuilder
+    -> GeneralizationRequirements
+    -> Maybe (GaBindParents p)
+    -> PresolutionView p
+    -> NodeRef
+    -> NodeId
+    -> Either
+        ElabError
+        ( ElabScheme
+        , IntMap.IntMap TypeBinderRef
+        , Reify.InheritedGammaRoutes
+        )
+generalizeAtWithBuilderRequiredRouted planBuilder requirements mbBindParentsGa presolutionView scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
         go mbGa scope target = do
-            (genPlan, reifyPlan) <- buildPlans presolutionView mbGa scope target
-            applyGeneralizePlan genPlan reifyPlan
+            (genPlan, reifyPlan) <-
+                buildPlans presolutionView mbGa requirements scope target
+            (scheme, subst) <- applyGeneralizePlan genPlan reifyPlan
+            let ReifyPlan {rpPlan = rawReifyPlan} = reifyPlan
+                inheritedRoutes =
+                    Reify.inheritedGammaPlanRoutes
+                        (Reify.rpInheritedGammaPlan rawReifyPlan)
+            pure (scheme, subst, inheritedRoutes)
     in go mbBindParentsGa scopeRoot targetNode
+
+-- | A certified caller needs both halves of the frozen route: the live node
+-- retained in 'InheritedGammaRoutes' and the exact base key against which an
+-- enclosing construction substitution can join it.  Ordinary generalization
+-- still returns only published scheme routes; this bridge exists solely on
+-- the certificate-bearing API.
+attachInheritedGammaBaseRoutes
+    :: Reify.InheritedGammaRoutes
+    -> IntMap.IntMap TypeBinderRef
+    -> Either ElabError (IntMap.IntMap TypeBinderRef)
+attachInheritedGammaBaseRoutes routes = go (Reify.inheritedGammaRoutesEntries routes)
+  where
+    go [] subst = pure subst
+    go (route : rest) subst =
+        let baseNode = Reify.inheritedGammaRouteBaseNode route
+            baseKey = getNodeId baseNode
+            inheritedRef = Reify.inheritedGammaRouteRef route
+        in case IntMap.lookup baseKey subst of
+            Nothing ->
+                go rest (IntMap.insert baseKey inheritedRef subst)
+            Just existing
+                | typeBinderRefsSameIdentity existing inheritedRef ->
+                    go rest subst
+                | otherwise ->
+                    Left
+                        ( ValidationFailed
+                            [ "certified inherited Gamma base route conflicts with generalized substitution"
+                            , "  base node: " ++ show baseNode
+                            , "  generalized ref: " ++ show existing
+                            , "  inherited ref: " ++ show inheritedRef
+                            ]
+                        )
 
 mkGeneralizeAtWithBuilder
     :: PresolutionPlanBuilder

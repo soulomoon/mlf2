@@ -11,7 +11,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionView(..)
     )
-import MLF.Constraint.Presolution.Base (InteriorNodes(..), copiedNodes)
+import MLF.Constraint.Presolution.Base (EdgeSourceInterior(..), InteriorNodes(..), copiedNodes)
 import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
@@ -56,7 +56,7 @@ instantiationCopyNodes presolutionView redirects edgeTraces =
     let canonical = pvCanonical presolutionView
         adoptNode nid = canonical (chaseRedirects redirects nid)
         collectTrace tr =
-            let InteriorNodes interiorKeys = etInterior tr
+            let EdgeSourceInterior (InteriorNodes interiorKeys) = etInterior tr
                 copyRaw =
                     [ getNodeId node
                     | node <- copiedNodes (etCopyMap tr)

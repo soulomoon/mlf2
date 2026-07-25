@@ -8,6 +8,10 @@ module MLF.Frontend.ConstraintGen
     RootOwnershipIndex (..),
     ModuleConstraintRoot (..),
     ModuleConstraintResult (..),
+    InstantiationTargetTopology (..),
+    InstantiationSite (..),
+    mkInstantiationSite,
+    mkArrowInstantiationSite,
     AnnExpr (..),
     BindingKey (..),
     bindingKeyForTermReference,
@@ -23,31 +27,53 @@ module MLF.Frontend.ConstraintGen
     ExternalBindings,
     generateConstraints,
     generateConstraintsCore,
+    generateResolvedConstraintsCore,
     generateConstraintsWithEnv,
     generateConstraintsWithExternalBindings,
     generateConstraintsWithExternalBindingsFromSupply,
+    generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply,
+    generateConstraintsWithResolvedExternalBindingsFromSupply,
+    generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply,
     generateModuleConstraintsKeyedWithExternalBindings,
     generateModuleConstraintsKeyedWithExternalBindingsFromSupply,
+    generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply,
+    generateModuleConstraintsKeyedWithResolvedExternalBindingsFromSupply,
+    generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply,
     generateModuleConstraintsWithExternalBindings,
     generateConstraintsCoreWithEnv,
     generateConstraintsCoreWithExternalBindings,
+    generateResolvedConstraintsCoreWithExternalBindings,
   )
 where
 
 import Data.Functor.Foldable (cata)
+import Data.Bifunctor (first)
 import qualified Data.IntSet as IntSet
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMapWith)
 import MLF.Frontend.ConstraintGen.State
 import MLF.Frontend.ConstraintGen.Translate (buildModuleRootExprsKeyedWithExternalBindings, buildRootExprWithExternalBindings)
 import MLF.Frontend.ConstraintGen.Types
-import MLF.Frontend.Desugar (desugarSurface)
+import MLF.Frontend.Desugar (desugarResolvedSurface)
 import MLF.Frontend.Syntax
   ( NormCoreExpr,
     NormSurfaceExpr,
+    ResolvedNormCoreExpr,
+    ResolvedNormSurfaceExpr,
     VarName,
   )
-import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
+import MLF.Frontend.TermResolve (resolveTermReferences)
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
+import MLF.Types.Identity
+  ( IdDetails (EnvId),
+    IdentityGenerator,
+    TypeBinderIdentity,
+    freshEnvRef,
+    initialIdentityGenerator,
+  )
 
 {- Note [Phase 1: Constraint Generation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,21 +154,44 @@ Paper references:
 
 generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraints polySyms expr =
-  generateConstraintsCore polySyms (desugarSurface expr)
+  generateConstraintsWithExternalBindings polySyms Map.empty expr
 
 -- | Like 'generateConstraints' but with an external environment of
 -- pre-existing type assumptions for free variables.
 generateConstraintsWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsWithEnv polySyms extEnv expr =
-  generateConstraintsCoreWithEnv polySyms extEnv (desugarSurface expr)
+  let (extBindings, generator) = externalBindingsFromEnv initialIdentityGenerator extEnv
+   in generateConstraintsWithExternalBindingsFromSupply generator polySyms extBindings expr
 
 generateConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsWithExternalBindings polySyms extBindings expr =
   generateConstraintsWithExternalBindingsFromSupply initialIdentityGenerator polySyms extBindings expr
 
 generateConstraintsWithExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
-generateConstraintsWithExternalBindingsFromSupply generator polySyms extBindings expr =
-  generateConstraintsCoreWithExternalBindingsFromSupply generator polySyms extBindings (desugarSurface expr)
+generateConstraintsWithExternalBindingsFromSupply generator polySyms =
+  generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply generator polySyms Map.empty Map.empty
+
+generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply :: IdentityGenerator -> PolySyms -> Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
+generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply generator polySyms typeHeadIdentities typeBinderIdentities extBindings expr = do
+  let identities = externalTermIdentities extBindings
+  (resolvedExpr, generator2) <-
+    first UnknownVariable (resolveTermReferences generator identities expr)
+  generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+    generator2
+    polySyms
+    typeHeadIdentities
+    typeBinderIdentities
+    extBindings
+    resolvedExpr
+
+generateConstraintsWithResolvedExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> ExternalBindings -> ResolvedNormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
+generateConstraintsWithResolvedExternalBindingsFromSupply generator polySyms =
+  generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply generator polySyms Map.empty Map.empty
+
+generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply :: IdentityGenerator -> PolySyms -> Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> ExternalBindings -> ResolvedNormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
+generateConstraintsWithResolvedExternalBindingsAndTypeIdentitiesFromSupply generator polySyms typeHeadIdentities typeBinderIdentities extBindings expr =
+  let (coreExpr, generator') = desugarResolvedSurface generator expr
+   in generateResolvedConstraintsCoreWithExternalBindingsFromSupply generator' polySyms typeHeadIdentities typeBinderIdentities extBindings coreExpr
 
 -- | Generate constraints from a normalized core expression.
 --
@@ -155,31 +204,45 @@ generateConstraintsCore polySyms =
 
 -- | Like 'generateConstraintsCore' but with an external environment.
 generateConstraintsCoreWithEnv :: PolySyms -> ExternalEnv -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
-generateConstraintsCoreWithEnv polySyms extEnv expr = do
-  let extBindings =
-        Map.map
-          ( \srcTy ->
-              ExternalBinding
-                { externalBindingType = srcTy,
-                  externalBindingMode = ExternalBindingScheme,
-                  externalBindingIdentity = Nothing,
-                  externalBindingTypeHeadIdentities = Map.empty,
-                  externalBindingTypeBinderIdentities = Map.empty
-                }
-          )
-          extEnv
-  generateConstraintsCoreWithExternalBindings polySyms extBindings expr
+generateConstraintsCoreWithEnv polySyms extEnv expr =
+  let (extBindings, generator) = externalBindingsFromEnv initialIdentityGenerator extEnv
+   in generateConstraintsCoreWithExternalBindingsFromSupply generator polySyms extBindings expr
 
 generateConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsCoreWithExternalBindings =
   generateConstraintsCoreWithExternalBindingsFromSupply initialIdentityGenerator
 
+generateResolvedConstraintsCore :: PolySyms -> ResolvedNormCoreExpr -> Either ConstraintError (ConstraintResult p)
+generateResolvedConstraintsCore polySyms =
+  generateResolvedConstraintsCoreWithExternalBindings polySyms Map.empty
+
+generateResolvedConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> ResolvedNormCoreExpr -> Either ConstraintError (ConstraintResult p)
+generateResolvedConstraintsCoreWithExternalBindings polySyms =
+  generateResolvedConstraintsCoreWithExternalBindingsFromSupply initialIdentityGenerator polySyms Map.empty Map.empty
+
 generateConstraintsCoreWithExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsCoreWithExternalBindingsFromSupply generator polySyms extBindings expr = do
-  let initialState = mkInitialStateWithPolySymsAndIdentityGenerator polySyms generator
+  (resolvedExpr, generator2) <-
+    first UnknownVariable
+      (resolveTermReferences generator (externalTermIdentities extBindings) expr)
+  generateResolvedConstraintsCoreWithExternalBindingsFromSupply
+    generator2
+    polySyms
+    Map.empty
+    Map.empty
+    extBindings
+    resolvedExpr
+
+generateResolvedConstraintsCoreWithExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> ExternalBindings -> ResolvedNormCoreExpr -> Either ConstraintError (ConstraintResult p)
+generateResolvedConstraintsCoreWithExternalBindingsFromSupply generator polySyms typeHeadIdentities typeBinderIdentities extBindings expr = do
+  let initialState =
+        (mkInitialStateWithPolySyms polySyms)
+          { bsTypeHeadIdentities = constraintTypeHeadIdentities typeHeadIdentities polySyms extBindings
+          , bsTypeBinderIdentities = typeBinderIdentities
+          }
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
-  constraintResultFromState initialEnv rootNode annRoot finalState
+  constraintResultFromState generator initialEnv rootNode annRoot finalState
 
 generateModuleConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> [(VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult VarName p)
 generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs =
@@ -193,39 +256,138 @@ generateModuleConstraintsKeyedWithExternalBindings =
   generateModuleConstraintsKeyedWithExternalBindingsFromSupply initialIdentityGenerator
 
 generateModuleConstraintsKeyedWithExternalBindingsFromSupply :: (Ord key) => IdentityGenerator -> PolySyms -> ExternalBindings -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
-generateModuleConstraintsKeyedWithExternalBindingsFromSupply generator polySyms extBindings keyedExprs = do
-  let initialState = mkInitialStateWithPolySymsAndIdentityGenerator polySyms generator
-      namedCoreExprs =
-        [ (key, name, desugarSurface expr)
-        | (key, name, expr) <- keyedExprs
-        ]
-  ((_rootGen, initialEnv, roots), finalState) <-
-    runConstraintM (buildModuleRootExprsKeyedWithExternalBindings extBindings namedCoreExprs) initialState
-  constraintModuleResultFromState initialEnv roots finalState
+generateModuleConstraintsKeyedWithExternalBindingsFromSupply generator polySyms =
+  generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply generator polySyms Map.empty Map.empty Map.empty
 
-constraintResultFromState :: Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
-constraintResultFromState initialEnv rootNode annRoot finalState = do
+generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply :: (Ord key) => IdentityGenerator -> PolySyms -> Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map key (Map.Map String TypeBinderIdentity) -> ExternalBindings -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
+generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply generator polySyms typeHeadIdentities typeBinderIdentities rootTypeBinderIdentities extBindings keyedExprs = do
+  (resolvedExprs, generator2) <-
+    resolveKeyedSurfaceExprs
+      generator
+      (externalTermIdentities extBindings)
+      (orderKeyedExprs keyedExprs)
+  generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply
+    generator2
+    polySyms
+    typeHeadIdentities
+    typeBinderIdentities
+    rootTypeBinderIdentities
+    extBindings
+    resolvedExprs
+
+generateModuleConstraintsKeyedWithResolvedExternalBindingsFromSupply :: (Ord key) => IdentityGenerator -> PolySyms -> ExternalBindings -> [(key, VarName, ResolvedNormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
+generateModuleConstraintsKeyedWithResolvedExternalBindingsFromSupply generator polySyms =
+  generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply generator polySyms Map.empty Map.empty Map.empty
+
+generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply :: (Ord key) => IdentityGenerator -> PolySyms -> Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map key (Map.Map String TypeBinderIdentity) -> ExternalBindings -> [(key, VarName, ResolvedNormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
+generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply generator polySyms typeHeadIdentities typeBinderIdentities rootTypeBinderIdentities extBindings keyedExprs = do
+  let (namedCoreExprs, generator') =
+        desugarKeyedSurfaceExprs generator (orderKeyedExprs keyedExprs)
+      initialState =
+        (mkInitialStateWithPolySyms polySyms)
+          { bsTypeHeadIdentities = constraintTypeHeadIdentities typeHeadIdentities polySyms extBindings
+          , bsTypeBinderIdentities = typeBinderIdentities
+          }
+  ((_rootGen, initialEnv, roots), finalState) <-
+    runConstraintM (buildModuleRootExprsKeyedWithExternalBindings rootTypeBinderIdentities extBindings namedCoreExprs) initialState
+  constraintModuleResultFromState generator' initialEnv roots finalState
+
+-- | A keyed module is a finite map of independent roots, not a sequence whose
+-- input order may assign semantic identities.  Allocate syntax and graph
+-- identities in key order so the same root keeps the same construction packet
+-- when callers enumerate that map differently.
+orderKeyedExprs :: (Ord key) => [(key, name, expr)] -> [(key, name, expr)]
+orderKeyedExprs = sortOn (\(key, _, _) -> key)
+
+externalBindingsFromEnv :: IdentityGenerator -> ExternalEnv -> (ExternalBindings, IdentityGenerator)
+externalBindingsFromEnv generator bindings =
+  let (generator', bindings') = Map.mapAccumWithKey resolveOne generator bindings
+   in (bindings', generator')
+  where
+    resolveOne generator0 name srcTy =
+      let (ref, generator1) = freshEnvRef name generator0
+       in ( generator1,
+            ExternalBinding
+              { externalBindingType = srcTy,
+                externalBindingMode = ExternalBindingScheme,
+                externalBindingIdentity =
+                  externalBindingIdentityFromDetails (EnvId ref),
+                externalBindingTypeHeadIdentities = Map.empty,
+                externalBindingTypeBinderIdentities = Map.empty
+              }
+          )
+
+externalTermIdentities :: ExternalBindings -> Map.Map VarName IdDetails
+externalTermIdentities =
+  Map.map (externalBindingDetails . externalBindingIdentity)
+
+resolveKeyedSurfaceExprs :: IdentityGenerator -> Map.Map VarName IdDetails -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError ([(key, VarName, ResolvedNormSurfaceExpr)], IdentityGenerator)
+resolveKeyedSurfaceExprs generator _ [] = Right ([], generator)
+resolveKeyedSurfaceExprs generator identities ((key, name, expr) : rest) = do
+  (resolvedExpr, generator1) <-
+    first UnknownVariable (resolveTermReferences generator identities expr)
+  (resolvedRest, generator2) <-
+    resolveKeyedSurfaceExprs generator1 identities rest
+  Right ((key, name, resolvedExpr) : resolvedRest, generator2)
+
+desugarKeyedSurfaceExprs :: IdentityGenerator -> [(key, VarName, ResolvedNormSurfaceExpr)] -> ([(key, VarName, ResolvedNormCoreExpr)], IdentityGenerator)
+desugarKeyedSurfaceExprs generator [] = ([], generator)
+desugarKeyedSurfaceExprs generator ((key, name, expr) : rest) =
+  let (coreExpr, generator1) = desugarResolvedSurface generator expr
+      (coreRest, generator2) = desugarKeyedSurfaceExprs generator1 rest
+   in ((key, name, coreExpr) : coreRest, generator2)
+
+constraintTypeHeadIdentities :: Map.Map String SymbolIdentity -> PolySyms -> ExternalBindings -> Map.Map String SymbolIdentity
+constraintTypeHeadIdentities supplied polySyms extBindings =
+  supplied
+    `Map.union` symbolIdentityAliasMapWith
+      (suppliedEntries ++ builtinEntries ++ polymorphicEntries ++ externalEntries)
+  where
+    suppliedEntries =
+      [(identity, [name]) | (name, identity) <- Map.toList supplied]
+
+    builtinEntries =
+      [ (PrimitiveIdentity.builtinTypeIdentity name, [name])
+      | name <- Set.toList PrimitiveIdentity.builtinTypeNames
+      ]
+
+    polymorphicEntries =
+      [(identity, []) | identity <- Set.toList polySyms]
+
+    externalEntries =
+      [ (identity, [name])
+      | binding <- Map.elems extBindings,
+        (name, identity) <- Map.toList (externalBindingTypeHeadIdentities binding)
+      ]
+
+constraintResultFromState :: IdentityGenerator -> Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
+constraintResultFromState identityGenerator initialEnv rootNode annRoot finalState = do
   let annEdges = collectAnnEdges annRoot
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
   pure
     ConstraintResult { crConstraint = constraint,
         crRoot = rootNode,
         crAnnotated = annRoot,
+        crIdentityGenerator = identityGenerator,
         crAnnSourceTypes = bsAnnSourceTypes finalState,
+        crExactProducerTypes = bsExactProducerTypes finalState,
+        crSourceTypeBinderIdentities = bsTypeBinderNodeIdentities finalState,
+        crSourceTypeBinderAliases = bsTypeBinderIdentities finalState,
         crInitialEnv = initialEnv
       }
 
-constraintModuleResultFromState :: Env -> Map.Map key (ModuleRootId, NodeId, AnnExpr) -> BuildState -> Either ConstraintError (ModuleConstraintResult key p)
-constraintModuleResultFromState initialEnv roots finalState = do
-  let annEdges = IntSet.unions [collectAnnEdges annRoot | (_, _rootNode, annRoot) <- Map.elems roots]
+constraintModuleResultFromState :: IdentityGenerator -> Env -> Map.Map key (ModuleRootId, NodeId, AnnExpr, Map.Map String TypeBinderIdentity) -> BuildState -> Either ConstraintError (ModuleConstraintResult key p)
+constraintModuleResultFromState identityGenerator initialEnv roots finalState = do
+  let annEdges = IntSet.unions [collectAnnEdges annRoot | (_, _rootNode, annRoot, _) <- Map.elems roots]
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
       rootMap =
         Map.map
-          ( \(rootId, rootNode, annRoot) ->
+          ( \(rootId, rootNode, annRoot, sourceTypeBinderAliases) ->
               ModuleConstraintRoot
                 { mcrRootId = rootId,
                   mcrRoot = rootNode,
-                  mcrAnnotated = annRoot
+                  mcrAnnotated = annRoot,
+                  mcrSourceTypeBinderAliases = sourceTypeBinderAliases
                 }
           )
           roots
@@ -233,40 +395,29 @@ constraintModuleResultFromState initialEnv roots finalState = do
     ModuleConstraintResult
       { mcrConstraint = constraint,
         mcrRoots = rootMap,
+        mcrIdentityGenerator = identityGenerator,
         mcrAnnSourceTypes = bsAnnSourceTypes finalState,
+        mcrExactProducerTypes = bsExactProducerTypes finalState,
+        mcrSourceTypeBinderIdentities = bsTypeBinderNodeIdentities finalState,
         mcrInitialEnv = initialEnv,
         mcrRootOwnership = bsRootOwnership finalState
       }
 
-data AnnEdges = AnnEdges
-  { aeAll :: IntSet.IntSet,
-    aeNoAnn :: IntSet.IntSet,
-    aeAnnTarget :: Maybe NodeId
-  }
-
 collectAnnEdges :: AnnExpr -> IntSet.IntSet
-collectAnnEdges ann = aeAll (cata alg ann)
+collectAnnEdges = cata alg
   where
-    emptyEdges = AnnEdges IntSet.empty IntSet.empty Nothing
-
     alg expr = case expr of
-      AVarF _ _ -> emptyEdges
-      AResolvedVarF _ _ _ -> emptyEdges
-      ALitF _ _ -> emptyEdges
-      ALamF _ _ _ _ body _ -> body
-      AAppF fun arg _ _ _ ->
-        let allEdges = IntSet.union (aeAll fun) (aeAll arg)
-         in AnnEdges allEdges allEdges Nothing
-      ALetF _ _ _ _ _ _ rhs body trivialRoot ->
-        let bodyEdges =
-              if aeAnnTarget body == Just trivialRoot
-                then aeNoAnn body
-                else aeAll body
-            allEdges = IntSet.union (aeAll rhs) bodyEdges
-         in AnnEdges allEdges allEdges Nothing
-      AAnnF inner target eid ->
-        let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
-         in AnnEdges allEdges (aeAll inner) (Just target)
-      AUnfoldF inner target eid ->
-        let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
-         in AnnEdges allEdges (aeAll inner) (Just target)
+      AResolvedVarF _ _ _ -> IntSet.empty
+      ALitF _ _ -> IntSet.empty
+      -- Lambda-body instantiation is an ordinary Figure 15.3.5 edge, not a
+      -- source-annotation kappa-sigma edge.
+      ALamF _ _ _ _ body _bodyEid _ -> body
+      AAppF fun arg _ _ _ -> IntSet.union fun arg
+      ALetF _ _ _ _ _ _ rhs body _ -> IntSet.union rhs body
+      -- Compiler-owned exact checks are ordinary witnessed instantiation
+      -- edges over one authoritative target.  Only source kappa-sigma edges
+      -- use the annotation-wrapper ownership rules carried by 'cAnnEdges'.
+      AExactAnnF inner _ _ _ -> inner
+      AAnnF inner _ eid -> IntSet.insert (getEdgeId eid) inner
+      ALetScopeF inner _ _ -> inner
+      AUnfoldF inner _ eid -> IntSet.insert (getEdgeId eid) inner

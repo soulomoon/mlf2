@@ -13,6 +13,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo)
+import MLF.Constraint.Presolution.Plan.Requirements (RequiredGammaBinder)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
 import MLF.Types.Elab (TypeBinderRef)
@@ -49,7 +50,6 @@ data BinderPlanInput p = BinderPlanInput
     , bpiTypeRoot0 :: NodeId
     , bpiTypeRoot :: NodeId
     , bpiTypeRootFromBoundVar :: Maybe NodeId
-    , bpiTypeRootIsForall :: Bool
     , bpiLiftToForall :: NodeId -> NodeId
     , bpiReachableFromWithBounds :: NodeId -> IntSet.IntSet
     , bpiResForReify :: PresolutionView p
@@ -64,14 +64,16 @@ data BinderPlanInput p = BinderPlanInput
     , bpiSchemeRootByBodyBase :: IntMap.IntMap NodeId
     , bpiAliasBinderBases :: IntSet.IntSet
     , bpiOrderBinderCandidates :: [Int] -> (Int -> Either ElabError [Int]) -> Either ElabError [Int]
+    , bpiRequiredGamma :: IntMap.IntMap RequiredGammaBinder
+    , bpiLocallyClosedGammaNodes :: IntSet.IntSet
+    , bpiSourceBinderRefs :: IntMap.IntMap TypeBinderRef
+    , bpiAmbientBinderRefs :: [TypeBinderRef]
     }
 
 data BinderPlan = BinderPlan
-    { bpBindersCanon :: [NodeId]
-    , bpBinderIds :: [Int]
-    , bpOrderedBinderIds :: [Int]
-    , bpBinderNames :: [String]
-    , bpSubst0 :: IntMap.IntMap TypeBinderRef
+    { bpOrderedBinders :: [(Int, TypeBinderRef)]
+    , bpBinderRefRoutes :: IntMap.IntMap TypeBinderRef
+    , bpLocallyClosedGammaKeys :: IntSet.IntSet
     , bpNestedSchemeInteriorSet :: IntSet.IntSet
     , bpGammaAlias :: IntMap.IntMap Int
     , bpBaseGammaSet :: IntSet.IntSet
@@ -81,4 +83,7 @@ data BinderPlan = BinderPlan
     , bpReachableForBinders :: IntSet.IntSet
     , bpAliasBinderBases :: IntSet.IntSet
     , bpOrderBinders :: [Int] -> Either ElabError [Int]
+    , bpRequiredGamma :: IntMap.IntMap RequiredGammaBinder
+    , bpSourceBinderRefs :: IntMap.IntMap TypeBinderRef
+    , bpAmbientBinderRefs :: [TypeBinderRef]
     }

@@ -10,14 +10,10 @@ It keeps expansion/copy responsibilities cohesive while the public presolution
 entrypoint stays as a thin orchestration layer.
 -}
 module MLF.Constraint.Presolution.Expansion (
-    applyExpansion,
-    applyExpansionTraced,
-    applyExpansionEdgeTraced,
-    applyExpansionEdgeTracedWithBinders,
+    applyExpansionEdgeTracedAtTarget,
+    applyExpansionEdgeTracedAtTargetWithBinders,
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
-    copyBinderBounds,
-    copyBinderBoundsWithSnapshot,
     MinimalExpansionDecision(..),
     decideMinimalExpansion,
     decideMinimalExpansionDetailed,
@@ -25,47 +21,58 @@ module MLF.Constraint.Presolution.Expansion (
     instantiateScheme,
     instantiateSchemeWithTrace,
     mergeExpansions,
-    recordEdgeExpansion,
     setExpansion
 ) where
 
 import Control.Monad (foldM, zipWithM, zipWithM_)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
-import Control.Monad.State (gets, modify)
+import Control.Monad.State (get, gets, modify)
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe)
 import qualified Data.List.NonEmpty as NE
 
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorSet,
     FrontierSet,
+    RawExpansionConstruction,
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
+    combineRawExpansionConstructions,
+    emptyRawExpansionConstruction,
     emptyTrace,
     forallSpecM,
     instantiationBindersM,
+    instantiationBindersFromGenM,
+    lookupExpansionResultUnder,
     unionTrace
     )
 import MLF.Constraint.Presolution.Copy (
+    ExpansionBinderProjection(..),
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
     instantiateScheme,
     instantiateSchemeWithTrace,
-    instantiateSchemeWithTraceSnapshot
+    instantiateExpansionWithTraceAtTargetSnapshot,
+    projectExpansionBinders
     )
-import MLF.Constraint.Presolution.ForallIntro (introduceForallFromSpec)
+import MLF.Constraint.Presolution.ForallIntro (
+    destinationOwnedRootNode,
+    introduceForallFromSpec,
+    requireDestinationOwnedRoot
+    )
 import MLF.Constraint.Presolution.Ops (
     createFreshVar,
-    getCanonicalNode,
-    setVarBound
+    getCanonicalNode
     )
 import MLF.Constraint.Presolution.StateAccess (
-    PresolutionBindingSnapshot(..),
+    bindingSnapshotInteriorOf,
+    findSchemeIntroducerM,
     getConstraintAndCanonical,
     getBindingSnapshot,
     lookupBindParentM
@@ -73,9 +80,9 @@ import MLF.Constraint.Presolution.StateAccess (
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
-import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.Trace (traceBindingM)
 
 -- | Get the current expansion for an expansion variable.
@@ -96,18 +103,16 @@ setExpansion s expansion = do
                     IntMap.insert (getExpVarId s) expansion (getAssignments (psPresolution st))
             }
 
-{-# INLINE recordEdgeExpansion #-}
-recordEdgeExpansion :: EdgeId -> Expansion -> PresolutionM p ()
-recordEdgeExpansion (EdgeId eid) expn =
-    modify $ \st -> st { psEdgeExpansions = IntMap.insert eid expn (psEdgeExpansions st) }
-
 -- | Merge two expansions for the same variable.
 -- This may trigger unifications if we merge two Instantiates.
+-- The edge worklist validates that every ExpVar has one propagation
+-- destination before any merge can retain graph-owning arguments.
 mergeExpansions :: ExpVarId -> Expansion -> Expansion -> PresolutionM p Expansion
-mergeExpansions _v e1 e2 = case (e1, e2) of
-    (ExpIdentity, _) -> pure e2
-    (_, ExpIdentity) -> pure e1
-    _ -> (cata alg e1) e2
+mergeExpansions _v e1 e2 =
+    case (e1, e2) of
+        (ExpIdentity, _) -> pure e2
+        (_, ExpIdentity) -> pure e1
+        _ -> (cata alg e1) e2
   where
     alg layer = case layer of
         ExpIdentityF -> \e2' -> pure e2'
@@ -141,7 +146,7 @@ mergeExpansions _v e1 e2 = case (e1, e2) of
 
 {- Note [Minimal Expansion Decision]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-See also Note [Forall Level Mismatch → Compose].
+See also Note [Forall arity mismatch composes elimination and introduction].
 
 Presolution chooses the least-committing expansion for an edge s · τ ≤ τ′ so
 that E(τ) matches the shape of τ′ while keeping s as general as possible
@@ -150,9 +155,9 @@ identity, instantiation, ∀-introduction, and explicit composition.
 
 Decision cases (as implemented):
 
-1. ∀ ≤ ∀: if quantifier levels coincide, keep identity and unify bodies; if they
-    differ, instantiate the source binders (fresh vars) then re-generalize to
-    the target level via ExpCompose (ExpInstantiate · ExpForall).
+1. ∀ ≤ ∀: if binder arities coincide, keep identity and unify bodies; if
+    they differ, instantiate the source binders and re-introduce the target
+    quantifiers explicitly.
 
 2. ∀ ≤ structure: instantiate to expose the body. If there are no bound vars
     (degenerate ∀), reuse the body and just unify; otherwise allocate fresh
@@ -178,22 +183,25 @@ variables of the source ∀; shared nodes beyond that scope stay shared. The
 result is an Expansion (possibly composed) plus the deferred unifications
 required by the component constraints.
 -}
-{- Note [Forall Level Mismatch → Compose]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Paper §5 and Definition 5 ("expansion of g at g′") in
-`papers/recasting-mlf-RR.txt` and the matching discussion in
-`papers/Remy-Yakobowski@icfp08_mlf-type-inference.txt` describe how a forall
-body is copied and re-bound at a destination generalization node. For an edge
-s · (forall@ℓ α.σ) ≤ forall@ℓ′ β.τ with ℓ ≠ ℓ′ the minimal recipe is:
+{- Note [Forall arity mismatch composes elimination and introduction]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Figure 14.2.6 of `papers/these-finale-english.txt` distinguishes quantifier
+elimination from quantifier introduction.  Consequently an edge such as
 
-    1. instantiate the source binders at level ℓ (fresh metas, drop the old ∀)
-    2. re-introduce ∀ at the demanded level ℓ′
+    (forall a. a) <= (forall b c. b -> c)
 
-The lattice offers only “instantiate” and “add ∀”, so changing the quantifier
-level is spelled as ExpCompose (ExpInstantiate · ExpForall). Instantiation
-alone would lose required polymorphism; ∀ alone would quantify at the wrong
-level. The sequence preserves sharing outside the binder and remains the least
-expansion that satisfies the edge (principality argument in §5).
+cannot retain the source quantifier in place.  It first instantiates the source
+body and then introduces the target quantifiers, represented by
+@ExpInstantiate; ExpForall@.  For a singleton source binder the target body is
+the exact instantiation argument: the copied body therefore already exposes
+the variables selected by the target's Q(n) before forall introduction runs.
+Using the target forall root itself would instead put the expansion root in its
+own graft bound and manufacture an occurs cycle.
+
+For multiple source binders the edge-local structural unification still
+refines fresh arguments.  In both cases the recipe records elimination and
+introduction separately; collapsing it to ExpInstantiate would erase required
+polymorphism and its witness step.
 -}
 nearestGenAncestor :: (NodeId -> NodeId) -> NodeId -> PresolutionM p (Maybe GenNodeId)
 nearestGenAncestor canonical nid0 = do
@@ -211,6 +219,111 @@ nearestGenAncestor canonical nid0 = do
                         go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
     go IntSet.empty start
 
+-- | Expose every leading forall boundary owned by one expansion source.
+-- Nested 'TyExp' nodes are administrative occurrence wrappers, so their
+-- expansion variables do not establish a new scheme boundary.  Crossing such
+-- a wrapper is legal while its body remains under the current scheme owner;
+-- when the owner changes, the already-materialized result is the sole
+-- producer-owned continuation.  Requiring the nested occurrence to reuse the
+-- outer 'ExpVarId' would conflate occurrence-local expansion choice with
+-- source-scheme authority and reject nested uses of one polymorphic binding.
+instantiationBinderSpineM
+    :: (NodeId -> NodeId)
+    -> GenNodeId
+    -> ExpVarId
+    -> NodeId
+    -> PresolutionM p (NodeId, [NodeId])
+instantiationBinderSpineM canonical ownerGen ownerExpVar source0 =
+    collect (canonical source0) []
+  where
+    collect source binders = do
+        st <- get
+        let constraint = psConstraint st
+            sourceC = canonical source
+        case lookupNodeIn (cNodes constraint) sourceC of
+            Nothing -> throwError (NodeLookupFailed sourceC)
+            Just node ->
+                case node of
+                    TyForall {tnId = forallId, tnBody = inner} -> do
+                        boundaryBinders <-
+                            case Binding.orderedBinders id constraint (typeRef forallId) of
+                                Left err -> throwError (BindingTreeError err)
+                                Right ordered -> pure ordered
+                        collect
+                            (canonical inner)
+                            (binders ++ boundaryBinders)
+                    TyExp
+                        { tnId = wrapper
+                        , tnExpVar = nestedExpVar
+                        , tnBody = inner
+                        } -> do
+                            nestedOwner <-
+                                findSchemeIntroducerM
+                                    canonical
+                                    constraint
+                                    (nestedOwnerRoot constraint wrapper inner)
+                            if nestedOwner == ownerGen
+                                then collect (canonical inner) binders
+                                else do
+                                    materialized <-
+                                        either
+                                            throwError
+                                            pure
+                                            ( lookupExpansionResultUnder
+                                                canonical
+                                                wrapper
+                                                (psExpansionResults st)
+                                            )
+                                    case materialized of
+                                        Nothing ->
+                                            throwMismatch wrapper nestedExpVar nestedOwner Nothing
+                                        Just result -> do
+                                            resultOwner <-
+                                                findSchemeIntroducerM
+                                                    canonical
+                                                    constraint
+                                                    result
+                                            if resultOwner == ownerGen
+                                                then collect (canonical result) binders
+                                                else
+                                                    throwMismatch
+                                                        wrapper
+                                                        nestedExpVar
+                                                        nestedOwner
+                                                        (Just (result, resultOwner))
+                    _
+                        | null binders ->
+                            instantiationBindersFromGenM ownerGen sourceC
+                        | otherwise -> pure (sourceC, binders)
+
+    nestedOwnerRoot constraint wrapper inner
+        | any isAnnotationEdge (cInstEdges constraint) = wrapper
+        | otherwise = inner
+      where
+        wrapperC = canonical wrapper
+        isAnnotationEdge edge =
+            canonical (instLeft edge) == wrapperC
+                && IntSet.member
+                    (getEdgeId (instEdgeId edge))
+                    (cAnnEdges constraint)
+
+    throwMismatch
+        :: NodeId
+        -> ExpVarId
+        -> GenNodeId
+        -> Maybe (NodeId, GenNodeId)
+        -> PresolutionM p a
+    throwMismatch wrapper nestedExpVar nestedOwner materialized =
+        throwError
+            ( NestedTyExpAuthorityMismatch
+                wrapper
+                nestedOwner
+                nestedExpVar
+                ownerGen
+                ownerExpVar
+                materialized
+            )
+
 data MinimalExpansionDecision = MinimalExpansionDecision
     { medExpansion :: Expansion
     , medUnifications :: [(NodeId, NodeId)]
@@ -225,8 +338,47 @@ decideMinimalExpansion canonical gid allowTrivial sourceNode targetNode = do
     pure (medExpansion decision, medUnifications decision)
 
 decideMinimalExpansionDetailed :: (NodeId -> NodeId) -> GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p MinimalExpansionDecision
-decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
-    (bodyRoot, boundVars) <- instantiationBindersM gid bodyId
+decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnExpVar = expVar, tnBody = bodyId }) targetNode = do
+    currentExpansion <- getExpansion expVar
+    let instantiationBindersForTarget source =
+            case targetNode of
+                -- A forall destination consumes one source boundary at this
+                -- comparison step.  A structural destination requires the
+                -- complete leading source spine for T(e) to reach it.
+                TyForall {} -> instantiationBindersM gid source
+                _ -> instantiationBinderSpineM canonical gid expVar source
+    (bodyRoot, candidateBoundVars) <-
+        if isSynthesizedExpVar expVar
+            then do
+                bodyNode <- getCanonicalNode bodyId
+                case bodyNode of
+                    -- Paper-shape wrapping synthesizes an expansion node for
+                    -- residual edges, but an explicit forall still owns real
+                    -- quantifiers.  Preserve those binders so coercion results
+                    -- such as forall(beta >= sigma).beta instantiate at their
+                    -- application boundary instead of being structurally
+                    -- equated with the target.
+                    TyForall {} -> instantiationBindersForTarget bodyId
+                    TyVar {tnBound = Just bound} -> do
+                        boundNode <- getCanonicalNode bound
+                        case boundNode of
+                            TyForall {} -> instantiationBindersForTarget bound
+                            _ -> pure (canonical bodyId, [])
+                    _ -> pure (canonical bodyId, [])
+            else instantiationBindersForTarget bodyId
+    constraint <- gets psConstraint
+    binderSnapshot <- getBindingSnapshot
+    binderProjection <-
+        projectExpansionBinders
+            binderSnapshot
+            gid
+            bodyRoot
+            candidateBoundVars
+    let boundVars = ebpSemanticBinders binderProjection
+        retainedSchemeRootWrappers =
+            ebpRetainedSchemeRootWrappers binderProjection
+        hasRetainedSchemeRootWrappers =
+            not (null retainedSchemeRootWrappers)
     debugExpansion
         ( "decideMinimalExpansion: bodyId="
             ++ show bodyId
@@ -234,17 +386,52 @@ decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnBody = body
             ++ show bodyRoot
             ++ " boundVars="
             ++ show boundVars
+            ++ " outsideSemanticLane="
+            ++ show (ebpOutsideSemanticLane binderProjection)
             ++ " target="
             ++ show (tnId targetNode)
         )
-    let done expn unifications =
+    let doneWithBinders activeBinders expn unifications =
             pure
                 MinimalExpansionDecision
                     { medExpansion = expn
                     , medUnifications = unifications
                     , medBodyRoot = bodyRoot
-                    , medBoundVars = boundVars
+                    , medBoundVars = activeBinders
                     }
+        done = doneWithBinders boundVars
+        instantiateArgs activeBinders =
+            case existingInstantiationArgs currentExpansion of
+                Just args
+                    | length args == length activeBinders -> pure args
+                _ -> mapM (const createFreshVar) activeBinders
+    targetIsOpaqueBoundedVariable <-
+        case targetNode of
+            TyVar {tnId = targetVariable, tnBound = Just _} -> do
+                kind <-
+                    either
+                        (throwError . BindingTreeError)
+                        pure
+                        (Binding.nodeKind constraint (typeRef targetVariable))
+                pure $
+                    case kind of
+                        Binding.NodeRestricted -> True
+                        Binding.NodeLocked -> True
+                        Binding.NodeRoot -> True
+                        Binding.NodeInstantiable -> False
+            _ -> pure False
+    sourceIsDegenerate <-
+        if targetIsOpaqueBoundedVariable
+            then do
+                snapshot <- getBindingSnapshot
+                ownerInterior <- bindingSnapshotInteriorOf snapshot (genRef gid)
+                pure $
+                    IntSet.notMember
+                        (nodeRefKey (typeRef (canonical bodyRoot)))
+                        ownerInterior
+            else pure False
+    bodyShape <- lowerBoundHead bodyRoot
+    targetShape <- lowerBoundHead (tnId targetNode)
     isTrivialTarget <- case targetNode of
         TyVar { tnId = targetId, tnBound = Nothing } -> do
             mbGen <- nearestGenAncestor canonical targetId
@@ -259,11 +446,35 @@ decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnBody = body
                                 Nothing -> []
                     pure (allowTrivial && targetC `elem` schemeRoots)
         _ -> pure False
-    if not (null boundVars)
+    if sourceIsDegenerate && targetIsOpaqueBoundedVariable
+        then
+            -- Definition 10.1.1: a scheme root outside I(g) has exactly one
+            -- legal projection.  When the target is also opaque at this edge,
+            -- copy the root as a destination-owned bottom and leave both its
+            -- frontier equality and target matching to edge-local Omega.
+            -- Looking through either lower bound here would fabricate
+            -- structure outside chi_e or through a rigid boundary.
+            doneWithBinders [] (ExpInstantiate []) []
+        else if hasRetainedSchemeRootWrappers && null boundVars
+        then if isTrivialTarget
+            then
+                done ExpIdentity [(bodyRoot, tnId targetNode)]
+            else
+                -- The source still needs Definition 10.1.1's fresh structural
+                -- projection, but every candidate binder is a retained nested
+                -- scheme boundary rather than a chi_e substitution.
+                done (ExpInstantiate []) []
+        else if not (null boundVars)
         then if isTrivialTarget
             then
                 -- Trivial let-scheme instantiation is identity: unify without extra expansion.
                 done ExpIdentity [(bodyRoot, tnId targetNode)]
+            -- Only a structural target forall can match the source forall in
+            -- place.  A TyVar merely *bounded by* a forall denotes a flexible
+            -- instance target: treating its lower-bound head as the target
+            -- quantifier would align unrelated binders by arity and compare the
+            -- source bound with the target body.  Instantiate the source in
+            -- that case, as required by the variable's instance relation.
             else case targetNode of
             TyForall { tnId = targetForallId, tnBody = targetBody } -> do
                 targetSpec <- forallSpecM targetForallId
@@ -272,37 +483,41 @@ decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnBody = body
                         -- Note [Minimal Expansion Decision] case 1 (∀≤∀ matching arity)
                         done ExpIdentity [(bodyRoot, targetBody)]
                     else do
-                        -- Note [Minimal Expansion Decision] case 1 (∀≤∀ arity mismatch)
-                        freshNodes <- mapM (const createFreshVar) boundVars
+                        -- Note [Forall arity mismatch composes elimination and introduction]
+                        args <-
+                            case boundVars of
+                                [_] -> pure [targetBody]
+                                _ -> instantiateArgs boundVars
                         let expn =
                                 ExpCompose
-                                    (ExpInstantiate freshNodes NE.<| (ExpForall (targetSpec NE.:| []) NE.:| []))
+                                    ( ExpInstantiate args
+                                        NE.:| [ExpForall (targetSpec NE.:| [])]
+                                    )
                         done expn []
             _ -> do
                 -- target is not a forall → instantiate to expose structure
                 -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
-                freshNodes <- mapM (const createFreshVar) boundVars
-                done (ExpInstantiate freshNodes) []
+                args <- instantiateArgs boundVars
+                done (ExpInstantiate args) []
         else do
-            bodyNode <- getCanonicalNode bodyRoot
-            case bodyNode of
+            case bodyShape of
                 TyArrow { tnDom = bDom, tnCod = bCod } -> do
-                    case targetNode of
+                    case targetShape of
                         TyArrow { tnDom = tDom, tnCod = tCod } ->
                             -- Note [Minimal Expansion Decision] case 4 (structure≤structure, arrow)
                             done ExpIdentity [(bDom, tDom), (bCod, tCod)]
-                        TyForall {} -> do
+                        TyForall {tnId = targetForallId} -> do
                             -- need to generalize to meet target forall
                             -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
-                            targetSpec <- forallSpecM (tnId targetNode)
+                            targetSpec <- forallSpecM targetForallId
                             let expn = ExpForall (targetSpec NE.:| [])
                             done expn []
                         _ -> done ExpIdentity [(bodyRoot, tnId targetNode)]
 
-                _ -> case targetNode of
-                    TyForall {} -> do
+                _ -> case targetShape of
+                    TyForall {tnId = targetForallId} -> do
                         -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
-                        targetSpec <- forallSpecM (tnId targetNode)
+                        targetSpec <- forallSpecM targetForallId
                         let expn = ExpForall (targetSpec NE.:| [])
                         done expn []
                     _ -> done ExpIdentity [(bodyRoot, tnId targetNode)]
@@ -314,390 +529,373 @@ decideMinimalExpansionDetailed _canonical _ _ sourceNode _ =
             , medUnifications = []
             , medBodyRoot = tnId sourceNode
             , medBoundVars = []
-            }
+        }
+
+existingInstantiationArgs :: Expansion -> Maybe [NodeId]
+existingInstantiationArgs expansion =
+    case expansion of
+        ExpInstantiate args -> Just args
+        ExpCompose (ExpInstantiate args NE.:| _) -> Just args
+        _ -> Nothing
+
+-- | Follow semantically transparent aliases only far enough to expose the head
+-- shape used by the expansion lattice.  Constraint generation represents
+-- coercion endpoints as variables with structural lower bounds (for example
+-- @alpha >= tau@ and @beta >= forall ...@), and recursive-let constraints can
+-- place an identity expansion wrapper on the target.  Classifying either as
+-- an opaque variable or wrapper postpones the structural comparison until
+-- unification, where equating a wrapper with its own body would manufacture an
+-- administrative cycle.  Expansion choice is therefore made from this view
+-- while all emitted equalities continue to use the original structural nodes.
+lowerBoundHead :: NodeId -> PresolutionM p TyNode
+lowerBoundHead = go IntSet.empty
+  where
+    go seen nodeId = do
+        node <- getCanonicalNode nodeId
+        let key = getNodeId (tnId node)
+        if IntSet.member key seen
+            then pure node
+            else case node of
+                TyVar {tnId = variable, tnBound = Just bound} -> do
+                    constraint <- gets psConstraint
+                    kind <-
+                        either
+                            (throwError . BindingTreeError)
+                            pure
+                            (Binding.nodeKind constraint (typeRef variable))
+                    case kind of
+                        Binding.NodeInstantiable ->
+                            go (IntSet.insert key seen) bound
+                        Binding.NodeRoot -> pure node
+                        Binding.NodeRestricted -> pure node
+                        Binding.NodeLocked -> pure node
+                TyExp {tnExpVar = expVar, tnBody = body} -> do
+                    expansion <- getExpansion expVar
+                    case expansion of
+                        ExpIdentity -> go (IntSet.insert key seen) body
+                        _ -> pure node
+                _ -> pure node
 
 debugExpansion :: String -> PresolutionM p ()
 debugExpansion msg = do
     cfg <- ask
     traceBindingM cfg msg
 
--- | Apply an expansion to a TyExp node.
--- Note: this helper is used twice for distinct purposes.
---   • processInstEdge: enforce a single instantiation edge now (expansion choice
---     plus the unifications it triggers) so later edges see the refined graph.
---   • materializeExpansions: after all edges are processed, rewrite the graph to
---     erase TyExp nodes and clear inst edges before Solve.
-applyExpansion :: GenNodeId -> Expansion -> TyNode -> PresolutionM p NodeId
-applyExpansion gid expansion expNode =
-    let start =
-            case expNode of
-                TyExp { tnBody = b } -> b
-                _ -> tnId expNode
-        action = expansionAction expansion
-    in action expNode start
+{- Note [Destination-aware edge expansion construction]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The paper's χe construction creates an edge expansion at the destination of
+that edge.  Ownership therefore has to be present before copied lower bounds
+are installed; copying at the source and repairing the root, frontier, and
+arguments afterwards can demand a spurious Raise while the graph is only
+half-constructed.
+
+Every edge-only expansion shape goes through the target-aware constructor
+below.  An ExpInstantiate step copies directly into the target scope, binds its
+fresh arguments before copying their bounds, and carries that ownership through
+subsequent ExpForall steps.  A forall-only recipe and a degenerate
+ExpInstantiate both copy their source projection at the destination before any
+wrapper or binding edit is made.  Only identity has no copy constructor; its
+result is attached once at the end.  In particular, ExpCompose does not fall
+back to a source-scoped copy API for nested instantiation steps.
+-}
+
+applyExpansionEdgeTracedAtTarget
+    :: GenNodeId
+    -> NodeId
+    -> Expansion
+    -> TyNode
+    -> PresolutionM p
+        ( NodeId
+        , (CopyMap, InteriorSet, FrontierSet)
+        , RawExpansionConstruction
+        )
+applyExpansionEdgeTracedAtTarget gid targetNode expansion expNode =
+    applyExpansionEdgeTracedAtTargetFromKnownBinders
+        gid
+        targetNode
+        expansion
+        expNode
+        start
+        Nothing
   where
-    wrapForall :: [ForallSpec] -> NodeId -> PresolutionM p NodeId
-    wrapForall [] nid = return nid
-    wrapForall (spec:ls) nid = do
-        newId <- introduceForallFromSpec spec nid
-        wrapForall ls newId
-
-    -- Allow composing over an already-expanded node (not necessarily TyExp)
-    expansionAction :: Expansion -> TyNode -> NodeId -> PresolutionM p NodeId
-    expansionAction = cata alg
-      where
-        alg layer = case layer of
-            ExpIdentityF -> \_ nid -> return nid
-            ExpForallF ls -> \_ nid -> wrapForall (NE.toList ls) nid
-            ExpComposeF es ->
-                \_ nid ->
-                    foldM
-                        (\n step -> do
-                            nNode <- getCanonicalNode n
-                            step nNode n)
-                        nid
-                        (NE.toList es)
-            ExpInstantiateF args ->
-                \node _ ->
-                    case node of
-                        TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid b
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure bodyRoot
-                                        else throwError $ InstantiateOnNonForall bodyRoot
-                            else if length boundVars /= length args
-                                then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
-                                else instantiateScheme bodyRoot (zip boundVars args)
-                        _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure bodyRoot
-                                        else throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then throwError $ ArityMismatch "applyExpansion" (length boundVars) (length args)
-                                else instantiateScheme bodyRoot (zip boundVars args)
-
--- | Apply an expansion like 'applyExpansion', but also return a (coarse) trace
--- of the expansion interior I(r): instantiation args, copied nodes, and any
--- freshly introduced ∀ wrappers.
-applyExpansionTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-applyExpansionTraced gid expansion expNode =
-    let start =
-            case expNode of
-                TyExp { tnBody = b } -> b
-                _ -> tnId expNode
-        action = expansionActionTraced expansion
-    in action expNode start
-  where
-    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-    wrapForallTraced [] nid = pure (nid, emptyTrace)
-    wrapForallTraced (spec:ls) nid = do
-        newId <- introduceForallFromSpec spec nid
-        (outer, (cmap, interior, frontier)) <- wrapForallTraced ls newId
-        pure (outer, (cmap, IntSet.insert (getNodeId newId) interior, frontier))
-
-    expansionActionTraced :: Expansion -> TyNode -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-    expansionActionTraced = cata alg
-      where
-        alg layer = case layer of
-            ExpIdentityF -> \_ nid -> pure (nid, emptyTrace)
-            ExpForallF ls -> \_ nid -> wrapForallTraced (NE.toList ls) nid
-            ExpComposeF es ->
-                \_ nid ->
-                    foldM
-                        (\(n, trAcc) step -> do
-                            nNode <- getCanonicalNode n
-                            (n', tr') <- step nNode n
-                            pure (n', unionTrace trAcc tr'))
-                        (nid, emptyTrace)
-                        (NE.toList es)
-            ExpInstantiateF args ->
-                \node _ ->
-                    case node of
-                        TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid b
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure (bodyRoot, emptyTrace)
-                                        else throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then throwError $ ArityMismatch "applyExpansionTraced" (length boundVars) (length args)
-                                else do
-                                    (root, cmap, interior, frontier) <- instantiateSchemeWithTrace bodyRoot (zip boundVars args)
-                                    pure (root, (cmap, interior, frontier))
-                        _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure (bodyRoot, emptyTrace)
-                                        else throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then throwError $ ArityMismatch "applyExpansionTraced" (length boundVars) (length args)
-                                else do
-                                    (root, cmap, interior, frontier) <- instantiateSchemeWithTrace bodyRoot (zip boundVars args)
-                                    pure (root, (cmap, interior, frontier))
-
--- | Like 'applyExpansionTraced', but for edge processing: construct χe-style copies
--- so that Ω operations (Graft/Weaken/Merge) can be executed as graph transformations.
---
-    -- In particular, `ExpInstantiate` copies the body by substituting binders with
-    -- fresh binder-meta variables, and copies their instance bounds onto the
-    -- instantiation arguments (via `MLF.Constraint.VarStore`).
-applyExpansionEdgeTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-applyExpansionEdgeTraced gid expansion expNode =
-    let action = expansionActionEdgeTraced expansion
-    in action expNode start
-  where
-    start :: NodeId
     start =
         case expNode of
-            TyExp { tnBody = b } -> b
+            TyExp {tnBody = body} -> body
             _ -> tnId expNode
 
-    binderMetaAt :: NodeId -> NodeId -> PresolutionM p NodeId
-    binderMetaAt _arg _bv =
-        createFreshVar
+applyExpansionEdgeTracedAtTargetWithBinders
+    :: GenNodeId
+    -> NodeId
+    -> Expansion
+    -> TyNode
+    -> NodeId
+    -> [NodeId]
+    -> PresolutionM p
+        ( NodeId
+        , (CopyMap, InteriorSet, FrontierSet)
+        , RawExpansionConstruction
+        )
+applyExpansionEdgeTracedAtTargetWithBinders gid targetNode expansion expNode bodyRoot boundVars =
+    applyExpansionEdgeTracedAtTargetFromKnownBinders
+        gid
+        targetNode
+        expansion
+        expNode
+        bodyRoot
+        (Just (bodyRoot, boundVars))
 
-    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-    wrapForallTraced [] nid = pure (nid, emptyTrace)
-    wrapForallTraced (spec:ls) nid = do
-        newId <- introduceForallFromSpec spec nid
-        (outer, (cmap, interior, frontier)) <- wrapForallTraced ls newId
-        pure (outer, (cmap, IntSet.insert (getNodeId newId) interior, frontier))
-
-    expansionActionEdgeTraced :: Expansion -> TyNode -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-    expansionActionEdgeTraced = cata alg
-      where
-        alg layer = case layer of
-            ExpIdentityF -> \_ nid -> pure (nid, emptyTrace)
-            ExpForallF ls -> \_ nid -> wrapForallTraced (NE.toList ls) nid
-            ExpComposeF es ->
-                \_ nid ->
-                    foldM
-                        (\(n, trAcc) step -> do
-                            nNode <- getCanonicalNode n
-                            (n', tr') <- step nNode n
-                            pure (n', unionTrace trAcc tr'))
-                        (nid, emptyTrace)
-                        (NE.toList es)
-            ExpInstantiateF args ->
-                \node _ ->
-                    case node of
-                        TyExp{ tnBody = b } -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid b
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure (bodyRoot, emptyTrace)
-                                        else
-                                            throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then
-                                    if length boundVars == 1 && length args > 1
-                                        then case args of
-                                            [] -> throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                                            (arg0:rest) -> do
-                                                mapM_ (unifyAcyclic arg0) rest
-                                                metas <- zipWithM binderMetaAt [arg0] boundVars
-                                                let binderMetas = zip boundVars metas
-                                                    binderArgs = zip boundVars [arg0]
-                                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-                                        else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                            else do
-                                metas <- zipWithM binderMetaAt args boundVars
-                                let binderMetas = zip boundVars metas
-                                    binderArgs = zip boundVars args
-                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-                        _ -> do
-                            (bodyRoot, boundVars) <- instantiationBindersM gid (tnId node)
-                            if null boundVars
-                                then
-                                    if null args
-                                        then pure (bodyRoot, emptyTrace)
-                                        else
-                                            throwError $ InstantiateOnNonForall (tnId node)
-                            else if length boundVars /= length args
-                                then
-                                    if length boundVars == 1 && length args > 1
-                                        then case args of
-                                            [] -> throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                                            (arg0:rest) -> do
-                                                mapM_ (unifyAcyclic arg0) rest
-                                                metas <- zipWithM binderMetaAt [arg0] boundVars
-                                                let binderMetas = zip boundVars metas
-                                                    binderArgs = zip boundVars [arg0]
-                                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-                                        else throwError $ ArityMismatch "applyExpansionEdgeTraced" (length boundVars) (length args)
-                            else do
-                                metas <- zipWithM binderMetaAt args boundVars
-                                let binderMetas = zip boundVars metas
-                                    binderArgs = zip boundVars args
-                                (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-                                (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-                                pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-
-applyExpansionEdgeTracedWithBinders ::
-    GenNodeId ->
-    Expansion ->
-    TyNode ->
-    NodeId ->
-    [NodeId] ->
-    PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-applyExpansionEdgeTracedWithBinders gid expansion expNode bodyRoot boundVars =
-    case expansion of
-        ExpInstantiate args ->
-            instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
-        _ ->
-            applyExpansionEdgeTraced gid expansion expNode
-
-instantiateEdgeTraceFromKnownBinders ::
-    TyNode ->
-    NodeId ->
-    [NodeId] ->
-    [NodeId] ->
-    PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
-instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
-    | null boundVars =
-        if null args
-            then pure (bodyRoot, emptyTrace)
-            else throwError $ InstantiateOnNonForall (tnId expNode)
-    | length boundVars == length args =
-        instantiateWithArgs args
-    | length boundVars == 1 && length args > 1 =
-        case args of
-            [] -> throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
-            (arg0 : rest) -> do
-                mapM_ (unifyAcyclic arg0) rest
-                instantiateWithArgs [arg0]
-    | otherwise =
-        throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
+applyExpansionEdgeTracedAtTargetFromKnownBinders
+    :: GenNodeId
+    -> NodeId
+    -> Expansion
+    -> TyNode
+    -> NodeId
+    -> Maybe (NodeId, [NodeId])
+    -> PresolutionM p
+        ( NodeId
+        , (CopyMap, InteriorSet, FrontierSet)
+        , RawExpansionConstruction
+        )
+applyExpansionEdgeTracedAtTargetFromKnownBinders gid targetNode expansion expNode bodyRoot knownBinders0 = do
+    ( resultRoot
+      , traceResult
+      , constructionResult
+      , mbDestinationRoot
+      , _knownBinders
+      ) <-
+        applyRecipe
+            expansion
+            expNode
+            bodyRoot
+            Nothing
+            knownBinders0
+    finalRoot <-
+        case mbDestinationRoot of
+            Just destinationRoot ->
+                pure (destinationOwnedRootNode destinationRoot)
+            Nothing -> do
+                _ <- bindExpansionRootLikeTarget resultRoot targetNode
+                pure resultRoot
+    pure (finalRoot, traceResult, constructionResult)
   where
-    binderMetaAt :: NodeId -> NodeId -> PresolutionM p NodeId
-    binderMetaAt _arg _bv =
-        createFreshVar
-
-    instantiateWithArgs args0 = do
-        metas <- zipWithM binderMetaAt args0 boundVars
-        let binderMetas = zip boundVars metas
-            binderArgs = zip boundVars args0
-        (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
-        (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
-        pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-
-copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
-copyBinderBounds binderMetas binderArgs = do
-    (c0, canonical) <- getConstraintAndCanonical
-    copyBinderBoundsWithContext Nothing c0 canonical binderMetas binderArgs
-
-copyBinderBoundsWithSnapshot
-    :: PresolutionBindingSnapshot p
-    -> [(NodeId, NodeId)]
-    -> [(NodeId, NodeId)]
-    -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
-copyBinderBoundsWithSnapshot snapshot binderMetas binderArgs =
-    copyBinderBoundsWithContext
-        (Just snapshot)
-        (pbsConstraint snapshot)
-        (pbsCanonical snapshot)
-        binderMetas
-        binderArgs
-
-copyBinderBoundsWithContext
-    :: Maybe (PresolutionBindingSnapshot p)
-    -> Constraint p
-    -> (NodeId -> NodeId)
-    -> [(NodeId, NodeId)]
-    -> [(NodeId, NodeId)]
-    -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
-copyBinderBoundsWithContext mbSnapshot0 c0 canonical binderMetas binderArgs = do
-    let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]
-        binderMetaCanonicalMap =
-            IntMap.fromListWith
-                (\existing _ -> existing)
-                [ (getNodeId (canonical bv), meta)
-                | (bv, meta) <- binderMetas
-                ]
-        lookupBinderMetaForBound bnd =
-            case IntMap.lookup (getNodeId bnd) binderMetaMap of
-                Just meta -> Just meta
-                Nothing -> IntMap.lookup (getNodeId (canonical bnd)) binderMetaCanonicalMap
-        binderArgMap = IntMap.fromList [(getNodeId bv, arg) | (bv, arg) <- binderArgs]
-    let binderBounds =
-            [ (bv, meta, VarStore.lookupVarBound c0 (canonical bv))
-            | (bv, meta) <- binderMetas
-            ]
-    let needsCopy =
-            any
-                ( \(_, _, mbBound) ->
-                    case mbBound of
-                        Just bnd -> maybe True (const False) (lookupBinderMetaForBound bnd)
-                        Nothing -> False
-                )
-                binderBounds
-    mbSnapshot <-
-        if needsCopy
-            then case mbSnapshot0 of
-                Just snapshot -> pure (Just snapshot)
-                Nothing -> Just <$> getBindingSnapshot
-            else pure Nothing
-    (traceResult, _copiedBounds) <-
-        foldM
-            (copyBinderBoundWith mbSnapshot lookupBinderMetaForBound binderArgMap binderMetas)
-            (emptyTrace, IntMap.empty)
-            binderBounds
-    pure traceResult
-
-copyBinderBoundWith
-    :: Maybe (PresolutionBindingSnapshot p)
-    -> (NodeId -> Maybe NodeId)
-    -> IntMap.IntMap NodeId
-    -> [(NodeId, NodeId)]
-    -> ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
-    -> (NodeId, NodeId, Maybe NodeId)
-    -> PresolutionM p ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
-copyBinderBoundWith mbSnapshot lookupBinderMetaForBound binderArgMap binderMetas (traceAcc, copiedBounds) (bv, meta, mbBound) =
-    case mbBound of
-        Nothing -> pure (traceAcc, copiedBounds)
-        Just bnd ->
-            case lookupBinderMetaForBound bnd of
-                Just bndMeta -> do
-                    setInstantiatedBound bv meta bndMeta
-                    pure (traceAcc, copiedBounds)
-                Nothing ->
-                    case mbSnapshot of
-                        Nothing -> pure (traceAcc, copiedBounds)
-                        Just snapshot -> do
-                            let bndKey = getNodeId (pbsCanonical snapshot bnd)
-                            case IntMap.lookup bndKey copiedBounds of
-                                Just bndCopy -> do
-                                    setInstantiatedBound bv meta bndCopy
-                                    pure (traceAcc, copiedBounds)
-                                Nothing -> do
-                                    (bndCopy, cmapB, intB, frontierB) <-
-                                        instantiateSchemeWithTraceSnapshot snapshot bnd binderMetas
-                                    setInstantiatedBound bv meta bndCopy
-                                    pure
-                                        ( unionTrace traceAcc (cmapB, intB, frontierB)
-                                        , IntMap.insert bndKey bndCopy copiedBounds
+    applyRecipe recipe node currentRoot mbDestinationRoot knownBinders =
+        case recipe of
+            ExpIdentity ->
+                pure
+                    ( currentRoot
+                    , emptyTrace
+                    , emptyRawExpansionConstruction
+                    , mbDestinationRoot
+                    , knownBinders
+                    )
+            ExpForall specs -> do
+                -- A forall introduction is still an expansion: when no
+                -- preceding recipe step has constructed a destination-owned
+                -- graph, copy the source projection before wrapping it.  In
+                -- particular, reusing and rebinding the target forall's
+                -- existing body would steal shared source structure and can
+                -- make the fresh wrapper a child of itself.
+                (bodyAtDestination, copyTrace, copyConstruction) <-
+                    case mbDestinationRoot of
+                        Just destinationRoot ->
+                            pure
+                                ( destinationRoot
+                                , emptyTrace
+                                , emptyRawExpansionConstruction
+                                )
+                        Nothing ->
+                            copyAtDestination currentRoot [] []
+                (outer, forallTrace) <-
+                    wrapForallTraced (NE.toList specs) bodyAtDestination
+                pure
+                    ( destinationOwnedRootNode outer
+                    , unionTrace copyTrace forallTrace
+                    , copyConstruction
+                    , Just outer
+                    , Nothing
+                    )
+            ExpCompose steps ->
+                foldM
+                    (\(root, traceAcc, constructionAcc, owned, known) step -> do
+                        rootNode <- getCanonicalNode root
+                        (root', trace', construction', owned', known') <-
+                            applyRecipe step rootNode root owned known
+                        constructionAcc' <-
+                            either
+                                ( \err ->
+                                    throwError
+                                        ( InternalError
+                                            ( "conflicting construction evidence in "
+                                                ++ "composed edge expansion: "
+                                                ++ err
+                                            )
                                         )
-  where
-    setInstantiatedBound bv0 meta0 bound = do
-        setVarBound meta0 (Just bound)
-        case IntMap.lookup (getNodeId bv0) binderArgMap of
-            Just arg -> setVarBound arg (Just bound)
-            Nothing -> pure ()
+                                )
+                                pure
+                                ( combineRawExpansionConstructions
+                                    constructionAcc
+                                    construction'
+                                )
+                        pure
+                            ( root'
+                            , unionTrace traceAcc trace'
+                            , constructionAcc'
+                            , owned'
+                            , known'
+                            )
+                    )
+                    ( currentRoot
+                    , emptyTrace
+                    , emptyRawExpansionConstruction
+                    , mbDestinationRoot
+                    , knownBinders
+                    )
+                    (NE.toList steps)
+            ExpInstantiate args -> do
+                let sourceBody =
+                        case node of
+                            TyExp {tnBody = body} -> body
+                            _ -> tnId node
+                (instantiateRoot, instantiateBinders) <-
+                    case knownBinders of
+                        Just known -> pure known
+                        Nothing -> instantiationBindersM gid sourceBody
+                if null instantiateBinders
+                    then
+                        if null args
+                            then do
+                                ( destinationRoot
+                                  , copyTrace
+                                  , copyConstruction
+                                  ) <-
+                                    case mbDestinationRoot of
+                                        Just owned ->
+                                            pure
+                                                ( owned
+                                                , emptyTrace
+                                                , emptyRawExpansionConstruction
+                                                )
+                                        Nothing -> copyAtDestination instantiateRoot [] []
+                                pure
+                                    ( destinationOwnedRootNode destinationRoot
+                                    , copyTrace
+                                    , copyConstruction
+                                    , Just destinationRoot
+                                    , Nothing
+                                    )
+                            else throwError (InstantiateOnNonForall sourceBody)
+                    else do
+                        argsForBinders <- normalizeInstantiationArgs instantiateBinders args
+                        binderMetas <-
+                            mapM
+                                (\binder -> do
+                                    meta <- createFreshVar
+                                    pure (binder, meta)
+                                )
+                                instantiateBinders
+                        let binderArgs = zip instantiateBinders argsForBinders
+                        ( destinationRoot
+                          , copyTrace
+                          , copyConstruction
+                          ) <-
+                            copyAtDestination
+                                instantiateRoot
+                                binderMetas
+                                binderArgs
+                        pure
+                            ( destinationOwnedRootNode destinationRoot
+                            , copyTrace
+                            , copyConstruction
+                            , Just destinationRoot
+                            , Nothing
+                            )
+
+    copyAtDestination sourceRoot binderMetas binderArgs = do
+        destinationOwner <- expansionDestinationOwner targetNode
+        snapshot <- getBindingSnapshot
+        ( (copiedRoot, bodyCopyMap, bodyInterior, bodyFrontier)
+          , (boundCopyMap, boundInterior, boundFrontier)
+          , construction
+          ) <-
+            instantiateExpansionWithTraceAtTargetSnapshot
+                snapshot
+                gid
+                targetNode
+                sourceRoot
+                binderMetas
+                binderArgs
+        destinationRoot <-
+            requireDestinationOwnedRoot destinationOwner copiedRoot
+        pure
+            ( destinationRoot
+            , ( bodyCopyMap <> boundCopyMap
+              , IntSet.union bodyInterior boundInterior
+              , IntSet.union bodyFrontier boundFrontier
+              )
+            , construction
+            )
+
+    -- This is the same destination rule used by the copy constructor: a
+    -- non-root target contributes its current parent, while a binding-root
+    -- target is owned by the unique root gen node.  The value is computed from
+    -- the target, independently of the copied root, so minting
+    -- DestinationOwnedRoot cannot bless an arbitrary source owner.
+    expansionDestinationOwner target = do
+        mbParentInfo <- lookupBindParentM (typeRef target)
+        case mbParentInfo of
+            Just (parentRef, _flag) -> pure parentRef
+            Nothing -> do
+                (constraint, _canonical) <- getConstraintAndCanonical
+                rootGen <-
+                    foldM
+                        (\acc gidInt ->
+                            case acc of
+                                Just _ -> pure acc
+                                Nothing -> do
+                                    let gref = genRef (GenNodeId gidInt)
+                                    mbParent <- lookupBindParentM gref
+                                    pure $
+                                        case mbParent of
+                                            Nothing -> Just gref
+                                            Just _ -> Nothing
+                        )
+                        Nothing
+                        (IntMap.keys (getGenNodeMap (cGenNodes constraint)))
+                case rootGen of
+                    Just owner@(GenRef _) -> pure owner
+                    Just (TypeRef _) ->
+                        throwError
+                            (InternalError "expected gen root binder for expansion target")
+                    Nothing ->
+                        throwError
+                            (InternalError "missing gen root binder for expansion target")
+
+    normalizeInstantiationArgs binders args
+        | length binders == length args = pure args
+        | length binders == 1
+        , arg0 : rest <- args = do
+            mapM_ (unifyAcyclic arg0) rest
+            pure [arg0]
+        | otherwise =
+            throwError $
+                ArityMismatch
+                    "applyExpansionEdgeTracedAtTargetWithBinders"
+                    (length binders)
+                    (length args)
+
+    wrapForallTraced [] destinationRoot = pure (destinationRoot, emptyTrace)
+    wrapForallTraced (spec : specs) destinationRoot = do
+        newRoot <- introduceForallFromSpec spec destinationRoot
+        (outer, (cmap, interior, frontier)) <- wrapForallTraced specs newRoot
+        pure
+            ( outer
+            , ( cmap
+              , IntSet.insert
+                    (getNodeId (destinationOwnedRootNode newRoot))
+                    interior
+              , frontier
+              )
+            )
 
 -- Copying helpers (`instantiateScheme*` + binding fixes) live in
 -- `MLF.Constraint.Presolution.Copy`.

@@ -111,7 +111,9 @@ Compute minimal expansions for each `TyExp` node and record per-edge witnesses.
 - `ForallIntro` — ∀-introduction handling
 
 ### Tests
-- `test/PresolutionSpec.hs` — presolution correctness
+- `test/Presolution/ExpansionSpec.hs` — expansion selection and materialization
+- `test/Presolution/WitnessSpec.hs` — witness construction and normalization
+- `test/Presolution/EnforcementSpec.hs` — finalized presolution validation
 
 ---
 

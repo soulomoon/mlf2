@@ -1,14 +1,16 @@
 {-# LANGUAGE DataKinds #-}
 module AcyclicitySpec (spec) where
 
+import IdentityTestSupport
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import MLF.API (Expr (..), Lit (..), SrcTy (..))
+import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..), CycleError (..), buildDependencyGraph, collectReachableNodes, findCycle, isAcyclic, topologicalSort)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Presolution
 import MLF.Pipeline (ConstraintResult (..), inferConstraintGraph)
-import SpecUtil (breakCyclesAndCheckAcyclicityRaw, checkAcyclicityRaw, emptyConstraint, nodeMapElems, nodeMapFromList, nodeMapSingleton)
+import SpecUtil (breakCyclesAndCheckAcyclicityRaw, checkAcyclicityRaw, emptyConstraint, lookupNodeMaybe, nodeMapElems, nodeMapFromList, nodeMapSingleton)
 import Test.Hspec
 
 spec :: Spec
@@ -154,7 +156,7 @@ spec = do
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}), -- α
                   (1, TyVar {tnId = NodeId 1, tnBound = Nothing}), -- β
                   (2, TyVar {tnId = NodeId 2, tnBound = Nothing}), -- γ
-                  (3, TyBase (NodeId 3) (BaseTy "Int")),
+                  (3, TestTyBase (NodeId 3) (BaseTy "Int")),
                   (4, TyArrow (NodeId 4) (NodeId 1) (NodeId 3)) -- β → Int
                 ]
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 4) -- α ≤ (β → Int)
@@ -180,7 +182,7 @@ spec = do
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}), -- α
                   (1, TyVar {tnId = NodeId 1, tnBound = Nothing}), -- β
                   (2, TyVar {tnId = NodeId 2, tnBound = Nothing}), -- γ
-                  (3, TyBase (NodeId 3) (BaseTy "Int")),
+                  (3, TestTyBase (NodeId 3) (BaseTy "Int")),
                   (4, TyArrow (NodeId 4) (NodeId 3) (NodeId 1)) -- Int → β
                 ]
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 4) -- α ≤ (Int → β)
@@ -196,8 +198,8 @@ spec = do
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}), -- α
                   (1, TyVar {tnId = NodeId 1, tnBound = Nothing}), -- β
                   (2, TyVar {tnId = NodeId 2, tnBound = Nothing}), -- γ
-                  (3, TyBase (NodeId 3) (BaseTy "Int")),
-                  (4, TyBase (NodeId 4) (BaseTy "Bool")),
+                  (3, TestTyBase (NodeId 3) (BaseTy "Int")),
+                  (4, TestTyBase (NodeId 4) (BaseTy "Bool")),
                   (5, TyArrow (NodeId 5) (NodeId 1) (NodeId 3)), -- β → Int
                   (6, TyArrow (NodeId 6) (NodeId 5) (NodeId 4)) -- (β → Int) → Bool
                 ]
@@ -262,7 +264,7 @@ spec = do
               nodeMapFromList
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}), -- α
                   (1, TyVar {tnId = NodeId 1, tnBound = Nothing}), -- β
-                  (2, TyBase (NodeId 2) (BaseTy "Int")),
+                  (2, TestTyBase (NodeId 2) (BaseTy "Int")),
                   (3, TyArrow (NodeId 3) (NodeId 1) (NodeId 2)), -- β → Int
                   (4, TyArrow (NodeId 4) (NodeId 0) (NodeId 2)) -- α → Int
                 ]
@@ -280,15 +282,39 @@ spec = do
                 ]
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0)
-            constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
+            owner = GenNodeId 0
+            constraint =
+              emptyConstraint
+                { cNodes = nodes
+                , cGenNodes = insertGen owner (GenNode owner [NodeId 0, NodeId 1]) (cGenNodes emptyConstraint)
+                , cBindParents =
+                    IntMap.fromList
+                      [ (nodeRefKey (typeRef (NodeId 0)), (genRef owner, BindFlex))
+                      , (nodeRefKey (typeRef (NodeId 1)), (genRef owner, BindRigid))
+                      ]
+                , cInstEdges = [e1, e2]
+                }
         case breakCyclesAndCheckAcyclicityRaw constraint of
           Left err -> expectationFailure ("Expected rewritten acyclic graph, got " ++ show err)
           Right (rewritten, result) -> do
             checkAcyclicityRaw rewritten `shouldSatisfy` isRight
             arSortedEdges result `shouldSatisfy` (not . null)
+            let rewrittenNodes = cNodes rewritten
+                endpoints =
+                  concatMap
+                    (\edge -> [instLeft edge, instRight edge])
+                    (cInstEdges rewritten)
+            mapM_
+              (\endpoint -> lookupNodeMaybe rewrittenNodes endpoint `shouldSatisfy` isJust)
+              endpoints
+            case [edge | edge <- cInstEdges rewritten, instEdgeId edge == EdgeId 0] of
+              [rewrittenPivot] ->
+                Binding.lookupBindParent rewritten (typeRef (instRight rewrittenPivot))
+                  `shouldBe` Just (genRef owner, BindRigid)
+              other -> expectationFailure ("Expected one rewritten pivot edge, saw " ++ show other)
 
       it "introduces TyMu nodes when it breaks a cycle" $ do
-        let intNode = TyBase (NodeId 2) (BaseTy "Int")
+        let intNode = TestTyBase (NodeId 2) (BaseTy "Int")
             nodes =
               nodeMapFromList
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
@@ -556,7 +582,7 @@ spec = do
 
     describe "collectReachableNodes" $ do
       it "returns singleton for base type" $ do
-        let nodes = nodeMapSingleton 0 (TyBase (NodeId 0) (BaseTy "Int"))
+        let nodes = nodeMapSingleton 0 (TestTyBase (NodeId 0) (BaseTy "Int"))
         collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0]
 
       it "returns singleton for isolated variable" $ do
@@ -567,8 +593,8 @@ spec = do
         let nodes =
               nodeMapFromList
                 [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2)),
-                  (1, TyBase (NodeId 1) (BaseTy "Int")),
-                  (2, TyBase (NodeId 2) (BaseTy "Bool"))
+                  (1, TestTyBase (NodeId 1) (BaseTy "Int")),
+                  (2, TestTyBase (NodeId 2) (BaseTy "Bool"))
                 ]
         collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2]
 
@@ -577,8 +603,8 @@ spec = do
               nodeMapFromList
                 [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 2)), -- outer
                   (1, TyArrow (NodeId 1) (NodeId 3) (NodeId 4)), -- inner in domain
-                  (2, TyBase (NodeId 2) (BaseTy "Bool")),
-                  (3, TyBase (NodeId 3) (BaseTy "Int")),
+                  (2, TestTyBase (NodeId 2) (BaseTy "Bool")),
+                  (3, TestTyBase (NodeId 3) (BaseTy "Int")),
                   (4, TyVar {tnId = NodeId 4, tnBound = Nothing})
                 ]
         collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2, 3, 4]
@@ -588,7 +614,7 @@ spec = do
               nodeMapFromList
                 [ (0, TyForall (NodeId 0) (NodeId 1)), -- ∀g.body
                   (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3)), -- body = Int → β
-                  (2, TyBase (NodeId 2) (BaseTy "Int")),
+                  (2, TestTyBase (NodeId 2) (BaseTy "Int")),
                   (3, TyVar {tnId = NodeId 3, tnBound = Nothing}) -- β
                 ]
         collectReachableNodes nodes (NodeId 0) `shouldBe` intSetFromList [0, 1, 2, 3]

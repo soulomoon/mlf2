@@ -25,6 +25,7 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types.Graph hiding (insertNode)
+import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.ConstraintGen.State
     ( BuildState(..)
     , ConstraintM
@@ -71,11 +72,12 @@ allocVar = do
     -- Binding parent will be set by the caller
     pure nid
 
-allocBase :: BaseTy -> ConstraintM NodeId
-allocBase base = do
+allocBase :: SymbolIdentity -> BaseTy -> ConstraintM NodeId
+allocBase identity base = do
     nid <- freshNodeId
     insertNode TyBase
         { tnId = nid
+        , tnBaseIdentity = identity
         , tnBase = base
         }
     -- Binding parent will be set by the caller (or this is a root)
@@ -98,11 +100,12 @@ allocArrow domNode codNode = do
     pure nid
 
 -- | Allocate a TyCon node (type constructor application C σ₁ … σₙ).
-allocCon :: BaseTy -> NonEmpty NodeId -> ConstraintM NodeId
-allocCon con argNodes = do
+allocCon :: SymbolIdentity -> BaseTy -> NonEmpty NodeId -> ConstraintM NodeId
+allocCon identity con argNodes = do
     nid <- freshNodeId
     insertNode TyCon
         { tnId = nid
+        , tnConIdentity = identity
         , tnCon = con
         , tnArgs = argNodes
         }

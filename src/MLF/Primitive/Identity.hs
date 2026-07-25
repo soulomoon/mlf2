@@ -3,12 +3,15 @@ module MLF.Primitive.Identity
     builtinTypeNames,
     builtinTypeIdentity,
     builtinTypeHeadIdentity,
+    primitivePreludeTypeHeadIdentity,
+    primitiveTypeHeadIdentity,
     builtinValueIdentity,
     isBuiltinTypeName,
     normalizeBuiltinTypeReference,
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.List (stripPrefix)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -57,6 +60,27 @@ builtinTypeHeadIdentity name
   | otherwise = Nothing
   where
     canonical = canonicalBuiltinTypeReference name
+
+-- | Nominal Prelude types that occur in compiler primitive signatures are
+-- part of the primitive ABI.  Their identities are fixed even though their
+-- declarations and constructors continue to live in @Prelude@.
+primitivePreludeTypeHeadIdentity :: String -> Maybe SymbolIdentity
+primitivePreludeTypeHeadIdentity name =
+  (\unique -> symbolIdentityFromParts unique SymbolType "Prelude" name Nothing)
+    <$> Map.lookup name primitivePreludeTypeUniqueIdentities
+
+primitiveTypeHeadIdentity :: String -> Maybe SymbolIdentity
+primitiveTypeHeadIdentity name =
+  builtinTypeHeadIdentity name <|> primitivePreludeTypeHeadIdentity name
+
+primitivePreludeTypeUniqueIdentities :: Map String UniqueIdentity
+primitivePreludeTypeUniqueIdentities =
+  Map.fromList
+    [ ("List", UniqueIdentity (-110000)),
+      ("Nat", UniqueIdentity (-110001)),
+      ("Option", UniqueIdentity (-110002)),
+      ("Unit", UniqueIdentity (-110003))
+    ]
 
 builtinTypeUniqueIdentity :: String -> UniqueIdentity
 builtinTypeUniqueIdentity name =

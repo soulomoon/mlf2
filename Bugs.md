@@ -8,6 +8,110 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-25-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-25
+- Resolved: 2026-07-25
+- Summary: Runtime parity tests flattened the builtin Prelude package into a
+  plain program and then checked interpreter and backend lanes separately, so
+  each selected matrix row repeatedly rebuilt the entire Prelude.
+- Expected vs actual:
+  - Expected: one canonical checked Prelude artifact and one checked program
+    artifact feed interpreter, LLVM, and native assertions for a matrix row.
+  - Actual before fix: `withPrelude` discarded located-package provenance,
+    repackaging produced a source path of `Nothing`, cache eligibility depended
+    on `<mlfp-prelude>`, and the two generated parity tests each spent about
+    21 seconds checking Prelude. The focused pair took 42.66 seconds while the
+    higher-kinded method lowering itself took less than one millisecond.
+- Fix:
+  - Preserved the canonical builtin Prelude as an owner-minted package source
+    unit through checking and runtime tests instead of flattening it.
+  - Made cache eligibility depend on hidden builtin provenance plus the exact
+    import-free Prelude structure, with an owner-private identity supply and
+    client-supply advancement past the cached identities.
+  - Merged interpreter, LLVM, and native parity assertions around one checked
+    row artifact and made backend preparation lazy.
+  - Injected the builtin Prelude only for modules that actually import it.
+- Regression tests:
+  - `test/ProgramPackageSpec.hs` (`shares one builtin Prelude build across interpreter and backend consumers`)
+  - `test/ProgramPackageSpec.hs` (`does not inject or check Prelude for a higher-kinded runtime artifact without a Prelude import`)
+  - `test/Parity/ProgramMatrix.hs` (`runs higher-kinded class method over a parameterized data constructor`)
+  - `test/Parity/ProgramMatrix.hs` (`rejects bare overloaded method use`)
+  - The final focused measurements are 1.89 seconds for the shared-cache
+    regression, 0.95 seconds for the merged higher-kinded runtime row, and
+    0.16 seconds for bare-overloaded-method rejection.
+
+### BUG-2026-07-12-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-12
+- Resolved: 2026-07-21
+- Summary: eMLF annotated self-application and ordinary polymorphic aliases
+  depended on late structural recovery instead of preserving the paper's
+  rigid-domain/flexible-codomain coercion and unbounded-binder invariants during
+  construction.
+- Expected vs actual:
+  - Expected: `lambda (g : forall a. a -> a). g g` and its polymorphic `apply`
+    presentation infer `forall (beta >= sigma-id). sigma-id -> beta`; ordinary
+    `lambda x. x` generalizes directly to `forall a. a -> a`; emitted xMLF
+    typechecks without repair passes.
+  - Actual before fix: coercion result ownership, Eq-Var aliases, and replay
+    binder provenance could drift; generalization could import a structural
+    base bound into a live-unbounded binder; bound graph identities were
+    mistaken for unresolved free variables; recursive identity applications
+    could retain incompatible closed mu identities until Phase 7.
+- Fix:
+  - Constructed annotation domain/codomain copies with explicit rigid/flexible
+    ownership in `MLF.Frontend.ConstraintGen.Translate`, representing Eq-Var
+    directly rather than with a synthetic `forall (beta >= sigma). beta`
+    wrapper.
+  - Canonicalized Eq-Var aliases during presolution and restricted Phi replay
+    binder reconstruction to producer-owned identity domains.
+  - Prevented live-unbounded binders from inheriting base bounds in
+    `MLF.Constraint.Presolution.Plan.ReifyPlan`.
+  - Made internal-variable detection scope-aware and constructed recursive
+    identity-lambda applications from the checked argument type in
+    `MLF.Elab.Elaborate.Algebra`.
+  - Preserved compiler-exact result-bound authority by binder identity while
+    descending through the annotated lambda, and staged packet-only result
+    abstractions after exact validation instead of reconstructing them from a
+    partially elaborated term.
+  - Constructed a unique source-binder to graph-binder quotient while preparing
+    each exact packet, published Gamma bounds back in the source identity
+    domain, and specialized only the identity-matching leading forall slot.
+  - Required a graph-node/representative sidecar route plus the independent
+    exact endpoint before a bounded packet binder can adopt a source identity;
+    missing, ambiguous, or wrong-identity routes now fail closed.
+  - Preserved every binder declared by the exact operated endpoint through
+    both completed construction-packet projections, while continuing to reopen
+    already-projected inherited binders that the endpoint uses free.
+  - Kept an exact source bound for packet-body-only placement matches and
+    installed copied forall spines only when whole-packet or graph-local
+    closure authority requires them.
+  - Composed transparent-let completed Gamma bindings by identity before
+    freshening, including bound-dependency closure and fail-closed route/bound
+    conflict checks.
+- Regression tests:
+  - `test/ElaborationSpec.hs` (`keeps annotated self-application typable through apply`)
+  - `test/ElaborationSpec.hs` (`infers the principal flexible result for annotated self-application`)
+  - `test/ProgramSpec.hs` (`preserves the paper's annotated g g construction in checked IR`)
+  - `test/Parity/ProgramMatrix.hs` (`paper: runs annotated self-application at its explicit bound`)
+  - `test/GeneralizeSpec.hs` (`construction source-binder projection`)
+  - `test/GeneralizeSpec.hs` (`compiler-exact Gamma-bound publication`)
+  - `test/GeneralizeSpec.hs` (`retains an already-projected declaration owned by an exact endpoint`)
+  - `test/GeneralizeSpec.hs` (`keeps an already-projected binder declared by its exact endpoint`)
+  - `test/GeneralizeSpec.hs` (`keeps a consumer bound whose exact source argument is already published`)
+  - `test/GeneralizeSpec.hs` (`retains an exact source bound when only the packet body matches`)
+  - `test/GeneralizeSpec.hs` (`constructs a checked source projection from exact sidecar and construction routes`)
+  - `test/ElaborationSpec.hs` (`BUG-004-V4: annotated parameter + inner let preserves Int result`)
+  - `test/ElaborationSpec.hs` (`delegates a graph node only when the displaced binder has exact source authority`)
+  - `test/Phi/AlignmentSpec.hs` (`pipeline succeeds for nested-let when forall binders carry graph identities`)
+  - `cabal build all && cabal test`
+- Thesis impact:
+  - Restores the annotation-as-coercion construction in thesis sections 12.3.2
+    and 15.3.8 and the Eq-Var canonical equivalence from section 8.2.
+
 ### BUG-2026-03-16-001
 - Status: Resolved
 - Priority: High
@@ -32,7 +136,7 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
   - Added `{- Note [InstBot replay-bound match] -}` documentation block in `src/MLF/Elab/Inst.hs`.
 - Regression tests:
   - `test/ElaborationSpec.hs` (`BUG-2026-03-16-001 regression: InstBot accepts replay-resolved bound match`)
-  - `test/ElaborationSpec.hs` (`URI-R2-C1 witness replay stays alpha-equivalent to the locked no-fallback shape`)
+  - `test/ElaborationSpec.hs` (`URI-R2-C1 empty witness replay is identity and retains the direct source forall`)
   - `cabal build all && cabal test`
 
 ### BUG-2026-03-09-001
@@ -1070,40 +1174,49 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 - Priority: High
 - Discovered: 2026-02-06
 - Resolved: 2026-03-06
-- Summary: Historical polymorphic-factory success sentinel. Strict Ω fail-fast on unresolved non-root `OpWeaken` remains correct, but this specific path was carrying a stale producer-side non-root weaken after the `c1` scheme had already become monomorphic; upstream witness normalization now prunes that dead residue so the path elaborates successfully again.
+- Summary: Historical polymorphic-factory success sentinel. Strict Ω fail-fast on unresolved non-root `OpWeaken` remains correct, but this ordinary ML path must construct `c1 : forall a. a -> Int` and elaborate successfully without a scheme-recovery fallback.
 - Reproducer (surface expression):
   - `ELet "make" (ELam "x" (ELam "y" (EVar "x"))) (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4)))) (EApp (EVar "c1") (ELit (LBool True))))`
 - Final expected/actual:
   - Expected: checked and unchecked pipelines elaborate to `Int`, while Ω still fails fast on genuine unresolved non-root `OpWeaken`.
-  - Actual (2026-03-06 verification): `WitnessNorm` prunes the stale non-root `OpWeaken` before Phi for `let-c1-apply-bool`; checked and unchecked pipelines return `Int`; the under-lambda `BUG-002-V4` strict non-root weaken is still preserved; full gate is green (`956 examples, 0 failures`).
+  - Actual (2026-07-15 verification): the root-domain plan selects the live structural root, generalization constructs `c1 : forall a. a -> Int`, and the canonical xMLF term re-typechecks at `Int`. Remaining adjacent `OpGraft`/`OpWeaken` pairs are valid Ω witnesses, not stale residue. The under-lambda `BUG-002-V4` strict non-root weaken remains the negative fail-fast case.
 - Regression tests:
-  - `/Users/ares/.config/superpowers/worktrees/mlf4/row6-replay-contract-recovery-20260306/test/PipelineSpec.hs`
+  - `test/PipelineSpec.hs`
     - `make let-c1-apply-bool path typechecks to Int`
-    - `make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi`
+    - `BUG-2026-02-06-002 polymorphic factory regression`
+    - `Phase 3 atomic wrapping equivalence gates`
     - `BUG-002-V4 keeps the strict non-root OpWeaken when c1 stays abstract under lambda`
-  - `/Users/ares/.config/superpowers/worktrees/mlf4/row6-replay-contract-recovery-20260306/test/ThesisFixDirectionSpec.hs`
+  - `test/ThesisFixDirectionSpec.hs`
     - `BUG-2026-02-06-002 thesis target`
-  - Validation gate: `cabal build all && cabal test` (`956 examples, 0 failures`)
+  - Validation gate: `cabal build all && cabal test`
 - Thesis impact:
-  - Keeps thesis-shaped Ω strictness intact. The fix is producer-side dead-op elimination after witness finalization, not a consumer fallback or no-op weaken rule.
+  - Keeps thesis-shaped Ω strictness intact while restoring MLF's conservative extension of ML and let-generalization contract. Success comes from the planned live root and its carried graph domain, not a consumer fallback or no-op weaken rule.
 
 ### BUG-2026-02-08-004
-- Status: Resolved (superseded by strict OpWeaken fail-fast baseline)
+- Status: Resolved (thesis-green success restored by exact construction)
 - Priority: High
 - Discovered: 2026-02-08
 - Resolved: 2026-02-11
 - Superseded: 2026-02-26
-- Summary: Historical nested-let annotated-lambda success sentinel; under strict non-root `OpWeaken` replay, this path is now expected to fail fast when binder replay cannot be resolved.
+- Restored: 2026-07-21
+- Summary: Nested-let annotated-lambda application is an ordinary valid ML
+  program. Its temporary strict-failure baseline exposed missing construction
+  provenance rather than a semantic rejection required by the paper.
 - Reproducer (surface expression):
   - `ELet "id" (ELam "x" (EVar "x")) (ELet "use" (ELamAnn "f" (STArrow (STBase "Int") (STBase "Int")) (EApp (EVar "f") (ELit (LInt 0)))) (EApp (EVar "use") (EVar "id")))`
 - Final expected/actual:
-  - Expected (2026-02-26 strict policy): unresolved non-root `OpWeaken` fails fast in Phase 6 (no permissive identity fallback).
-  - Actual (2026-02-26 verification): checked and unchecked variants fail fast with `PhiTranslatabilityError` rooted at unresolved `OpWeaken`; full gate is green (`829 examples, 0 failures`) after regression rebaseline.
+  - Expected: the exact identity/Gamma construction supplies the replay
+    authority needed by `use id`; the independently checked xMLF term has type
+    `Int`. Genuine unresolved non-root `OpWeaken` remains a hard failure.
+  - Actual: the canonical pipeline constructs and independently typechecks an
+    `Int` result without a permissive replay fallback.
 - Regression tests:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "BUG-2026-02-08-004"'` (`1 example, 0 failures`)
   - Validation gate: `cabal build all && cabal test` (`829 examples, 0 failures`)
 - Thesis impact:
-  - Makes unresolved replay explicitly non-translatable instead of silently preserving historical permissive behavior.
+  - Restores the conservative-extension/ordinary-ML behavior through explicit
+    construction provenance while retaining fail-fast rejection for genuinely
+    unresolved replay.
 
 ### BUG-2026-02-11-001
 - Status: Resolved

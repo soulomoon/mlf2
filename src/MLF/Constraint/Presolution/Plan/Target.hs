@@ -12,6 +12,7 @@ module MLF.Constraint.Presolution.Plan.Target (
     -- * Type root plan (re-exported from TypeRootPlan submodule)
     TypeRootPlanInput(..),
     TypeRootPlan(..),
+    ReifyRootSource(..),
     buildTypeRootPlan
 ) where
 
@@ -33,5 +34,6 @@ import MLF.Constraint.Presolution.Plan.Target.GammaPlan (
 import MLF.Constraint.Presolution.Plan.Target.TypeRootPlan (
     TypeRootPlanInput(..),
     TypeRootPlan(..),
+    ReifyRootSource(..),
     buildTypeRootPlan
   )

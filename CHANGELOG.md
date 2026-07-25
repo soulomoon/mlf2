@@ -3,11 +3,111 @@
 ## Unreleased
 
 ### Changed
+- Aligned Raise permission with the paper's restricted/locked distinction:
+  own-rigid nodes remain raisable, while flex-bound nodes below a strict rigid
+  ancestor are rejected. Presolution now checks bound scope against a
+  prospective union-find merge and publishes the repaired binding tree and UF
+  link atomically only after that check succeeds. Edge-local witness filtering
+  derives the same classification from the canonical binding snapshot, so a
+  restricted node nested beneath another rigid edge still records its Raise.
+- Kept the builtin Prelude as its own canonical package source unit through
+  check/run tests and removed the flattening Prelude adapters that discarded
+  that boundary. Builtin status is now hidden package-source provenance minted
+  by the Prelude owner, rather than an inference from the `<mlfp-prelude>` path.
+  Cache eligibility also requires the canonical import-free Prelude shape. The
+  one-slot checked Prelude cache validates a spelling-sensitive structural
+  snapshot of the complete resolved module. It builds with an owner-private
+  descending identity supply, stores the checked module together with its
+  generated-identity extrema, and advances each client's generator past the
+  cached artifact. Different clients can therefore reuse one checked Prelude
+  artifact without reusing it for changed Prelude syntax or source spelling.
+  Runtime parity now asserts interpreter, LLVM, and native behavior from one
+  checked artifact per row, and test artifacts inject the builtin Prelude only
+  when a parsed module actually imports it. Checked-module identity inventory
+  is owned once by the program types layer and shared by the cache and backend.
+  Backend preparation is lazy, so interpreter-only assertions do not force
+  LLVM/native work. The former duplicate higher-kinded runtime lanes now run as
+  one checked parity artifact, reducing the focused 42.66-second pair to under
+  one second in the final focused validation.
+- Made eMLF annotations construct the thesis coercion shape directly: rigid
+  annotated domains and independently flexible codomains are direct graphic
+  copies, with no synthetic `forall (beta >= sigma). beta` Eq-Var wrapper.
+  Source quantifier structure remains explicit through constraint generation,
+  Phi replay, and xMLF elaboration. Annotated `g g`, including the same term
+  passed through polymorphic `apply`, now has the principal
+  `forall (beta >= sigma-id). sigma-id -> beta` type and a checked xMLF term.
+  Packet preparation records a unique source-to-construction binder quotient;
+  Gamma publication applies its inverse in the outward source domain, while
+  consumer specialization selects the matching binder by identity rather than
+  quantifier position. A bounded graph binder may adopt an exact source
+  identity only when the sidecar route and independent exact endpoint both
+  prove that choice. An already-source-aligned binder remains quantified when
+  that endpoint declares it, but is reopened when the endpoint merely inherits
+  it free. Packet placement likewise distinguishes a whole-packet match from a
+  body-only match, which retains the exact source bound instead of replacing it
+  with a copied forall packet. Application construction restores an opened
+  topology to its complete source `forall` only when the checked scheme, its
+  opened body, and every participating binder identity agree; wrong-identity
+  and vacuous-forall cases fail closed. The paper term is therefore constructed
+  directly as `g[σ-id] g`, while unrelated generalized graph presentations are
+  not promoted to value-level polymorphism.
+  Lambda-body projection now freezes the exact source-to-construction renames
+  in one certificate and applies them to the term, checked source type, and
+  lookup environment together. Structured operated endpoints retain their free
+  graph identities as dependencies instead of routing them to the flexible
+  consumer, preventing an intended bound such as `Box f -> Bool` from becoming
+  the illegal self-bound `Box c -> Bool`. A displaced local graph declaration
+  is accepted only with independent exact source-sidecar authority, and replay
+  route conflicts require the active construction alias.
+  Compiler-generated class evidence parameters now use a separate exact core
+  lambda, so their metadata-owned types do not acquire the source coercion's
+  flexible codomain.
+- Made local class evidence construction specialize the complete
+  evidence-method head before applying method-local evidence. Nullary uses
+  take their specialization from the expected result; non-nullary calls infer
+  it once from the call arguments and use the same identity substitution for
+  both the head annotation and its local evidence constraints. Enclosing class
+  arguments remain rigid, and duplicate matching evidence is rejected.
+  Scheme-aware term closure now completes only the missing suffix of a
+  partially constructed `forall` spine and accepts an uncheckable intermediate
+  spine only when it still contains a real deferred reference; deferred case
+  handlers no longer add a second post-hoc abstraction layer.
+- Made root/application closure correct by construction. A typed root plan now
+  distinguishes exact prepared generalization from an ordinary
+  requirement-owned construction scope; ordinary final schemes are rebuilt
+  from the authoritative elaborated result. Application environments use the
+  validated argument endpoint, deferred case calls require their binding
+  identity at creation, and exact-result preparation uses a closed sum instead
+  of independently optional owner/stage fields. Transparent let construction
+  composes a completed RHS Gamma by binder identity before freshening, retains
+  its bound-dependency closure, and rejects ambiguous routes or conflicting
+  concrete bounds before term construction. `OpRaise` classification reads
+  the frozen source binding parent, so a finalized replay representative cannot
+  erase or invent the source operation by changing rigidity.
+  The nested-let annotated-lambda application sentinel is consequently
+  thesis-green at `Int` again; genuine unresolved non-root weakenings remain
+  rejected.
+- Aligned term-level `InstApp` reduction with type-level bounded
+  instantiation. An argument alpha-equivalent to an explicit non-bottom bound
+  eliminates that binder directly, preserving the real bound-matching
+  construction used by recursive Nat applications instead of expanding it
+  through an invalid `InstBot` step.
+- Removed the redundant `PresolutionSpec` umbrella execution from the test
+  harness. Its nine constituent specs remain wired and individually timed, but
+  are no longer run a second time under an aggregate wrapper.
+- Made generalization preserve live-unbounded binders without importing
+  unrelated base bounds, classify only free graph references as unresolved,
+  and construct recursive identity-lambda applications with the authoritative
+  argument type. Reification roots now carry their live/base graph domain to
+  the no-fallback reifier, so overlapping `NodeId` keys cannot select the wrong
+  graph. This removes dependence on late identity-wrapper recovery, keeps
+  nested polymorphic aliases at `forall a. a -> a`, and constructs partial
+  constant applications directly at `forall a. a -> Int`.
 - Made checked and backend publication capabilities construction-only:
-  `CheckedProgram` is abstract and validates identity payloads once at
-  `mkCheckedProgram`, production consumers no longer repeat that traversal,
-  production backend IR can be unwrapped only by its lowering owner, and
-  metadata-light backend inputs use an explicit fixture capability.
+  `CheckedProgram` is abstract and its constituent types require identity
+  payloads before publication; production backend IR constructors likewise
+  require identity, and a validated backend program can be unwrapped only by
+  its lowering owner.
 - Threaded the module identity generator through derived-instance synthesis,
   instance skeletons, resolved binding lowering, and constraint generation.
   Deferred and lexical references are now allocated before their IR is built;
@@ -24,10 +124,39 @@
   rewriting, deferred obligations, type-binder substitution, structural
   recovery, specialization, provenance, and semantic caches now use carried
   identities instead of string projections.
-- Added mention-sensitive checked-`TypeView` completeness validation and applied
-  it at checked artifact publication and backend conversion, including binding,
-  data, constructor, class, instance, export, evidence, and deferred-obligation
-  payloads.
+- Collapsed the remaining derivable identity state: elaboration now owns one
+  identity-keyed binding table and derives its type-check view;
+  `PreparedExternalBindings` pairs each external binding with its checked scheme
+  before deriving constraint/elaboration/type-check views; `TypeBinderSubst` is
+  a direct identity-to-`TypeView` map; backend
+  validation and LLVM cache keys store identities without one-constructor
+  wrappers or ignored name inputs. `LoweredBindingIdentity` is now a closed
+  top-level/constructor/method sum.
+- Made scoped source-type conversion identity-first: it now constructs
+  `TypeView` before applying import-visible display names. Shared source
+  compatibility compares type heads by identity and binders by alpha
+  equivalence, with legacy source-shaped checks receiving explicit head aliases
+  from the originating views instead of recovering identity from stable-looking
+  strings.
+- Replaced projection-and-recovery paths with direct identity-bearing
+  traversals from `TypeView` to resolved source types, elaborated types, backend
+  types, structural matches, and free-binder sets; error paths preserve the
+  offending carried identity instead of canonicalizing it by name.
+- Replaced `TypeView`'s parallel display/identity construction projections with
+  one source shape plus an explicit identity-alias smart constructor. Stable
+  identity spellings are derived from payloads, alias enrichment cannot rewrite
+  payloads, and substitution, specialization, and subtree projection no longer
+  filter identities by projected strings.
+- Combined generated LLVM function parameters, wrapper parameters,
+  closure-entry parameters, and returned-partial captures into complete
+  identity/name/type records at allocation time, eliminating parallel-list
+  truncation and post-construction identity attachment.
+- Made structural recursive match evidence carry its selected data identity
+  (and constructor identity for focused matches), with equality independent of
+  diagnostic names.
+- Made `TypeView` construction require a semantic payload for every mentioned
+  head and binder, removing the need for a checked-publication or backend
+  identity-completeness repair traversal.
 - Replaced the resolved surface identity wrapper with direct `TermReference`
   payloads on variable, lambda, let, and annotated-lambda nodes; normalization,
   desugaring, constraint generation, and finalization now consume the same
@@ -36,34 +165,30 @@
   identity source types plus head/binder alias indexes are derived projections,
   projected constructor context remains in explicit tree nodes, and
   substitution/specialization selects same-spelled binders by identity.
-- Unified reference matching under one `ReferenceMode`, removed the one-instance
-  backend callable classifier typeclass, merged checked `TypeView`/`ElabType`
-  validation into one recursive traversal, and deleted trivial backend
-  conversion forwarding helpers.
-- Made `validateBackendProgram` identity-complete by default, moved permissive
-  fixture validation behind `BackendIRTestSupport`, and collapsed backend
+- Removed name-or-identity matching modes, removed the one-instance backend
+  callable classifier typeclass, moved matching/free-variable/type conversion
+  onto carried `TypeView` payloads, and deleted trivial backend conversion
+  forwarding helpers.
+- Made every constructible backend IR reference identity-bearing, kept test
+  fixture identity generation in `BackendIRTestSupport`, and collapsed backend
   validation globals, data, constructors, locals, and closure classifications
-  from parallel name/identity collections onto tagged reference keys.
+  from parallel name/identity collections onto direct identity keys.
 - Removed the bidirectional `TypeView` pseudo-record and its partial builder;
   production code now uses explicit tree transforms, while test construction is
   isolated in `TypeViewTestSupport`.
 - Made backend conversion publish `ProductionBackendProgram` and restricted LLVM
-  entrypoints to that identity-complete capability; raw metadata-light Backend
-  IR remains available only through explicit fixture/boundary adapters.
+  entrypoints to that validated capability; there is no constructible
+  metadata-light Backend IR alternative.
 - Assigned structural constructor-result binders owner-derived identities and
   made structural source-type recovery require one unambiguous data owner.
-- Centralized resolved `TypeView` identity hydration and evidence-method identity
-  checks, and removed the owner-unavailable structural recovery entrypoint; the
-  remaining string-only recovery path is explicitly metadata-light.
-- Accepted Resolved xMLF Identity IR as the checked-term target: final checked
-  executable references should carry resolved variable identity and
-  constructor references instead of bare strings, while checked module metadata
-  remains the declaration owner during migration.
-- Started the checked-binding side of that migration: lowered bindings now carry
-  `LoweredBindingIdentity`, finalized bindings carry `ResolvedVar`, constructor
-  bindings carry `ConstructorId ConstructorRef`, and backend constructor-binding
-  synthesis consumes that checked identity instead of reclassifying by binding
-  name.
+- Centralized resolved `TypeView` construction and evidence-method identity
+  checks, and removed owner-unavailable or spelling-selected structural
+  recovery entrypoints.
+- Completed the Resolved xMLF Identity IR boundary: lowered bindings carry
+  `LoweredBindingIdentity`, finalized bindings and all executable occurrences
+  carry `ResolvedVar`, constructor occurrences carry
+  `ConstructorId ConstructorRef`, and checked module metadata remains the
+  declaration owner. Backend conversion consumes those identities directly.
 - Centralized `IdDetails` reference-name, local, constructor, and local-rename
   projections in `MLF.Types.Identity`, with `ResolvedVar` and binding
   constructor-reference helpers delegating through that identity layer.
@@ -146,8 +271,8 @@
 - Checked lambda and let binders now store `LocalId` binder identity alongside
   the resolved local occurrences that refer to it.
 - Moved backend-emission, runtime reachability, and backend-conversion
-  free-variable scans onto resolved `XmlfTerm` identity first, falling back to
-  string names only for legacy bare terms.
+  free-variable scans onto resolved `XmlfTerm` identities; the checked path has
+  no legacy bare-string fallback.
 - Moved backend-emission Prelude data retention to use resolved data and
   constructor identity indexes instead of reconstructing data identities from
   constructor owner strings.
@@ -170,8 +295,8 @@
 - Moved pipeline authoritative-annotation selection to recognize resolved local
   identity-lambda terms before falling back to runtime-name equality.
 - Moved backend constructor-head recognition onto resolved `ConstructorId`
-  identities when present, leaving string-name recognition only as the legacy
-  compatibility path for unresolved terms.
+  identities. Remaining structural shape handling is pinned to checked
+  metadata identity and cannot select a constructor by spelling.
 - Moved backend structural-constructor current-module result matching to compare
   data identity after lookup instead of reading data module/name strings from
   the candidate metadata, and made backend data-meta scope/context recovery and
@@ -279,8 +404,9 @@
   identity data index, keeping source/display aliases out of that semantic scan.
 - Moved resolved import scope, visible instance, and imported class lookups
   through module-interface identities instead of module-name keys.
-- Made the checked Prelude cache return the advanced identity generator and
-  reuse only for matching resolved identities and generator inputs.
+- Replaced the client-generator-keyed checked Prelude cache with the canonical
+  owner-private cache described above; cache hits advance the client's identity
+  generator past the cached artifact's generated-identity extrema.
 - Included module identities in module-interface summary metadata so dependency
   cache validation sees semantic module identity changes.
 - Tightened module-interface validation to reject semantic identities that lack
@@ -467,11 +593,10 @@
 - Moved the opaque unchecked checked-binding fallback to annotate resolved term
   identities before storing the fallback term, so opaque primitive paths do not
   reintroduce bare executable variable references.
-- Extended metadata-derived constructor-binding finalization from the initial
-  nullary subset to constructor bindings without constructor foralls, including
-  monomorphic field/multi-constructor ADTs and non-nullary data-parameterized
-  constructors. Parameterized nullary constructors remain on the surface
-  pipeline until their type-instantiated roll shape is proven.
+- Extended metadata-derived constructor-binding finalization to every
+  constructor shape, including constructor-local foralls, parameterized
+  nullary constructors, monomorphic fields, and non-nullary parameterized ADTs.
+  Constructor bindings no longer re-enter the surface pipeline.
 - Temporarily disabled `MLF.Program parser parity` from the default `mlf2-test`
   driver while parser parity remains too slow for the current migration loop.
 - Added exact two- and three-source-definition helper entrypoints to the
@@ -1096,7 +1221,7 @@
   `Functor -> Applicative -> Monad` hierarchy with coherent `IO` instances for
   `map`, `pure`, `ap`, and `bind`.
 - Broadened native LLVM run-result coverage accounting so every shared
-  `ProgramSpec`-to-LLVM runtime-success row is explicitly classified as
+  runtime-success row is explicitly classified as
   native-run checked or native-unsupported with a diagnostic, with advanced
   typeclass, first-class polymorphism, and higher-order rows required to stay on
   the native-run path when renderable. Added backend native pipeline
@@ -1104,9 +1229,9 @@
   result comparison.
 - Added LLVM backend support for checked-source partial applications by
   packaging supplied arguments into explicit closure values. Top-level and local
-  function partials now participate in the shared ProgramSpec-to-LLVM parity
-  matrix with assembly, object-code, and native execution coverage where the
-  local LLVM toolchain is available.
+  function partials now participate in the merged interpreter/LLVM/native
+  parity matrix with assembly, object-code, and native execution coverage where
+  the local LLVM toolchain is available.
 - Added checked-program closure conversion for ordinary monomorphic escaping
   `.mlfp` lambdas and closure-valued let aliases. Backend conversion now emits
   explicit `BackendClosure` / `BackendClosureCall` IR for returned local

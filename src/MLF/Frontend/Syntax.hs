@@ -20,9 +20,10 @@ module MLF.Frontend.Syntax
     typeParamNames,
     typeParamIsFirstOrder,
     ExprStage (..),
+    TermReferencePhase (..),
     TermReference (..),
     termReferenceName,
-    termReferenceDetails,
+    resolvedTermReferenceDetails,
     Expr
       ( EVarNode,
         ELit,
@@ -31,7 +32,10 @@ module MLF.Frontend.Syntax
         ELetNode,
         ELamAnnNode,
         EAnn,
+        EExactAnn,
+        EExactLamNode,
         ECoerceConst,
+        EExactCoerceConst,
         EVar,
         EResolvedVar,
         ELam,
@@ -44,9 +48,15 @@ module MLF.Frontend.Syntax
     SurfaceExprF (..),
 
     -- * Staged expression synonyms
+    SurfaceExprOf,
+    NormSurfaceExprOf,
+    NormCoreExprOf,
     SurfaceExpr,
+    ResolvedSurfaceExpr,
     NormSurfaceExpr,
+    ResolvedNormSurfaceExpr,
     NormCoreExpr,
+    ResolvedNormCoreExpr,
 
     -- * Raw source types (parser output)
     SrcTy (..),
@@ -135,8 +145,8 @@ Annotated lets are represented using `ELet` with an annotated RHS:
 Implementation boundary
 -----------------------
 Source spellings remain `String`s, but every variable or binder node owns a
-`TermReference`: parser input is explicitly metadata-light and resolved program
-lowering carries `IdDetails`. Binding levels and polymorphism decisions still
+`TermReference`: parser input is explicitly phase-indexed as raw, while resolved
+program lowering carries `IdDetails`. Binding levels and polymorphism decisions still
 live in the constraint representation (`MLF.Constraint.Types`) produced by
 Phase 1.
 -}
@@ -418,22 +428,26 @@ instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
 
 data ExprStage = Surface | Core
 
-data TermReference
-  = MetadataLightTermReference VarName
-  | ResolvedTermReference IdDetails VarName
-  deriving (Eq, Show)
+data TermReferencePhase
+  = RawTermReferences
+  | ResolvedTermReferences
 
-termReferenceName :: TermReference -> VarName
+data TermReference (r :: TermReferencePhase) where
+  RawTermReference :: VarName -> TermReference 'RawTermReferences
+  ResolvedTermReference :: IdDetails -> VarName -> TermReference 'ResolvedTermReferences
+
+deriving instance Eq (TermReference r)
+
+deriving instance Show (TermReference r)
+
+termReferenceName :: TermReference r -> VarName
 termReferenceName reference =
   case reference of
-    MetadataLightTermReference name -> name
+    RawTermReference name -> name
     ResolvedTermReference _ name -> name
 
-termReferenceDetails :: TermReference -> Maybe IdDetails
-termReferenceDetails reference =
-  case reference of
-    MetadataLightTermReference {} -> Nothing
-    ResolvedTermReference details _ -> Just details
+resolvedTermReferenceDetails :: TermReference 'ResolvedTermReferences -> IdDetails
+resolvedTermReferenceDetails (ResolvedTermReference details _) = details
 
 -- | eMLF expressions, indexed by stage and annotation type.
 --
@@ -442,9 +456,13 @@ termReferenceDetails reference =
 -- (alias bounds inlined). See Note [Staged frontend types].
 --
 -- The surface stage matches the thesis' expression grammar and includes
--- annotations (`EAnn`, `ELamAnn`). The core stage is annotation-free and
--- represents term annotations via explicit coercion constants (`ECoerceConst`)
--- plus ordinary application/let (thesis §12.3.2).
+-- annotations (`EAnn`, `ELamAnn`). The core stage represents source term
+-- annotations via explicit coercion constants (`ECoerceConst`) plus ordinary
+-- application/let (thesis §12.3.2). Compiler-owned annotations use the exact
+-- `EExactAnn`/`EExactCoerceConst` path instead: their producer type is already
+-- authoritative and Phase 6 must not infer construction from κσ's flexible
+-- codomain. Compiler-owned evidence parameters use `EExactLamNode` for the
+-- same reason.
 --
 -- Surface annotations are desugared to coercion constants before constraint
 -- generation. For example:
@@ -453,74 +471,99 @@ termReferenceDetails reference =
 --
 -- The resulting let-binding has a coercion term as its RHS, which is treated
 -- as an ordinary let-binding (not a special "declared scheme" form).
-data Expr (s :: ExprStage) ty where
-  EVarNode :: TermReference -> Expr s ty
-  ELit :: Lit -> Expr s ty
+data Expr (r :: TermReferencePhase) (s :: ExprStage) ty where
+  EVarNode :: TermReference r -> Expr r s ty
+  ELit :: Lit -> Expr r s ty
   ELamNode ::
-    TermReference ->
-    Expr s ty ->
+    TermReference r ->
+    Expr r s ty ->
     -- | λx. e (inferred parameter type)
-    Expr s ty
-  EApp :: Expr s ty -> Expr s ty -> Expr s ty
+    Expr r s ty
+  EApp :: Expr r s ty -> Expr r s ty -> Expr r s ty
   ELetNode ::
-    TermReference ->
-    Expr s ty ->
-    Expr s ty ->
+    TermReference r ->
+    Expr r s ty ->
+    Expr r s ty ->
     -- | let x = e₁ in e₂ (inferred scheme)
-    Expr s ty
+    Expr r s ty
   -- Surface-only.
-  ELamAnnNode :: TermReference -> ty -> Expr 'Surface ty -> Expr 'Surface ty
-  EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
-  -- Core-only.
+  ELamAnnNode :: TermReference r -> ty -> Expr r 'Surface ty -> Expr r 'Surface ty
+  EAnn :: Expr r 'Surface ty -> ty -> Expr r 'Surface ty
+  EExactAnn ::
+    Expr r 'Surface ty ->
+    ty ->
+    ResolvedSrcType ->
+    -- | Compiler-owned exact annotation. Source syntax never constructs this
+    -- node: `EAnn` retains the thesis' κσ semantics.  The resolved producer
+    -- type carries binder and head identities as construction authority.
+    Expr r 'Surface ty
+  -- Compiler-only, preserved from surface construction into core.
+  EExactLamNode ::
+    TermReference r ->
+    ty ->
+    Expr r s ty ->
+    -- | Compiler-owned lambda parameter with an authoritative exact type.
+    -- Source annotations never construct this node: they elaborate through
+    -- 'ECoerceConst' according to the thesis' κσ translation.
+    Expr r s ty
   ECoerceConst ::
     ty ->
     -- | cτ (coercion constant)
-    Expr 'Core ty
+    Expr r 'Core ty
+  EExactCoerceConst ::
+    ty ->
+    ResolvedSrcType ->
+    -- | Compiler-owned exact type authority after surface desugaring.
+    Expr r 'Core ty
 
-pattern EVar :: VarName -> Expr s ty
-pattern EVar name = EVarNode (MetadataLightTermReference name)
+pattern EVar :: VarName -> Expr 'RawTermReferences s ty
+pattern EVar name = EVarNode (RawTermReference name)
 
-pattern EResolvedVar :: IdDetails -> VarName -> Expr s ty
+pattern EResolvedVar :: IdDetails -> VarName -> Expr 'ResolvedTermReferences s ty
 pattern EResolvedVar details name = EVarNode (ResolvedTermReference details name)
 
-pattern ELam :: VarName -> Expr s ty -> Expr s ty
-pattern ELam name body = ELamNode (MetadataLightTermReference name) body
+pattern ELam :: VarName -> Expr 'RawTermReferences s ty -> Expr 'RawTermReferences s ty
+pattern ELam name body = ELamNode (RawTermReference name) body
 
-pattern EResolvedLam :: IdDetails -> VarName -> Expr s ty -> Expr s ty
+pattern EResolvedLam :: IdDetails -> VarName -> Expr 'ResolvedTermReferences s ty -> Expr 'ResolvedTermReferences s ty
 pattern EResolvedLam details name body = ELamNode (ResolvedTermReference details name) body
 
-pattern ELet :: VarName -> Expr s ty -> Expr s ty -> Expr s ty
-pattern ELet name rhs body = ELetNode (MetadataLightTermReference name) rhs body
+pattern ELet :: VarName -> Expr 'RawTermReferences s ty -> Expr 'RawTermReferences s ty -> Expr 'RawTermReferences s ty
+pattern ELet name rhs body = ELetNode (RawTermReference name) rhs body
 
-pattern EResolvedLet :: IdDetails -> VarName -> Expr s ty -> Expr s ty -> Expr s ty
+pattern EResolvedLet :: IdDetails -> VarName -> Expr 'ResolvedTermReferences s ty -> Expr 'ResolvedTermReferences s ty -> Expr 'ResolvedTermReferences s ty
 pattern EResolvedLet details name rhs body = ELetNode (ResolvedTermReference details name) rhs body
 
-pattern ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
-pattern ELamAnn name ty body = ELamAnnNode (MetadataLightTermReference name) ty body
+pattern ELamAnn :: VarName -> ty -> Expr 'RawTermReferences 'Surface ty -> Expr 'RawTermReferences 'Surface ty
+pattern ELamAnn name ty body = ELamAnnNode (RawTermReference name) ty body
 
-pattern EResolvedLamAnn :: IdDetails -> VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
+pattern EResolvedLamAnn :: IdDetails -> VarName -> ty -> Expr 'ResolvedTermReferences 'Surface ty -> Expr 'ResolvedTermReferences 'Surface ty
 pattern EResolvedLamAnn details name ty body = ELamAnnNode (ResolvedTermReference details name) ty body
 
-{-# COMPLETE EVar, EResolvedVar, ELit, ELam, EResolvedLam, EApp, ELet, EResolvedLet, ECoerceConst #-}
-{-# COMPLETE EVar, EResolvedVar, ELit, ELam, EResolvedLam, EApp, ELet, EResolvedLet, ELamAnn, EResolvedLamAnn, EAnn #-}
+{-# COMPLETE EVar, ELit, ELam, EApp, ELet, EExactLamNode, ECoerceConst, EExactCoerceConst #-}
+{-# COMPLETE EResolvedVar, ELit, EResolvedLam, EApp, EResolvedLet, EExactLamNode, ECoerceConst, EExactCoerceConst #-}
+{-# COMPLETE EVar, ELit, ELam, EApp, ELet, ELamAnn, EExactAnn, EExactLamNode, EAnn #-}
+{-# COMPLETE EResolvedVar, ELit, EResolvedLam, EApp, EResolvedLet, EResolvedLamAnn, EExactAnn, EExactLamNode, EAnn #-}
 
-deriving instance (Eq ty) => Eq (Expr s ty)
+deriving instance (Eq ty) => Eq (Expr r s ty)
 
-deriving instance (Show ty) => Show (Expr s ty)
+deriving instance (Show ty) => Show (Expr r s ty)
 
-data SurfaceExprF ty a
-  = EVarSurfaceF TermReference
+data SurfaceExprF r ty a
+  = EVarSurfaceF (TermReference r)
   | ELitSurfaceF Lit
-  | ELamSurfaceF TermReference a
+  | ELamSurfaceF (TermReference r) a
   | EAppSurfaceF a a
-  | ELetSurfaceF TermReference a a
-  | ELamAnnSurfaceF TermReference ty a
+  | ELetSurfaceF (TermReference r) a a
+  | ELamAnnSurfaceF (TermReference r) ty a
+  | EExactLamSurfaceF (TermReference r) ty a
   | EAnnSurfaceF a ty
+  | EExactAnnSurfaceF a ty ResolvedSrcType
   deriving (Functor, Foldable, Traversable)
 
-type instance Base (Expr 'Surface ty) = SurfaceExprF ty
+type instance Base (Expr r 'Surface ty) = SurfaceExprF r ty
 
-instance Recursive (Expr 'Surface ty) where
+instance Recursive (Expr r 'Surface ty) where
   project expr = case expr of
     EVarNode ref -> EVarSurfaceF ref
     ELit l -> ELitSurfaceF l
@@ -528,9 +571,11 @@ instance Recursive (Expr 'Surface ty) where
     EApp fun arg -> EAppSurfaceF fun arg
     ELetNode ref rhs body -> ELetSurfaceF ref rhs body
     ELamAnnNode ref ty body -> ELamAnnSurfaceF ref ty body
+    EExactLamNode ref ty body -> EExactLamSurfaceF ref ty body
     EAnn expr0 ty -> EAnnSurfaceF expr0 ty
+    EExactAnn expr0 ty exactTy -> EExactAnnSurfaceF expr0 ty exactTy
 
-instance Corecursive (Expr 'Surface ty) where
+instance Corecursive (Expr r 'Surface ty) where
   embed expr = case expr of
     EVarSurfaceF ref -> EVarNode ref
     ELitSurfaceF l -> ELit l
@@ -538,16 +583,30 @@ instance Corecursive (Expr 'Surface ty) where
     EAppSurfaceF fun arg -> EApp fun arg
     ELetSurfaceF ref rhs body -> ELetNode ref rhs body
     ELamAnnSurfaceF ref ty body -> ELamAnnNode ref ty body
+    EExactLamSurfaceF ref ty body -> EExactLamNode ref ty body
     EAnnSurfaceF expr0 ty -> EAnn expr0 ty
+    EExactAnnSurfaceF expr0 ty exactTy -> EExactAnn expr0 ty exactTy
+
+type SurfaceExprOf r = Expr r 'Surface SrcType
+
+type NormSurfaceExprOf r = Expr r 'Surface NormSrcType
+
+type NormCoreExprOf r = Expr r 'Core NormSrcType
 
 -- | Raw surface expression accepted by the parser.
-type SurfaceExpr = Expr 'Surface SrcType
+type SurfaceExpr = SurfaceExprOf 'RawTermReferences
+
+type ResolvedSurfaceExpr = SurfaceExprOf 'ResolvedTermReferences
 
 -- | Normalized surface expression (alias bounds inlined).
-type NormSurfaceExpr = Expr 'Surface NormSrcType
+type NormSurfaceExpr = NormSurfaceExprOf 'RawTermReferences
+
+type ResolvedNormSurfaceExpr = NormSurfaceExprOf 'ResolvedTermReferences
 
 -- | Normalized core expression (alias bounds inlined).
-type NormCoreExpr = Expr 'Core NormSrcType
+type NormCoreExpr = NormCoreExprOf 'RawTermReferences
+
+type ResolvedNormCoreExpr = NormCoreExprOf 'ResolvedTermReferences
 
 -- | Optional wrapper for attaching binding-site metadata to a surface expression.
 --

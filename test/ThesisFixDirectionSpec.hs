@@ -12,24 +12,21 @@ bugExpr =
         (ELet "c1" (EApp (EVar "make") (ELit (LInt (-4))))
             (EApp (EVar "c1") (ELit (LBool True))))
 
-assertPipelineStrictFailure
+assertPipelineInt
     :: String
     -> (PolySyms -> NormSurfaceExpr -> Either PipelineError (XmlfTerm, ElabType))
     -> Expectation
-assertPipelineStrictFailure label runPipeline =
+assertPipelineInt label runPipeline =
     case runPipeline Set.empty bugExpr of
         Left err ->
-            renderPipelineError err `shouldSatisfy`
-                (\msg ->
-                    "PhiTranslatabilityError" `elem` words msg
-                        || "TCInstantiationError" `elem` words msg
-                        || "TCLetTypeMismatch" `elem` words msg
-                        || "TCExpectedArrow" `elem` words msg
-                )
-        Right (_term, ty) ->
-            expectationFailure (label ++ " unexpectedly succeeded with type: " ++ show ty)
+            expectationFailure (label ++ " unexpectedly failed: " ++ renderPipelineError err)
+        Right (term, ty) -> do
+            case ty of
+                TBaseWithIdentity _ (BaseTy "Int") -> pure ()
+                other -> expectationFailure (label ++ " returned non-Int type: " ++ show other)
+            typeCheck term `shouldBe` Right ty
 
 spec :: Spec
 spec = describe "BUG-2026-02-06-002 thesis target" $ do
-    it "canonical pipeline now fails fast without fallback recovery" $
-        assertPipelineStrictFailure "canonical pipeline" runPipelineElab
+    it "canonical pipeline typechecks to Int without fallback recovery" $
+        assertPipelineInt "canonical pipeline" runPipelineElab

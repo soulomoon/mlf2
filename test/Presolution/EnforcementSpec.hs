@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Presolution.EnforcementSpec (spec) where
 
+import IdentityTestSupport
 import Data.List (isInfixOf)
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
@@ -12,7 +13,9 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     )
 import MLF.Constraint.Presolution.TestSupport
-    ( translatableWeakenedNodes
+    ( TranslatabilityIssue(..)
+    , structuralInterior
+    , translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
@@ -34,7 +37,7 @@ spec = describe "Translatable presolution enforcement" $ do
             nodes = nodeMapFromList
                 [ (getNodeId root, TyArrow root mid mid)
                 , (getNodeId mid, TyArrow mid base base)
-                , (getNodeId base, TyBase base (BaseTy "int"))
+                , (getNodeId base, TestTyBase base (BaseTy "int"))
                 ]
             bindParents =
                 bindParentsFromPairs
@@ -50,7 +53,8 @@ spec = describe "Translatable presolution enforcement" $ do
                 let bp = cBindParents (prConstraint pr)
                 IntMap.lookup (nodeRefKey (typeRef mid)) bp `shouldBe` Just (typeRef root, BindRigid)
                 IntMap.lookup (nodeRefKey (typeRef base)) bp `shouldBe` Just (typeRef mid, BindRigid)
-                translatableWeakenedNodes (prConstraint pr) `shouldSatisfy` IntSet.member (getNodeId base)
+                translatableWeakenedNodes (prConstraint pr)
+                    `shouldSatisfy` either (const False) (IntSet.member (getNodeId base))
 
     it "O15-TRANS-SCHEME-ROOT-RIGID O15-TRANS-ARROW-RIGID O15-TRANS-NON-INTERIOR-RIGID: rigidifies scheme roots, arrow nodes, and non-interior nodes" $ do
         let rootGen = GenNodeId 0
@@ -90,6 +94,57 @@ spec = describe "Translatable presolution enforcement" $ do
                 IntMap.lookup (nodeRefKey (typeRef arrow)) bp `shouldBe` Just (typeRef schemeRoot, BindRigid)
                 IntMap.lookup (nodeRefKey (typeRef outside)) bp `shouldBe` Just (genRef rootGen, BindRigid)
 
+    it "Def 9.2.16: structural interior intersects scheme reachability with the gen binding interior" $ do
+        let outerGen = GenNodeId 0
+            schemeGen = GenNodeId 1
+            schemeRoot = NodeId 0
+            owned = NodeId 1
+            boundAbove = NodeId 2
+            scheme = GenNode schemeGen [schemeRoot]
+            nodes =
+                nodeMapFromList
+                    [ (getNodeId schemeRoot, TyArrow schemeRoot owned boundAbove)
+                    , (getNodeId owned, TyVar { tnId = owned, tnBound = Nothing })
+                    , (getNodeId boundAbove, TyVar { tnId = boundAbove, tnBound = Nothing })
+                    ]
+            bindParents =
+                IntMap.fromList
+                    [ (nodeRefKey (genRef schemeGen), (genRef outerGen, BindFlex))
+                    , (nodeRefKey (typeRef schemeRoot), (genRef schemeGen, BindRigid))
+                    , (nodeRefKey (typeRef owned), (genRef schemeGen, BindFlex))
+                    , (nodeRefKey (typeRef boundAbove), (genRef outerGen, BindFlex))
+                    ]
+            constraint =
+                emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes =
+                        fromListGen
+                            [ (outerGen, GenNode outerGen [])
+                            , (schemeGen, scheme)
+                            ]
+                    }
+            acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
+
+        structuralInterior constraint scheme
+            `shouldBe` Right (IntSet.fromList [getNodeId schemeRoot, getNodeId owned])
+
+        case validateTranslatablePresolution constraint of
+            Left (NonTranslatablePresolution issues) ->
+                issues `shouldBe` [NonInteriorNodeNotRigid outerGen boundAbove]
+            other ->
+                expectationFailure
+                    ("Expected only the above-scope node to be non-interior, got: " ++ show other)
+
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
+            Left err -> expectationFailure ("computePresolution failed: " ++ show err)
+            Right pr -> do
+                let bp = cBindParents (prConstraint pr)
+                IntMap.lookup (nodeRefKey (typeRef owned)) bp
+                    `shouldBe` Just (genRef schemeGen, BindFlex)
+                IntMap.lookup (nodeRefKey (typeRef boundAbove)) bp
+                    `shouldBe` Just (genRef outerGen, BindRigid)
+
     it "O15-TRANS-NO-INERT-LOCKED: rejects constraints with inert-locked nodes" $ do
         let root = NodeId 0
             mid = NodeId 1
@@ -101,7 +156,7 @@ spec = describe "Translatable presolution enforcement" $ do
                 , (getNodeId mid, TyArrow mid n base)
                 , (getNodeId n, TyArrow n v base)
                 , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
-                , (getNodeId base, TyBase base (BaseTy "int"))
+                , (getNodeId base, TestTyBase base (BaseTy "int"))
                 ]
             bindParents =
                 bindParentsFromPairs

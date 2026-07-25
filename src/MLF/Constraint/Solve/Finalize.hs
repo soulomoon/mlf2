@@ -175,11 +175,11 @@ applyUFConstraint ufRaw c =
             TyVar { tnBound = mb } -> TyVar { tnId = nid', tnBound = fmap (frWith uf) mb }
             TyBottom {} -> TyBottom nid'
             TyArrow { tnDom = dom, tnCod = cod } -> TyArrow nid' (frWith uf dom) (frWith uf cod)
-            TyBase { tnBase = baseTy } -> TyBase nid' baseTy
+            TyBase { tnBaseIdentity = identity, tnBase = baseTy } -> TyBase nid' identity baseTy
             TyForall { tnBody = body } -> TyForall nid' (frWith uf body)
             TyExp { tnExpVar = expVar, tnBody = body } -> TyExp nid' expVar (frWith uf body)
             TyMu { tnBody = body } -> TyMu nid' (frWith uf body)
-            TyCon { tnCon = con, tnArgs = args } -> TyCon nid' con (NE.map (frWith uf) args)
+            TyCon { tnConIdentity = identity, tnCon = con, tnArgs = args } -> TyCon nid' identity con (NE.map (frWith uf) args)
             TyVarApp { tnVarHead = headNode, tnArgs = args } ->
                 TyVarApp nid' (frWith uf headNode) (NE.map (frWith uf) args)
             )
@@ -187,10 +187,11 @@ applyUFConstraint ufRaw c =
     rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
     rewriteEliminated canon nodes0 elims0 =
         IntSet.fromList
-            [ getNodeId vC
+            [ vid
             | vid <- IntSet.toList elims0
-            , let vC = canon (NodeId vid)
-            , case IntMap.lookup (getNodeId vC) nodes0 of
+            , let nid = NodeId vid
+            , canon nid == nid
+            , case IntMap.lookup vid nodes0 of
                 Just TyVar {} -> True
                 _ -> False
             ]
@@ -338,8 +339,8 @@ rewriteEliminatedBinders c0
                     TyExp nid expVar (substNode body)
                 TyMu { tnId = nid, tnBody = body } ->
                     TyMu nid (substNode body)
-                TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
-                    TyCon nid con (NE.map substNode args)
+                TyCon { tnId = nid, tnConIdentity = identity, tnCon = con, tnArgs = args } ->
+                    TyCon nid identity con (NE.map substNode args)
                 TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
                     TyVarApp nid (substNode headNode) (NE.map substNode args)
 

@@ -2,10 +2,11 @@
 
 module ProgramSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import Data.Either (isLeft, isRight)
 import Data.List (isInfixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
@@ -18,9 +19,10 @@ import MLF.API
     , renderProgramParseError
     )
 import MLF.Frontend.Program.Check (checkResolvedProgram)
+import MLF.Frontend.Program.Check.TestSupport (checkLocatedProgramPackageWithDefaultTiming)
 import qualified MLF.Frontend.Program.Checked as Checked
 import MLF.Frontend.Program.Checked.Internal (CheckedProgram (..))
-import MLF.Frontend.Program.Elaborate (ElaborateScope, constructorTypeView, elaborateScopeRuntimeTypeViews, lowerConstructorBinding, lowerExprBinding, lowerResolvedConstrainedExprBinding, lowerType, lowerTypeView, matchMethodTypeViews, matchTypeViewsAgainstIdentity, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
+import MLF.Frontend.Program.Elaborate (ElaborateScope, constructorTypeView, elaborateScopeRuntimeTypeViews, lowerConstructorBinding, lowerExprBinding, lowerResolvedConstrainedExprBinding, lowerType, lowerTypeView, lowerTypeViewWithIdentities, matchMethodTypeViews, matchTypeViewsAgainstIdentity, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Finalize
     ( finalizeBindingAllowOpaqueWithModuleContext
     , finalizeBindingLayerAllowOpaqueWithModuleContext
@@ -29,13 +31,20 @@ import MLF.Frontend.Program.Finalize
     , mkFinalizeContext
     , mkModuleFinalizeContext
     , elabTypeToRecoveredTypeView
-    , recoverSourceTypeMetadataLight
     , resolvedForallSubst
-    , sourceForallMatches
     , sourceForallMatchesInScope
     , srcTypeToElabTypeInScope
-    , stripVacuousForallsAndTypeAbs
     , typeViewToElabType
+    )
+import MLF.Frontend.Program.Finalize.TestSupport
+    ( allocateDeferredRewriteBinderRefs
+    , constructLocalOccurrencesForSchemeForTest
+    , consumeDeferredConstructorHeadInstantiationsForTest
+    , consumeDeferredMethodHeadInstantiationsForTest
+    , dropStaleTypeInstsForTest
+    , freshenDeferredMethodTypeBinders
+    , normalizeCheckedTypeRedexesForTest
+    , projectDeferredConstructorConstructionRoutesForTest
     )
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Resolve (resolveProgram)
@@ -48,14 +57,12 @@ import MLF.Frontend.Program.Types
     , DataInfo (..)
     , DeferredCaseCall (..)
     , DeferredConstructorCall (..)
-    , DeferredMethodEvidence (..)
     , DeferredMethodCall (..)
     , DeferredRef
     , deferredRefFromIdentity
     , deferredRefIdentity
     , deferredRefName
     , DeferredProgramObligation (..)
-    , EvidenceInfo (..)
     , EvidenceMethod (..)
     , IdDetails (..)
     , InstanceInfo (..)
@@ -80,10 +87,13 @@ import MLF.Frontend.Program.Types
     , resolvedModuleSyntax
     )
 import qualified MLF.Frontend.Program.Types as ProgramTypes
-import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
+import MLF.Frontend.Program.Prelude
+    ( withPreludeLocatedPackage
+    , withPreludePackage
+    )
 import qualified MLF.Frontend.Symbol as Symbol
 import MLF.Frontend.Symbol (renameSymbolDefiningName, symbolIdentityStableName)
-import MLF.Frontend.Syntax (ResolvedSrcTy (..), ResolvedTypeBinderRef, SrcBound (..), SrcType, mkSrcBound, resolvedTypeBinderIdentity, resolvedTypeBinderName, resolvedTypeBinderRefFromIdentity)
+import MLF.Frontend.Syntax (ResolvedSrcBound (..), ResolvedSrcTy (..), ResolvedTypeBinderRef, SrcBound (..), SrcType, mkSrcBound, resolvedTypeBinderIdentity, resolvedTypeBinderName, resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Frontend.Syntax.Program
 import MLF.Frontend.TypeLevel
@@ -99,11 +109,14 @@ import MLF.Frontend.TypeLevel
     , familyEquationRhs
     )
 import MLF.Pipeline
+import qualified MLF.Elab.Pipeline as ElabPipeline
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarRefsType)
 import qualified MLF.Types.Elab as Elab
 import MLF.Types.Identity
     ( LocalIdentity (..)
     , StructuralTypeBinderRole (..)
+    , freshIdentity
     , freshenLocalRef
     , identityGeneratorAfter
     , primitiveRefFromSymbol
@@ -116,7 +129,6 @@ import MLF.Types.Identity
     , typeBinderIdentityFromStructural
     , typeBinderIdentityStableName
     )
-import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
 import TypeViewTestSupport
   ( fixtureTypeView,
@@ -130,9 +142,7 @@ import TypeViewTestSupport
 import ElabTermTestSupport
     ( generatedLocalRefForName
     , generatedResolvedLocal
-    , mkTestDeferredVar
     , mkTestTyAbs
-    , testTForall
     , testTVar
     )
 import Parity.ProgramMatrix
@@ -185,7 +195,7 @@ resolvedTypeBinderRef :: UniqueIdentity -> String -> ResolvedTypeBinderRef
 resolvedTypeBinderRef identity name =
     resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name
 
-surfaceExprMentionsVar :: String -> Surface.SurfaceExpr -> Bool
+surfaceExprMentionsVar :: String -> Surface.Expr r stage ty -> Bool
 surfaceExprMentionsVar needle expr =
     case expr of
         Surface.EVarNode reference -> Surface.termReferenceName reference == needle
@@ -196,14 +206,75 @@ surfaceExprMentionsVar needle expr =
             Surface.termReferenceName reference == needle || surfaceExprMentionsVar needle rhs || surfaceExprMentionsVar needle body
         Surface.ELamAnnNode reference _ body -> Surface.termReferenceName reference == needle || surfaceExprMentionsVar needle body
         Surface.EAnn expr0 _ -> surfaceExprMentionsVar needle expr0
+        Surface.EExactAnn expr0 _ _ -> surfaceExprMentionsVar needle expr0
+        Surface.EExactLamNode reference _ body -> Surface.termReferenceName reference == needle || surfaceExprMentionsVar needle body
+        Surface.ECoerceConst {} -> False
+        Surface.EExactCoerceConst {} -> False
+
+resolvedSurfaceLocalOccurrenceNames :: Surface.ResolvedSurfaceExpr -> [String]
+resolvedSurfaceLocalOccurrenceNames expr =
+    case expr of
+        Surface.EVarNode (Surface.ResolvedTermReference (LocalId _) name) -> [name]
+        Surface.EVarNode _ -> []
+        Surface.ELit{} -> []
+        Surface.ELamNode _ body -> resolvedSurfaceLocalOccurrenceNames body
+        Surface.EApp fun arg -> resolvedSurfaceLocalOccurrenceNames fun ++ resolvedSurfaceLocalOccurrenceNames arg
+        Surface.ELetNode _ rhs body -> resolvedSurfaceLocalOccurrenceNames rhs ++ resolvedSurfaceLocalOccurrenceNames body
+        Surface.ELamAnnNode _ _ body -> resolvedSurfaceLocalOccurrenceNames body
+        Surface.EExactLamNode _ _ body -> resolvedSurfaceLocalOccurrenceNames body
+        Surface.EAnn expr0 _ -> resolvedSurfaceLocalOccurrenceNames expr0
+        Surface.EExactAnn expr0 _ _ -> resolvedSurfaceLocalOccurrenceNames expr0
+
+resolvedSurfaceGeneratedLocalIdentities :: Surface.ResolvedSurfaceExpr -> [UniqueIdentity]
+resolvedSurfaceGeneratedLocalIdentities expr =
+    case expr of
+        Surface.EVarNode reference -> generatedIdentityFor reference
+        Surface.ELit{} -> []
+        Surface.ELamNode reference body ->
+            generatedIdentityFor reference
+                ++ resolvedSurfaceGeneratedLocalIdentities body
+        Surface.EApp fun arg ->
+            resolvedSurfaceGeneratedLocalIdentities fun
+                ++ resolvedSurfaceGeneratedLocalIdentities arg
+        Surface.ELetNode reference rhs body ->
+            generatedIdentityFor reference
+                ++ resolvedSurfaceGeneratedLocalIdentities rhs
+                ++ resolvedSurfaceGeneratedLocalIdentities body
+        Surface.ELamAnnNode reference _ body ->
+            generatedIdentityFor reference
+                ++ resolvedSurfaceGeneratedLocalIdentities body
+        Surface.EExactLamNode reference _ body ->
+            generatedIdentityFor reference
+                ++ resolvedSurfaceGeneratedLocalIdentities body
+        Surface.EAnn expr0 _ -> resolvedSurfaceGeneratedLocalIdentities expr0
+        Surface.EExactAnn expr0 _ _ -> resolvedSurfaceGeneratedLocalIdentities expr0
+  where
+    generatedIdentityFor reference =
+        case Surface.resolvedTermReferenceDetails reference of
+            LocalId ref ->
+                case localRefIdentity ref of
+                    GeneratedGraphLocalId identity _ -> [identity]
+                    GeneratedLocalId identity -> [identity]
+                    _ -> []
+            _ -> []
+
+unknownSurfaceVar :: String -> Surface.ResolvedSurfaceExpr
+unknownSurfaceVar name =
+    Surface.EResolvedVar
+        (DeferredId (deferredRefFromIdentity (UniqueIdentity (negate (980000 + stableNameKey name))) name))
+        name
+  where
+    stableNameKey = foldl (\acc char -> (acc * 131 + fromEnum char) `mod` 100000) 0
 
 loweredBindingIdentityFromDetails :: String -> IdDetails -> ProgramTypes.LoweredBindingIdentity
 loweredBindingIdentityFromDetails _runtimeName details =
-    ProgramTypes.loweredBindingIdentityFromResolvedVar
-        ResolvedVar
-            { resolvedVarType = Elab.TBottom
-            , resolvedVarDetails = details
-            }
+    case details of
+        TopLevelId identity -> ProgramTypes.loweredBindingIdentityFromTopLevel identity
+        _ -> error "test binding identity must be top-level"
+
+sourceForallMatches :: SrcType -> SrcType -> Bool
+sourceForallMatches =
+    sourceForallMatchesInScope (mkElaborateScope Map.empty Map.empty Map.empty [])
 
 poisonResolvedEqIdentityNames :: ResolvedProgram -> ResolvedProgram
 poisonResolvedEqIdentityNames resolved =
@@ -526,9 +597,204 @@ spec = do
                 actual = bounded "g" (STBase "Bool")
             sourceForallMatches expected actual `shouldBe` False
 
-        it "does not create type-view substitution keys by ordinary name" $ do
-            let sourceView = mkTypeView (STVar "a") (STVar "a")
-            ProgramTypes.typeViewSubstKeyFor sourceView "a" `shouldBe` Nothing
+        it "rejects ordinary-name TypeView construction without an identity payload" $ do
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar "a")
+                `shouldSatisfy` isLeft
+
+        it "projects TypeView children from carried identities without losing forall context" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992540)
+                binderStableName = typeBinderIdentityStableName binderIdentity
+                boxIdentity = generatedSymbolIdentity 992541 SymbolType "Main" "Box" Nothing
+                boxStableName = symbolIdentityStableName boxIdentity
+                source =
+                    fixtureTypeView
+                        ( STForall
+                            "a"
+                            Nothing
+                            ( STArrow
+                                (STBase "Alias.Box")
+                                (STVar "a")
+                            )
+                        )
+                        ( STForall
+                            binderStableName
+                            Nothing
+                            ( STArrow
+                                (STBase boxStableName)
+                                (STVar binderStableName)
+                            )
+                        )
+                        ( Map.fromList
+                            [ ("Box", boxIdentity)
+                            , ("Alias.Box", boxIdentity)
+                            , (boxStableName, boxIdentity)
+                            ]
+                        )
+                        ( Map.fromList
+                            [ ("a", binderIdentity)
+                            , (binderStableName, binderIdentity)
+                            ]
+                        )
+            case ProgramTypes.typeViewNodeView source of
+                ProgramTypes.TypeViewForallNode "a" actualBinder Nothing body -> do
+                    actualBinder `shouldBe` binderIdentity
+                    ProgramTypes.typeViewBinderIdentityForAlias body "a"
+                        `shouldBe` Just binderIdentity
+                    case ProgramTypes.typeViewNodeView body of
+                        ProgramTypes.TypeViewArrowNode domain codomain -> do
+                            ProgramTypes.typeViewHeadIdentityForAlias domain "Alias.Box"
+                                `shouldBe` Just boxIdentity
+                            ProgramTypes.typeViewNodeView domain
+                                `shouldBe` ProgramTypes.TypeViewBaseNode "Alias.Box" boxIdentity
+                            ProgramTypes.typeViewNodeView codomain
+                                `shouldBe` ProgramTypes.TypeViewVarNode "a" binderIdentity
+                        other ->
+                            expectationFailure ("unexpected projected forall body " ++ show other)
+                other ->
+                    expectationFailure ("unexpected projected forall view " ++ show other)
+
+        it "groups unmentioned TypeView aliases without losing exact identity contexts" $ do
+            let visibleIdentity = generatedSymbolIdentity 992550 SymbolType "Main" "Visible" Nothing
+                hiddenIdentity = generatedSymbolIdentity 992551 SymbolType "Imported" "Hidden" Nothing
+                firstBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992552)
+                secondBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992553)
+                headIdentities =
+                    Map.fromList
+                        [ ("Visible", visibleIdentity)
+                        , (symbolIdentityStableName visibleIdentity, visibleIdentity)
+                        , ("Hidden", hiddenIdentity)
+                        , ("Imported.Hidden", hiddenIdentity)
+                        , (symbolIdentityStableName hiddenIdentity, hiddenIdentity)
+                        ]
+                binderIdentities =
+                    Map.fromList
+                        [ ("first", firstBinderIdentity)
+                        , (typeBinderIdentityStableName firstBinderIdentity, firstBinderIdentity)
+                        , ("second", secondBinderIdentity)
+                        , (typeBinderIdentityStableName secondBinderIdentity, secondBinderIdentity)
+                        ]
+            case ProgramTypes.typeViewFromSourceType headIdentities binderIdentities (STBase "Visible") of
+                Left err -> expectationFailure ("unexpected TypeView construction failure " ++ show err)
+                Right view -> do
+                    ProgramTypes.typeViewNodeView view
+                        `shouldBe` ProgramTypes.TypeViewBaseNode "Visible" visibleIdentity
+                    ProgramTypes.typeViewHeadIdentities view `shouldBe` headIdentities
+                    ProgramTypes.typeViewBinderIdentities view `shouldBe` binderIdentities
+
+        it "does not attach unrelated scope identities when lowering a carried TypeView" $ do
+            let targetHeadIdentity = generatedSymbolIdentity 992560 SymbolType "Main" "Target" Nothing
+                hiddenHeadIdentity = generatedSymbolIdentity 992561 SymbolType "Main" "Hidden" Nothing
+                targetCtorIdentity = generatedSymbolIdentity 992562 SymbolConstructor "Main" "MkTarget" (Just (SymbolOwnerType targetHeadIdentity))
+                unrelatedHeadIdentity = generatedSymbolIdentity 992563 SymbolType "Imported" "Other" Nothing
+                unrelatedBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992564)
+                targetView =
+                    fixtureTypeView
+                        (STBase "Target")
+                        (STBase (symbolIdentityStableName targetHeadIdentity))
+                        (Map.singleton "Target" targetHeadIdentity)
+                        Map.empty
+                targetCtorView =
+                    fixtureTypeView
+                        (STArrow (STBase "Hidden") (STBase "Target"))
+                        ( STArrow
+                            (STBase (symbolIdentityStableName hiddenHeadIdentity))
+                            (STBase (symbolIdentityStableName targetHeadIdentity))
+                        )
+                        (Map.fromList [("Hidden", hiddenHeadIdentity), ("Target", targetHeadIdentity)])
+                        Map.empty
+                targetCtor =
+                    ConstructorInfo
+                        { ctorInfoSymbol = targetCtorIdentity
+                        , ctorRuntimeName = "Main__MkTarget"
+                        , ctorTypeView = targetCtorView
+                        , ctorOwningTypeIdentity = targetHeadIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                targetData = DataInfo targetHeadIdentity [] [targetCtor]
+                hiddenData = DataInfo hiddenHeadIdentity [] []
+                unrelatedView =
+                    fixtureTypeView
+                        (STForall "u" Nothing (STBase "Other"))
+                        ( STForall
+                            (typeBinderIdentityStableName unrelatedBinderIdentity)
+                            Nothing
+                            (STBase (symbolIdentityStableName unrelatedHeadIdentity))
+                        )
+                        (Map.singleton "Other" unrelatedHeadIdentity)
+                        (Map.singleton "u" unrelatedBinderIdentity)
+                targetValue =
+                    OrdinaryValue
+                        { valueInfoSymbol = generatedSymbolIdentity 992565 SymbolValue "Main" "target" Nothing
+                        , valueRuntimeName = "Main__target"
+                        , valueTypeView = targetView
+                        , valueConstraintInfos = []
+                        }
+                unrelatedValue =
+                    OrdinaryValue
+                        { valueInfoSymbol = generatedSymbolIdentity 992566 SymbolValue "Imported" "other" Nothing
+                        , valueRuntimeName = "Imported__other"
+                        , valueTypeView = unrelatedView
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.fromList [("target", targetValue), ("other", unrelatedValue)])
+                        (Map.fromList [("Target", targetData), ("Hidden", hiddenData)])
+                        Map.empty
+                        []
+                lowered = lowerTypeViewWithIdentities scope targetView
+            Map.elems (ProgramTypes.typeViewHeadIdentities lowered)
+                `shouldSatisfy` any (Symbol.sameSymbolIdentity targetHeadIdentity)
+            Map.elems (ProgramTypes.typeViewHeadIdentities lowered)
+                `shouldSatisfy` any (Symbol.sameSymbolIdentity hiddenHeadIdentity)
+            Map.elems (ProgramTypes.typeViewHeadIdentities lowered)
+                `shouldSatisfy` all (not . Symbol.sameSymbolIdentity unrelatedHeadIdentity)
+            Map.elems (ProgramTypes.typeViewBinderIdentities lowered)
+                `shouldSatisfy` all (/= unrelatedBinderIdentity)
+
+        it "does not let a carried context alias choose a structural binder owner" $ do
+            let literalIdentity = generatedSymbolIdentity 992570 SymbolType "Main" "BoolLiteral" Nothing
+                natIdentity =
+                    case PrimitiveInventory.primitivePreludeTypeHeadIdentity "Nat" of
+                        Just identity -> identity
+                        Nothing -> error "missing primitive Prelude.Nat identity"
+                literalSelfIdentity =
+                    typeBinderIdentityFromStructural
+                        (Symbol.symbolUniqueIdentity literalIdentity)
+                        StructuralSelfBinder
+                natSelfIdentity =
+                    typeBinderIdentityFromStructural
+                        (Symbol.symbolUniqueIdentity natIdentity)
+                        StructuralSelfBinder
+                pollutedView =
+                    fixtureTypeView
+                        (STBase "BoolLiteral")
+                        (STBase (symbolIdentityStableName literalIdentity))
+                        ( Map.fromList
+                            [ ("BoolLiteral", literalIdentity)
+                            , (symbolIdentityStableName literalIdentity, literalIdentity)
+                            -- This is an earlier scope's lookup history.  The
+                            -- current BoolLiteral node carries literalIdentity
+                            -- and must remain the structural owner.
+                            , ("Main.BoolLiteral", natIdentity)
+                            ]
+                        )
+                        Map.empty
+                scope =
+                    mkElaborateScope
+                        Map.empty
+                        (Map.singleton "BoolLiteral" (DataInfo literalIdentity [] []))
+                        Map.empty
+                        []
+                lowered = lowerTypeViewWithIdentities scope pollutedView
+            ProgramTypes.typeViewBinderIdentityForAlias lowered "$Main.BoolLiteral_self"
+                `shouldBe` Just literalSelfIdentity
+            Map.elems (ProgramTypes.typeViewBinderIdentities lowered)
+                `shouldSatisfy` all (/= natSelfIdentity)
 
         it "builds type-view substitutions from binder identities" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991622)
@@ -537,7 +803,7 @@ spec = do
             ProgramTypes.lookupTypeViewSubst identity subst
                 `shouldBe` Just replacement
 
-        it "hydrates type-binder substitutions from replacement identity payloads" $ do
+        it "preserves replacement identity payloads in type-binder substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991632)
                 replacementIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991633)
                 replacementStableName = typeBinderIdentityStableName replacementIdentity
@@ -545,86 +811,424 @@ spec = do
                     (setTypeViewBinderIdentities (Map.singleton "display" replacementIdentity) (mkTypeView (STVar "display") (STVar replacementStableName)))
                 subst =
                     ProgramTypes.typeBinderSubstFromTypeViewSubst
-                        [("source", sourceIdentity)]
                         (Map.singleton sourceIdentity replacement)
-            ProgramTypes.lookupTypeBinderSubstByIdentity sourceIdentity subst
-                `shouldBe` Just (STVar replacementStableName)
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity sourceIdentity subst
+                `shouldBe` Just replacement
 
-        it "does not key generated stable binder names without metadata" $ do
+        it "does not erase a non-identity type application at a monomorphic target" $ do
+            let boolTy = TestElab.tBase (BaseTy "Bool")
+                intTy = TestElab.tBase (BaseTy "Int")
+                resolved = generatedResolvedLocal 992218 "value" "Main__value" boolTy
+                env =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [(resolved, boolTy)]
+                        Map.empty
+                term =
+                    Elab.ETyInst
+                        (Elab.EVarNode resolved)
+                        (Elab.InstApp intTy)
+            dropStaleTypeInstsForTest env term `shouldBe` term
+            dropStaleTypeInstsForTest
+                env
+                (Elab.ETyInst (Elab.EVarNode resolved) (Elab.InstBot boolTy))
+                `shouldBe` Elab.EVarNode resolved
+
+        it "constructs monomorphic local occurrences by identity, not spelling" $ do
+            let boolTy = TestElab.tBase (BaseTy "Bool")
+                localTy = Elab.TArrow boolTy boolTy
+                ghostRef =
+                    Elab.typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 992221))
+                        "ghost"
+                staleOccurrenceTy = Elab.TForallRef ghostRef Nothing localTy
+                binder = generatedResolvedLocal 992222 "id" "Main__id" localTy
+                renamedOccurrence =
+                    generatedResolvedLocal 992222 "choose" "Main__choose" staleOccurrenceTy
+                sameSpellingOther =
+                    generatedResolvedLocal 992223 "id" "Other__id" staleOccurrenceTy
+                env =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [(binder, localTy)]
+                        Map.empty
+                term =
+                    Elab.EApp
+                        (Elab.ETyInst (Elab.EVarNode renamedOccurrence) Elab.InstElim)
+                        (Elab.ETyInst (Elab.EVarNode sameSpellingOther) Elab.InstElim)
+                expected =
+                    Elab.EApp
+                        ( Elab.EVarNode
+                            (Elab.mapResolvedVarType (const localTy) renamedOccurrence)
+                        )
+                        (Elab.ETyInst (Elab.EVarNode sameSpellingOther) Elab.InstElim)
+            constructLocalOccurrencesForSchemeForTest env binder localTy term
+                `shouldBe` expected
+
+        it "normalizes checked type redexes only when they do not mint identities" $ do
+            let binderRef =
+                    Elab.typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 992217))
+                        "a"
+                literal = Elab.ELit (LInt 1)
+                elimination =
+                    Elab.ETyInst
+                        (Elab.eTyAbsWithRef binderRef Nothing literal)
+                        Elab.InstElim
+                introduction =
+                    Elab.ETyInst literal Elab.InstIntro
+            normalizeCheckedTypeRedexesForTest elimination
+                `shouldBe` literal
+            normalizeCheckedTypeRedexesForTest introduction
+                `shouldBe` introduction
+            case Elab.elabToBound (TestElab.tBase (BaseTy "Int")) of
+                Left err ->
+                    expectationFailure
+                        ("could not construct bounded-Hyp regression: " ++ show err)
+                Right intBound -> do
+                    let boundedHyp =
+                            Elab.ETyInst
+                                ( Elab.eTyAbsWithRef
+                                    binderRef
+                                    (Just intBound)
+                                    ( Elab.ETyInst
+                                        literal
+                                        (Elab.InstAbstrRef binderRef)
+                                    )
+                                )
+                                Elab.InstElim
+                    normalizeCheckedTypeRedexesForTest boundedHyp
+                        `shouldBe` boundedHyp
+
+        it "rejects conflicting or excess deferred constructor head instantiations" $ do
+            let scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992219)
+                secondBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992220)
+                boolTy = TestElab.tBase (BaseTy "Bool")
+                intTy = TestElab.tBase (BaseTy "Int")
+                boolView = ProgramTypes.typeViewFromElabType boolTy
+                sourceSubst =
+                    ProgramTypes.insertTypeBinderSubstView
+                        binderIdentity
+                        boolView
+                        ProgramTypes.emptyTypeBinderSubst
+                consume =
+                    consumeDeferredConstructorHeadInstantiationsForTest
+                        scope
+                        "Boxed"
+                        [("a", binderIdentity)]
+                        sourceSubst
+            consume [intTy]
+                `shouldBe` Left (ProgramAmbiguousConstructorUse "Boxed")
+            consume [boolTy, intTy]
+                `shouldBe` Left (ProgramAmbiguousConstructorUse "Boxed")
+            case
+                consumeDeferredConstructorHeadInstantiationsForTest
+                    scope
+                    "Paired"
+                    [("a", binderIdentity), ("b", secondBinderIdentity)]
+                    ProgramTypes.emptyTypeBinderSubst
+                    [boolTy, intTy]
+                of
+                Left err ->
+                    expectationFailure ("ordered constructor head consumption failed: " ++ show err)
+                Right subst -> do
+                    ProgramTypes.lookupTypeBinderSubstViewByIdentity binderIdentity subst
+                        `shouldBe` Just boolView
+                    ProgramTypes.lookupTypeBinderSubstViewByIdentity secondBinderIdentity subst
+                        `shouldBe` Just (ProgramTypes.typeViewFromElabType intTy)
+
+        it "maps deferred partial-method heads in order at the source-supplied arity boundary" $ do
+            let scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                classIdentity = generatedSymbolIdentity 992228 SymbolClass "Main" "Pick" Nothing
+                methodIdentity =
+                    generatedSymbolIdentity
+                        992229
+                        SymbolMethod
+                        "Main"
+                        "pick"
+                        (Just (SymbolOwnerClass classIdentity))
+                classParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992230)
+                ghostIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992231)
+                valueIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992232)
+                ghostRef = Elab.typeBinderRefFromIdentity ghostIdentity "ghost"
+                valueRef = Elab.typeBinderRefFromIdentity valueIdentity "b"
+                boolTy = TestElab.tBase (BaseTy "Bool")
+                intTy = TestElab.tBase (BaseTy "Int")
+                methodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = methodIdentity
+                        , methodDisplayName = "pick"
+                        , methodTypeViewRaw =
+                            ProgramTypes.typeViewFromElabType
+                                ( Elab.TForallRef
+                                    ghostRef
+                                    Nothing
+                                    ( Elab.TForallRef
+                                        valueRef
+                                        Nothing
+                                        (Elab.TArrow boolTy (Elab.TArrow (Elab.TVarRef valueRef) (Elab.TVarRef valueRef)))
+                                    )
+                                )
+                        , methodConstraintInfos = []
+                        , methodParamBinders = ("a", classParamIdentity) :| []
+                        }
+                deferred =
+                    DeferredMethodCall
+                        { deferredMethodRef =
+                            deferredRefFromIdentity (UniqueIdentity 992239) "pick"
+                        , deferredMethodInfo = methodInfo
+                        , deferredMethodSuppliedArgCount = 1
+                        , deferredMethodRemainingArgCount = 1
+                        , deferredMethodInstBinders =
+                            [("ghost", ghostIdentity), ("b", valueIdentity)]
+                        , deferredMethodExpectedResult = Nothing
+                        , deferredMethodEvidence = Nothing
+                        , deferredMethodLocalEvidence = []
+                        }
+                etaOnlyDeferred =
+                    deferred
+                        { deferredMethodSuppliedArgCount = 0
+                        , deferredMethodRemainingArgCount = 2
+                        }
+            ProgramTypes.deferredMethodTotalArgCount deferred
+                `shouldBe` 2
+            ProgramTypes.deferredMethodResolutionArgCount deferred
+                `shouldBe` 1
+            ProgramTypes.deferredMethodResolutionArgCount etaOnlyDeferred
+                `shouldBe` 2
+            case consumeDeferredMethodHeadInstantiationsForTest scope deferred [intTy, boolTy] of
+                Left err ->
+                    expectationFailure ("ordered method head consumption failed: " ++ show err)
+                Right subst -> do
+                    ProgramTypes.lookupTypeViewSubst ghostIdentity subst
+                        `shouldBe` Just (ProgramTypes.typeViewFromElabType intTy)
+                    ProgramTypes.lookupTypeViewSubst valueIdentity subst
+                        `shouldBe` Just (ProgramTypes.typeViewFromElabType boolTy)
+            consumeDeferredMethodHeadInstantiationsForTest scope deferred [intTy, boolTy, intTy]
+                `shouldBe` Left (ProgramAmbiguousMethodUse "pick")
+
+        it "finalizes a partial deferred method from its checked head instantiation" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Eq, Mix, eq, mix, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Bool {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , "  class Mix a {"
+                        , "    mix : Eq b => a -> b -> Bool;"
+                        , "  }"
+                        , "  instance Mix Bool {"
+                        , "    mix = λx λy eq y y;"
+                        , "  }"
+                        , "  def applyBool : (Bool -> Bool) -> Bool = λf f true;"
+                        , "  def main : Bool = applyBool (mix true);"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            case runCheckedProgramOutput checked of
+                Left err ->
+                    expectationFailure ("partial deferred method runtime failed: " ++ show err)
+                Right result ->
+                    programRunOutput result `shouldBe` "true\n"
+
+        it "uses the recorded placeholder binder identity and strips vacuous construction wrappers" $ do
+            let scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                classIdentity = generatedSymbolIdentity 992233 SymbolClass "Main" "Pick" Nothing
+                methodIdentity =
+                    generatedSymbolIdentity
+                        992234
+                        SymbolMethod
+                        "Main"
+                        "pick"
+                        (Just (SymbolOwnerClass classIdentity))
+                classParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992235)
+                outerWrapperIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992237)
+                innerWrapperIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992238)
+                classParamRef = Elab.typeBinderRefFromIdentity classParamIdentity "a"
+                outerWrapperRef = Elab.typeBinderRefFromIdentity outerWrapperIdentity "outer"
+                innerWrapperRef = Elab.typeBinderRefFromIdentity innerWrapperIdentity "inner"
+                boolTy = TestElab.tBase (BaseTy "Bool")
+                wrappedBoolTy =
+                    Elab.TForallRef
+                        outerWrapperRef
+                        (Just (TestElab.tBase (BaseTy "Bool")))
+                        (Elab.TForallRef innerWrapperRef Nothing boolTy)
+                methodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = methodIdentity
+                        , methodDisplayName = "pick"
+                        , methodTypeViewRaw =
+                            ProgramTypes.typeViewFromElabType
+                                (Elab.TArrow (Elab.TVarRef classParamRef) (Elab.TVarRef classParamRef))
+                        , methodConstraintInfos = []
+                        , methodParamBinders = ("a", classParamIdentity) :| []
+                        }
+                deferred =
+                    DeferredMethodCall
+                        { deferredMethodRef =
+                            deferredRefFromIdentity (UniqueIdentity 992240) "pick"
+                        , deferredMethodInfo = methodInfo
+                        , deferredMethodSuppliedArgCount = 1
+                        , deferredMethodRemainingArgCount = 0
+                        , deferredMethodInstBinders = [("a", classParamIdentity)]
+                        , deferredMethodExpectedResult = Nothing
+                        , deferredMethodEvidence = Nothing
+                        , deferredMethodLocalEvidence = []
+                        }
+            case consumeDeferredMethodHeadInstantiationsForTest scope deferred [wrappedBoolTy] of
+                Left err ->
+                    expectationFailure ("vacuous method head wrapper consumption failed: " ++ show err)
+                Right subst ->
+                    ProgramTypes.lookupTypeViewSubst classParamIdentity subst
+                        `shouldBe` Just (ProgramTypes.typeViewFromElabType boolTy)
+
+        it "projects deferred constructor identities through sibling-safe common construction routes" $ do
+            let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992220)
+                localIdentity = typeBinderIdentityFromNode (NodeId 992221)
+                conflictingLocalIdentity = typeBinderIdentityFromNode (NodeId 992227)
+                constructorBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992222)
+                sourceRef = Elab.typeBinderRefFromIdentity sourceIdentity "source"
+                localRef = Elab.typeBinderRefFromIdentity localIdentity "local"
+                conflictingLocalRef =
+                    Elab.typeBinderRefFromIdentity
+                        conflictingLocalIdentity
+                        "conflicting-local"
+                sourceView = ProgramTypes.typeViewFromElabType (Elab.TVarRef sourceRef)
+                localView = ProgramTypes.typeViewFromElabType (Elab.TVarRef localRef)
+                dataIdentity = generatedSymbolIdentity 992223 SymbolType "Main" "Box" Nothing
+                constructorIdentity =
+                    generatedSymbolIdentity
+                        992224
+                        SymbolConstructor
+                        "Main"
+                        "Boxed"
+                        (Just (SymbolOwnerType dataIdentity))
+                constructorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = constructorIdentity
+                        , ctorRuntimeName = "Main__Boxed"
+                        , ctorTypeView = sourceView
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                routedRef = deferredRefFromIdentity (UniqueIdentity 992225) "$routed_constructor"
+                siblingRef = deferredRefFromIdentity (UniqueIdentity 992226) "$sibling_constructor"
+                deferred ref =
+                    DeferredConstructor
+                        DeferredConstructorCall
+                            { deferredConstructorRef = ref
+                            , deferredConstructorInfo = constructorInfo
+                            , deferredConstructorArgCount = 0
+                            , deferredConstructorSourceTypeView = sourceView
+                            , deferredConstructorOccurrenceTypeView = sourceView
+                            , deferredConstructorInstBinders = [("a", constructorBinderIdentity)]
+                            , deferredConstructorInitialSubst =
+                                ProgramTypes.insertTypeBinderSubstView
+                                    constructorBinderIdentity
+                                    sourceView
+                                    ProgramTypes.emptyTypeBinderSubst
+                            , deferredConstructorBindingMode = ProgramTypes.DeferredBindingMonomorphic
+                            }
+                constructionRedex constructionRef ref =
+                    Elab.ETyInst
+                        ( Elab.ETyAbsRef
+                            constructionRef
+                            Nothing
+                            (Elab.EVarNode (Elab.deferredResolvedVarFromRef ref))
+                        )
+                        (Elab.InstApp (Elab.TVarRef sourceRef))
+                term =
+                    Elab.EApp
+                        (constructionRedex localRef routedRef)
+                        (Elab.EVarNode (Elab.deferredResolvedVarFromRef siblingRef))
+                obligations =
+                    Map.fromList
+                        [ (routedRef, deferred routedRef)
+                        , (siblingRef, deferred siblingRef)
+                        ]
+                projected =
+                    projectDeferredConstructorConstructionRoutesForTest term obligations
+                projectedAgain =
+                    projectDeferredConstructorConstructionRoutesForTest term projected
+                repeatedTerm =
+                    Elab.EApp
+                        (constructionRedex localRef routedRef)
+                        (constructionRedex conflictingLocalRef routedRef)
+                repeatedProjected =
+                    projectDeferredConstructorConstructionRoutesForTest
+                        repeatedTerm
+                        (Map.singleton routedRef (deferred routedRef))
+                requireConstructor projectedObligations ref =
+                    case Map.lookup ref projectedObligations of
+                        Just (DeferredConstructor actual) -> actual
+                        other -> error ("expected deferred constructor, got " ++ show other)
+                routed = requireConstructor projected routedRef
+                sibling = requireConstructor projected siblingRef
+                repeated = requireConstructor repeatedProjected routedRef
+            deferredConstructorSourceTypeView routed `shouldBe` localView
+            deferredConstructorOccurrenceTypeView routed `shouldBe` localView
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity
+                constructorBinderIdentity
+                (deferredConstructorInitialSubst routed)
+                `shouldBe` Just localView
+            deferredConstructorSourceTypeView sibling `shouldBe` sourceView
+            deferredConstructorOccurrenceTypeView sibling `shouldBe` sourceView
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity
+                constructorBinderIdentity
+                (deferredConstructorInitialSubst sibling)
+                `shouldBe` Just sourceView
+            deferredConstructorSourceTypeView repeated `shouldBe` sourceView
+            deferredConstructorOccurrenceTypeView repeated `shouldBe` sourceView
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity
+                constructorBinderIdentity
+                (deferredConstructorInitialSubst repeated)
+                `shouldBe` Just sourceView
+            projectedAgain `shouldBe` projected
+
+        it "rejects stable-looking binder names without identity payloads" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991601)
                 stableName = typeBinderIdentityStableName identity
-                sourceView = mkTypeView (STVar stableName) (STVar stableName)
-            ProgramTypes.typeViewSubstKeyFor sourceView stableName
-                `shouldBe` Nothing
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar stableName)
+                `shouldSatisfy` isLeft
 
-        it "does not treat stable binder spelling as identity without metadata" $ do
+        it "requires a payload for a stable-looking TypeView source name" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991603)
                 stableName = typeBinderIdentityStableName identity
-                sourceView = mkTypeView (STVar stableName) (STVar stableName)
-            ProgramTypes.typeViewIsBareBinderIdentity identity sourceView
-                `shouldBe` False
-            ProgramTypes.typeViewMentionsFreeBinderIdentity identity sourceView
-                `shouldBe` False
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar stableName)
+                `shouldSatisfy` isLeft
 
-        it "keys generated stable binder type-view substitutions by identity without metadata" $ do
+        it "keys generated stable binder TypeView substitutions by identity" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991613)
                 replacement = mkTypeView (STBase "Int") (STBase "Int")
                 subst =
                     ProgramTypes.typeBinderSubstFromTypeViewSubst
-                        []
                         (Map.singleton identity replacement)
                 viewSubst = ProgramTypes.typeBinderSubstToTypeViewSubst subst
-            ProgramTypes.lookupTypeBinderSubstByIdentity identity subst
-                `shouldBe` Just (STBase "Int")
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity identity subst
+                `shouldBe` Just replacement
             ProgramTypes.lookupTypeViewSubst identity viewSubst
                 `shouldBe` Just replacement
 
-        it "applies identity-bearing type-binder substitutions through stable names at the string substitution boundary" $ do
-            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991618)
-                stableName = typeBinderIdentityStableName identity
-                replacementTy = STBase "Int"
-                subst =
-                    ProgramTypes.insertTypeBinderSubstWithIdentity
-                        identity
-                        "a"
-                        replacementTy
-                        ProgramTypes.emptyTypeBinderSubst
-            ProgramTypes.applyTypeBinderSubst subst (STVar stableName) `shouldBe` replacementTy
-
-        it "does not apply ambiguous type-binder display substitutions at the string substitution boundary" $ do
-            let firstIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991630)
-                secondIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991631)
-                firstStableName = typeBinderIdentityStableName firstIdentity
-                secondStableName = typeBinderIdentityStableName secondIdentity
-                subst =
-                    ProgramTypes.insertTypeBinderSubstWithIdentity
-                        secondIdentity
-                        "a"
-                        (STBase "Bool")
-                        ( ProgramTypes.insertTypeBinderSubstWithIdentity
-                            firstIdentity
-                            "a"
-                            (STBase "Int")
-                            ProgramTypes.emptyTypeBinderSubst
-                        )
-            ProgramTypes.applyTypeBinderSubst subst (STVar "a")
-                `shouldBe` STVar "a"
-            ProgramTypes.applyTypeBinderSubst subst (STArrow (STVar firstStableName) (STVar secondStableName))
-                `shouldBe` STArrow (STBase "Int") (STBase "Bool")
-
-        it "does not apply identity-keyed type-view display substitutions through metadata-free stable names" $ do
+        it "cannot construct a stable-name TypeView without identity payloads" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991619)
                 stableName = typeBinderIdentityStableName identity
-                replacement = mkTypeView (STBase "Int") (STBase "Int")
-                source = mkTypeView (STVar stableName) (STVar stableName)
-            ProgramTypes.typeViewDisplay
-                ( ProgramTypes.applyTypeViewSubst
-                    (Map.singleton identity replacement)
-                    source
-                )
-                `shouldBe` STVar stableName
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar stableName)
+                `shouldSatisfy` isLeft
 
-        it "applies identity-keyed type-view substitutions through paired metadata" $ do
+        it "applies identity-keyed type-view substitutions through carried binder payloads" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991619)
                 stableName = typeBinderIdentityStableName identity
                 replacement = mkTypeView (STBase "Int") (STBase "Int")
@@ -635,7 +1239,8 @@ spec = do
                         (Map.singleton identity replacement)
                         source
             ProgramTypes.typeViewDisplay actual `shouldBe` STBase "Int"
-            ProgramTypes.typeViewIdentity actual `shouldBe` STBase "Int"
+            ProgramTypes.typeViewIdentity actual
+                `shouldBe` ProgramTypes.typeViewIdentity (builtinBaseTypeView "Int")
 
         it "specializes quantified TypeViews without leaving identity-incomplete binders" $ do
             let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991620)
@@ -657,7 +1262,6 @@ spec = do
                         source
             ProgramTypes.typeViewDisplay specialized
                 `shouldBe` STArrow (STBase "Int") (STCon "Box" (STBase "Int" :| []))
-            ProgramTypes.typeViewIdentityGaps specialized `shouldBe` []
 
         it "applies same-spelled type-view substitutions by node identity" $ do
             let leftIdentity = typeBinderIdentityFromNode (NodeId 992510)
@@ -683,9 +1287,12 @@ spec = do
                         ]
                 actual = ProgramTypes.applyTypeViewSubst subst source
             ProgramTypes.typeViewDisplay actual `shouldBe` STArrow (STBase "Int") (STBase "Bool")
-            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STBase "Bool")
+            ProgramTypes.typeViewIdentity actual
+                `shouldBe` STArrow
+                    (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Int"))
+                    (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Bool"))
 
-        it "does not let ambiguous display pairs overwrite identity substitutions" $ do
+        it "does not let ambiguous display aliases overwrite identity substitutions" $ do
             let leftIdentity = typeBinderIdentityFromNode (NodeId 992512)
                 rightIdentity = typeBinderIdentityFromNode (NodeId 992513)
                 leftStableName = typeBinderIdentityStableName leftIdentity
@@ -694,7 +1301,7 @@ spec = do
                     ( setTypeViewBinderIdentities
                         ( Map.fromList
                             [ (leftStableName, leftIdentity)
-                            , ("a", rightIdentity)
+                            , (rightStableName, rightIdentity)
                             ]
                         )
                         ( mkTypeView
@@ -708,7 +1315,10 @@ spec = do
                         , (rightIdentity, mkTypeView (STBase "Bool") (STBase "Bool"))
                         ]
                 actual = ProgramTypes.applyTypeViewSubst subst source
-            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STBase "Bool")
+            ProgramTypes.typeViewIdentity actual
+                `shouldBe` STArrow
+                    (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Int"))
+                    (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Bool"))
 
         it "replaces only the same-spelled node selected by identity" $ do
             let leftIdentity = typeBinderIdentityFromNode (NodeId 992514)
@@ -719,7 +1329,7 @@ spec = do
                     ( setTypeViewBinderIdentities
                         ( Map.fromList
                             [ (leftStableName, leftIdentity)
-                            , ("a", rightIdentity)
+                            , (rightStableName, rightIdentity)
                             ]
                         )
                         ( mkTypeView
@@ -733,7 +1343,10 @@ spec = do
                         (mkTypeView (STBase "Int") (STBase "Int"))
                 actual = ProgramTypes.applyTypeViewSubst subst source
             ProgramTypes.typeViewDisplay actual `shouldBe` STArrow (STBase "Int") (STVar "a")
-            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STVar rightStableName)
+            ProgramTypes.typeViewIdentity actual
+                `shouldBe` STArrow
+                    (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Int"))
+                    (STVar rightStableName)
 
         it "keys type-view substitutions by identity through binder metadata" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991621)
@@ -751,7 +1364,7 @@ spec = do
             ProgramTypes.typeViewSubstKeyFor source stableName
                 `shouldBe` Just identity
 
-        it "drops ambiguous paired display aliases for one binder identity" $ do
+        it "keeps multiple display aliases when they select one binder identity" $ do
             let identity = typeBinderIdentityFromNode (NodeId 992520)
                 stableName = typeBinderIdentityStableName identity
                 source =
@@ -762,12 +1375,12 @@ spec = do
                             (STArrow (STVar stableName) (STVar stableName))
                         )
                     )
-            ProgramTypes.typeViewSubstKeyFor source "a" `shouldBe` Nothing
-            ProgramTypes.typeViewSubstKeyFor source "b" `shouldBe` Nothing
+            ProgramTypes.typeViewSubstKeyFor source "a" `shouldBe` Just identity
+            ProgramTypes.typeViewSubstKeyFor source "b" `shouldBe` Just identity
             ProgramTypes.typeViewSubstKeyFor source stableName
                 `shouldBe` Just identity
 
-        it "collects free type-view variables by binder identity through paired aliases" $ do
+        it "collects free type-view variables directly from binder payloads" $ do
             let leftIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991624)
                 rightIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991625)
                 leftStableName = typeBinderIdentityStableName leftIdentity
@@ -785,11 +1398,14 @@ spec = do
                         )
                     )
             ProgramTypes.freeTypeBinderIdentitiesTypeView source
-                `shouldBe` Right (Set.fromList [leftIdentity, rightIdentity])
+                `shouldBe` Set.fromList [leftIdentity, rightIdentity]
 
-        it "rejects free type-view variable collection without binder metadata" $ do
-            ProgramTypes.freeTypeBinderIdentitiesTypeView (mkTypeView (STVar "a") (STVar "a"))
-                `shouldBe` Left "a"
+        it "rejects free type-view variable construction without binder metadata" $ do
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar "a")
+                `shouldSatisfy` isLeft
 
         it "keeps replacement type head identities by display key after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991429)
@@ -802,8 +1418,9 @@ spec = do
                     (setTypeViewHeadIdentities (Map.singleton "Token" headIdentity) (mkTypeView (STBase "Token") (STBase headStableName)))
                 subst =
                     Map.singleton sourceIdentity replacement
-            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "Token" headIdentity
+            let actual = ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "Token" actual `shouldBe` Just headIdentity
+            Map.lookup headStableName actual `shouldBe` Just headIdentity
 
         it "collects constructor metadata type-view identities for generated identity seeding" $ do
             let dataIdentity = generatedSymbolIdentity 992530 SymbolType "Main" "Phantom" Nothing
@@ -823,7 +1440,6 @@ spec = do
                         { constructorShapeSymbol = ctorIdentity
                         , constructorShapeRuntimeName = "Main__MkPhantom"
                         , constructorShapeTypeView = ownerShapeView
-                        , constructorShapeForallBinderInfo = []
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -832,7 +1448,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__MkPhantom"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [ownerShape]
@@ -844,6 +1459,10 @@ spec = do
                         , dataConstructors = [ctorInfo]
                         }
                 collected = ProgramTypes.dataInfoGeneratedIdentities dataInfo
+            ProgramTypes.typeViewHeadIdentities ctorView
+                `shouldSatisfy` elem ctorHeadIdentity . Map.elems
+            ProgramTypes.typeViewHeadIdentities ownerShapeView
+                `shouldSatisfy` elem ownerShapeHeadIdentity . Map.elems
             collected `shouldSatisfy` elem ctorHeadUnique
             collected `shouldSatisfy` elem ownerShapeHeadUnique
 
@@ -860,9 +1479,8 @@ spec = do
                         }
                 method =
                     EvidenceMethod
-                        { evidenceMethodRuntimeName = "Main__method"
-                        , evidenceMethodSymbol = methodIdentity
-                        , evidenceMethodResolvedVar = Just resolved
+                        { evidenceMethodSymbol = methodIdentity
+                        , evidenceMethodResolvedVar = resolved
                         , evidenceMethodTypeView = mkTypeView (STBase "Int") (STBase "Int")
                         }
             ProgramTypes.evidenceMethodGeneratedIdentities method `shouldSatisfy` elem binderUnique
@@ -882,7 +1500,7 @@ spec = do
                     ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
             Map.lookup "DisplayToken" actual `shouldBe` Just headIdentity
 
-        it "projects constructor argument head identities through display pairs" $ do
+        it "projects constructor argument head identities from carried payloads" $ do
             let dataIdentity = generatedSymbolIdentity 991652 SymbolType "Main" "Box" Nothing
                 ctorIdentity = generatedSymbolIdentity 991653 SymbolConstructor "Main" "MkBox" (Just (SymbolOwnerType dataIdentity))
                 argIdentity = generatedSymbolIdentity 991654 SymbolType "Main" "Token" Nothing
@@ -906,7 +1524,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__MkBox"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -916,7 +1533,6 @@ spec = do
                         { constructorShapeSymbol = ctorIdentity
                         , constructorShapeRuntimeName = "Main__MkBox"
                         , constructorShapeTypeView = ctorView
-                        , constructorShapeForallBinderInfo = []
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -965,7 +1581,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__MkBox"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -1003,7 +1618,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__SomeExpr"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -1025,8 +1639,9 @@ spec = do
                     (setTypeViewHeadIdentities (Map.singleton "Token" headIdentity) (mkTypeView (STBase headStableName) (STBase headStableName)))
                 subst =
                     Map.singleton sourceIdentity replacement
-            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "Token" headIdentity
+            let actual = ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "Token" actual `shouldBe` Just headIdentity
+            Map.lookup headStableName actual `shouldBe` Just headIdentity
 
         it "keeps replacement type head identities by payload qualified name after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 992507)
@@ -1039,8 +1654,10 @@ spec = do
                     (setTypeViewHeadIdentities (Map.singleton "Token" headIdentity) (mkTypeView (STBase qualifiedHeadName) (STBase qualifiedHeadName)))
                 subst =
                     Map.singleton sourceIdentity replacement
-            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "Token" headIdentity
+            let actual = ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "Token" actual `shouldBe` Just headIdentity
+            Map.lookup qualifiedHeadName actual `shouldBe` Just headIdentity
+            Map.lookup (symbolIdentityStableName headIdentity) actual `shouldBe` Just headIdentity
 
         it "resolves type head identities through payload qualified aliases" $ do
             let headIdentity = generatedSymbolIdentity 992509 SymbolType "Main" "Token" Nothing
@@ -1049,7 +1666,7 @@ spec = do
             ProgramTypes.typeViewHeadIdentityForAlias view "Main.Token"
                 `shouldBe` Just headIdentity
 
-        it "drops ambiguous paired display aliases for one type head identity" $ do
+        it "keeps paired display aliases when they select one type head identity" $ do
             let headIdentity = generatedSymbolIdentity 992521 SymbolType "Main" "Token" Nothing
                 headStableName = symbolIdentityStableName headIdentity
                 view =
@@ -1060,8 +1677,8 @@ spec = do
                             (STArrow (STBase headStableName) (STBase headStableName))
                         )
                     )
-            ProgramTypes.typeViewHeadIdentityForAlias view "LeftToken" `shouldBe` Nothing
-            ProgramTypes.typeViewHeadIdentityForAlias view "RightToken" `shouldBe` Nothing
+            ProgramTypes.typeViewHeadIdentityForAlias view "LeftToken" `shouldBe` Just headIdentity
+            ProgramTypes.typeViewHeadIdentityForAlias view "RightToken" `shouldBe` Just headIdentity
             ProgramTypes.typeViewHeadIdentityForAlias view headStableName
                 `shouldBe` Just headIdentity
 
@@ -1076,8 +1693,9 @@ spec = do
                     (setTypeViewBinderIdentities (Map.singleton "y" replacementIdentity) (mkTypeView (STVar "y") (STVar replacementStableName)))
                 subst =
                     Map.singleton sourceIdentity replacement
-            ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "y" replacementIdentity
+            let actual = ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "y" actual `shouldBe` Just replacementIdentity
+            Map.lookup replacementStableName actual `shouldBe` Just replacementIdentity
 
         it "keeps replacement binder identities by payload stable name after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 992503)
@@ -1090,8 +1708,9 @@ spec = do
                     (setTypeViewBinderIdentities (Map.singleton "y" replacementIdentity) (mkTypeView (STVar replacementStableName) (STVar replacementStableName)))
                 subst =
                     Map.singleton sourceIdentity replacement
-            ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "y" replacementIdentity
+            let actual = ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "y" actual `shouldBe` Just replacementIdentity
+            Map.lookup replacementStableName actual `shouldBe` Just replacementIdentity
 
         it "keeps display keys for known type-binder identities" $ do
             let identity = typeBinderIdentityFromNode (NodeId 991617)
@@ -1114,25 +1733,27 @@ spec = do
             Map.lookup firstStableName aliases `shouldBe` Just firstIdentity
             Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
 
-        it "drops ambiguous direct aliases from type-view binder alias entries" $ do
+        it "keeps the semantic binder payload authoritative across a display overlay" $ do
             let firstIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991624)
                 secondIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991625)
                 firstStableName = typeBinderIdentityStableName firstIdentity
                 secondStableName = typeBinderIdentityStableName secondIdentity
-                view =
-                    ( setTypeViewBinderIdentities
-                        ( Map.fromList
-                            [ ("x", firstIdentity)
-                            , (firstStableName, secondIdentity)
-                            ]
-                        )
-                        (mkTypeView (STVar "x") (STVar "x"))
-                    )
-                aliases =
-                    Map.fromList (ProgramTypes.typeViewBinderIdentityAliasEntries view)
-            Map.lookup "x" aliases `shouldBe` Just firstIdentity
-            Map.lookup firstStableName aliases `shouldBe` Nothing
-            Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
+            case
+                ProgramTypes.typeViewFromSourceType
+                    Map.empty
+                    (Map.fromList [("x", firstIdentity), (firstStableName, secondIdentity)])
+                    (STVar firstStableName)
+                of
+                    Right identityView ->
+                        case ProgramTypes.typeViewWithDisplay (STVar "x") identityView of
+                            Right view -> do
+                                ProgramTypes.typeViewIdentity view `shouldBe` STVar secondStableName
+                                Map.lookup secondStableName (ProgramTypes.typeViewBinderIdentities view)
+                                    `shouldBe` Just secondIdentity
+                            Left err ->
+                                expectationFailure ("expected shape-preserving display overlay, got " ++ show err)
+                    Left err ->
+                        expectationFailure ("expected source-shape identity payload, got " ++ show err)
 
         it "pairs display aliases through stable type-binder identity keys" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991626)
@@ -1144,32 +1765,31 @@ spec = do
             Map.lookup "display" aliases `shouldBe` Just identity
             Map.lookup stableName aliases `shouldBe` Just identity
 
-        it "compares type-binder substitutions by identity targets when alias names are stale" $ do
+        it "compares type-binder substitutions by identity targets" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991616)
                 replacementTy = STBase "Int"
-                subst name =
-                    ProgramTypes.insertTypeBinderSubstWithIdentity
+                subst =
+                    ProgramTypes.insertTypeBinderSubstView
                         identity
-                        name
-                        replacementTy
+                        (mkTypeView replacementTy replacementTy)
                         ProgramTypes.emptyTypeBinderSubst
-            subst "a" `shouldBe` subst "$stale_a"
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity identity subst
+                `shouldBe` Just (mkTypeView replacementTy replacementTy)
 
-        it "does not hydrate identity-bearing type-binder substitutions from missing identity keys" $ do
+        it "does not infer identity-bearing type-binder substitutions from missing identity keys" $ do
             let identity = typeBinderIdentityFromNode (NodeId 991304)
                 identitySubst =
                     ProgramTypes.typeBinderSubstFromTypeViewSubst
-                        [("a", identity)]
                         Map.empty
-            ProgramTypes.lookupTypeBinderSubstByIdentity identity identitySubst
+            ProgramTypes.lookupTypeBinderSubstViewByIdentity identity identitySubst
                 `shouldBe` Nothing
 
-        it "does not match metadata-free type-view variables by name" $ do
-            let scope = mkElaborateScope Map.empty Map.empty Map.empty []
-                template = mkTypeView (STVar "a") (STVar "a")
-                actual = mkTypeView (STBase "Int") (STBase "Int")
-            matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| [])
-                `shouldBe` Nothing
+        it "rejects TypeView variables without identity payloads before matching" $ do
+            ProgramTypes.typeViewFromSourceType
+                Map.empty
+                Map.empty
+                (STVar "a")
+                `shouldSatisfy` isLeft
 
         it "does not let method display matching override conflicting head identities" $ do
             let leftIdentity = generatedSymbolIdentity 991733 SymbolType "Left" "Token" Nothing
@@ -1266,7 +1886,8 @@ spec = do
             case matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| []) of
                 Just subst -> do
                     Map.member headKey subst `shouldBe` False
-                    fmap ProgramTypes.typeViewIdentity (Map.lookup argKey subst) `shouldBe` Just (STBase "Int")
+                    fmap ProgramTypes.typeViewIdentity (Map.lookup argKey subst)
+                        `shouldBe` Just (ProgramTypes.typeViewIdentity (builtinBaseTypeView "Int"))
                 Nothing ->
                     expectationFailure "expected argument substitution"
 
@@ -1281,8 +1902,11 @@ spec = do
                     Map.singleton
                         originalIdentity
                         replacement
-            ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.singleton "$b" replacementIdentity
+            let actual = ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "$b" actual `shouldBe` Just replacementIdentity
+            Map.lookup "b" actual `shouldBe` Just replacementIdentity
+            Map.lookup (typeBinderIdentityStableName replacementIdentity) actual
+                `shouldBe` Just replacementIdentity
 
         it "drops ambiguous replacement binder display identities after applying type-view substitutions" $ do
             let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991415)
@@ -1301,7 +1925,10 @@ spec = do
                         , (rightSourceIdentity, rightReplacement)
                         ]
             ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.empty
+                `shouldBe` Map.fromList
+                    [ (typeBinderIdentityStableName leftReplacementIdentity, leftReplacementIdentity)
+                    , (typeBinderIdentityStableName rightReplacementIdentity, rightReplacementIdentity)
+                    ]
 
         it "keeps stable binder aliases but drops ambiguous direct display keys after applying type-view substitutions" $ do
             let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991438)
@@ -1341,7 +1968,10 @@ spec = do
                         , (rightSourceIdentity, rightReplacement)
                         ]
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.empty
+                `shouldBe` Map.fromList
+                    [ (symbolIdentityStableName leftHeadIdentity, leftHeadIdentity)
+                    , (symbolIdentityStableName rightHeadIdentity, rightHeadIdentity)
+                    ]
 
         it "keeps stable type head aliases but drops ambiguous direct display keys after applying type-view substitutions" $ do
             let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991442)
@@ -1381,7 +2011,10 @@ spec = do
                         , (rightSourceIdentity, rightReplacement)
                         ]
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.empty
+                `shouldBe` Map.fromList
+                    [ (symbolIdentityStableName leftHeadIdentity, leftHeadIdentity)
+                    , (symbolIdentityStableName rightHeadIdentity, rightHeadIdentity)
+                    ]
 
         it "drops mixed direct and stable ambiguous type head aliases after applying type-view substitutions" $ do
             let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991434)
@@ -1400,7 +2033,10 @@ spec = do
                         , (rightSourceIdentity, rightReplacement)
                         ]
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
-                `shouldBe` Map.empty
+                `shouldBe` Map.fromList
+                    [ (symbolIdentityStableName leftHeadIdentity, leftHeadIdentity)
+                    , (symbolIdentityStableName rightHeadIdentity, rightHeadIdentity)
+                    ]
 
         it "drops conflicting merged type head payloads with the same symbol identity" $ do
             let stableName = symbolIdentityStableName originalIdentity
@@ -1440,7 +2076,6 @@ spec = do
                         { ctorInfoSymbol = identity
                         , ctorRuntimeName = "Lib__Some"
                         , ctorTypeView = mkTypeView (STBase "Token") (STBase "Token")
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -1465,7 +2100,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Lib__MkToken"
                         , ctorTypeView = mkTypeView (STBase "Token") (STBase "Token")
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -1501,11 +2135,12 @@ spec = do
                         { valueInfoSymbol = valueIdentity
                         , valueRuntimeName = "Main__f"
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = [constraintInfo leftIdentity, constraintInfo rightIdentity]
                         }
-            ProgramTypes.typeViewBinderIdentities (ProgramTypes.ordinaryValueTypeView valueInfo)
-                `shouldBe` Map.empty
+            let actual = ProgramTypes.typeViewBinderIdentities (ProgramTypes.ordinaryValueTypeView valueInfo)
+            Map.lookup "a" actual `shouldBe` Nothing
+            Map.lookup (typeBinderIdentityStableName leftIdentity) actual `shouldBe` Just leftIdentity
+            Map.lookup (typeBinderIdentityStableName rightIdentity) actual `shouldBe` Just rightIdentity
 
         it "drops ambiguous value binder display identities from ordinary value views" $ do
             let valueIdentity = generatedSymbolIdentity 991428 SymbolValue "Main" "f" Nothing
@@ -1535,14 +2170,12 @@ spec = do
                                     )
                                 )
                             )
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
-            ProgramTypes.typeViewBinderIdentities (ProgramTypes.ordinaryValueTypeView valueInfo)
-                `shouldBe` Map.fromList
-                    [ ("$typevar#991429", leftIdentity)
-                    , ("$typevar#991430", rightIdentity)
-                    ]
+            let actual = ProgramTypes.typeViewBinderIdentities (ProgramTypes.ordinaryValueTypeView valueInfo)
+            Map.lookup "a" actual `shouldBe` Nothing
+            Map.lookup "$typevar#991429" actual `shouldBe` Just leftIdentity
+            Map.lookup "$typevar#991430" actual `shouldBe` Just rightIdentity
 
         it "carries runtime type binder identities in elaborate scope" $ do
             let valueIdentity = generatedSymbolIdentity 991431 SymbolValue "Main" "id" Nothing
@@ -1559,7 +2192,6 @@ spec = do
                                     (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
                                 )
                             )
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope = mkElaborateScope (Map.singleton "id" valueInfo) Map.empty Map.empty []
@@ -1592,15 +2224,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "method"
                         , methodTypeViewRaw = localBinderView "b"
-                        , methodConstraints = []
                         , methodConstraintInfos = [methodConstraint]
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -1610,15 +2240,13 @@ spec = do
                         { methodInfoSymbol = evidenceMethodIdentity
                         , methodDisplayName = "witness"
                         , methodTypeViewRaw = evidenceParamView "d"
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("d", evidenceParamIdentity) :| []
                         }
                 evidenceClassInfo =
                     ClassInfo
                         { classInfoSymbol = evidenceClassIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity evidenceParamIdentity "d") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity evidenceParamIdentity "d") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton evidenceMethodIdentity evidenceMethodInfo
@@ -1634,7 +2262,6 @@ spec = do
                         { valueInfoSymbol = valueIdentity
                         , valueRuntimeName = "Main__use"
                         , valueTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
-                        , valueConstraints = []
                         , valueConstraintInfos = [valueConstraint]
                         }
                 scope =
@@ -1673,15 +2300,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "method"
                         , methodTypeViewRaw = mkTypeView (STBase "Bool") (STBase "Bool")
-                        , methodConstraints = []
                         , methodConstraintInfos = [methodConstraint "c", methodConstraint "d"]
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -1693,15 +2318,13 @@ spec = do
                         , methodDisplayName = "witness"
                         , methodTypeViewRaw =
                             (setTypeViewBinderIdentities (Map.singleton evidenceParamStableName evidenceParamIdentity) (mkTypeView (STVar "e") (STVar evidenceParamStableName)))
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("e", evidenceParamIdentity) :| []
                         }
                 evidenceClassInfo =
                     ClassInfo
                         { classInfoSymbol = evidenceClassIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity evidenceParamIdentity "e") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity evidenceParamIdentity "e") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton evidenceMethodIdentity evidenceMethodInfo
@@ -1717,7 +2340,6 @@ spec = do
                         { valueInfoSymbol = valueIdentity
                         , valueRuntimeName = "Main__ambiguous"
                         , valueTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
-                        , valueConstraints = []
                         , valueConstraintInfos = [valueConstraint]
                         }
                 scope =
@@ -1751,7 +2373,6 @@ spec = do
                         , valueRuntimeName = "Main__box"
                         , valueTypeView =
                             (setTypeViewHeadIdentities (Map.singleton staleHead typeIdentity) (mkTypeView (STBase "Box") (STBase staleHead)))
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope = mkElaborateScope (Map.singleton "box" valueInfo) Map.empty Map.empty []
@@ -1775,23 +2396,20 @@ spec = do
                     OrdinaryValue
                         { valueInfoSymbol = valueIdentity
                         , valueRuntimeName = "Main__box"
-                        , valueTypeView = mkTypeView (STBase "Box") (STBase "Box")
-                        , valueConstraints = []
+                        , valueTypeView = baseTypeView "Box" typeIdentity
                         , valueConstraintInfos = []
                         }
                 methodValue =
                     OrdinaryValue
                         { valueInfoSymbol = staleMethodValueIdentity
                         , valueRuntimeName = "Main__method"
-                        , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
+                        , valueTypeView = builtinBaseTypeView "Int"
                         , valueConstraintInfos = []
                         }
                 instanceInfo =
                     InstanceInfo
                         { instanceClassSymbol = classIdentity
                         , instanceOriginModuleIdentity = originIdentity
-                        , instanceConstraints = []
                         , instanceConstraintInfos = []
                         , instanceHeadTypeViews = mkTypeView (STBase "Int") (STBase "Int") :| []
                         , instanceMethodsByIdentity = Map.singleton methodIdentity methodValue
@@ -1814,7 +2432,6 @@ spec = do
                         { valueInfoSymbol = identity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView ty ty
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -1837,7 +2454,6 @@ spec = do
                         { valueInfoSymbol = sharedIdentity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView ty ty
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -1861,7 +2477,6 @@ spec = do
                         { valueInfoSymbol = identity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -1884,7 +2499,6 @@ spec = do
                         { valueInfoSymbol = sharedIdentity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView ty ty
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 leftValue = valueInfo "Main__left" (STBase "Int")
@@ -1934,7 +2548,6 @@ spec = do
                         { ctorInfoSymbol = expectedCtorIdentity
                         , ctorRuntimeName = "Expected__MkToken"
                         , ctorTypeView = baseTypeView "Token" expectedTypeIdentity
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = expectedTypeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -1950,7 +2563,6 @@ spec = do
                         { valueInfoSymbol = actualValueIdentity
                         , valueRuntimeName = "Actual__actual"
                         , valueTypeView = baseTypeView "Token" actualTypeIdentity
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 expectedView = baseTypeView "Token" expectedTypeIdentity
@@ -1969,14 +2581,12 @@ spec = do
                                     )
                                 )
                             )
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 instanceInfo =
                     InstanceInfo
                         { instanceClassSymbol = classIdentity
                         , instanceOriginModuleIdentity = instanceOriginIdentity
-                        , instanceConstraints = []
                         , instanceConstraintInfos = []
                         , instanceHeadTypeViews = expectedView :| []
                         , instanceMethodsByIdentity = Map.singleton methodIdentity instanceMethodValue
@@ -1995,7 +2605,6 @@ spec = do
                                 )
                                 (mkTypeView (STVar "a") (STVar actualBinderStableName))
                             )
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 methodView =
@@ -2015,15 +2624,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "pick"
                         , methodTypeViewRaw = methodView
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -2140,7 +2747,6 @@ spec = do
                         { valueInfoSymbol = actualValueIdentity
                         , valueRuntimeName = "Actual__actual"
                         , valueTypeView = actualView
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 methodView =
@@ -2162,15 +2768,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "inspect"
                         , methodTypeViewRaw = methodView
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -2263,7 +2867,6 @@ spec = do
                         { ctorInfoSymbol = wrapIdentity
                         , ctorRuntimeName = "Main__Wrap"
                         , ctorTypeView = wrapView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = boxIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -2272,7 +2875,7 @@ spec = do
                     DataInfo
                         { dataInfoSymbol = boxIdentity
                         , dataTypeParams =
-                            [ ResolvedTypeParam
+                            [ ProgramTypes.CheckedTypeParam
                                 (resolvedTypeBinderRefFromIdentity boxParamIdentity "a")
                                 KType
                             ]
@@ -2309,7 +2912,6 @@ spec = do
                         { valueInfoSymbol = boxValueIdentity
                         , valueRuntimeName = "Main__box"
                         , valueTypeView = boxValueView
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2388,25 +2990,20 @@ spec = do
                                 placeholderView
                                 (typeBinderIdentityStableName expectedSelfIdentity)
                                 `shouldBe` Nothing
-                            case ( ProgramTypes.typeViewDisplay placeholderView
-                                 , ProgramTypes.typeViewIdentity placeholderView
-                                 ) of
-                                ( STArrow _ (STArrow (STArrow handlerArgDisplay _) _)
-                                    , STArrow _ (STArrow (STArrow handlerArgIdentity _) _)
-                                    ) -> do
-                                        handlerArgView <-
-                                            maybe
-                                                (expectationFailure "failed to project deferred case handler argument" >> fail "unreachable")
-                                                pure
-                                                ( ProgramTypes.projectTypeView
-                                                    placeholderView
-                                                    handlerArgDisplay
-                                                    handlerArgIdentity
-                                                )
-                                        let handlerArgBinderIdentities =
-                                                Map.elems (ProgramTypes.typeViewBinderIdentities handlerArgView)
-                                        handlerArgBinderIdentities `shouldSatisfy` elem actualSelfIdentity
-                                        handlerArgBinderIdentities `shouldSatisfy` not . elem expectedSelfIdentity
+                            case ProgramTypes.typeViewNodeView placeholderView of
+                                ProgramTypes.TypeViewArrowNode _ outerCodomain ->
+                                    case ProgramTypes.typeViewNodeView outerCodomain of
+                                        ProgramTypes.TypeViewArrowNode handlerType _ ->
+                                            case ProgramTypes.typeViewNodeView handlerType of
+                                                ProgramTypes.TypeViewArrowNode handlerArgView _ -> do
+                                                    let handlerArgBinderIdentities =
+                                                            Map.elems (ProgramTypes.typeViewBinderIdentities handlerArgView)
+                                                    handlerArgBinderIdentities `shouldSatisfy` elem actualSelfIdentity
+                                                    handlerArgBinderIdentities `shouldSatisfy` not . elem expectedSelfIdentity
+                                                other ->
+                                                    expectationFailure ("unexpected deferred case handler type " ++ show other)
+                                        other ->
+                                            expectationFailure ("unexpected deferred case continuation type " ++ show other)
                                 other ->
                                     expectationFailure ("unexpected deferred case placeholder type " ++ show other)
                         Nothing ->
@@ -2426,14 +3023,12 @@ spec = do
                         { valueInfoSymbol = identity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 instanceInfo identity headTy =
                     InstanceInfo
                         { instanceClassSymbol = classIdentity
                         , instanceOriginModuleIdentity = originIdentity
-                        , instanceConstraints = []
                         , instanceConstraintInfos = []
                         , instanceHeadTypeViews = mkTypeView headTy headTy :| []
                         , instanceMethodsByIdentity = Map.singleton methodIdentity (valueInfo identity)
@@ -2466,7 +3061,7 @@ spec = do
                     (TopLevelId leftIdentity)
                     (symbolIdentityStableName leftIdentity)
 
-        it "seeds deferred evidence methods with resolved identity during resolved lowering" $ do
+        it "resolves a unique local nullary evidence method during resolved lowering" $ do
             let classIdentity = generatedSymbolIdentity 991800 SymbolClass "Main" "Pick" Nothing
                 methodIdentity = generatedSymbolIdentity 991801 SymbolMethod "Main" "pick" (Just (SymbolOwnerClass classIdentity))
                 bindingIdentity = generatedSymbolIdentity 991802 SymbolValue "Main" "main" Nothing
@@ -2479,15 +3074,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "pick"
                         , methodTypeViewRaw = classParamView
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -2517,30 +3110,334 @@ spec = do
                     expr of
                     Left err -> expectationFailure ("resolved evidence lowering failed: " ++ show err) >> fail "resolved evidence lowering failed"
                     Right lowered0 -> pure lowered0
-            let deferredEvidenceMethods =
-                    [ deferredMethodEvidenceMethod evidence
-                    | DeferredMethod deferred <- Map.elems (loweredBindingDeferredObligations lowered)
-                    , Just evidence <- [deferredMethodEvidence deferred]
-                    ]
-                loweredEvidenceRefs =
+            let loweredEvidenceRefs =
                     map
                         ProgramTypes.loweredResolvedLocalRef
                         (loweredBindingResolvedEvidenceIdentities lowered)
-            case deferredEvidenceMethods of
-                [method] ->
-                    case evidenceMethodResolvedVar method of
-                        Just ResolvedVar{resolvedVarDetails = EvidenceId evidenceRef} ->
-                            evidenceRef `shouldSatisfy` (`elem` loweredEvidenceRefs)
-                        other ->
-                            expectationFailure ("expected lowering-time EvidenceId, got " ++ show other)
-                methods ->
-                    expectationFailure ("expected one deferred evidence method, got " ++ show methods)
+            loweredBindingDeferredObligations lowered `shouldBe` Map.empty
+            case loweredBindingSurfaceExpr lowered of
+                Surface.EResolvedLamAnn
+                    (EvidenceId binderRef)
+                    _
+                    _
+                    (Surface.EAnn (Surface.EResolvedVar (EvidenceId occurrenceRef) _) _) -> do
+                        binderRef `shouldSatisfy` (`elem` loweredEvidenceRefs)
+                        occurrenceRef `shouldBe` binderRef
+                other ->
+                    expectationFailure ("expected direct local evidence use, got " ++ show other)
             finalizeContext <- requireFinalizeContext scope
             binding <-
                 case finalizeBindingWithContext finalizeContext lowered of
                     Right checked -> pure checked
                     Left err -> expectationFailure ("resolved evidence finalization failed: " ++ show err) >> fail "resolved evidence finalization failed"
             resolvedEvidenceBinders (checkedBindingTerm binding) `shouldMatchList` loweredEvidenceRefs
+
+        it "specializes the full constrained nullary evidence head before applying local evidence" $ do
+            let eqClassIdentity = generatedSymbolIdentity 991830 SymbolClass "Main" "Eq" Nothing
+                eqMethodIdentity = generatedSymbolIdentity 991831 SymbolMethod "Main" "eq" (Just (SymbolOwnerClass eqClassIdentity))
+                pickClassIdentity = generatedSymbolIdentity 991832 SymbolClass "Main" "Pick" Nothing
+                pickMethodIdentity = generatedSymbolIdentity 991833 SymbolMethod "Main" "pick" (Just (SymbolOwnerClass pickClassIdentity))
+                tokenIdentity = generatedSymbolIdentity 991834 SymbolType "Main" "Token" Nothing
+                bindingIdentity = generatedSymbolIdentity 991835 SymbolValue "Main" "selected" Nothing
+                eqParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991836)
+                pickParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991837)
+                methodLocalIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991838)
+                tokenParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991839)
+                eqParamStableName = typeBinderIdentityStableName eqParamIdentity
+                methodLocalStableName = typeBinderIdentityStableName methodLocalIdentity
+                tokenStableName = symbolIdentityStableName tokenIdentity
+                boolIdentity = Builtins.builtinTypeIdentity "Bool"
+                boolStableName = symbolIdentityStableName boolIdentity
+                eqMethodView =
+                    fixtureTypeView
+                        (STArrow (STVar "q") (STArrow (STVar "q") (STBase "Bool")))
+                        (STArrow (STVar eqParamStableName) (STArrow (STVar eqParamStableName) (STBase boolStableName)))
+                        (Map.fromList [("Bool", boolIdentity), (boolStableName, boolIdentity)])
+                        (Map.fromList [("q", eqParamIdentity), (eqParamStableName, eqParamIdentity)])
+                eqMethodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = eqMethodIdentity
+                        , methodDisplayName = "eq"
+                        , methodTypeViewRaw = eqMethodView
+                        , methodConstraintInfos = []
+                        , methodParamBinders = ("q", eqParamIdentity) :| []
+                        }
+                eqClassInfo =
+                    ClassInfo
+                        { classInfoSymbol = eqClassIdentity
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity eqParamIdentity "q") KType :| []
+                        , classSuperclassInfos = []
+                        , classFunctionalDependencies = []
+                        , classMethodsByIdentity = Map.singleton eqMethodIdentity eqMethodInfo
+                        }
+                methodLocalView =
+                    fixtureTypeView
+                        (STVar "b")
+                        (STVar methodLocalStableName)
+                        Map.empty
+                        (Map.fromList [("b", methodLocalIdentity), (methodLocalStableName, methodLocalIdentity)])
+                pickMethodView =
+                    fixtureTypeView
+                        (STCon "Token" (STVar "b" :| []))
+                        (STCon tokenStableName (STVar methodLocalStableName :| []))
+                        (Map.fromList [("Token", tokenIdentity), (tokenStableName, tokenIdentity)])
+                        (Map.fromList [("b", methodLocalIdentity), (methodLocalStableName, methodLocalIdentity)])
+                pickMethodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = pickMethodIdentity
+                        , methodDisplayName = "pick"
+                        , methodTypeViewRaw = pickMethodView
+                        , methodConstraintInfos =
+                            [ ProgramTypes.ConstraintInfo
+                                { ProgramTypes.constraintDisplayClass = "Eq"
+                                , ProgramTypes.constraintClassSymbol = eqClassIdentity
+                                , ProgramTypes.constraintTypeViews = methodLocalView :| []
+                                }
+                            ]
+                        , methodParamBinders = ("a", pickParamIdentity) :| []
+                        }
+                pickClassInfo =
+                    ClassInfo
+                        { classInfoSymbol = pickClassIdentity
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity pickParamIdentity "a") KType :| []
+                        , classSuperclassInfos = []
+                        , classFunctionalDependencies = []
+                        , classMethodsByIdentity = Map.singleton pickMethodIdentity pickMethodInfo
+                        }
+                tokenInfo =
+                    DataInfo
+                        { dataInfoSymbol = tokenIdentity
+                        , dataTypeParams = [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity tokenParamIdentity "t") KType]
+                        , dataConstructors = []
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.singleton "pick" (OverloadedMethod pickMethodIdentity pickMethodInfo))
+                        (Map.singleton "Token" tokenInfo)
+                        (Map.fromList [("Eq", eqClassInfo), ("Pick", pickClassInfo)])
+                        []
+                boolTy = RSTBase (Builtins.builtinTypeSymbol "Bool")
+                tokenBoolTy =
+                    RSTCon
+                        (ProgramTypes.resolvedDataInfoSymbol (SymbolLocal "Main") "Token" tokenInfo)
+                        (boolTy :| [])
+                bindingTy =
+                    ConstrainedType
+                        [ ClassConstraint
+                            (ProgramTypes.resolvedClassInfoSymbol (SymbolLocal "Main") "Pick" pickClassInfo)
+                            (boolTy :| [])
+                        , ClassConstraint
+                            (ProgramTypes.resolvedClassInfoSymbol (SymbolLocal "Main") "Eq" eqClassInfo)
+                            (boolTy :| [])
+                        ]
+                        tokenBoolTy
+                expr =
+                    EVar
+                        ( ResolvedGlobalValue
+                            (ProgramTypes.resolvedMethodInfoSymbol (SymbolLocal "Main") "pick" pickMethodInfo)
+                        )
+            lowered <-
+                case lowerResolvedConstrainedExprBinding
+                    scope
+                    (loweredBindingIdentityFromDetails "Main__selected" (TopLevelId bindingIdentity))
+                    bindingTy
+                    False
+                    expr of
+                    Left err -> expectationFailure ("constrained nullary evidence lowering failed: " ++ show err) >> fail "constrained nullary evidence lowering failed"
+                    Right lowered0 -> pure lowered0
+            loweredBindingDeferredObligations lowered `shouldBe` Map.empty
+            case loweredBindingSurfaceExpr lowered of
+                Surface.EResolvedLamAnn
+                    (EvidenceId pickBinderRef)
+                    _
+                    pickEvidenceTy
+                    ( Surface.EResolvedLamAnn
+                        (EvidenceId eqBinderRef)
+                        _
+                        eqEvidenceTy
+                        ( Surface.EAnn
+                            ( Surface.EApp
+                                (Surface.EAnn (Surface.EResolvedVar (EvidenceId pickOccurrenceRef) _) specializedHeadTy)
+                                (Surface.EResolvedVar (EvidenceId eqOccurrenceRef) _)
+                              )
+                            resultTy
+                          )
+                      ) -> do
+                        pickOccurrenceRef `shouldBe` pickBinderRef
+                        eqOccurrenceRef `shouldBe` eqBinderRef
+                        pickEvidenceTy
+                            `shouldSatisfy` ( \ty ->
+                                                case ty of
+                                                    STForall {} -> True
+                                                    _ -> False
+                                            )
+                        case specializedHeadTy of
+                            STArrow evidenceArgTy headResultTy -> do
+                                evidenceArgTy `shouldBe` eqEvidenceTy
+                                headResultTy `shouldBe` resultTy
+                            other ->
+                                expectationFailure ("expected specialized evidence arrow before application, got " ++ show other)
+                other ->
+                    expectationFailure ("expected constrained direct local evidence application, got " ++ show other)
+            finalizeContext <- requireFinalizeContext scope
+            binding <-
+                case finalizeBindingWithContext finalizeContext lowered of
+                    Right checked -> pure checked
+                    Left err -> expectationFailure ("constrained nullary evidence finalization failed: " ++ show err) >> fail "constrained nullary evidence finalization failed"
+            typeCheck (checkedBindingTerm binding)
+                `shouldBe` Right (ProgramTypes.checkedBindingType binding)
+
+        it "specializes a non-nullary local method-evidence head before applying local evidence" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Eq, Mix, eq, mix, callMix, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  instance Eq Bool {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , ""
+                        , "  class Mix a {"
+                        , "    mix : Eq b => a -> b -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  instance Mix Bool {"
+                        , "    mix = λx λy eq y y;"
+                        , "  }"
+                        , ""
+                        , "  def callMix : Mix Bool => Bool -> Bool -> Bool = λx λy mix x y;"
+                        , "  def main : Bool = callMix true true;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            callMixBinding <- requireCheckedBinding "Main__callMix" checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let evidenceBinders = resolvedEvidenceBinders (checkedBindingTerm callMixBinding)
+                specializedEvidenceOccurrences =
+                    [ (occurrenceRef, argumentTy)
+                    | (occurrenceRef, argumentTy) <- resolvedEvidenceInstApps (checkedBindingTerm callMixBinding)
+                    , occurrenceRef `elem` evidenceBinders
+                    ]
+            specializedEvidenceOccurrences
+                `shouldSatisfy` any
+                    ( \(_, argumentTy) ->
+                        alphaEqType argumentTy (ProgramTypes.checkedBindingType mainBinding)
+                    )
+
+        it "does not specialize a rigid local class-evidence parameter from the expected nullary result" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Pick, pick, bad) {"
+                        , "  class Pick a {"
+                        , "    pick : a;"
+                        , "  }"
+                        , "  def bad : Pick a => Bool = pick;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramNoMatchingInstance "Pick" (STBase "Bool"))
+
+        it "does not use a polymorphic local zero-method assumption for a concrete instance prerequisite" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Marker, Choose, choose, selected, main) {"
+                        , "  class Marker a {"
+                        , "  }"
+                        , "  class Choose a {"
+                        , "    choose : a;"
+                        , "  }"
+                        , "  instance Marker Bool => Choose Int {"
+                        , "    choose = 1;"
+                        , "  }"
+                        , "  def selected : Marker a => Int = choose;"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramNoMatchingInstance "Marker" (STBase "Bool"))
+
+        it "falls back to a matching global zero-method instance instead of specializing local evidence" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Marker, Choose, choose, selected, main) {"
+                        , "  class Marker a {"
+                        , "  }"
+                        , "  instance Marker Bool {"
+                        , "  }"
+                        , "  class Choose a {"
+                        , "    choose : a;"
+                        , "  }"
+                        , "  instance Marker Bool => Choose Int {"
+                        , "    choose = 1;"
+                        , "  }"
+                        , "  def selected : Marker a => Int = choose;"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "does not use polymorphic local method evidence for a concrete constrained nullary method" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Eq, Pick, eq, pick, selected, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  class Pick a {"
+                        , "    pick : Eq Bool => a;"
+                        , "  }"
+                        , "  instance Pick Int {"
+                        , "    pick = 1;"
+                        , "  }"
+                        , "  def selected : Eq a => a -> Int = λx let same = eq x x in pick;"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramNoMatchingInstance "Eq" (STBase "Bool"))
+
+        it "falls back to a matching global method-bearing instance for a constrained nullary method" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Eq, Pick, eq, pick, selected, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Bool {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , "  class Pick a {"
+                        , "    pick : Eq Bool => a;"
+                        , "  }"
+                        , "  instance Pick Int {"
+                        , "    pick = 1;"
+                        , "  }"
+                        , "  def selected : Eq Int => Int = pick;"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects ambiguous duplicate local evidence for a nullary method" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Pick, pick, bad) {"
+                        , "  class Pick a {"
+                        , "    pick : a;"
+                        , "  }"
+                        , "  def bad : (Pick Bool, Pick Bool) => Bool = pick;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramAmbiguousMethodUse "pick")
 
         it "uses identity-derived runtime aliases for selected instance method dispatch instead of raw method runtime names" $ do
             let staleRuntimeName = "Main__stale_method_runtime"
@@ -2562,15 +3459,13 @@ spec = do
                         { methodInfoSymbol = methodIdentity
                         , methodDisplayName = "apply"
                         , methodTypeViewRaw = methodView
-                        , methodConstraints = []
                         , methodConstraintInfos = []
                         , methodParamBinders = ("a", classParamIdentity) :| []
                         }
                 classInfo =
                     ClassInfo
                         { classInfoSymbol = classIdentity
-                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
-                        , classSuperclasses = []
+                        , classTypeParams = ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
                         , classSuperclassInfos = []
                         , classFunctionalDependencies = []
                         , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
@@ -2580,7 +3475,6 @@ spec = do
                         { valueInfoSymbol = instanceMethodIdentity
                         , valueRuntimeName = staleRuntimeName
                         , valueTypeView = mkTypeView (STArrow (STBase "Token") (STBase "Int")) (STArrow (STBase (symbolIdentityStableName tokenTypeIdentity)) (STBase "Int"))
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 tokenValue =
@@ -2588,14 +3482,12 @@ spec = do
                         { valueInfoSymbol = tokenValueIdentity
                         , valueRuntimeName = "Main__token"
                         , valueTypeView = tokenView
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 instanceInfo =
                     InstanceInfo
                         { instanceClassSymbol = classIdentity
                         , instanceOriginModuleIdentity = originIdentity
-                        , instanceConstraints = []
                         , instanceConstraintInfos = []
                         , instanceHeadTypeViews = tokenView :| []
                         , instanceMethodsByIdentity = Map.singleton methodIdentity instanceMethodValue
@@ -2653,14 +3545,12 @@ spec = do
                         { valueInfoSymbol = instanceMethodIdentity
                         , valueRuntimeName = staleRuntimeName
                         , valueTypeView = mkTypeView (STArrow (STBase "Int") (STBase "Int")) (STArrow (STBase "Int") (STBase "Int"))
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 instanceInfo =
                     InstanceInfo
                         { instanceClassSymbol = classIdentity
                         , instanceOriginModuleIdentity = originIdentity
-                        , instanceConstraints = []
                         , instanceConstraintInfos = []
                         , instanceHeadTypeViews = intView :| []
                         , instanceMethodsByIdentity = Map.singleton methodIdentity instanceMethodValue
@@ -2683,7 +3573,6 @@ spec = do
                         { valueInfoSymbol = identity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2697,11 +3586,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar runtimeName
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar runtimeName
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -2719,7 +3606,6 @@ spec = do
                         { valueInfoSymbol = sharedIdentity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2736,11 +3622,10 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar "Main__right"
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr =
+                            Surface.EResolvedVar (TopLevelId sharedIdentity) "Main__right"
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -2748,7 +3633,6 @@ spec = do
                         , loweredBindingExportedAsMain = False
                         }
             lowerType scope (STBase "Expected.Box") `shouldNotBe` lowerType scope (STBase "Wrong.Box")
-            recoverSourceTypeMetadataLight scope (lowerType scope (STBase "Wrong.Box")) `shouldBe` STBase "Wrong.Box"
             finalizeContext <- requireFinalizeContext scope
             case finalizeBindingWithContext finalizeContext lowered of
                 Right binding ->
@@ -2770,7 +3654,6 @@ spec = do
                         { valueInfoSymbol = valueIdentity
                         , valueRuntimeName = "Main__actual"
                         , valueTypeView = mkTypeView (STBase "Int") (STBase "Int")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2783,11 +3666,10 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar stableName
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr =
+                            Surface.EResolvedVar (TopLevelId valueIdentity) stableName
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -2810,6 +3692,7 @@ spec = do
             let binderName = "a"
                 expectedBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991657)
                 ambientBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991658)
+                surfaceLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991663)) "x"
                 expectedView = binderFunctionTypeView binderName [] expectedBinderIdentity
                 ambientValueIdentity = generatedSymbolIdentity 991659 SymbolValue "Main" "ambient" Nothing
                 bindingIdentity = generatedSymbolIdentity 991660 SymbolValue "Main" "main" Nothing
@@ -2818,7 +3701,6 @@ spec = do
                         { valueInfoSymbol = ambientValueIdentity
                         , valueRuntimeName = "Main__ambient"
                         , valueTypeView = binderFunctionTypeView binderName [] ambientBinderIdentity
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2827,17 +3709,18 @@ spec = do
                         Map.empty
                         Map.empty
                         []
-                functionType = STArrow (STVar binderName) (STVar binderName)
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = functionType
-                        , loweredBindingSourceTypeView = Just expectedView
-                        , loweredBindingExpectedType = functionType
-                        , loweredBindingExpectedTypeView = Just expectedView
+                        , loweredBindingSourceTypeView = expectedView
+                        , loweredBindingExpectedTypeView = expectedView
                         , loweredBindingSurfaceExpr =
-                            Surface.ELamAnn "x" (STVar binderName) (Surface.EVar "x")
+                            Surface.EResolvedLamAnn
+                                (LocalId surfaceLocal)
+                                "x"
+                                (STVar binderName)
+                                (Surface.EResolvedVar (LocalId surfaceLocal) "x")
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -2858,25 +3741,24 @@ spec = do
                 surfaceBinderName = "$surface_a"
                 binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991661)
                 bindingIdentity = generatedSymbolIdentity 991662 SymbolValue "Main" "main" Nothing
+                surfaceLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991664)) "x"
                 expectedView =
                     binderFunctionTypeView
                         expectedBinderName
                         [surfaceBinderName]
                         binderIdentity
-                functionType =
-                    STArrow
-                        (STVar expectedBinderName)
-                        (STVar expectedBinderName)
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = functionType
-                        , loweredBindingSourceTypeView = Just expectedView
-                        , loweredBindingExpectedType = functionType
-                        , loweredBindingExpectedTypeView = Just expectedView
+                        , loweredBindingSourceTypeView = expectedView
+                        , loweredBindingExpectedTypeView = expectedView
                         , loweredBindingSurfaceExpr =
-                            Surface.ELamAnn "x" (STVar surfaceBinderName) (Surface.EVar "x")
+                            Surface.EResolvedLamAnn
+                                (LocalId surfaceLocal)
+                                "x"
+                                (STVar surfaceBinderName)
+                                (Surface.EResolvedVar (LocalId surfaceLocal) "x")
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -2908,7 +3790,6 @@ spec = do
                         { valueInfoSymbol = identity
                         , valueRuntimeName = symbolIdentityStableName identity
                         , valueTypeView = mkTypeView ty ty
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -2925,10 +3806,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Bool"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Bool"
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
                         , loweredBindingSurfaceExpr =
                             Surface.EResolvedVar
                                 (TopLevelId rightIdentity)
@@ -2966,7 +3845,6 @@ spec = do
                         { valueInfoSymbol = externalIdentity
                         , valueRuntimeName = symbolIdentityStableName externalIdentity
                         , valueTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope = mkElaborateScope (Map.singleton "external" valueInfo) Map.empty Map.empty []
@@ -2974,10 +3852,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STArrow (STBase "Int") (STBase "Bool")
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STArrow (STBase "Int") (STBase "Bool")
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STArrow (STBase "Int") (STBase "Bool")) (STArrow (STBase "Int") (STBase "Bool"))
+                        , loweredBindingExpectedTypeView = mkTypeView (STArrow (STBase "Int") (STBase "Bool")) (STArrow (STBase "Int") (STBase "Bool"))
                         , loweredBindingSurfaceExpr =
                             Surface.EResolvedLamAnn
                                 (LocalId binderRef)
@@ -3002,11 +3878,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar stableName
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar stableName
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -3026,11 +3900,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar externalName
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar externalName
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -3050,7 +3922,6 @@ spec = do
                         { valueInfoSymbol = sharedIdentity
                         , valueRuntimeName = runtimeName
                         , valueTypeView = mkTypeView ty ty
-                        , valueConstraints = []
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -3067,11 +3938,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar "Main__left"
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar "Main__left"
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.empty
@@ -3096,7 +3965,6 @@ spec = do
                             Nothing
                             (STVarApp stableName (STVar "a" :| []))
                         )
-                view = mkTypeView sourceTy sourceTy
                 expected =
                     Elab.TForallRef
                         stableRef
@@ -3106,15 +3974,17 @@ spec = do
                             Nothing
                             (Elab.TVarAppRef stableRef (Elab.TVarRef freshRef :| []))
                         )
-            typeViewToElabType scope view `shouldBe` Right expected
+            srcTypeToElabTypeInScope scope sourceTy `shouldBe` Right expected
 
-        it "does not carry stable source type binder identities without metadata" $ do
+        it "rejects stable-looking source type binders without identity payloads" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991622)
                 stableName = typeBinderIdentityStableName identity
-                scope = mkElaborateScope Map.empty Map.empty Map.empty []
                 sourceTy = STForall stableName Nothing (STVarApp stableName (STBase "Int" :| []))
-                view = sourceTypeViewInScope scope sourceTy
-            Map.lookup stableName (ProgramTypes.typeViewBinderIdentities view) `shouldBe` Nothing
+            ProgramTypes.typeViewFromSourceType
+                (Map.singleton "Int" (Builtins.builtinTypeIdentity "Int"))
+                Map.empty
+                sourceTy
+                `shouldSatisfy` isLeft
 
         it "preserves type-view binder identities while finalizing views" $ do
             let identity = typeBinderIdentityFromNode (NodeId 991608)
@@ -3175,55 +4045,66 @@ spec = do
                 expected = Elab.TForallRef ref Nothing (Elab.TVarRef ref)
             typeViewToElabType scope view `shouldBe` Right expected
 
-        it "does not reuse an outer display binder identity for a same-named missing inner finalization binder" $ do
+        it "preserves distinct identities for same-named nested finalization binders" $ do
             let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991633)
+                innerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991637)
+                outerSourceRef = resolvedTypeBinderRefFromIdentity outerIdentity "a"
+                innerSourceRef = resolvedTypeBinderRefFromIdentity innerIdentity "a"
                 scope = mkElaborateScope Map.empty Map.empty Map.empty []
-                displayTy = STForall "a" Nothing (STForall "a" Nothing (STVar "a"))
-                identityTy = STForall "$outer_a" Nothing (STForall "$missing_inner_a" Nothing (STVar "$missing_inner_a"))
                 view =
-                    (setTypeViewBinderIdentities (Map.singleton "a" outerIdentity) (mkTypeView displayTy identityTy))
+                    ProgramTypes.typeViewFromResolved
+                        (RSTForall outerSourceRef Nothing (RSTForall innerSourceRef Nothing (RSTVar innerSourceRef)))
             case typeViewToElabType scope view of
                 Right (Elab.TForallRef outerRef Nothing (Elab.TForallRef innerRef Nothing (Elab.TVarRef bodyRef))) -> do
                     Elab.typeBinderRefIdentity outerRef `shouldBe` outerIdentity
-                    Elab.typeBinderRefIdentity innerRef `shouldNotBe` outerIdentity
-                    Elab.typeBinderRefIdentity bodyRef `shouldBe` Elab.typeBinderRefIdentity innerRef
+                    Elab.typeBinderRefIdentity innerRef `shouldBe` innerIdentity
+                    Elab.typeBinderRefIdentity bodyRef `shouldBe` innerIdentity
                 other ->
                     expectationFailure ("expected distinct finalized forall refs, got " ++ show other)
 
-        it "does not reuse an outer display binder identity for same-named finalization binders inside bounds" $ do
+        it "preserves distinct identities for same-named finalization binders inside bounds" $ do
             let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991634)
+                bodyIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991638)
+                boundIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991639)
+                outerSourceRef = resolvedTypeBinderRefFromIdentity outerIdentity "a"
+                bodySourceRef = resolvedTypeBinderRefFromIdentity bodyIdentity "b"
+                boundSourceRef = resolvedTypeBinderRefFromIdentity boundIdentity "a"
                 scope = mkElaborateScope Map.empty Map.empty Map.empty []
-                displayBound = STForall "a" Nothing (STVar "a")
-                identityBound = STForall "$missing_bound_a" Nothing (STVar "$missing_bound_a")
-                displayTy =
-                    STForall "a" Nothing $
-                        STForall "b" (Just (SrcBound displayBound)) (STVar "b")
-                identityTy =
-                    STForall "$outer_a" Nothing $
-                        STForall "$b" (Just (SrcBound identityBound)) (STVar "$b")
                 view =
-                    (setTypeViewBinderIdentities (Map.singleton "a" outerIdentity) (mkTypeView displayTy identityTy))
+                    ProgramTypes.typeViewFromResolved
+                        ( RSTForall outerSourceRef Nothing $
+                            RSTForall
+                                bodySourceRef
+                                (Just (ResolvedSrcBound (RSTForall boundSourceRef Nothing (RSTVar boundSourceRef))))
+                                (RSTVar bodySourceRef)
+                        )
             case typeViewToElabType scope view of
                 Right (Elab.TForallRef outerRef Nothing (Elab.TForallRef bRef (Just (Elab.TForallRef boundRef Nothing (Elab.TVarRef boundBodyRef))) (Elab.TVarRef bodyRef))) -> do
                     Elab.typeBinderRefIdentity outerRef `shouldBe` outerIdentity
-                    Elab.typeBinderRefIdentity boundRef `shouldNotBe` outerIdentity
-                    Elab.typeBinderRefIdentity boundBodyRef `shouldBe` Elab.typeBinderRefIdentity boundRef
+                    Elab.typeBinderRefIdentity boundRef `shouldBe` boundIdentity
+                    Elab.typeBinderRefIdentity boundBodyRef `shouldBe` boundIdentity
                     bodyRef `shouldBe` bRef
                 other ->
                     expectationFailure ("expected distinct finalized bound refs, got " ++ show other)
 
-        it "seeds fresh type-view binders after type head identities while finalizing views" $ do
+        it "preserves construction-time type-view binder identities alongside head identities" $ do
             let headIdentity = generatedSymbolIdentity 43 SymbolType "Main" "Box" Nothing
                 headName = symbolIdentityStableName headIdentity
-                binderRef = Elab.typeBinderRefFromIdentity (typeBinderIdentityFromUnique (UniqueIdentity 44)) "a"
+                binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 44)
+                binderName = typeBinderIdentityStableName binderIdentity
+                binderRef = Elab.typeBinderRefFromIdentity binderIdentity "a"
                 scope = mkElaborateScope Map.empty Map.empty Map.empty []
                 sourceTy = STArrow (STBase "Box") (STVar "a")
-                identityTy = STArrow (STBase headName) (STVar "a")
+                identityTy = STArrow (STBase headName) (STVar binderName)
                 view =
-                    (setTypeViewHeadIdentities (Map.singleton headName headIdentity) (mkTypeView sourceTy identityTy))
+                    fixtureTypeView
+                        sourceTy
+                        identityTy
+                        (Map.singleton headName headIdentity)
+                        (Map.singleton binderName binderIdentity)
                 expected =
                     Elab.TArrow
-                        (Elab.TBaseWithIdentity (Just headIdentity) (BaseTy "Box"))
+                        (Elab.TBaseWithIdentity headIdentity (BaseTy "Box"))
                         (Elab.TVarRef binderRef)
             typeViewToElabType scope view `shouldBe` Right expected
 
@@ -3234,7 +4115,7 @@ spec = do
                 view =
                     (setTypeViewHeadIdentities (Map.singleton "Token" headIdentity) (mkTypeView (STBase headName) (STBase headName)))
                 expected =
-                    Elab.TBaseWithIdentity (Just headIdentity) (BaseTy headName)
+                    Elab.TBaseWithIdentity headIdentity (BaseTy headName)
             typeViewToElabType scope view `shouldBe` Right expected
 
         it "finalizes type-view heads through display identity pairs" $ do
@@ -3244,33 +4125,19 @@ spec = do
                 view =
                     (setTypeViewHeadIdentities (Map.singleton headName headIdentity) (mkTypeView (STBase "DisplayToken") (STBase headName)))
                 expected =
-                    Elab.TBaseWithIdentity (Just headIdentity) (BaseTy "DisplayToken")
-            typeViewToElabType scope view `shouldBe` Right expected
-
-        it "does not finalize ambiguous type-view head aliases by display name" $ do
-            let leftIdentity = generatedSymbolIdentity 991620 SymbolType "Left" "Token" Nothing
-                rightIdentity = generatedSymbolIdentity 991621 SymbolType "Right" "Token" Nothing
-                scope = mkElaborateScope Map.empty Map.empty Map.empty []
-                view =
-                    ( setTypeViewHeadIdentities
-                        ( Map.fromList
-                            [ (symbolIdentityStableName leftIdentity, leftIdentity)
-                            , (symbolIdentityStableName rightIdentity, rightIdentity)
-                            ]
-                        )
-                        (mkTypeView (STBase "Token") (STBase "Token"))
-                    )
-                expected =
-                    Elab.TBaseWithIdentity Nothing (BaseTy "Token")
+                    Elab.TBaseWithIdentity headIdentity (BaseTy "DisplayToken")
             typeViewToElabType scope view `shouldBe` Right expected
 
         it "does not let conflicting type-view head aliases override builtin identities" $ do
             let fakeIdentity = generatedSymbolIdentity 991647 SymbolType "Fake" "Int" Nothing
                 scope = mkElaborateScope Map.empty Map.empty Map.empty []
                 view =
-                    (setTypeViewHeadIdentities (Map.singleton "Int" fakeIdentity) (mkTypeView (STBase "Int") (STBase "Int")))
+                    ProgramTypes.typeViewWithIdentityAliases
+                        (Map.singleton "Int" fakeIdentity)
+                        Map.empty
+                        (builtinBaseTypeView "Int")
                 expected =
-                    Elab.TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
+                    Elab.TBaseWithIdentity (Builtins.builtinTypeIdentity "Int") (BaseTy "Int")
             typeViewToElabType scope view `shouldBe` Right expected
 
         it "seeds fresh type-view binders after scoped type head identities" $ do
@@ -3303,13 +4170,13 @@ spec = do
                 sourceTy = STArrow (STBase "Int") (STCon "IO" (STBase "Int" :| []))
                 builtinIntTy =
                     Elab.TBaseWithIdentity
-                        (Just (Builtins.builtinTypeIdentity "Int"))
+                        (Builtins.builtinTypeIdentity "Int")
                         (BaseTy "Int")
                 expected =
                     Elab.TArrow
                         builtinIntTy
                         ( Elab.TConWithIdentity
-                            (Just (Builtins.builtinTypeIdentity "IO"))
+                            (Builtins.builtinTypeIdentity "IO")
                             (BaseTy "IO")
                             (builtinIntTy :| [])
                         )
@@ -3324,7 +4191,7 @@ spec = do
                         Map.empty
                         []
             srcTypeToElabTypeInScope scope (STBase "Int")
-                `shouldBe` Right (Elab.TBaseWithIdentity (Just localIntIdentity) (BaseTy "Int"))
+                `shouldBe` Right (Elab.TBaseWithIdentity localIntIdentity (BaseTy "Int"))
 
         it "does not resolve resolved forall substitutions by stale name when binder identity differs" $ do
             let expectedIdentity = typeBinderIdentityFromNode (NodeId 991302)
@@ -3356,21 +4223,31 @@ spec = do
                         , dataConstructors = []
                         }
                 scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
-                baseTemplate = mkTypeView (STBase "Box") (STBase "Box")
-                baseActual = mkTypeView (STBase "Box") (STBase "Main.Box")
+                baseTemplate = baseTypeView "Box" typeIdentity
+                baseActual = baseTypeView "Box" typeIdentity
                 conTemplate =
-                    mkTypeView
+                    fixtureTypeView
                         (STCon "Box" (STBase "Int" :| []))
-                        (STCon "Box" (STBase "Int" :| []))
+                        (STCon stableHead (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "Int")) :| []))
+                        (Map.fromList [("Box", typeIdentity), ("Int", Builtins.builtinTypeIdentity "Int")])
+                        Map.empty
                 conActual =
-                    mkTypeView
+                    fixtureTypeView
                         (STCon "Box" (STBase "Int" :| []))
-                        (STCon "Main.Box" (STBase "Int" :| []))
+                        (STCon stableHead (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "Int")) :| []))
+                        (Map.fromList [("Main.Box", typeIdentity), ("Int", Builtins.builtinTypeIdentity "Int")])
+                        Map.empty
                 metadataTemplate =
                     (setTypeViewHeadIdentities (Map.singleton "Box" typeIdentity) (mkTypeView (STBase "Box") (STBase "Box")))
                 metadataActual =
                     (setTypeViewHeadIdentities (Map.singleton "Box" typeIdentity) (mkTypeView (STBase "Box") (STBase stableHead)))
                 emptyScope = mkElaborateScope Map.empty Map.empty Map.empty []
+            ProgramTypes.typeViewNodeView metadataTemplate
+                `shouldBe` ProgramTypes.TypeViewBaseNode "Box" typeIdentity
+            ProgramTypes.typeViewNodeView metadataActual
+                `shouldBe` ProgramTypes.TypeViewBaseNode "Box" typeIdentity
+            ProgramTypes.typeViewNodeView conTemplate
+                `shouldBe` ProgramTypes.typeViewNodeView conActual
             matchTypeViewsAgainstIdentity scope Map.empty (baseTemplate :| []) (baseActual :| [])
                 `shouldBe` Just Map.empty
             matchTypeViewsAgainstIdentity scope Map.empty (conTemplate :| []) (conActual :| [])
@@ -3420,7 +4297,7 @@ spec = do
                         Map.empty
                         []
                 view =
-                    mkTypeView (STBase "Box") (STBase "Main.Box")
+                    baseTypeView "Box" mainIdentity
             case lowerTypeView scope view of
                 STMu selfName _ ->
                     selfName `shouldBe` "$Main.Box_self"
@@ -3562,7 +4439,7 @@ spec = do
                     DataInfo
                         { dataInfoSymbol = typeIdentity
                         , dataTypeParams =
-                            [ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991708) "a") KType]
+                            [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991708) "a") KType]
                         , dataConstructors = []
                         }
                 scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
@@ -3640,27 +4517,6 @@ spec = do
                         )
             sourceForallMatches expected actual `shouldBe` False
 
-        it "keeps vacuous foralls when matching type abstractions still carry instantiations" $ do
-            let ty = testTForall "a" Nothing (testTVar "result")
-                retainedTerm =
-                    mkTestTyAbs
-                        "a"
-                        Nothing
-                        (Elab.ETyInst (mkTestDeferredVar "poly") (Elab.InstApp (testTVar "a")))
-                strippedTerm = mkTestTyAbs "a" Nothing (mkTestDeferredVar "value")
-            stripVacuousForallsAndTypeAbs ty retainedTerm `shouldBe` (ty, retainedTerm)
-            stripVacuousForallsAndTypeAbs ty strippedTerm `shouldBe` (testTVar "result", mkTestDeferredVar "value")
-
-        it "keeps vacuous foralls when resolved sidecar types still mention the binder" $ do
-            let ty = testTForall "a" Nothing (testTVar "result")
-                resolved =
-                    ResolvedVar
-                        { resolvedVarType = testTVar "a"
-                        , resolvedVarDetails = LocalId (generatedLocalRefForName "$value#0")
-                        }
-                retainedTerm = mkTestTyAbs "a" Nothing (Elab.EVarNode resolved)
-            stripVacuousForallsAndTypeAbs ty retainedTerm `shouldBe` (ty, retainedTerm)
-
         it "recovers structural owners from binder identity instead of the mu binder spelling" $ do
             let typeIdentity =
                     generatedSymbolIdentity 10001 SymbolType "Main" "Box" Nothing
@@ -3676,7 +4532,6 @@ spec = do
                             mkTypeView
                                 (STArrow (STBase "Int") (STBase "Box"))
                                 (STArrow (STBase "Int") (STBase "Main.Box"))
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3690,7 +4545,6 @@ spec = do
                 scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
                 visible = STBase "Box"
                 encoded = lowerType scope visible
-            recoverSourceTypeMetadataLight scope encoded `shouldBe` visible
             case srcTypeToElabTypeInScope scope encoded of
                 Left err ->
                     expectationFailure ("expected structural Box type to elaborate, got " ++ show err)
@@ -3729,16 +4583,23 @@ spec = do
                     generatedSymbolIdentity 1001 SymbolType "Main" "Apply" Nothing
                 ctorIdentity =
                     generatedSymbolIdentity 1002 SymbolConstructor "Main" "Apply" (Just (SymbolOwnerType typeIdentity))
+                fIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991701)
+                aIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991702)
+                fStableName = typeBinderIdentityStableName fIdentity
+                aStableName = typeBinderIdentityStableName aIdentity
+                applyStableHead = symbolIdentityStableName typeIdentity
                 applyResult = STCon "Apply" (STVar "f" :| [STVar "a"])
+                applyResultIdentity = STCon applyStableHead (STVar fStableName :| [STVar aStableName])
                 applyCtor =
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "$Apply"
                         , ctorTypeView =
-                            mkTypeView
+                            fixtureTypeView
                                 (STArrow (STVarApp "f" (STVar "a" :| [])) applyResult)
-                                (STArrow (STVarApp "f" (STVar "a" :| [])) (STCon "Main.Apply" (STVar "f" :| [STVar "a"])))
-                        , ctorForallBinderInfo = []
+                                (STArrow (STVarApp fStableName (STVar aStableName :| [])) applyResultIdentity)
+                                (Map.singleton applyStableHead typeIdentity)
+                                (Map.fromList [(fStableName, fIdentity), (aStableName, aIdentity)])
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3747,8 +4608,8 @@ spec = do
                     DataInfo
                         { dataInfoSymbol = typeIdentity
                         , dataTypeParams =
-                            [ ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991701) "f") (KArrow KType KType)
-                            , ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991702) "a") KType
+                            [ ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") (KArrow KType KType)
+                            , ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                             ]
                         , dataConstructors = [applyCtor]
                         }
@@ -3756,12 +4617,17 @@ spec = do
                 visible =
                     STCon
                         "Apply"
-                        ( STCon "Either" (STBase "Int" :| [])
+                        ( STBase "IO"
                             :| [STBase "String"]
                         )
-            recoverSourceTypeMetadataLight scope (lowerType scope visible) `shouldBe` visible
+            case srcTypeToElabTypeInScope scope (lowerType scope visible) of
+                Right encodedTy ->
+                    ProgramTypes.typeViewDisplay (elabTypeToRecoveredTypeView scope encodedTy)
+                        `shouldBe` visible
+                Left err ->
+                    expectationFailure ("identity-bearing higher-kinded recovery setup failed: " ++ show err)
 
-        it "does not recover same-shaped encodings when multiple data owners match" $ do
+        it "recovers same-shaped encodings by structural owner identity" $ do
             let mkBoxInfo moduleName dataUnique ctorUnique =
                     let dataIdentity =
                             generatedSymbolIdentity dataUnique SymbolType moduleName "Box" Nothing
@@ -3784,7 +4650,6 @@ spec = do
                                             (STBase (moduleName ++ ".Box"))
                                         )
                                     )
-                                , ctorForallBinderInfo = []
                                 , ctorOwningTypeIdentity = dataIdentity
                                 , ctorIndex = 0
                                 , ctorOwnerConstructors = []
@@ -3806,14 +4671,16 @@ spec = do
                         )
                         Map.empty
                         []
-            case lowerType scope (STBase "Left.Box") of
-                STMu _ body -> do
-                    let ambiguousEncoding = STMu "$Box_self" body
-                    recoverSourceTypeMetadataLight scope ambiguousEncoding `shouldBe` ambiguousEncoding
-                other ->
-                    expectationFailure ("expected a structural data encoding, got " ++ show other)
-            recoverSourceTypeMetadataLight scope (lowerType scope (STBase "Right.Box"))
-                `shouldBe` STBase "Right.Box"
+            mapM_
+                ( \visible ->
+                    case srcTypeToElabTypeInScope scope (lowerType scope visible) of
+                        Right encodedTy ->
+                            ProgramTypes.typeViewDisplay (elabTypeToRecoveredTypeView scope encodedTy)
+                                `shouldBe` visible
+                        Left err ->
+                            expectationFailure ("identity-bearing owner recovery setup failed: " ++ show err)
+                )
+                [STBase "Left.Box", STBase "Right.Box"]
 
         it "recovers repeated data parameters through scoped type-head identity aliases" $ do
             let boxIdentity =
@@ -3825,7 +4692,6 @@ spec = do
                         { ctorInfoSymbol = boxCtorIdentity
                         , ctorRuntimeName = "$Box"
                         , ctorTypeView = mkTypeView (STBase "Box") (STBase "Main.Box")
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = boxIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3849,7 +4715,6 @@ spec = do
                             mkTypeView
                                 (STArrow (STVar "a") (STArrow (STVar "a") dupResult))
                                 (STArrow (STVar "a") (STArrow (STVar "a") (STCon "Main.Dup" (STVar "a" :| []))))
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dupIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3858,7 +4723,7 @@ spec = do
                     DataInfo
                         { dataInfoSymbol = dupIdentity
                         , dataTypeParams =
-                            [ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991707) "a") KType]
+                            [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991707) "a") KType]
                         , dataConstructors = [dupCtor]
                         }
                 scope =
@@ -3873,7 +4738,12 @@ spec = do
                         "a"
                         [STBase "Box", STBase (symbolIdentityStableName boxIdentity)]
                         (lowerType scope (STCon "Dup" (STVar "a" :| [])))
-            recoverSourceTypeMetadataLight scope actual `shouldBe` visible
+            case srcTypeToElabTypeInScope scope actual of
+                Right actualTy ->
+                    ProgramTypes.typeViewDisplay (elabTypeToRecoveredTypeView scope actualTy)
+                        `shouldBe` visible
+                Left err ->
+                    expectationFailure ("identity-bearing repeated-parameter recovery failed: " ++ show err)
 
         it "recovers repeated data parameters through constructor metadata head aliases" $ do
             let boxIdentity =
@@ -3885,7 +4755,6 @@ spec = do
                         { ctorInfoSymbol = boxCtorIdentity
                         , ctorRuntimeName = "$Box"
                         , ctorTypeView = mkTypeView (STBase "Box") (STBase "Main.Box")
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = boxIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3914,7 +4783,6 @@ spec = do
                                     (STArrow (STVar "a") (STArrow (STVar "a") (STCon "Main.Dup" (STVar "a" :| []))))
                                 )
                             )
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dupIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3923,13 +4791,13 @@ spec = do
                     DataInfo
                         { dataInfoSymbol = dupIdentity
                         , dataTypeParams =
-                            [ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991708) "a") KType]
+                            [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991708) "a") KType]
                         , dataConstructors = [dupCtor]
                         }
                 scope =
                     mkElaborateScope
                         Map.empty
-                        (Map.fromList [("Box", boxInfo), ("Dup", dupInfo)])
+                        (Map.fromList [("Box", boxInfo), (staleBoxHead, boxInfo), ("Dup", dupInfo)])
                         Map.empty
                         []
                 visible = STCon "Dup" (STBase "Box" :| [])
@@ -3938,7 +4806,12 @@ spec = do
                         "a"
                         [STBase "Box", STBase staleBoxHead]
                         (lowerType scope (STCon "Dup" (STVar "a" :| [])))
-            recoverSourceTypeMetadataLight scope actual `shouldBe` visible
+            case srcTypeToElabTypeInScope scope actual of
+                Right actualTy ->
+                    ProgramTypes.typeViewDisplay (elabTypeToRecoveredTypeView scope actualTy)
+                        `shouldBe` visible
+                Left err ->
+                    expectationFailure ("identity-bearing metadata-alias recovery failed: " ++ show err)
 
         it "lowers data encoding binders from data identity when data names are stale" $ do
             let typeIdentity =
@@ -3953,7 +4826,6 @@ spec = do
                             mkTypeView
                                 (STArrow (STBase "Int") (STBase "Box"))
                                 (STArrow (STBase "Int") (STBase "Main.Box"))
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -3986,17 +4858,33 @@ spec = do
                 ctorIdentity unique name =
                     generatedSymbolIdentity unique SymbolConstructor "Core" name (Just (SymbolOwnerType typeIdentity))
                 resultTy = STCon "MaybeF" (STVar "f" :| [STVar "a"])
-                resultTyIdentity = STCon "Core.MaybeF" (STVar "f" :| [STVar "a"])
+                fIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991703)
+                aIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991704)
+                fStableName = typeBinderIdentityStableName fIdentity
+                aStableName = typeBinderIdentityStableName aIdentity
+                ownerStableHead = symbolIdentityStableName typeIdentity
+                resultTyIdentity = STCon ownerStableHead (STVar fStableName :| [STVar aStableName])
                 ownerTypeParams =
-                    [ ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991703) "f") (KArrow KType KType)
-                    , ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991704) "a") KType
+                    [ ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") (KArrow KType KType)
+                    , ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                     ]
+                resultView =
+                    fixtureTypeView
+                        resultTy
+                        resultTyIdentity
+                        (Map.singleton ownerStableHead typeIdentity)
+                        (Map.fromList [(fStableName, fIdentity), (aStableName, aIdentity)])
+                justView =
+                    fixtureTypeView
+                        (STArrow (STVarApp "f" (STVar "a" :| [])) resultTy)
+                        (STArrow (STVarApp fStableName (STVar aStableName :| [])) resultTyIdentity)
+                        (Map.singleton ownerStableHead typeIdentity)
+                        (Map.fromList [(fStableName, fIdentity), (aStableName, aIdentity)])
                 nothingShape =
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity 1022 "NothingF"
                         , constructorShapeRuntimeName = "Core__NothingF"
-                        , constructorShapeTypeView = mkTypeView resultTy resultTyIdentity
-                        , constructorShapeForallBinderInfo = []
+                        , constructorShapeTypeView = resultView
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
@@ -4004,11 +4892,7 @@ spec = do
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity 1023 "JustF"
                         , constructorShapeRuntimeName = "Core__JustF"
-                        , constructorShapeTypeView =
-                            mkTypeView
-                                (STArrow (STVarApp "f" (STVar "a" :| [])) resultTy)
-                                (STArrow (STVarApp "f" (STVar "a" :| [])) resultTyIdentity)
-                        , constructorShapeForallBinderInfo = []
+                        , constructorShapeTypeView = justView
                         , constructorShapeIndex = 1
                         , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
@@ -4016,8 +4900,7 @@ spec = do
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity 1022 "NothingF"
                         , ctorRuntimeName = "Core__NothingF"
-                        , ctorTypeView = mkTypeView resultTy resultTyIdentity
-                        , ctorForallBinderInfo = []
+                        , ctorTypeView = resultView
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [nothingShape, justShape]
@@ -4040,29 +4923,25 @@ spec = do
                 displayResult = STCon staleDisplayHead (STVar "f" :| [STVar "a"])
                 identityResult = STCon staleIdentityHead (STVar fStableName :| [STVar aStableName])
                 ctorView =
-                    fixtureTypeView
-                        displayResult
-                        identityResult
-                        ( Map.fromList
-                            [ (staleDisplayHead, typeIdentity)
-                            , (staleIdentityHead, typeIdentity)
-                            ]
-                        )
-                        ( Map.fromList
-                            [ (fStableName, fIdentity)
-                            , (aStableName, aIdentity)
-                            ]
-                        )
-                forallBinders =
-                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
-                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
-                    ]
+                    ProgramTypes.typeViewQuantifyBinders [("f", fIdentity), ("a", aIdentity)] $
+                        fixtureTypeView
+                            displayResult
+                            identityResult
+                            ( Map.fromList
+                                [ (staleDisplayHead, typeIdentity)
+                                , (staleIdentityHead, typeIdentity)
+                                ]
+                            )
+                            ( Map.fromList
+                                [ (fStableName, fIdentity)
+                                , (aStableName, aIdentity)
+                                ]
+                            )
                 shape =
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity
                         , constructorShapeRuntimeName = "Core__JustF"
                         , constructorShapeTypeView = ctorView
-                        , constructorShapeForallBinderInfo = forallBinders
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -4071,18 +4950,17 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Core__JustF"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = forallBinders
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [shape]
                         }
                 ownerInfo = ProgramTypes.constructorOwnerDataInfoFromShapes ctorInfo
             dataTypeParams ownerInfo
-                `shouldBe` [ ResolvedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") KType
-                           , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
+                `shouldBe` [ ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") KType
+                           , ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                            ]
 
-        it "does not infer constructor owner params from metadata-free stable owner heads" $ do
+        it "does not infer constructor owner params from a same-spelled wrong owner identity" $ do
             let typeIdentity =
                     generatedSymbolIdentity 1041 SymbolType "Core" "MaybeF" Nothing
                 ctorIdentity =
@@ -4095,27 +4973,23 @@ spec = do
                 displayResult = STCon ownerStableHead (STVar "f" :| [STVar "a"])
                 identityResult = STCon ownerStableHead (STVar fStableName :| [STVar aStableName])
                 ctorView =
-                    ( setTypeViewBinderIdentities
-                        ( Map.fromList
-                            [ (fStableName, fIdentity)
-                            , (aStableName, aIdentity)
-                            ]
+                    ProgramTypes.typeViewQuantifyBinders [("f", fIdentity), ("a", aIdentity)] $
+                        ( setTypeViewBinderIdentities
+                            ( Map.fromList
+                                [ (fStableName, fIdentity)
+                                , (aStableName, aIdentity)
+                                ]
+                            )
+                            ( mkTypeView
+                                displayResult
+                                identityResult
+                            )
                         )
-                        ( mkTypeView
-                            displayResult
-                            identityResult
-                        )
-                    )
-                forallBinders =
-                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
-                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
-                    ]
                 shape =
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity
                         , constructorShapeRuntimeName = "Core__JustF"
                         , constructorShapeTypeView = ctorView
-                        , constructorShapeForallBinderInfo = forallBinders
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -4124,7 +4998,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Core__JustF"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = forallBinders
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [shape]
@@ -4168,16 +5041,15 @@ spec = do
                             , (aStableName, aIdentity)
                             ]
                         )
-                forallBinders =
-                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
-                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
-                    ]
+                quantifiedView displayTy identityTy =
+                    ProgramTypes.typeViewQuantifyBinders
+                        [("f", fIdentity), ("a", aIdentity)]
+                        (mkView displayTy identityTy)
                 leftShape =
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity 1027 "NothingF"
                         , constructorShapeRuntimeName = "Core__NothingF"
-                        , constructorShapeTypeView = mkView leftDisplayResult identityResult
-                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeTypeView = quantifiedView leftDisplayResult identityResult
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -4185,8 +5057,7 @@ spec = do
                     ConstructorShape
                         { constructorShapeSymbol = ctorIdentity 1028 "JustF"
                         , constructorShapeRuntimeName = "Core__JustF"
-                        , constructorShapeTypeView = mkView rightDisplayType rightIdentityType
-                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeTypeView = quantifiedView rightDisplayType rightIdentityType
                         , constructorShapeIndex = 1
                         , constructorShapeOwnerTypeParams = []
                         }
@@ -4194,16 +5065,15 @@ spec = do
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity 1027 "NothingF"
                         , ctorRuntimeName = "Core__NothingF"
-                        , ctorTypeView = mkView leftDisplayResult identityResult
-                        , ctorForallBinderInfo = forallBinders
+                        , ctorTypeView = quantifiedView leftDisplayResult identityResult
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [leftShape, rightShape]
                         }
                 ownerInfo = ProgramTypes.constructorOwnerDataInfoFromShapes ctorInfo
             dataTypeParams ownerInfo
-                `shouldBe` [ ResolvedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") (KArrow KType KType)
-                           , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
+                `shouldBe` [ ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") (KArrow KType KType)
+                           , ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                            ]
 
         it "records constructor bindings with resolved constructor identity" $ do
@@ -4217,7 +5087,7 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             binding <- requireCheckedBinding "Main__None" checked
             case checkedBindingResolvedVar binding of
                 ResolvedVar
@@ -4241,7 +5111,7 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Option" checked
             ctorInfo <- requireDataConstructor "None" dataInfo
             ProgramTypes.ctorType ctorInfo `shouldBe` STBase "Option"
@@ -4258,26 +5128,23 @@ spec = do
                     generatedSymbolIdentity 991723 SymbolValue "Main" "main" Nothing
                 sharedDisplayHead = "Shared"
                 ctorView =
-                    ( setTypeViewHeadIdentities
+                    fixtureTypeView
+                        (STArrow (STBase sharedDisplayHead) (STBase sharedDisplayHead))
+                        ( STArrow
+                            (STBase (symbolIdentityStableName otherIdentity))
+                            (STBase (symbolIdentityStableName ownerIdentity))
+                        )
                         ( Map.fromList
                             [ (symbolIdentityStableName otherIdentity, otherIdentity)
                             , (symbolIdentityStableName ownerIdentity, ownerIdentity)
                             ]
                         )
-                        ( mkTypeView
-                            (STArrow (STBase sharedDisplayHead) (STBase sharedDisplayHead))
-                            ( STArrow
-                                (STBase (symbolIdentityStableName otherIdentity))
-                                (STBase (symbolIdentityStableName ownerIdentity))
-                            )
-                        )
-                    )
+                        Map.empty
                 ctorInfo =
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Owner__Build"
                         , ctorTypeView = ctorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = ownerIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4319,7 +5186,7 @@ spec = do
                     Left err -> expectationFailure ("constructor visibility lowering failed: " ++ show err) >> fail "constructor visibility lowering failed"
                     Right binding -> pure binding
             case loweredBindingSurfaceExpr lowered of
-                Surface.ELet _ (Surface.EAnn _ inferredType) _ ->
+                Surface.EResolvedLet _ _ (Surface.EAnn _ inferredType) _ ->
                     inferredType `shouldBe` lowerType scope expectedVisibleType
                 surfaceExpr ->
                     expectationFailure ("expected an annotated constructor let binding, got " ++ show surfaceExpr)
@@ -4331,20 +5198,19 @@ spec = do
                     generatedSymbolIdentity 1022 SymbolConstructor "Main" "Some" (Just (SymbolOwnerType dataIdentity))
                 staleDisplayHead = "$stale_display_option"
                 staleIdentityHead = "$stale_identity_option"
+                paramIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991705)
+                paramStableName = typeBinderIdentityStableName paramIdentity
                 ctorTypeView =
-                    ( setTypeViewHeadIdentities
+                    fixtureTypeView
+                        (STArrow (STVar "a") (STCon staleDisplayHead (STVar "a" :| [])))
+                        (STArrow (STVar paramStableName) (STCon staleIdentityHead (STVar paramStableName :| [])))
                         (Map.singleton staleIdentityHead dataIdentity)
-                        ( mkTypeView
-                            (STArrow (STVar "a") (STCon staleDisplayHead (STVar "a" :| [])))
-                            (STArrow (STVar "a") (STCon staleIdentityHead (STVar "a" :| [])))
-                        )
-                    )
+                        (Map.singleton paramStableName paramIdentity)
                 ctorInfo =
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__Some"
                         , ctorTypeView = ctorTypeView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4352,7 +5218,7 @@ spec = do
                 dataInfo =
                     DataInfo
                         { dataInfoSymbol = dataIdentity
-                        , dataTypeParams = [ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 991705) "a") KType]
+                        , dataTypeParams = [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRefFromIdentity paramIdentity "a") KType]
                         , dataConstructors = [ctorInfo]
                         }
                 valueInfo =
@@ -4367,7 +5233,6 @@ spec = do
                         (Map.singleton "Option" dataInfo)
                         Map.empty
                         []
-                intHead = symbolIdentityStableName (Builtins.builtinTypeIdentity "Int")
                 expectedTy = STCon "Option" (STBase "Int" :| [])
                 expr = EApp (EVar "Some") (ELit (LInt 1))
             lowered <-
@@ -4381,8 +5246,11 @@ spec = do
                     let placeholder = ProgramTypes.deferredConstructorPlaceholder deferred
                     (Map.lookup placeholder (loweredBindingExternalTypeViews lowered) >>= Map.lookup staleIdentityHead . ProgramTypes.typeViewHeadIdentities)
                         `shouldBe` Just dataIdentity
+                    let expectedPlaceholderIdentity =
+                            ProgramTypes.typeViewIdentity
+                                (sourceTypeViewInScope scope (lowerType scope (STArrow (STBase "Int") expectedTy)))
                     fmap ProgramTypes.typeViewIdentity (Map.lookup placeholder (loweredBindingExternalTypeViews lowered))
-                        `shouldBe` Just (STArrow (STBase intHead) (STCon (symbolIdentityStableName dataIdentity) (STBase intHead :| [])))
+                        `shouldBe` Just expectedPlaceholderIdentity
                 obligations ->
                     expectationFailure ("expected one deferred constructor obligation, got " ++ show obligations)
 
@@ -4398,21 +5266,22 @@ spec = do
                 optionHead = symbolIdentityStableName dataIdentity
                 intHead = symbolIdentityStableName (Builtins.builtinTypeIdentity "Int")
                 noneTypeView =
-                    (setTypeViewHeadIdentities (Map.singleton optionHead dataIdentity) (mkTypeView (STBase "Option") (STBase optionHead)))
+                    fixtureTypeView
+                        (STBase "Option")
+                        (STBase optionHead)
+                        (Map.singleton optionHead dataIdentity)
+                        Map.empty
                 someTypeView =
-                    ( setTypeViewHeadIdentities
+                    fixtureTypeView
+                        (STArrow (STBase "Int") (STBase "Option"))
+                        (STArrow (STBase intHead) (STBase optionHead))
                         (Map.fromList [(optionHead, dataIdentity), (intHead, Builtins.builtinTypeIdentity "Int")])
-                        ( mkTypeView
-                            (STArrow (STBase "Int") (STBase "Option"))
-                            (STArrow (STBase intHead) (STBase optionHead))
-                        )
-                    )
+                        Map.empty
                 noneInfo =
                     ConstructorInfo
                         { ctorInfoSymbol = noneIdentity
                         , ctorRuntimeName = "Main__None"
                         , ctorTypeView = noneTypeView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4422,7 +5291,6 @@ spec = do
                         { ctorInfoSymbol = someIdentity
                         , ctorRuntimeName = "Main__Some"
                         , ctorTypeView = someTypeView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 1
                         , ctorOwnerConstructors = []
@@ -4466,14 +5334,161 @@ spec = do
                     Right binding -> pure binding
             case [deferred | DeferredCase deferred <- Map.elems (loweredBindingDeferredObligations lowered)] of
                 [deferred] -> do
+                    deferredCaseBindingIdentity deferred
+                        `shouldBe` loweredBindingIdentity lowered
+                    ProgramTypes.diagnosticMessage
+                        ( ProgramTypes.diagnosticForProgramError
+                            Nothing
+                            (ProgramDeferredCaseArityMismatch deferred 0)
+                        )
+                        `shouldSatisfy` isInfixOf "binding `Main__main`: deferred case"
                     let placeholder = ProgramTypes.deferredCasePlaceholder deferred
                     case Map.lookup placeholder (loweredBindingExternalTypeViews lowered) of
                         Just view -> do
-                            Map.lookup optionHead (ProgramTypes.typeViewHeadIdentities view) `shouldBe` Just dataIdentity
+                            Map.elems (ProgramTypes.typeViewHeadIdentities view)
+                                `shouldSatisfy` any (Symbol.sameSymbolIdentity dataIdentity)
                         Nothing ->
                             expectationFailure ("missing deferred case placeholder view " ++ placeholder)
                 obligations ->
                     expectationFailure ("expected one deferred case obligation, got " ++ show obligations)
+
+        it "applies residual arguments after resolving a deferred case result" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (One(..), main) {"
+                        , "  data One ="
+                        , "      One : One;"
+                        , ""
+                        , "  def main : Int = (case One of {"
+                        , "    One -> λx x"
+                        , "  }) 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "1\n"
+
+        it "consumes ordered head instantiations when resolving a deferred case result" $ do
+            let dataIdentity =
+                    generatedSymbolIdentity 1051 SymbolType "Main" "One" Nothing
+                ctorIdentity =
+                    generatedSymbolIdentity 1052 SymbolConstructor "Main" "One" (Just (SymbolOwnerType dataIdentity))
+                scrutineeIdentity =
+                    generatedSymbolIdentity 1053 SymbolValue "Main" "oneValue" Nothing
+                handlerIdentity =
+                    generatedSymbolIdentity 1054 SymbolValue "Main" "handler" Nothing
+                bindingIdentity =
+                    generatedSymbolIdentity 1055 SymbolValue "Main" "main" Nothing
+                deferredRef =
+                    deferredRefFromIdentity (UniqueIdentity 991710) "$case_one"
+                firstIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991711)
+                secondIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991712)
+                binderView name identity =
+                    let stableName = typeBinderIdentityStableName identity
+                     in setTypeViewBinderIdentities
+                            (Map.fromList [(name, identity), (stableName, identity)])
+                            (mkTypeView (STVar name) (STVar stableName))
+                firstView = binderView "first" firstIdentity
+                secondView = binderView "second" secondIdentity
+                resultView = ProgramTypes.typeViewArrow firstView secondView
+                oneView = baseTypeView "One" dataIdentity
+                specializedResultView =
+                    ProgramTypes.typeViewArrow
+                        (builtinBaseTypeView "Int")
+                        (builtinBaseTypeView "Bool")
+                placeholderView =
+                    ProgramTypes.typeViewQuantifyBinders
+                        [("first", firstIdentity), ("second", secondIdentity)]
+                        ( ProgramTypes.typeViewArrow
+                            oneView
+                            (ProgramTypes.typeViewArrow resultView resultView)
+                        )
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__One"
+                        , ctorTypeView = oneView
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                dataInfo =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = [ctorInfo]
+                        }
+                scrutineeValue =
+                    OrdinaryValue
+                        { valueInfoSymbol = scrutineeIdentity
+                        , valueRuntimeName = "Main__oneValue"
+                        , valueTypeView = oneView
+                        , valueConstraintInfos = []
+                        }
+                handlerValue =
+                    OrdinaryValue
+                        { valueInfoSymbol = handlerIdentity
+                        , valueRuntimeName = "Main__handler"
+                        , valueTypeView = specializedResultView
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.fromList [("oneValue", scrutineeValue), ("handler", handlerValue)])
+                        (Map.singleton "One" dataInfo)
+                        Map.empty
+                        []
+                placeholder = deferredRefName deferredRef
+                bindingOwner =
+                    loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseBindingIdentity = bindingOwner
+                            , deferredCaseRef = deferredRef
+                            , deferredCaseDataInfo = dataInfo
+                            , deferredCaseScrutineeTypeView = oneView
+                            , deferredCaseResultTypeView = resultView
+                            , deferredCaseExpectedArgCount = 2
+                            }
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity = bindingOwner
+                        , loweredBindingSourceTypeView = specializedResultView
+                        , loweredBindingExpectedTypeView =
+                            lowerTypeViewWithIdentities scope specializedResultView
+                        , loweredBindingSurfaceExpr =
+                            Surface.EApp
+                                ( Surface.EApp
+                                    (Surface.EResolvedVar (DeferredId deferredRef) placeholder)
+                                    (Surface.EResolvedVar (TopLevelId scrutineeIdentity) "oneValue")
+                                )
+                                (Surface.EResolvedVar (TopLevelId handlerIdentity) "handler")
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingResolvedEvidenceIdentities = []
+                        , loweredBindingDeferredObligations = Map.singleton deferredRef obligation
+                        , loweredBindingExternalTypeViews = Map.singleton placeholder placeholderView
+                        , loweredBindingExportedAsMain = False
+                        }
+            expectedResultTy <-
+                case typeViewToElabType scope specializedResultView of
+                    Right ty -> pure ty
+                    Left err ->
+                        expectationFailure ("failed to lower the specialized case result: " ++ show err)
+                            >> fail "specialized case result lowering failed"
+            finalizeContext <- requireFinalizeContext scope
+            case finalizeBindingWithContext finalizeContext lowered of
+                Right binding ->
+                    case checkedBindingTerm binding of
+                        Elab.EApp
+                            (Elab.ETyInst (Elab.EUnroll _) (Elab.InstApp resultTy))
+                            _ ->
+                                alphaEqType resultTy expectedResultTy
+                                    `shouldBe` True
+                        term ->
+                            expectationFailure ("expected a specialized deferred-case eliminator, got " ++ show term)
+                Left err ->
+                    expectationFailure ("expected ordered head instantiations to resolve, got " ++ show err)
 
         it "rejects deferred case scrutinees that only match by unqualified data name" $ do
             let expectedDataIdentity =
@@ -4492,9 +5507,7 @@ spec = do
                     ConstructorInfo
                         { ctorInfoSymbol = expectedCtorIdentity
                         , ctorRuntimeName = "Expected__Box"
-                        , ctorTypeView =
-                            (setTypeViewHeadIdentities (Map.singleton "Expected.Box" expectedDataIdentity) (mkTypeView (STBase "Expected.Box") (STBase (symbolIdentityStableName expectedDataIdentity))))
-                        , ctorForallBinderInfo = []
+                        , ctorTypeView = baseTypeView "Expected.Box" expectedDataIdentity
                         , ctorOwningTypeIdentity = expectedDataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4515,9 +5528,7 @@ spec = do
                     OrdinaryValue
                         { valueInfoSymbol = wrongValueIdentity
                         , valueRuntimeName = "Wrong__box"
-                        , valueTypeView =
-                            (setTypeViewHeadIdentities (Map.singleton "Wrong.Box" wrongDataIdentity) (mkTypeView (STBase "Wrong.Box") (STBase (symbolIdentityStableName wrongDataIdentity))))
-                        , valueConstraints = []
+                        , valueTypeView = baseTypeView "Wrong.Box" wrongDataIdentity
                         , valueConstraintInfos = []
                         }
                 scope =
@@ -4528,22 +5539,22 @@ spec = do
                         []
                 placeholder = deferredRefName deferredRef
                 placeholderTypeView =
-                    ( setTypeViewHeadIdentities
+                    fixtureTypeView
+                        (STArrow (STBase "Expected.Box") (STBase "Int"))
+                        (STArrow (STBase (symbolIdentityStableName expectedDataIdentity)) (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "Int"))))
                         ( Map.fromList
                             [ ("Expected.Box", expectedDataIdentity)
                             , (symbolIdentityStableName expectedDataIdentity, expectedDataIdentity)
                             , ("Int", Builtins.builtinTypeIdentity "Int")
                             ]
                         )
-                        ( mkTypeView
-                            (STArrow (STBase "Expected.Box") (STBase "Int"))
-                            (STArrow (STBase (symbolIdentityStableName expectedDataIdentity)) (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "Int"))))
-                        )
-                    )
+                        Map.empty
                 obligation =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = deferredRef
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            , deferredCaseRef = deferredRef
                             , deferredCaseDataInfo = expectedData
                             , deferredCaseScrutineeTypeView = baseTypeView "Expected.Box" expectedDataIdentity
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -4553,11 +5564,12 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EApp (Surface.EVar placeholder) (Surface.EVar "box")
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr =
+                            Surface.EApp
+                                (Surface.EResolvedVar (DeferredId deferredRef) placeholder)
+                                (Surface.EResolvedVar (TopLevelId wrongValueIdentity) "box")
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.singleton deferredRef obligation
@@ -4566,10 +5578,14 @@ spec = do
                         }
             finalizeContext <- requireFinalizeContext scope
             case finalizeBindingWithContext finalizeContext lowered of
-                Left (ProgramCaseOnNonDataType rejectedTy) ->
-                    rejectedTy `shouldBe` lowerType scope (STBase "Wrong.Box")
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "Phase 6 (elaboration)"
+                    message `shouldSatisfy` isInfixOf "invalid constructed application"
+                    message `shouldSatisfy` isInfixOf "$Expected.Box_self"
+                    message `shouldSatisfy` isInfixOf "$Wrong.Box_self"
+                    message `shouldSatisfy` isInfixOf "does not reach the exact endpoint"
                 Left err ->
-                    expectationFailure ("expected identity-based scrutinee rejection, got " ++ show err)
+                    expectationFailure ("expected early identity-based scrutinee rejection, got " ++ show err)
                 Right binding ->
                     expectationFailure ("expected scrutinee rejection, got " ++ show (checkedBindingTerm binding))
 
@@ -4580,20 +5596,18 @@ spec = do
                     generatedSymbolIdentity 1032 SymbolConstructor "Main" "Some" (Just (SymbolOwnerType dataIdentity))
                 paramUnique = UniqueIdentity 991706
                 paramIdentity = typeBinderIdentityFromUnique paramUnique
+                paramStableName = typeBinderIdentityStableName paramIdentity
                 ctorTypeView =
-                    ( setTypeViewHeadIdentities
+                    fixtureTypeView
+                        (STArrow (STVar "a") (STCon "Option" (STVar "a" :| [])))
+                        (STArrow (STVar paramStableName) (STCon (symbolIdentityStableName dataIdentity) (STVar paramStableName :| [])))
                         (Map.singleton (symbolIdentityStableName dataIdentity) dataIdentity)
-                        ( mkTypeView
-                            (STArrow (STVar "a") (STCon "Option" (STVar "a" :| [])))
-                            (STArrow (STVar "a") (STCon (symbolIdentityStableName dataIdentity) (STVar "a" :| [])))
-                        )
-                    )
+                        (Map.singleton paramStableName paramIdentity)
                 ctorInfo =
                     ConstructorInfo
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__Some"
                         , ctorTypeView = ctorTypeView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4601,7 +5615,7 @@ spec = do
                 dataInfo =
                     DataInfo
                         { dataInfoSymbol = dataIdentity
-                        , dataTypeParams = [ResolvedTypeParam (resolvedTypeBinderRef paramUnique "a") KType]
+                        , dataTypeParams = [ProgramTypes.CheckedTypeParam (resolvedTypeBinderRef paramUnique "a") KType]
                         , dataConstructors = [ctorInfo]
                         }
                 valueInfo =
@@ -4645,7 +5659,6 @@ spec = do
                         { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "Main__Box"
                         , ctorTypeView = ctorTypeView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = dataIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -4683,13 +5696,13 @@ spec = do
                     deferredRefIdentity (deferredConstructorRef deferred) `shouldBe` UniqueIdentity 4
                 obligations ->
                     expectationFailure ("expected one deferred constructor obligation, got " ++ show obligations)
-            (loweredBindingSourceTypeView lowered >>= Map.lookup dataDisplayHead . ProgramTypes.typeViewHeadIdentities)
+            Map.lookup dataDisplayHead (ProgramTypes.typeViewHeadIdentities (loweredBindingSourceTypeView lowered))
                 `shouldBe` Just dataIdentity
-            (loweredBindingSourceTypeView lowered >>= Map.lookup dataHead . ProgramTypes.typeViewHeadIdentities)
+            Map.lookup dataHead (ProgramTypes.typeViewHeadIdentities (loweredBindingSourceTypeView lowered))
                 `shouldBe` Just dataIdentity
-            (loweredBindingExpectedTypeView lowered >>= Map.lookup dataDisplayHead . ProgramTypes.typeViewHeadIdentities)
+            Map.lookup dataDisplayHead (ProgramTypes.typeViewHeadIdentities (loweredBindingExpectedTypeView lowered))
                 `shouldBe` Just dataIdentity
-            (loweredBindingExpectedTypeView lowered >>= Map.lookup dataHead . ProgramTypes.typeViewHeadIdentities)
+            Map.lookup dataHead (ProgramTypes.typeViewHeadIdentities (loweredBindingExpectedTypeView lowered))
                 `shouldBe` Just dataIdentity
 
         it "carries constraint-only type binder identities through resolved lowering" $ do
@@ -4707,6 +5720,51 @@ spec = do
             Map.lookup "a" (ProgramTypes.typeViewBinderIdentities (ProgramTypes.checkedBindingSourceTypeView binding))
                 `shouldSatisfy` isJust
 
+        it "closes polymorphic constrained bindings before checked IR acceptance" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (DefaultBox, Nat(..), Box(..), defaultBox, selected, main) {"
+                        , "  class DefaultBox a {"
+                        , "    defaultBox : Box a;"
+                        , "  }"
+                        , ""
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  instance DefaultBox Nat {"
+                        , "    defaultBox = Box Zero;"
+                        , "  }"
+                        , ""
+                        , "  def selected : DefaultBox a => Box a = defaultBox;"
+                        , "  def main : Box Nat = selected;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            selected <- requireCheckedBinding "Main__selected" checked
+            case (ProgramTypes.checkedBindingType selected, checkedBindingTerm selected) of
+                ( Elab.TForallRef typeRef _ _
+                    , Elab.ETyAbsRef
+                        termRef
+                        _
+                        ( Elab.ELam
+                            evidence@ResolvedVar{resolvedVarDetails = EvidenceId _}
+                            (Elab.EVarNode evidenceOccurrence)
+                          )
+                    ) -> do
+                        Elab.typeBinderRefsSameIdentity typeRef termRef `shouldBe` True
+                        Elab.resolvedVarSameIdentity evidence evidenceOccurrence `shouldBe` True
+                other ->
+                    expectationFailure
+                        ( "expected one type abstraction outside a direct evidence lambda, got "
+                            ++ show other
+                        )
+            typeCheck (checkedBindingTerm selected)
+                `shouldBe` Right (ProgramTypes.checkedBindingType selected)
+
         it "uses constructor owner param identities while finalizing constructor value types" $ do
             program <-
                 requireParsed $
@@ -4718,7 +5776,7 @@ spec = do
                         , "  def main : Box Int = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
@@ -4748,10 +5806,10 @@ spec = do
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             case dataTypeParams dataInfo of
-                [ResolvedTypeParam paramRef kind] -> do
+                [ProgramTypes.CheckedTypeParam paramRef kind] -> do
                     let paramIdentity = resolvedTypeBinderIdentity paramRef
                         collidingParam =
-                            ResolvedTypeParam
+                            ProgramTypes.CheckedTypeParam
                                 (resolvedTypeBinderRefFromIdentity paramIdentity "$Main.Box_result_shadow")
                                 kind
                         collidingDataInfo =
@@ -4763,8 +5821,9 @@ spec = do
                                 Map.empty
                                 []
                     finalizeContext <- requireFinalizeContext scope
+                    lowered <- requireLowerConstructorBinding scope ctorInfo
                     binding <-
-                        case finalizeBindingWithContext finalizeContext (lowerConstructorBinding scope ctorInfo) of
+                        case finalizeBindingWithContext finalizeContext lowered of
                             Left err -> expectationFailure ("constructor finalization failed: " ++ show err) >> fail "constructor finalization failed"
                             Right checkedBinding -> pure checkedBinding
                     leadingTypeAbsIdentities (checkedBindingTerm binding)
@@ -4783,14 +5842,15 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Option" checked
             ctorInfo <- requireDataConstructor "None" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Option" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope ctorInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope ctorInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             binding <-
                 case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -4811,14 +5871,15 @@ spec = do
                         , "  def main : Box = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope ctorInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope ctorInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             binding <-
                 case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -4846,16 +5907,17 @@ spec = do
                         , "  def main : Nat = Succ Zero;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Nat" checked
             let scope = mkElaborateScope Map.empty (Map.singleton "Nat" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
             mapM_
                 ( \ctorName0 -> do
                     ctorInfo <- requireDataConstructor ctorName0 dataInfo
+                    lowered <- requireLowerConstructorBinding scope ctorInfo
                     let poisonedLowered =
-                            (lowerConstructorBinding scope ctorInfo)
-                                { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                            lowered
+                                { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                                 }
                     binding <-
                         case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -4865,6 +5927,75 @@ spec = do
                         `shouldBe` Just ctorName0
                 )
                 ["Zero", "Succ"]
+
+        it "selects constructor handlers by identity when positional metadata is stale" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = Succ Zero;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            dataInfo <- requireCheckedData "Main" "Nat" checked
+            zeroInfo <- requireDataConstructor "Zero" dataInfo
+            succInfo <- requireDataConstructor "Succ" dataInfo
+            let staleSuccInfo = succInfo{ctorIndex = ctorIndex zeroInfo}
+                scope = mkElaborateScope Map.empty (Map.singleton "Nat" dataInfo) Map.empty []
+            lowered <- requireLowerConstructorBinding scope staleSuccInfo
+            filter (isInfixOf "_k") (resolvedSurfaceLocalOccurrenceNames (loweredBindingSurfaceExpr lowered))
+                `shouldBe` ["$Succ_k2"]
+
+            let missingIdentityDataInfo = dataInfo{dataConstructors = [zeroInfo]}
+                missingIdentityScope = mkElaborateScope Map.empty (Map.singleton "Nat" missingIdentityDataInfo) Map.empty []
+            case
+                lowerConstructorBinding
+                    (identityGeneratorAfter (ProgramTypes.constructorInfoGeneratedIdentities staleSuccInfo))
+                    missingIdentityScope
+                    staleSuccInfo
+              of
+                Left (ProgramPipelineError message) ->
+                    message `shouldSatisfy` isInfixOf "constructor handler metadata missing identity"
+                Left err -> expectationFailure ("expected typed constructor metadata error, got " ++ show err)
+                Right _ -> expectationFailure "expected missing constructor identity to fail during lowering"
+
+        it "allocates constructor surface locals from the supplied identity generator" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = Succ Zero;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            dataInfo <- requireCheckedData "Main" "Nat" checked
+            succInfo <- requireDataConstructor "Succ" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Nat" dataInfo) Map.empty []
+                sentinel = UniqueIdentity 2000000
+                suppliedGenerator = identityGeneratorAfter [sentinel]
+            case lowerConstructorBinding suppliedGenerator scope succInfo of
+                Left err ->
+                    expectationFailure ("constructor lowering failed: " ++ show err)
+                Right (lowered, returnedGenerator) -> do
+                    let generatedIdentities =
+                            nub
+                                ( resolvedSurfaceGeneratedLocalIdentities
+                                    (loweredBindingSurfaceExpr lowered)
+                                )
+                        (nextIdentity, _) = freshIdentity returnedGenerator
+                    case generatedIdentities of
+                        [] -> expectationFailure "constructor surface did not allocate local identities"
+                        firstIdentity : rest -> do
+                            generatedIdentities `shouldSatisfy` all (> sentinel)
+                            nextIdentity `shouldSatisfy` (> foldr max firstIdentity rest)
 
         it "does not pick an arbitrary constructor metadata match when identities collide" $ do
             program <-
@@ -4878,7 +6009,7 @@ spec = do
                         , "  def main : Nat = Zero;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Nat" checked
             zeroInfo <- requireDataConstructor "Zero" dataInfo
             succInfo <- requireDataConstructor "Succ" dataInfo
@@ -4891,9 +6022,10 @@ spec = do
                         }
                 scope = mkElaborateScope Map.empty (Map.singleton "Nat" duplicateDataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope zeroInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope zeroInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             finalizeBindingWithContext finalizeContext poisonedLowered `shouldSatisfy` isLeft
 
@@ -4908,7 +6040,7 @@ spec = do
                         , "  def main : Box Int = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             binding <- requireCheckedBinding "Main__Box" checked
             resolvedLocalBinders (checkedBindingTerm binding) `shouldSatisfy` (not . null)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
@@ -4924,7 +6056,7 @@ spec = do
                         , "  def main : Box Int = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             binding <- requireCheckedBinding "Main__Box" checked
             case ProgramTypes.dataParamBinderIdentities dataInfo of
@@ -4949,14 +6081,15 @@ spec = do
                         , "  def main : Box Int = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope ctorInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope ctorInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             binding <-
                 case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -4976,7 +6109,7 @@ spec = do
                     expectationFailure ("expected one data param identity, got " ++ show identities)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
-        it "does not recover constructor owner params from metadata-free stable spellings" $ do
+        it "carries constructor owner param identities into finalization by construction" $ do
             program <-
                 requireParsed $
                     unlines
@@ -4987,34 +6120,27 @@ spec = do
                         , "  def main : Box Int = Box 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
             case ProgramTypes.dataParamBinderIdentities dataInfo of
                 [paramIdentity] -> do
-                    let stableParamName = typeBinderIdentityStableName paramIdentity
-                        metadataFreeLowered =
-                            (lowerConstructorBinding scope ctorInfo)
-                                { loweredBindingExpectedType =
-                                    STForall
-                                        stableParamName
-                                        Nothing
-                                        ( STArrow
-                                            (STVar stableParamName)
-                                            (STCon "Box" (STVar stableParamName :| []))
-                                        )
-                                , loweredBindingExpectedTypeView = Nothing
-                                , loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered <- requireLowerConstructorBinding scope ctorInfo
+                    let identityCompleteLowered =
+                            lowered
+                                { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                                 }
+                    Map.elems (ProgramTypes.typeViewBinderIdentities (loweredBindingExpectedTypeView identityCompleteLowered))
+                        `shouldContain` [paramIdentity]
                     binding <-
-                        case finalizeBindingWithContext finalizeContext metadataFreeLowered of
+                        case finalizeBindingWithContext finalizeContext identityCompleteLowered of
                             Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
                             Right checkedBinding -> pure checkedBinding
                     let leadingIdentities = leadingTypeAbsIdentities (checkedBindingTerm binding)
                     leadingIdentities `shouldSatisfy` (not . null)
-                    leadingIdentities `shouldSatisfy` all (/= paramIdentity)
+                    leadingIdentities `shouldContain` [paramIdentity]
                 identities ->
                     expectationFailure ("expected one data param identity, got " ++ show identities)
 
@@ -5029,14 +6155,15 @@ spec = do
                         , "  def main : Option Bool = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Option" checked
             ctorInfo <- requireDataConstructor "None" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Option" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope ctorInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope ctorInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             binding <-
                 case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -5066,14 +6193,15 @@ spec = do
                         , "  def main : Pack = Pack 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Pack" checked
             ctorInfo <- requireDataConstructor "Pack" dataInfo
             let scope = mkElaborateScope Map.empty (Map.singleton "Pack" dataInfo) Map.empty []
             finalizeContext <- requireFinalizeContext scope
+            lowered <- requireLowerConstructorBinding scope ctorInfo
             let poisonedLowered =
-                    (lowerConstructorBinding scope ctorInfo)
-                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                    lowered
+                        { loweredBindingSurfaceExpr = unknownSurfaceVar "$missing_constructor_pipeline_input"
                         }
             binding <-
                 case finalizeBindingWithContext finalizeContext poisonedLowered of
@@ -5087,6 +6215,25 @@ spec = do
                     expectationFailure ("expected one constructor forall, got " ++ show binders)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
+        it "instantiates constructor-forall handlers in metadata constructor terms" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Expr(..), SomeExpr(..), main) {"
+                        , "  data Expr a ="
+                        , "      Keep : a -> Expr a;"
+                        , ""
+                        , "  data SomeExpr ="
+                        , "      SomeExpr : ∀ a. Expr a -> SomeExpr;"
+                        , ""
+                        , "  def main : SomeExpr = SomeExpr (Keep 1);"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__SomeExpr" checked
+            typeCheck (checkedBindingTerm binding)
+                `shouldBe` Right (ProgramTypes.checkedBindingType binding)
+
         it "records lambda and let binders with resolved local identity" $ do
             program <-
                 requireParsed $
@@ -5096,7 +6243,7 @@ spec = do
                         , "  def main : Int = apply 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             applyBinding <- requireCheckedBinding "Main__apply" checked
             let term = checkedBindingTerm applyBinding
                 binderRefs = resolvedLocalBinders term
@@ -5156,7 +6303,7 @@ spec = do
                         , "  def main : Int = get (Box 1);"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             getBinding <- requireCheckedBinding "Main__get" checked
             let term = checkedBindingTerm getBinding
                 binderRefs = resolvedLocalBinders term
@@ -5189,10 +6336,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__identity" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = functionTy
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = functionTy
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (functionTy) (functionTy)
+                        , loweredBindingExpectedTypeView = mkTypeView (functionTy) (functionTy)
                         , loweredBindingSurfaceExpr = localIdentityExpr "$stale_x"
                         , loweredBindingResolvedLocalIdentities =
                             [ProgramTypes.LoweredResolvedLocalIdentity (renameLocalRef "$sidecar_x" sourceLocal) sourceLocal]
@@ -5210,9 +6355,10 @@ spec = do
             map localRefName (resolvedLocalBinders (checkedBindingTerm binding)) `shouldBe` ["$stale_x"]
             map localRefName (resolvedLocalOccurrences (checkedBindingTerm binding)) `shouldBe` ["$stale_x"]
 
-        it "does not infer an untagged binder identity from resolved-local sidecars" $ do
+        it "keeps the surface binder identity authoritative over resolved-local sidecars" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let sourceLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991810)) "source_x"
+                surfaceLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991812)) "x"
                 bindingIdentity = generatedSymbolIdentity 991811 SymbolValue "Main" "identity" Nothing
                 intTy = STBase "Int"
                 functionTy = STArrow intTy intTy
@@ -5220,11 +6366,14 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__identity" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = functionTy
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = functionTy
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.ELamAnn "x" intTy (Surface.EVar "x")
+                        , loweredBindingSourceTypeView = mkTypeView (functionTy) (functionTy)
+                        , loweredBindingExpectedTypeView = mkTypeView (functionTy) (functionTy)
+                        , loweredBindingSurfaceExpr =
+                            Surface.EResolvedLamAnn
+                                (LocalId surfaceLocal)
+                                "x"
+                                intTy
+                                (Surface.EResolvedVar (LocalId surfaceLocal) "x")
                         , loweredBindingResolvedLocalIdentities =
                             [ProgramTypes.LoweredResolvedLocalIdentity (renameLocalRef "x" sourceLocal) sourceLocal]
                         , loweredBindingResolvedEvidenceIdentities = []
@@ -5238,7 +6387,7 @@ spec = do
                     Left err -> expectationFailure ("finalize binding failed: " ++ show err) >> fail "finalize binding failed"
             case (resolvedLocalBinders (checkedBindingTerm binding), resolvedLocalOccurrences (checkedBindingTerm binding)) of
                 ([binderRef], [occurrenceRef]) -> do
-                    binderRef `shouldNotBe` sourceLocal
+                    binderRef `shouldBe` surfaceLocal
                     occurrenceRef `shouldBe` binderRef
                 refs -> expectationFailure ("expected one generated local binder and occurrence, got " ++ show refs)
 
@@ -5257,10 +6406,11 @@ spec = do
                         , dataTypeParams = []
                         , dataConstructors = []
                         }
-                obligation deferredRef =
+                obligation bindingIdentity deferredRef =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = deferredRef
+                            { deferredCaseBindingIdentity = bindingIdentity
+                            , deferredCaseRef = deferredRef
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -5278,15 +6428,16 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails name (TopLevelId identity)
-                        , loweredBindingSourceType = functionTy
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = functionTy
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (functionTy) (functionTy)
+                        , loweredBindingExpectedTypeView = mkTypeView (functionTy) (functionTy)
                         , loweredBindingSurfaceExpr = localIdentityExpr "x" localRef
                         , loweredBindingResolvedLocalIdentities =
                             [ProgramTypes.LoweredResolvedLocalIdentity (renameLocalRef "x" localRef) localRef]
                         , loweredBindingResolvedEvidenceIdentities = []
-                        , loweredBindingDeferredObligations = Map.singleton deferredRef (obligation deferredRef)
+                        , loweredBindingDeferredObligations =
+                            Map.singleton
+                                deferredRef
+                                (obligation (loweredBindingIdentityFromDetails name (TopLevelId identity)) deferredRef)
                         , loweredBindingExternalTypeViews = Map.empty
                         , loweredBindingExportedAsMain = False
                         }
@@ -5348,10 +6499,267 @@ spec = do
                         , "  def main : Int = let id : ∀a. a -> a = λx x in id 1;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             mainBinding <- requireCheckedBinding "Main__main" checked
             resolvedLocalLetTypes (checkedBindingTerm mainBinding)
                 `shouldSatisfy` any isPolymorphicIdentityType
+
+        it "reuses imported polymorphic schemes for grouped direct instance-method aliases without Prelude" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Lib export (identity) {"
+                        , "  def identity : ∀ a. a -> a = λx x;"
+                        , "}"
+                        , ""
+                        , "module Main export (AliasOps, first, second, main) {"
+                        , "  import Lib exposing (identity);"
+                        , "  class AliasOps marker {"
+                        , "    first : ∀ a. a -> a;"
+                        , "    second : ∀ a. a -> a;"
+                        , "  }"
+                        , "  instance AliasOps Bool {"
+                        , "    first = identity;"
+                        , "    second = identity;"
+                        , "  }"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            let methodRuntimeNames =
+                    [ ProgramTypes.valueInfoRuntimeName valueInfo
+                    | checkedModule <- checkedProgramModules checked
+                    , instanceInfo <- checkedModuleInstances checkedModule
+                    , ProgramTypes.instanceClassName instanceInfo == "AliasOps"
+                    , valueInfo <- Map.elems (instanceMethodsByIdentity instanceInfo)
+                    ]
+            methodRuntimeNames `shouldSatisfy` ((== 2) . length)
+            methodBindings <- traverse (`requireCheckedBinding` checked) methodRuntimeNames
+            map ProgramTypes.checkedBindingType methodBindings
+                `shouldSatisfy` all isPolymorphicIdentityType
+            programRunOutput <$> runCheckedProgramOutput checked `shouldBe` Right "true\n"
+
+        it "checks a polymorphic Foo constructor alias across modules without Prelude" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Foo export (Foo(..), mk) {"
+                        , "  data Foo ="
+                        , "      Foo : ∀ a. a -> Foo;"
+                        , "  def mk : ∀ a. a -> Foo = Foo;"
+                        , "}"
+                        , ""
+                        , "module Main export (action, main) {"
+                        , "  import Foo exposing (Foo(..), mk);"
+                        , "  def action : Foo = mk 1;"
+                        , "  def main : Foo = action;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            fooData <- requireCheckedData "Foo" "Foo" checked
+            fooConstructor <- requireDataConstructor "Foo" fooData
+            constructorBinding <- requireCheckedBinding "Foo__Foo" checked
+            mkBinding <- requireCheckedBinding "Foo__mk" checked
+            actionBinding <- requireCheckedBinding "Main__action" checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            alphaEqType
+                (ProgramTypes.checkedBindingType mkBinding)
+                (ProgramTypes.checkedBindingType constructorBinding)
+                `shouldBe` True
+            leadingForallIdentities (ProgramTypes.checkedBindingType mkBinding)
+                `shouldSatisfy` ((== 1) . length)
+            map constructorRefSymbol (resolvedConstructorRefs (checkedBindingTerm mkBinding))
+                `shouldBe` [ctorInfoSymbol fooConstructor]
+            case resolvedConstructorVars (checkedBindingTerm mkBinding) of
+                [resolvedConstructor] ->
+                    alphaEqType
+                        (Elab.resolvedVarType resolvedConstructor)
+                        (ProgramTypes.checkedBindingType constructorBinding)
+                        `shouldBe` True
+                constructors ->
+                    expectationFailure
+                        ("expected one typed Foo constructor in Foo__mk, got " ++ show constructors)
+            mkIdentity <- requireTopLevelIdentity mkBinding
+            resolvedTopLevelIdentities (checkedBindingTerm actionBinding)
+                `shouldContain` [mkIdentity]
+            ProgramTypes.typeViewDisplay (ProgramTypes.checkedBindingSourceTypeView actionBinding)
+                `shouldBe` STBase "Foo"
+            ProgramTypes.typeViewDisplay (ProgramTypes.checkedBindingSourceTypeView mainBinding)
+                `shouldBe` STBase "Foo"
+
+        it "preserves same-module and alpha-renamed constructor schemes but specializes Int -> Foo" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Foo(..), same, renamed, specialized, main) {"
+                        , "  data Foo ="
+                        , "      Foo : ∀ a. a -> Foo;"
+                        , "  def same : ∀ a. a -> Foo = Foo;"
+                        , "  def renamed : ∀ b. b -> Foo = Foo;"
+                        , "  def specialized : Int -> Foo = Foo;"
+                        , "  def main : Foo = specialized 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            fooData <- requireCheckedData "Main" "Foo" checked
+            fooConstructor <- requireDataConstructor "Foo" fooData
+            constructorBinding <- requireCheckedBinding "Main__Foo" checked
+            sameBinding <- requireCheckedBinding "Main__same" checked
+            renamedBinding <- requireCheckedBinding "Main__renamed" checked
+            specializedBinding <- requireCheckedBinding "Main__specialized" checked
+            let constructorIdentity = ctorInfoSymbol fooConstructor
+                assertConstructorAlias binding = do
+                    map constructorRefSymbol (resolvedConstructorRefs (checkedBindingTerm binding))
+                        `shouldBe` [constructorIdentity]
+                    case resolvedConstructorVars (checkedBindingTerm binding) of
+                        [resolvedConstructor] ->
+                            alphaEqType
+                                (Elab.resolvedVarType resolvedConstructor)
+                                (ProgramTypes.checkedBindingType constructorBinding)
+                                `shouldBe` True
+                        constructors ->
+                            expectationFailure
+                                (checkedBindingName binding ++ " did not retain one typed constructor: " ++ show constructors)
+            alphaEqType
+                (ProgramTypes.checkedBindingType sameBinding)
+                (ProgramTypes.checkedBindingType constructorBinding)
+                `shouldBe` True
+            alphaEqType
+                (ProgramTypes.checkedBindingType renamedBinding)
+                (ProgramTypes.checkedBindingType constructorBinding)
+                `shouldBe` True
+            map (length . leadingForallIdentities . ProgramTypes.checkedBindingType) [sameBinding, renamedBinding]
+                `shouldBe` [1, 1]
+            ProgramTypes.typeViewDisplay (ProgramTypes.checkedBindingSourceTypeView specializedBinding)
+                `shouldBe` STArrow (STBase "Int") (STBase "Foo")
+            leadingForallIdentities (ProgramTypes.checkedBindingType specializedBinding)
+                `shouldBe` []
+            mapM_ assertConstructorAlias [sameBinding, renamedBinding, specializedBinding]
+
+        it "threads finalized packet identities across definitions and modules in pure and timed checking" $ do
+            let programText =
+                    unlines
+                        [ "module Lib export (first, second) {"
+                        , "  def first : Int = let id : ∀ a. a -> a = λx x in id 1;"
+                        , "  def second : Int = let id : ∀ a. a -> a = λx x in id 2;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Lib exposing (first, second);"
+                        , "  def main : Int = let id : ∀ a. a -> a = λx x in id first;"
+                        , "}"
+                        ]
+                assertDistinctPacketIdentities checked = do
+                    firstBinding <- requireCheckedBinding "Lib__first" checked
+                    secondBinding <- requireCheckedBinding "Lib__second" checked
+                    mainBinding <- requireCheckedBinding "Main__main" checked
+                    let packetIdentities =
+                            map
+                                ( Set.fromList
+                                    . mapMaybe typeBinderIdentityGeneratedUnique
+                                    . localSchemeBinderIdentities
+                                    . checkedBindingTerm
+                                )
+                                [firstBinding, secondBinding, mainBinding]
+                    packetIdentities `shouldSatisfy` all (not . Set.null)
+                    sequence_
+                        [ Set.intersection left right `shouldBe` Set.empty
+                        | (index, left) <- zip [(0 :: Int) ..] packetIdentities
+                        , right <- drop (index + 1) packetIdentities
+                        ]
+            program <- requireParsed programText
+            pureChecked <- requireChecked program
+            assertDistinctPacketIdentities pureChecked
+            located <- requireLocatedWithFile "<packet-supply>" programText
+            timedResult <-
+                checkLocatedProgramPackageWithDefaultTiming
+                    (trivialLocatedProgramPackage located)
+            timedChecked <-
+                case timedResult of
+                    Left diagnostic ->
+                        expectationFailure ("timed check failed: " ++ show diagnostic)
+                            >> fail "timed check failed"
+                    Right checked -> pure checked
+            assertDistinctPacketIdentities timedChecked
+
+        it "threads one authoritative supply through deferred constructor and case binder allocation" $ do
+            let supplyFloor = UniqueIdentity 992100
+                occupied = [UniqueIdentity 7]
+                generator0 = identityGeneratorAfter [supplyFloor]
+                (constructorRefs, generator1) =
+                    allocateDeferredRewriteBinderRefs generator0 occupied ["constructor-result"]
+                (caseRefs, generator2) =
+                    allocateDeferredRewriteBinderRefs generator1 occupied ["case-result"]
+                generatedIdentity refs name =
+                    Map.lookup name refs
+                        >>= typeBinderIdentityGeneratedUnique
+                            . Elab.typeBinderRefIdentity
+                (nextIdentity, _) = freshIdentity generator2
+            generatedIdentity constructorRefs "constructor-result"
+                `shouldBe` Just (UniqueIdentity 992101)
+            generatedIdentity caseRefs "case-result"
+                `shouldBe` Just (UniqueIdentity 992102)
+            nextIdentity `shouldBe` UniqueIdentity 992103
+
+        it "threads the authoritative supply through deferred method capture avoidance" $ do
+            let capturedIdentity = typeBinderIdentityFromUnique (UniqueIdentity 11)
+                capturedRef = Elab.typeBinderRefFromIdentity capturedIdentity "a"
+                capturedTy = Elab.TVarRef capturedRef
+                methodTy =
+                    Elab.TForallRef
+                        capturedRef
+                        Nothing
+                        (Elab.TArrow capturedTy capturedTy)
+                generator0 = identityGeneratorAfter [UniqueIdentity 992200]
+                (freshened, generator1) =
+                    freshenDeferredMethodTypeBinders generator0 [capturedTy] methodTy
+                (nextIdentity, _) = freshIdentity generator1
+            case freshened of
+                Elab.TForallRef freshRef Nothing (Elab.TArrow (Elab.TVarRef leftRef) (Elab.TVarRef rightRef)) -> do
+                    typeBinderIdentityGeneratedUnique (Elab.typeBinderRefIdentity freshRef)
+                        `shouldBe` Just (UniqueIdentity 992201)
+                    Elab.typeBinderRefsSameIdentity leftRef freshRef `shouldBe` True
+                    Elab.typeBinderRefsSameIdentity rightRef freshRef `shouldBe` True
+                    Elab.typeBinderRefsSameIdentity freshRef capturedRef `shouldBe` False
+                other ->
+                    expectationFailure ("expected freshened deferred method forall, got " ++ show other)
+            nextIdentity `shouldBe` UniqueIdentity 992202
+
+        it "freshens colliding binders inside bounds with the same authoritative supply" $ do
+            let capturedIdentity = typeBinderIdentityFromUnique (UniqueIdentity 12)
+                capturedRef = Elab.typeBinderRefFromIdentity capturedIdentity "a"
+                resultIdentity = typeBinderIdentityFromUnique (UniqueIdentity 13)
+                resultRef = Elab.typeBinderRefFromIdentity resultIdentity "result"
+                capturedTy = Elab.TVarRef capturedRef
+                nestedBound =
+                    Elab.TForallRef
+                        capturedRef
+                        Nothing
+                        (Elab.TArrow capturedTy capturedTy)
+                methodTy =
+                    Elab.TForallRef
+                        resultRef
+                        (Just nestedBound)
+                        (Elab.TVarRef resultRef)
+                generator0 = identityGeneratorAfter [UniqueIdentity 992210]
+                (freshened, generator1) =
+                    freshenDeferredMethodTypeBinders generator0 [capturedTy] methodTy
+                (nextIdentity, _) = freshIdentity generator1
+            case freshened of
+                Elab.TForallRef
+                    actualResultRef
+                    (Just (Elab.TForallRef freshRef Nothing (Elab.TArrow (Elab.TVarRef leftRef) (Elab.TVarRef rightRef))))
+                    (Elab.TVarRef resultUseRef) -> do
+                        actualResultRef `shouldBe` resultRef
+                        Elab.typeBinderRefsSameIdentity resultUseRef resultRef `shouldBe` True
+                        typeBinderIdentityGeneratedUnique (Elab.typeBinderRefIdentity freshRef)
+                            `shouldBe` Just (UniqueIdentity 992211)
+                        Elab.typeBinderRefsSameIdentity leftRef freshRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity rightRef freshRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity freshRef capturedRef `shouldBe` False
+                other ->
+                    expectationFailure ("expected freshened deferred-method bound, got " ++ show other)
+            nextIdentity `shouldBe` UniqueIdentity 992212
 
         it "decodes Church data using resolved local handler identity" $ do
             program <-
@@ -5364,7 +6772,7 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             let handlerType = testTVar "r"
                 handlerRef = generatedLocalRefForName "$None-handler"
                 binder =
@@ -5396,9 +6804,9 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             let handlerType = testTVar "r"
-                handlerArgType = Elab.tBase (BaseTy "Int")
+                handlerArgType = TestElab.tBase (BaseTy "Int")
                 handlerRef = generatedLocalRefForName "$Option-handler"
                 noneHandler =
                     ResolvedVar
@@ -5443,7 +6851,7 @@ spec = do
                         ]
             checked <- requireChecked program
             let handlerType = testTVar "r"
-                handlerArgType = Elab.tBase (BaseTy "Int")
+                handlerArgType = TestElab.tBase (BaseTy "Int")
                 handlerRef = generatedLocalRefForName "$Option-fallback-handler"
                 noneHandler =
                     ResolvedVar
@@ -5481,7 +6889,7 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Option" checked
             let displayHead = ProgramTypes.dataInfoIdentityName dataInfo
                 identityHead = symbolIdentityStableName (dataInfoSymbol dataInfo)
@@ -5491,12 +6899,6 @@ spec = do
                         ( (setTypeViewHeadIdentities (Map.singleton displayHead (dataInfoSymbol dataInfo)) (mkTypeView (STBase displayHead) (STBase identityHead)))
                         )
                         checked
-                checkedWithoutHeadMetadata =
-                    replaceCheckedBindingSourceTypeWithHeadIdentities
-                        "Main__main"
-                        (STBase identityHead)
-                        Map.empty
-                        checked
                 checkedWithDisplayHeadMetadata =
                     replaceCheckedBindingSourceTypeWithHeadIdentities
                         "Main__main"
@@ -5505,7 +6907,6 @@ spec = do
                         checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "None\n"
             (programRunOutput <$> runCheckedProgramOutput checkedWithDisplayHeadMetadata) `shouldBe` Right "None\n"
-            reconstructCheckedProgram checkedWithoutHeadMetadata `shouldSatisfy` isLeft
 
         it "decodes parameterized Church data using checked source type head identity metadata" $ do
             program <-
@@ -5521,7 +6922,7 @@ spec = do
                         , "  def main : Box Option = Box None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             optionInfo <- requireCheckedData "Main" "Option" checked
             let displayHead = ProgramTypes.dataInfoIdentityName dataInfo
@@ -5560,7 +6961,7 @@ spec = do
                         , "  def main : Box = Box None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             boxInfo <- requireCheckedData "Main" "Box" checked
             optionInfo <- requireCheckedData "Main" "Option" checked
             let boxDisplayHead = ProgramTypes.dataInfoIdentityName boxInfo
@@ -5596,7 +6997,7 @@ spec = do
                         , "  def main : Box Option = Box None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             case ProgramTypes.dataParamBinderIdentities dataInfo of
@@ -5629,7 +7030,7 @@ spec = do
                         , "  def main : Box String = Box \"placeholder\";"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             case ProgramTypes.dataParamBinderIdentities dataInfo of
@@ -5650,7 +7051,7 @@ spec = do
                         ctorTy = ProgramTypes.ctorTypeView poisonedCtor
                         stringFromInt =
                             ResolvedVar
-                                { resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
+                                { resolvedVarType = Elab.TArrow (TestElab.tBase (BaseTy "Int")) (TestElab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -5690,7 +7091,7 @@ spec = do
                         , "  def main : Box String = Box \"stable\";"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             dataInfo <- requireCheckedData "Main" "Box" checked
             ctorInfo <- requireDataConstructor "Box" dataInfo
             case ProgramTypes.dataParamBinders dataInfo of
@@ -5714,7 +7115,7 @@ spec = do
                         ctorTy = ProgramTypes.ctorTypeView poisonedCtor
                         stringFromInt =
                             ResolvedVar
-                                { resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
+                                { resolvedVarType = Elab.TArrow (TestElab.tBase (BaseTy "Int")) (TestElab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -5743,7 +7144,7 @@ spec = do
                 identities ->
                     expectationFailure ("expected one data param binder, got " ++ show identities)
 
-        it "decodes checked main data by source identity and rejects incomplete TypeViews" $ do
+        it "decodes checked main data by source identity when display heads are stale" $ do
             located <-
                 requireLocated $
                     unlines
@@ -5763,34 +7164,16 @@ spec = do
                         , "}"
                         ]
             checked <- requireCheckedLocated located
-            bData <- requireCheckedData "B" "Box" checked
             let checked' =
                     poisonCheckedBindingSourceTypeHeads
                         "Main__main"
                         (STBase "Box")
                         checked
-                checkedWithoutHeadMetadata =
-                    replaceCheckedBindingSourceTypeWithHeadIdentities
-                        "Main__main"
-                        (STBase "Box")
-                        Map.empty
-                        checked
-                checkedByElabIdentity =
-                    replaceCheckedBindingType
-                        "Main__main"
-                        (Elab.TBaseWithIdentity (Just (ProgramTypes.dataInfoSymbol bData)) (BaseTy "$stale.Box"))
-                        checkedWithoutHeadMetadata
             checkedWithStaleDisplay <-
                 case reconstructCheckedProgram checked' of
                     Left err -> expectationFailure ("expected checked reconstruction, got " ++ show err) >> fail "checked reconstruction failed"
                     Right reconstructed -> pure reconstructed
             (programRunOutput <$> runCheckedProgramOutput checkedWithStaleDisplay) `shouldBe` Right "BBox\n"
-            reconstructCheckedProgram checkedWithoutHeadMetadata `shouldSatisfy` isLeft
-            case reconstructCheckedProgram checkedByElabIdentity of
-                Left (ProgramPipelineError message) ->
-                    message `shouldSatisfy` isInfixOf "identity-incomplete"
-                other ->
-                    expectationFailure ("expected incomplete checked TypeView rejection, got " ++ show other)
 
         it "retains hidden constructor-field identities through imported value lowering" $ do
             located <-
@@ -5818,8 +7201,7 @@ spec = do
                         , "}"
                         ]
             checked <- requireCheckedLocated located
-            mainBinding <- requireCheckedBinding "Main__main" checked
-            Elab.xmlfTermTypeIdentityGaps (checkedBindingTerm mainBinding) `shouldBe` []
+            _ <- requireCheckedBinding "Main__main" checked
             (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "7\n"
 
         it "decodes checked main data by source display head identity when identity spelling is stale" $ do
@@ -5833,13 +7215,13 @@ spec = do
                         , "  def main : Option = None;"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
+            checked <- requireCheckedWithPrelude program
             optionInfo <- requireCheckedData "Main" "Option" checked
             let displayHead = ProgramTypes.dataInfoIdentityName optionInfo
                 checked' =
                     replaceCheckedBindingType
                         "Main__main"
-                        (Elab.TBaseWithIdentity (Just (ProgramTypes.dataInfoSymbol optionInfo)) (BaseTy "$stale_option"))
+                        (Elab.TBaseWithIdentity (ProgramTypes.dataInfoSymbol optionInfo) (BaseTy "$stale_option"))
                         ( replaceCheckedBindingSourceTypeView
                             "Main__main"
                             ( (setTypeViewHeadIdentities (Map.singleton displayHead (ProgramTypes.dataInfoSymbol optionInfo)) (mkTypeView (STBase displayHead) (STBase "$stale_identity_option")))
@@ -5856,9 +7238,9 @@ spec = do
                         , "  def main : String = \"placeholder\";"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
-            let intTy = Elab.tBase (BaseTy "Int")
-                stringTy = Elab.tBase (BaseTy "String")
+            checked <- requireCheckedWithPrelude program
+            let intTy = TestElab.tBase (BaseTy "Int")
+                stringTy = TestElab.tBase (BaseTy "String")
                 primitiveTy = Elab.TArrow intTy stringTy
                 staleStringFromInt =
                     ResolvedVar
@@ -5878,9 +7260,9 @@ spec = do
                         , "  def main : String = \"placeholder\";"
                         , "}"
                         ]
-            checked <- requireChecked (withPrelude program)
-            let intTy = Elab.tBase (BaseTy "Int")
-                stringTy = Elab.tBase (BaseTy "String")
+            checked <- requireCheckedWithPrelude program
+            let intTy = TestElab.tBase (BaseTy "Int")
+                stringTy = TestElab.tBase (BaseTy "String")
                 primitiveTy = Elab.TArrow intTy stringTy
                 fakePrimitiveSpelling =
                     ResolvedVar
@@ -5893,7 +7275,7 @@ spec = do
             (programRunOutput <$> runCheckedProgramOutput checked')
                 `shouldNotBe` Right "\"7\"\n"
 
-        it "runs Prelude stringFromList by resolved identity instead of runtime name" $ do
+        it "runs Prelude stringFromList through its resolved primitive identity" $ do
             located <-
                 requireLocated $
                     unlines
@@ -5902,14 +7284,20 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             mainBinding <- requireCheckedBinding "Main__main" checked
-            let checked' =
-                    replaceCheckedBindingTerm
-                        "Main__main"
-                        (poisonPrimitiveRuntimeNames "$stale_string_from_list" (checkedBindingTerm mainBinding))
-                        checked
-            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
+            stringFromListBinding <-
+                requireCheckedBinding "Prelude__stringFromList" checked
+            stringFromListBindingIdentity <-
+                requireTopLevelIdentity stringFromListBinding
+            let stringFromListIdentity =
+                    Builtins.builtinValueIdentity
+                        PrimitiveInventory.stringFromListPrimitiveName
+            resolvedTopLevelIdentities (checkedBindingTerm mainBinding)
+                `shouldSatisfy` any (Symbol.sameSymbolIdentity stringFromListBindingIdentity)
+            resolvedTopLevelIdentities (checkedBindingTerm stringFromListBinding)
+                `shouldSatisfy` any (Symbol.sameSymbolIdentity stringFromListIdentity)
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "\"\"\n"
 
         it "indexes runtime Prelude support by module identity instead of checked module name" $ do
             located <-
@@ -5920,7 +7308,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedModuleName "Prelude" "$stale_prelude_module_name" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
@@ -5933,7 +7321,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedConstructorIdentityNamesWhere (== "Nil") "$stale_nil_identity_name" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
@@ -5946,7 +7334,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedDataIdentityNamesWhere (== "List") "$stale_list_data_name" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
@@ -5959,7 +7347,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedExportedTypeDisplaysWhere (== "List") "$stale_list_export_display" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
@@ -5972,7 +7360,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             listData <- requireCheckedData "Prelude" "List" checked
             nilCtor <- requireDataConstructor "Nil" listData
             let staleListOwner = renameSymbolDefiningName "$stale_list_owner" (dataInfoSymbol listData)
@@ -5992,7 +7380,7 @@ spec = do
                         , "  def main : IO Unit = __io_putStrLn \"binding-identity\";"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedBindingName "Main__main" "$stale_main_binding_name" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "binding-identity\n"
 
@@ -6005,7 +7393,7 @@ spec = do
                         , "  def main : IO Unit = __io_putStrLn \"type-identity\";"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' =
                     replaceCheckedBindingSourceType
                         "Main__main"
@@ -6036,7 +7424,7 @@ spec = do
                         , "  def main : IO Unit = helper;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' = renameCheckedBindingName "Main__helper" "Main__main" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "helper\n"
 
@@ -6055,7 +7443,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' =
                     renameCheckedConstructorRuntimeNamesWhere
                         (== "Main__None")
@@ -6078,7 +7466,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             dataInfo <- requireCheckedData "Main" "Option" checked
             noneCtor <- requireDataConstructor "None" dataInfo
             actionBinding <- requireCheckedBinding "Main__action" checked
@@ -6168,7 +7556,7 @@ spec = do
                         , "  def main : IO Unit = helper;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             helperBinding <- requireCheckedBinding "Main__helper" checked
             mainBinding <- requireCheckedBinding "Main__main" checked
             helperIdentity <- requireTopLevelIdentity helperBinding
@@ -6193,8 +7581,8 @@ spec = do
                         , "  def main : IO Unit = __io_putStrLn \"placeholder\";"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
-            let stringTy = Elab.tBase (BaseTy "String")
+            checked <- requireCheckedLocatedWithPrelude located
+            let stringTy = TestElab.tBase (BaseTy "String")
                 correctIdentity = generatedSymbolIdentity 991730 SymbolValue "Synthetic" "message" Nothing
                 staleIdentity = renameSymbolDefiningName "$stale_message" correctIdentity
                 correctResolved =
@@ -6300,7 +7688,7 @@ spec = do
                         , "  def main : String = stringFromList Nil;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             listData <- requireCheckedData "Prelude" "List" checked
             nilCtor <- requireDataConstructor "Nil" listData
             consCtor <- requireDataConstructor "Cons" listData
@@ -6321,8 +7709,8 @@ spec = do
                         , "  def main : IO Unit = __io_putStrLn \"placeholder\";"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
-            let intElabTy = Elab.tBase (BaseTy "Int")
+            checked <- requireCheckedLocatedWithPrelude located
+            let intElabTy = TestElab.tBase (BaseTy "Int")
                 outer = generatedResolvedLocal 100 "x" "runtime-x" intElabTy
                 inner = generatedResolvedLocal 101 "x" "runtime-x" intElabTy
                 ioBind = primitiveTerm "__io_bind"
@@ -6963,14 +8351,7 @@ spec = do
                 )
                 ["∀ a Int", "∀a Int"]
 
-    describe "MLF.Program shared runtime-success parity surface" $ do
-        mapM_ runProgramRuntimeCase programRuntimeSuccessCases
-
     describe "MLF.Program CLI helper" $ do
-        it "runs a frozen sample file by path" $ do
-            runProgramFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
-                `shouldReturn` Right "true\n"
-
         it "prepends the built-in Prelude for explicit imports" $ do
             located <-
                 requireLocated $
@@ -6980,7 +8361,7 @@ spec = do
                         , "  def main : Option Nat = Some Zero;"
                         , "}"
                         ]
-            (prettyValue <$> runLocatedProgram (withPreludeLocated located)) `shouldBe` Right "Some Zero"
+            (prettyValue <$> runLocatedProgramWithPrelude located) `shouldBe` Right "Some Zero"
 
         it "typechecks the Prelude IO class hierarchy" $ do
             located <-
@@ -6993,7 +8374,64 @@ spec = do
                         , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+            checkLocatedProgramWithPrelude located `shouldSatisfy` isRight
+
+        it "constructs fully applied Prelude method results at the expected nominal identity" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  def action : IO Unit = pure Unit;"
+                        , "  def main : IO Unit = bind action (λ(_done : Unit) putStrLn \"nominal\");"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocatedWithPrelude located
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let typeCheckEnv =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [ (checkedBindingResolvedVar candidate, ProgramTypes.checkedBindingType candidate)
+                        | checkedModule <- checkedProgramModules checked
+                        , candidate <- checkedModuleBindings checkedModule
+                        ]
+                        Map.empty
+            case ElabPipeline.typeCheckWithEnv typeCheckEnv (checkedBindingTerm mainBinding) of
+                Left err ->
+                    expectationFailure
+                        ("fully applied Prelude method result failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType mainBinding)
+                        `shouldBe` True
+
+        it "constructs generated case-handler results at the enclosing nominal identity" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Option(..), stringCharAtOption, charIsAsciiControl);"
+                        , "  def main : Bool = case stringCharAtOption \"a\\0b\" 1 of {"
+                        , "    None -> false;"
+                        , "    Some ch -> charIsAsciiControl ch"
+                        , "  };"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocatedWithPrelude located
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let typeCheckEnv =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [ (checkedBindingResolvedVar candidate, ProgramTypes.checkedBindingType candidate)
+                        | checkedModule <- checkedProgramModules checked
+                        , candidate <- checkedModuleBindings checkedModule
+                        ]
+                        Map.empty
+            case ElabPipeline.typeCheckWithEnv typeCheckEnv (checkedBindingTerm mainBinding) of
+                Left err ->
+                    expectationFailure
+                        ("generated case handler failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType mainBinding)
+                        `shouldBe` True
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "true\n"
 
         it "runs Prelude Functor and Applicative IO instances through class methods" $ do
             located <-
@@ -7008,7 +8446,7 @@ spec = do
                         , "  def main : IO Unit = bind mapped (λ(_done : Unit) bind applied (λ(_done2 : Unit) putStrLn \"hierarchy\"));"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hierarchy\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "hierarchy\n"
 
         it "typechecks direct IO bind primitive uses with consistent arguments" $ do
             located <-
@@ -7020,11 +8458,26 @@ spec = do
                         , "}"
                         ]
             checked <-
-                case checkLocatedProgram (withPreludeLocated located) of
+                case checkLocatedProgramWithPrelude located of
                     Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
                     Right checked -> pure checked
             mainBinding <- requireCheckedBinding "Main__main" checked
             unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
+            case applicationArgumentsForRuntimeName "__io_pure" (checkedBindingTerm mainBinding) of
+                [Elab.ETyInst (Elab.EVarNode unitOccurrence) (Elab.InstAbstrRef _)] ->
+                    case Elab.resolvedVarDetails unitOccurrence of
+                        ConstructorId constructorRef ->
+                            Symbol.symbolDefiningName
+                                (constructorRefSymbol constructorRef)
+                                `shouldBe` "Unit"
+                        details ->
+                            expectationFailure
+                                ("expected resolved Unit constructor, got " ++ show details)
+                arguments ->
+                    expectationFailure
+                        ( "expected __io_pure's Unit argument to retain its explicit Hyp, got "
+                            ++ show arguments
+                        )
 
         it "rejects inconsistent direct IO bind primitive arguments" $ do
             located <-
@@ -7035,7 +8488,7 @@ spec = do
                         , "  def main : IO Unit = __io_bind (__io_pure 1) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isLeft
+            checkLocatedProgramWithPrelude located `shouldSatisfy` isLeft
 
         it "rejects non-IO expressions for Prelude IO annotations" $ do
             intLocated <-
@@ -7046,9 +8499,14 @@ spec = do
                         , "  def main : IO Unit = 1;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated intLocated)
+            checkLocatedProgramWithPrelude intLocated
                 `shouldSatisfy` either
-                    (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                    ( \diagnostic ->
+                        case diagnosticError diagnostic of
+                            ProgramTypeMismatch {} ->
+                                "type mismatch" `isInfixOf` renderProgramDiagnostic diagnostic
+                            _ -> False
+                    )
                     (const False)
             identityLocated <-
                 requireLocated $
@@ -7058,9 +8516,16 @@ spec = do
                         , "  def main : IO Unit = λx x;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated identityLocated)
+            checkLocatedProgramWithPrelude identityLocated
                 `shouldSatisfy` either
-                    (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                    ( \diagnostic ->
+                        case diagnosticError diagnostic of
+                            ProgramTypeShapeMismatch ProgramTypes.ProgramSourceArrowShape _ ->
+                                let rendered = renderProgramDiagnostic diagnostic
+                                 in "type mismatch" `isInfixOf` rendered
+                                      && "internal pipeline detail" `isInfixOf` rendered
+                            _ -> False
+                    )
                     (const False)
 
         it "rejects monomorphic IO actions for polymorphic IO annotations" $ do
@@ -7072,9 +8537,16 @@ spec = do
                         , "  def main : ∀ a. IO a = __io_pure 1;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located)
+            checkLocatedProgramWithPrelude located
                 `shouldSatisfy` either
-                    (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                    ( \diagnostic ->
+                        case diagnosticError diagnostic of
+                            ProgramTypeMismatch {} ->
+                                let rendered = renderProgramDiagnostic diagnostic
+                                 in "type mismatch" `isInfixOf` rendered
+                                      && "internal pipeline detail" `isInfixOf` rendered
+                            _ -> False
+                    )
                     (const False)
 
         it "rejects inconsistent Prelude IO bind argument substitutions" $ do
@@ -7086,7 +8558,7 @@ spec = do
                         , "  def main : IO Unit = bind (__io_pure 1) (λ(_n : Unit) putStrLn \"world\");"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located)
+            checkLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     (isInfixOf "ambiguous overloaded method use `bind`" . renderProgramDiagnostic)
                     (const False)
@@ -7100,7 +8572,7 @@ spec = do
                         , "  def main : Bool = true;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located)
+            checkLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     ((== ProgramImportNotExported "Prelude" "IO") . diagnosticError)
                     (const False)
@@ -7117,7 +8589,7 @@ spec = do
                         , "  };"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located)
+            checkLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     (isInfixOf "case scrutinee is not a data type" . renderProgramDiagnostic)
                     (const False)
@@ -7131,7 +8603,7 @@ spec = do
                         , "  def main : Unit = pure Unit;"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located)
+            checkLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     ((== ProgramAmbiguousMethodUse "pure") . diagnosticError)
                     (const False)
@@ -7145,7 +8617,7 @@ spec = do
                         , "  def main : IO Unit = putStrLn \"hello\";"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "hello\n"
 
         it "sequences main IO through Prelude bind" $ do
             located <-
@@ -7157,7 +8629,21 @@ spec = do
                         , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\nworld\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "hello\nworld\n"
+
+        it "sequences an inline bind continuation through nested application Gamma" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  def main : IO Unit ="
+                        , "    bind (putStrLn \"hello\")"
+                        , "      (λ(_done : Unit) putStrLn \"world\");"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located)
+                `shouldBe` Right "hello\nworld\n"
 
         it "sequences direct IO primitives without rendering Unit" $ do
             located <-
@@ -7168,7 +8654,7 @@ spec = do
                         , "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "world\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "world\n"
 
         it "runs pure IO Unit actions without stdout or Unit rendering" $ do
             located <-
@@ -7179,7 +8665,7 @@ spec = do
                         , "  def main : IO Unit = pure Unit;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right ""
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right ""
 
         it "supports qualified non-Prelude Unit results in IO main" $ do
             located <-
@@ -7208,7 +8694,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             mainBinding <- requireCheckedBinding "Main__main" checked
             unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
             (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "nat\n"
@@ -7222,7 +8708,7 @@ spec = do
                         , "  def main : IO Unit = __io_bind (__io_pure Zero) (λ(n : Nat) __io_putStrLn \"nat\");"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             mainBinding <- requireCheckedBinding "Main__main" checked
             resolvedLocalBinders (checkedBindingTerm mainBinding) `shouldSatisfy` any isGeneratedLocalRef
             generatedLocalIdentityValues (checkedBindingTerm mainBinding)
@@ -7240,10 +8726,12 @@ spec = do
                         , dataTypeParams = []
                         , dataConstructors = []
                         }
-                obligation =
+                obligation name identity =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = duplicateRef
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails name (TopLevelId identity)
+                            , deferredCaseRef = duplicateRef
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -7253,14 +8741,13 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails name (TopLevelId identity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
                         , loweredBindingSurfaceExpr = Surface.ELit (LInt 1)
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
-                        , loweredBindingDeferredObligations = Map.singleton duplicateRef obligation
+                        , loweredBindingDeferredObligations =
+                            Map.singleton duplicateRef (obligation name identity)
                         , loweredBindingExternalTypeViews = Map.empty
                         , loweredBindingExportedAsMain = False
                         }
@@ -7285,10 +8772,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails name (TopLevelId duplicateIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
                         , loweredBindingSurfaceExpr = Surface.ELit (LInt value)
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
@@ -7303,6 +8788,60 @@ spec = do
                     expectationFailure ("expected duplicate binding identity rejection, got " ++ show err)
                 Right _ ->
                     expectationFailure "expected duplicate binding identity rejection"
+
+        it "rejects deferred cases owned by a different binding identity" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let deferredRef = deferredRefFromIdentity (UniqueIdentity 24) "$deferred"
+                bindingIdentity = generatedSymbolIdentity 25 SymbolValue "Main" "main" Nothing
+                wrongBindingIdentity = generatedSymbolIdentity 26 SymbolValue "Main" "main" Nothing
+                dataIdentity = generatedSymbolIdentity 27 SymbolType "Main" "Phantom" Nothing
+                bindingOwner =
+                    loweredBindingIdentityFromDetails
+                        "Main__main"
+                        (TopLevelId bindingIdentity)
+                wrongOwner =
+                    loweredBindingIdentityFromDetails
+                        "Main__main"
+                        (TopLevelId wrongBindingIdentity)
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseBindingIdentity = wrongOwner
+                            , deferredCaseRef = deferredRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
+                            , deferredCaseResultTypeView = builtinBaseTypeView "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity = bindingOwner
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = Surface.ELit (LInt 1)
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingResolvedEvidenceIdentities = []
+                        , loweredBindingDeferredObligations = Map.singleton deferredRef obligation
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingExportedAsMain = False
+                        }
+            ProgramTypes.loweredIdentityRuntimeName wrongOwner
+                `shouldBe` ProgramTypes.loweredIdentityRuntimeName bindingOwner
+            wrongOwner `shouldNotBe` bindingOwner
+            case finalizeBindingWithContext finalizeContext lowered of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "deferred case owned by binding"
+                    message `shouldSatisfy` isInfixOf "Main__main"
+                Left err ->
+                    expectationFailure ("expected deferred case owner rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected deferred case owner rejection"
 
         it "rejects mismatched deferred obligation identities before checked binding storage" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
@@ -7319,7 +8858,9 @@ spec = do
                 obligation =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = payloadRef
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            , deferredCaseRef = payloadRef
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -7329,11 +8870,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar "$deferred"
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar "$deferred"
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.singleton keyRef obligation
@@ -7366,7 +8905,9 @@ spec = do
                 obligation =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = payloadRef
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails "Main__first" (TopLevelId firstIdentity)
+                            , deferredCaseRef = payloadRef
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -7376,11 +8917,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__first" (TopLevelId firstIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar "$deferred"
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar "$deferred"
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.singleton keyRef obligation
@@ -7392,10 +8931,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__second" (TopLevelId secondIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
                         , loweredBindingSurfaceExpr = Surface.ELit (LInt 1)
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
@@ -7427,7 +8964,9 @@ spec = do
                 obligation =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = payloadRef
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            , deferredCaseRef = payloadRef
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -7437,10 +8976,8 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
                         , loweredBindingSurfaceExpr = surfaceExpr
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
@@ -7451,7 +8988,7 @@ spec = do
                 cachedLowered = lowered (Surface.ELit (LInt 1)) Map.empty Map.empty
                 staleLowered =
                     lowered
-                        (Surface.EVar "$deferred")
+                        (unknownSurfaceVar "$deferred")
                         (Map.singleton keyRef obligation)
                         (Map.singleton "$deferred" (mkTypeView (STBase "Int") (STBase "Int")))
             moduleContext <-
@@ -7483,7 +9020,9 @@ spec = do
                 obligation ref =
                     DeferredCase
                         DeferredCaseCall
-                            { deferredCaseRef = ref
+                            { deferredCaseBindingIdentity =
+                                loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            , deferredCaseRef = ref
                             , deferredCaseDataInfo = phantomData
                             , deferredCaseScrutineeTypeView = builtinBaseTypeView "Int"
                             , deferredCaseResultTypeView = builtinBaseTypeView "Int"
@@ -7493,11 +9032,9 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = STBase "Int"
-                        , loweredBindingSourceTypeView = Nothing
-                        , loweredBindingExpectedType = STBase "Int"
-                        , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = Surface.EVar placeholder
+                        , loweredBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingExpectedTypeView = mkTypeView (STBase "Int") (STBase "Int")
+                        , loweredBindingSurfaceExpr = unknownSurfaceVar placeholder
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations =
@@ -7543,7 +9080,6 @@ spec = do
                         { ctorInfoSymbol = constructorIdentity
                         , ctorRuntimeName = "Prelude__OpaqueConstructor"
                         , ctorTypeView = constructorView
-                        , ctorForallBinderInfo = []
                         , ctorOwningTypeIdentity = ioIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
@@ -7564,11 +9100,10 @@ spec = do
                     LoweredBinding
                         { loweredBindingIdentity =
                             loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
-                        , loweredBindingSourceType = constructorTy
-                        , loweredBindingSourceTypeView = Just constructorView
-                        , loweredBindingExpectedType = constructorTy
-                        , loweredBindingExpectedTypeView = Just constructorView
-                        , loweredBindingSurfaceExpr = Surface.EVar (deferredRefName deferredRef)
+                        , loweredBindingSourceTypeView = constructorView
+                        , loweredBindingExpectedTypeView = constructorView
+                        , loweredBindingSurfaceExpr =
+                            Surface.EResolvedVar (DeferredId deferredRef) (deferredRefName deferredRef)
                         , loweredBindingResolvedLocalIdentities = []
                         , loweredBindingResolvedEvidenceIdentities = []
                         , loweredBindingDeferredObligations = Map.singleton deferredRef deferred
@@ -7594,7 +9129,7 @@ spec = do
                         , "  def main : IO P.Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "foo\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "foo\n"
 
         it "keeps deferred constructor lookup scoped to the binding that created the placeholder" $ do
             located <-
@@ -7621,7 +9156,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "scoped\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "scoped\n"
 
         it "resolves deferred case placeholders inside IO continuations" $ do
             located <-
@@ -7637,8 +9172,45 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
+            actionBinding <- requireCheckedBinding "Main__action" checked
             mainBinding <- requireCheckedBinding "Main__main" checked
+            let typeCheckEnv =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [ (checkedBindingResolvedVar candidate, ProgramTypes.checkedBindingType candidate)
+                        | checkedModule <- checkedProgramModules checked
+                        , candidate <- checkedModuleBindings checkedModule
+                        ]
+                        Map.empty
+                actionTerm = checkedBindingTerm actionBinding
+                endpointEvidence =
+                    polymorphicApplicationEndpointEvidence
+                        typeCheckEnv
+                        actionTerm
+                validEndpoint (sourceRef, endpointTy, Right argumentTy) =
+                    not
+                        ( any
+                            (Elab.typeBinderRefsSameIdentity sourceRef)
+                            (freeTypeVarRefsType endpointTy)
+                        )
+                        && alphaEqType endpointTy argumentTy
+                validEndpoint _ = False
+            case filter validEndpoint endpointEvidence of
+                _ : _ -> pure ()
+                [] ->
+                    expectationFailure
+                        ( "expected pure's instantiation endpoint to equal its argument type without leaking the source forall binder; evidence="
+                            ++ show endpointEvidence
+                            ++ "; term="
+                            ++ show actionTerm
+                        )
+            case ElabPipeline.typeCheckWithEnv typeCheckEnv actionTerm of
+                Left err ->
+                    expectationFailure
+                        ("deferred case action failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType actionBinding)
+                        `shouldBe` True
             unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
             (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "succ\n"
 
@@ -7662,7 +9234,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             mainBinding <- requireCheckedBinding "Main__main" checked
             unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
             (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "succ\n"
@@ -7687,7 +9259,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' =
                     renameInstanceMethodRuntimeNamesWhere
                         (\name -> "speak" `isInfixOf` name)
@@ -7717,7 +9289,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "int\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "int\n"
 
         it "resolves constrained instance evidence for IO method dispatch" $ do
             located <-
@@ -7730,7 +9302,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "eq\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "eq\n"
 
         it "applies local evidence arguments for constrained nullary IO methods" $ do
             located <-
@@ -7762,9 +9334,9 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "picked\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "picked\n"
 
-        it "looks up local deferred evidence by resolved identity instead of evidence runtime name" $ do
+        it "looks up local resolved evidence by identity instead of binder runtime name" $ do
             located <-
                 requireLocated $
                     unlines
@@ -7794,11 +9366,42 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
-            checkedProgramDeferredEvidenceMethods checked
-                `shouldSatisfy` any (isJust . evidenceMethodResolvedVar)
-            let checked' = poisonResolvedDeferredEvidenceRuntimeNames "$stale_evidence_runtime_name" checked
-            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "picked\n"
+            checked <- requireCheckedLocatedWithPrelude located
+            binding <- requireCheckedBinding "Main__selected" checked
+            checkedBindingDeferredObligations binding `shouldBe` Map.empty
+            -- Figure 15.3.5 may construct the constrained producer under a
+            -- type abstraction and immediately specialize it.  Inspect the
+            -- evidence-lambda spine modulo only those explicit type redexes;
+            -- keep the original construction intact for the runtime check.
+            case reduceLeadingTypeInstantiationRedexesFully (checkedBindingTerm binding) of
+                Elab.ELam
+                    ResolvedVar{resolvedVarDetails = EvidenceId pickBinderRef}
+                    pickBody ->
+                        case reduceLeadingTypeInstantiationRedexesFully pickBody of
+                            Elab.ELam
+                                ResolvedVar{resolvedVarDetails = EvidenceId eqBinderRef}
+                                body -> do
+                                    resolvedEvidenceOccurrences body
+                                        `shouldMatchList` [pickBinderRef, eqBinderRef]
+                                    let stalePickRef = renameLocalRef "$stale_pick_binder" pickBinderRef
+                                        staleEqRef = renameLocalRef "$stale_eq_binder" eqBinderRef
+                                        staleTerm =
+                                            renameEvidenceBinderRef eqBinderRef staleEqRef
+                                                . renameEvidenceBinderRef pickBinderRef stalePickRef
+                                                $ checkedBindingTerm binding
+                                        checked' = replaceCheckedBindingTerm "Main__selected" staleTerm checked
+                                    localRefIdentity stalePickRef `shouldBe` localRefIdentity pickBinderRef
+                                    localRefIdentity staleEqRef `shouldBe` localRefIdentity eqBinderRef
+                                    localRefName stalePickRef `shouldNotBe` localRefName pickBinderRef
+                                    localRefName staleEqRef `shouldNotBe` localRefName eqBinderRef
+                                    (programRunOutput <$> runCheckedProgramOutput checked')
+                                        `shouldBe` Right "picked\n"
+                            other ->
+                                expectationFailure
+                                    ("expected second resolved evidence binder, got " ++ show other)
+                other ->
+                    expectationFailure
+                        ("expected two resolved evidence binders, got " ++ show other)
 
         it "constructs IO ADT payloads with function fields without runtime type inference" $ do
             located <-
@@ -7814,7 +9417,7 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "boxed\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "boxed\n"
 
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
@@ -7825,7 +9428,7 @@ spec = do
                         , "  def main : IO Unit = main;"
                         , "}"
                         ]
-            runLocatedProgramOutput (withPreludeLocated located)
+            runLocatedProgramOutputWithPrelude located
                 `shouldSatisfy` either
                     ( \diagnostic ->
                         case diagnosticError diagnostic of
@@ -7852,7 +9455,7 @@ spec = do
                         , "  def main : IO Unit = finish (Succ Zero);"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "done\n"
+            (programRunOutput <$> runLocatedProgramOutputWithPrelude located) `shouldBe` Right "done\n"
 
         it "supports IO mains whose result type is not Unit" $ do
             located <-
@@ -7863,7 +9466,7 @@ spec = do
                         , "  def main : IO Int = pure 1;"
                         , "}"
                         ]
-            let result = runLocatedProgramOutput (withPreludeLocated located)
+            let result = runLocatedProgramOutputWithPrelude located
             result `shouldSatisfy` isRight
             case result of
                 Right runResult -> programRunValue runResult `shouldBe` Just (VLit (LInt 1))
@@ -7879,7 +9482,7 @@ spec = do
                         , "  def main : Unit = discard (pure Unit);"
                         , "}"
                         ]
-            runLocatedProgram (withPreludeLocated located)
+            runLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     ( \diagnostic ->
                         all
@@ -7900,7 +9503,7 @@ spec = do
                         , "  def main : Unit = discard (pure Unit);"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             let checked' =
                     poisonCheckedBindingSourceTypeHeads
                         "Main__discard"
@@ -7923,7 +9526,7 @@ spec = do
                         , "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);"
                         , "}"
                         ]
-            runLocatedProgram (withPreludeLocated located)
+            runLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     ( \diagnostic ->
                         all
@@ -7934,7 +9537,7 @@ spec = do
                     )
                     (const False)
 
-        it "rejects opaque primitive dependencies by resolved identity instead of runtime name" $ do
+        it "rejects opaque primitive dependencies carried by resolved identity" $ do
             located <-
                 requireLocated $
                     unlines
@@ -7943,18 +9546,19 @@ spec = do
                         , "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);"
                         , "}"
                         ]
-            checked <- requireCheckedLocated (withPreludeLocated located)
+            checked <- requireCheckedLocatedWithPrelude located
             mainBinding <- requireCheckedBinding "Main__main" checked
-            let checked' =
-                    replaceCheckedBindingTerm
-                        "Main__main"
-                        (poisonPrimitiveRuntimeNames "$stale_io_pure" (checkedBindingTerm mainBinding))
-                        checked
-            case runCheckedProgramOutput checked' of
+            let ioPureIdentity =
+                    Builtins.builtinValueIdentity
+                        ( PrimitiveInventory.nativeIOPrimitiveName
+                            PrimitiveInventory.PrimitiveIOPure
+                        )
+            resolvedTopLevelIdentities (checkedBindingTerm mainBinding)
+                `shouldSatisfy` any (Symbol.sameSymbolIdentity ioPureIdentity)
+            case runCheckedProgramOutput checked of
                 Left (ProgramPipelineError text) -> do
                     text `shouldSatisfy` isInfixOf "run-program does not support IO dependencies yet"
                     text `shouldSatisfy` isInfixOf "__io_pure"
-                    text `shouldNotSatisfy` isInfixOf "$stale_io_pure"
                 other ->
                     expectationFailure ("expected opaque primitive rejection, got " ++ show other)
 
@@ -7969,7 +9573,7 @@ spec = do
                         , "  def main : Bool = true;"
                         , "}"
                         ]
-            runLocatedProgram (withPreludeLocated located)
+            runLocatedProgramWithPrelude located
                 `shouldSatisfy` either
                     ((== ProgramDuplicateModule "Prelude") . diagnosticError)
                     (const False)
@@ -8054,6 +9658,29 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "checks a nested constructor through its argument-side root Gamma" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (SeedSpan(..), SeedKind(..), SeedDiagnostic(..), SeedResult(..), main) {"
+                        , "  data SeedSpan ="
+                        , "      SeedSpan : SeedSpan;"
+                        , ""
+                        , "  data SeedKind ="
+                        , "      SeedUnknown : SeedKind;"
+                        , ""
+                        , "  data SeedDiagnostic ="
+                        , "      SeedDiagnostic : SeedSpan -> SeedKind -> SeedDiagnostic;"
+                        , ""
+                        , "  data SeedResult ="
+                        , "      SeedError : SeedDiagnostic -> SeedResult;"
+                        , ""
+                        , "  def main : SeedResult ="
+                        , "    SeedError (SeedDiagnostic SeedSpan SeedUnknown);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
         it "checks parameterized constructor applications without leaking identity substitutions" $ do
             let programText =
                     unlines
@@ -8068,7 +9695,129 @@ spec = do
                         , "}"
                         ]
             program <- requireParsed programText
-            checkProgram program `shouldSatisfy` isRight
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__boxPure" checked
+            case (ProgramTypes.checkedBindingType binding, checkedBindingTerm binding) of
+                (Elab.TForallRef typeRef _ _, Elab.ETyAbsRef termRef _ _) ->
+                    Elab.typeBinderRefsSameIdentity typeRef termRef `shouldBe` True
+                other ->
+                    expectationFailure
+                        ("expected parameterized constructor producer type abstraction, got " ++ show other)
+            let typeCheckEnv =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [ (checkedBindingResolvedVar candidate, ProgramTypes.checkedBindingType candidate)
+                        | checkedModule <- checkedProgramModules checked
+                        , candidate <- checkedModuleBindings checkedModule
+                        ]
+                        Map.empty
+            ElabPipeline.typeCheckWithEnv typeCheckEnv (checkedBindingTerm binding)
+                `shouldBe` Right (ProgramTypes.checkedBindingType binding)
+
+        it "checks an unannotated lambda against a leading quantified binder by identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀ a. a -> a = λ(value) (value : a);"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__main" checked
+            case (ProgramTypes.checkedBindingType binding, checkedBindingTerm binding) of
+                ( Elab.TForallRef typeRef Nothing (Elab.TArrow (Elab.TVarRef domainRef) (Elab.TVarRef codomainRef))
+                    , Elab.ETyAbsRef termRef Nothing (Elab.ELam parameter _)
+                    ) -> do
+                        Elab.typeBinderRefsSameIdentity typeRef domainRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity typeRef codomainRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity typeRef termRef `shouldBe` True
+                        alphaEqType (Elab.resolvedVarType parameter) (Elab.TVarRef typeRef) `shouldBe` True
+                other ->
+                    expectationFailure
+                        ("expected one shared forall identity across the producer lambda, got " ++ show other)
+            case typeCheck (checkedBindingTerm binding) of
+                Left err -> expectationFailure ("quantified unannotated lambda failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType binding) `shouldBe` True
+
+        it "keeps an exact self-operated quantified lambda declaration unbounded" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀ a. a -> a = λvalue value;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__main" checked
+            case (ProgramTypes.checkedBindingType binding, checkedBindingTerm binding) of
+                ( Elab.TForallRef typeRef Nothing (Elab.TArrow (Elab.TVarRef domainRef) (Elab.TVarRef codomainRef))
+                    , Elab.ETyAbsRef termRef Nothing (Elab.ELam parameter _)
+                    ) -> do
+                        Elab.typeBinderRefsSameIdentity typeRef domainRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity typeRef codomainRef `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity typeRef termRef `shouldBe` True
+                        alphaEqType
+                            (Elab.resolvedVarType parameter)
+                            (Elab.TVarRef typeRef)
+                            `shouldBe` True
+                other ->
+                    expectationFailure
+                        ("expected an unbounded shared-identity forall, got " ++ show other)
+            typeCheck (checkedBindingTerm binding)
+                `shouldBe` Right (ProgramTypes.checkedBindingType binding)
+
+        it "checks an unannotated parameter in a quantified constructor producer" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), boxPure, main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def boxPure : ∀ a. a -> Box a ="
+                        , "    λ(value) (Box value : Box a);"
+                        , ""
+                        , "  def main : Box String = boxPure \"ok\";"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__boxPure" checked
+            case (ProgramTypes.checkedBindingType binding, checkedBindingTerm binding) of
+                ( Elab.TForallRef sourceRef Nothing _
+                    , Elab.ETyAbsRef outwardRef Nothing
+                        ( Elab.ELam
+                            parameter
+                            ( Elab.EApp
+                                ( Elab.ETyInst
+                                    (Elab.EVarNode ResolvedVar{resolvedVarDetails = ConstructorId _})
+                                    (Elab.InstApp (Elab.TVarRef constructorArgRef))
+                                )
+                                _
+                            )
+                        )
+                    ) -> do
+                        Elab.typeBinderRefsSameIdentity sourceRef outwardRef `shouldBe` True
+                        alphaEqType
+                            (Elab.resolvedVarType parameter)
+                            (Elab.TVarRef sourceRef)
+                            `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity constructorArgRef sourceRef `shouldBe` True
+                other ->
+                    expectationFailure
+                        ("expected one identity-bearing quantified constructor producer, got " ++ show other)
+            let typeCheckEnv =
+                    ElabPipeline.mkTypeCheckEnvWithResolvedTerms
+                        [ (checkedBindingResolvedVar candidate, ProgramTypes.checkedBindingType candidate)
+                        | checkedModule <- checkedProgramModules checked
+                        , candidate <- checkedModuleBindings checkedModule
+                        ]
+                        Map.empty
+            case ElabPipeline.typeCheckWithEnv typeCheckEnv (checkedBindingTerm binding) of
+                Left err ->
+                    expectationFailure
+                        ("scoped constructor producer failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType binding) `shouldBe` True
 
         it "rejects importing constructors from an abstract type export" $ do
             let programText =
@@ -8149,7 +9898,7 @@ spec = do
                 Left err -> expectationFailure ("checkProgram failed: " ++ show err)
 
         it "does not treat a local value named id as identity in case scrutinees" $ do
-            let programText =
+            let programText localName =
                     unlines
                         [ "module Main export (B(..), main) {"
                         , "  data B ="
@@ -8157,15 +9906,17 @@ spec = do
                         , "    | BO : B;"
                         , ""
                         , "  def main : B ="
-                        , "    let id : B -> B = λx BO in"
-                        , "    case (id BZ) of {"
+                        , "    let " ++ localName ++ " : B -> B = λx BO in"
+                        , "    case (" ++ localName ++ " BZ) of {"
                         , "      BZ -> BZ;"
                         , "      BO -> BO"
                         , "    };"
                         , "}"
                         ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "BO"
+                assertLocalName localName = do
+                    program <- requireParsed (programText localName)
+                    (prettyValue <$> runProgram program) `shouldBe` Right "BO"
+            mapM_ assertLocalName ["id", "choose"]
 
         it "rejects constructor arity mismatches as pattern errors" $ do
             let programText =
@@ -8521,6 +10272,7 @@ spec = do
             located <- requireLocatedWithFile "ambiguous.mlfp" programText
             case checkLocatedProgram located of
                 Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramAmbiguousConstructorUse "None"
                     let rendered = renderProgramDiagnostic diagnostic
                     rendered `shouldSatisfy` isInfixOf "ambiguous.mlfp:3:7"
                     rendered `shouldSatisfy` isInfixOf "error: ambiguous constructor use `None`"
@@ -8611,95 +10363,35 @@ spec = do
                                 )
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
-        it "rejects fabricated checked bindings with incomplete type-head identities" $ do
-            let programText =
+        it "keeps imported same-name constructor fields distinct from local results" $ do
+            program <-
+                requireParsed $
                     unlines
-                        [ "module Main export (main) {"
-                        , "  data Box = Box : Int -> Box;"
-                        , "  def main : Box = Box 1;"
+                        [ "module Core export (T(..)) {"
+                        , "  data T = External : T;"
+                        , "}"
+                        , "module Main export (T(..), main) {"
+                        , "  import Core as A;"
+                        , "  data T = Wrap : A.T -> T;"
+                        , "  def main : Bool = case Wrap A.External of {"
+                        , "    Wrap _ -> true"
+                        , "  };"
                         , "}"
                         ]
-            program <- requireParsed programText
             checked <- requireChecked program
-            reconstructCheckedProgram checked `shouldBe` Right checked
-            let incomplete =
-                    checked
-                        { checkedProgramModulesInternal =
-                            map poisonModule (checkedProgramModules checked)
-                        }
-                poisonModule checkedModule =
-                    checkedModule
-                        { checkedModuleBindings =
-                            map poisonMainBinding (checkedModuleBindings checkedModule)
-                        }
-                poisonMainBinding binding
-                    | checkedBindingName binding == "Main__main" =
-                        binding
-                            { ProgramTypes.checkedBindingSourceTypeView =
-                                (setTypeViewHeadIdentities (Map.empty) (ProgramTypes.checkedBindingSourceTypeView binding))
-                            }
-                    | otherwise = binding
-            reconstructCheckedProgram incomplete
-                `shouldSatisfy` either
-                    (isInfixOf "MissingTypeHeadIdentity" . show)
-                    (const False)
-
-        it "rejects identity-incomplete checked ElabType payloads" $ do
-            let programText =
-                    unlines
-                        [ "module Main export (main) {"
-                        , "  def main : Int = 1;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            checked <- requireChecked program
-            reconstructCheckedProgram checked `shouldBe` Right checked
-            let incompleteResult =
-                    mapMainBinding
-                        ( \binding ->
-                            binding
-                                { ProgramTypes.checkedBindingType =
-                                    Elab.TBaseWithIdentity Nothing (BaseTy "Int")
-                                }
-                        )
-                        checked
-                incompleteTerm =
-                    mapMainBinding
-                        ( \binding ->
-                            binding
-                                { ProgramTypes.checkedBindingTerm =
-                                    Elab.ERoll
-                                        (Elab.TBaseWithIdentity Nothing (BaseTy "Token"))
-                                        (ProgramTypes.checkedBindingTerm binding)
-                                }
-                        )
-                        checked
-                mapMainBinding f checked0 =
-                    checked0
-                        { checkedProgramModulesInternal =
-                            map
-                                ( \checkedModule ->
-                                    checkedModule
-                                        { checkedModuleBindings =
-                                            map
-                                                ( \binding ->
-                                                    if checkedBindingName binding == "Main__main"
-                                                        then f binding
-                                                        else binding
-                                                )
-                                                (checkedModuleBindings checkedModule)
-                                        }
-                                )
-                                (checkedProgramModules checked0)
-                        }
-            reconstructCheckedProgram incompleteResult
-                `shouldSatisfy` either
-                    (isInfixOf "MissingElabTypeHeadIdentity" . show)
-                    (const False)
-            reconstructCheckedProgram incompleteTerm
-                `shouldSatisfy` either
-                    (isInfixOf "MissingElabTypeHeadIdentity" . show)
-                    (const False)
+            coreData <- requireCheckedData "Core" "T" checked
+            mainData <- requireCheckedData "Main" "T" checked
+            wrap <- requireDataConstructor "Wrap" mainData
+            let coreIdentity = ProgramTypes.dataInfoSymbolIdentity coreData
+                mainIdentity = ProgramTypes.dataInfoSymbolIdentity mainData
+            coreIdentity `shouldNotBe` mainIdentity
+            case ProgramTypes.constructorInfoArgViews wrap of
+                [fieldView] ->
+                    ProgramTypes.typeViewRootHeadIdentity fieldView `shouldBe` Just coreIdentity
+                fieldViews ->
+                    expectationFailure ("expected one Wrap field, got " ++ show fieldViews)
+            ProgramTypes.typeViewRootHeadIdentity (ProgramTypes.constructorInfoResultView wrap)
+                `shouldBe` Just mainIdentity
 
         it "rejects duplicate resolved class identities before choosing local metadata" $ do
             let programText =
@@ -8980,6 +10672,63 @@ spec = do
                 Right resolved ->
                     checkResolvedProgram (poisonResolvedDataParamBinderName "Box" "$stale_box_param" resolved) `shouldSatisfy` isRight
 
+        it "keeps derived recursive List Eq exact-edge destinations gen-bound" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data List a ="
+                        , "      Nil : List a"
+                        , "    | Cons : a -> List a -> List a"
+                        , "    deriving Eq;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "checks Prelude-shaped successive Eq derivations with application-discharged intermediates" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  class Show a {"
+                        , "    show : a -> String;"
+                        , "  }"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : ∀ a b. (a -> b) -> f a -> f b;"
+                        , "  }"
+                        , "  class Functor f => Applicative (f :: * -> *) {"
+                        , "    pure : ∀ a. a -> f a;"
+                        , "    ap : ∀ a b. f (a -> b) -> f a -> f b;"
+                        , "  }"
+                        , "  class Applicative m => Monad (m :: * -> *) {"
+                        , "    bind : ∀ a b. m a -> (a -> m b) -> m b;"
+                        , "  }"
+                        , "  data Unit ="
+                        , "      Unit : Unit;"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat"
+                        , "    deriving Eq;"
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a"
+                        , "    deriving Eq;"
+                        , "  data List a ="
+                        , "      Nil : List a"
+                        , "    | Cons : a -> List a -> List a"
+                        , "    deriving Eq;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
         it "finalizes nullary method evidence by class parameter identity when binder names are stale" $ do
             let programText =
                     unlines
@@ -9156,6 +10905,112 @@ spec = do
                             resolvedTypeBinderIdentity dom `shouldBe` resolvedTypeBinderIdentity binder
                             resolvedTypeBinderIdentity cod `shouldBe` resolvedTypeBinderIdentity binder
                         other -> expectationFailure ("expected resolved forall identity type, got " ++ show other)
+
+        it "scopes leading definition forall identities over RHS annotations" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (keep) {"
+                        , "  def keep : ∀ a. a -> a = λ(value : a) (value : a);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case
+                        [ def
+                        | resolvedModule <- resolvedProgramModules resolved
+                        , DeclDef def <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                        ] of
+                        [def] ->
+                            case (defDeclType def, defDeclExpr def) of
+                                ( ConstrainedType [] (RSTForall binder Nothing (RSTArrow (RSTVar dom) (RSTVar cod)))
+                                    , ELam Param{paramType = Just (RSTVar paramRef)} (EAnn _ (RSTVar annRef))
+                                    ) -> do
+                                        let identities =
+                                                map
+                                                    resolvedTypeBinderIdentity
+                                                    [binder, dom, cod, paramRef, annRef]
+                                        length (nub identities) `shouldBe` 1
+                                other ->
+                                    expectationFailure
+                                        ("expected one forall identity across signature and RHS, got " ++ show other)
+                        other -> expectationFailure ("expected one resolved definition, got " ++ show other)
+
+        it "keeps nested forall identities local while the leading forall scopes the RHS" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (keep) {"
+                        , "  def keep : ∀ a. (∀ a. a -> a) -> a -> a ="
+                        , "    λ(poly) λ(value : a) (value : a);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case
+                        [ def
+                        | resolvedModule <- resolvedProgramModules resolved
+                        , DeclDef def <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                        ] of
+                        [def] ->
+                            case (defDeclType def, defDeclExpr def) of
+                                ( ConstrainedType
+                                        []
+                                        ( RSTForall
+                                                outer
+                                                Nothing
+                                                ( RSTArrow
+                                                        (RSTForall inner Nothing (RSTArrow (RSTVar innerDom) (RSTVar innerCod)))
+                                                        (RSTArrow (RSTVar outerDom) (RSTVar outerCod))
+                                                    )
+                                            )
+                                    , ELam _ (ELam Param{paramType = Just (RSTVar paramRef)} (EAnn _ (RSTVar annRef)))
+                                    ) -> do
+                                        let outerIdentity = resolvedTypeBinderIdentity outer
+                                            innerIdentity = resolvedTypeBinderIdentity inner
+                                        innerIdentity `shouldNotBe` outerIdentity
+                                        map resolvedTypeBinderIdentity [innerDom, innerCod]
+                                            `shouldBe` replicate 2 innerIdentity
+                                        map resolvedTypeBinderIdentity [outerDom, outerCod, paramRef, annRef]
+                                            `shouldBe` replicate 4 outerIdentity
+                                other ->
+                                    expectationFailure
+                                        ("expected nested forall shadowing with an outer RHS scope, got " ++ show other)
+                        other -> expectationFailure ("expected one resolved definition, got " ++ show other)
+
+        it "scopes a local binding's leading forall identity over its RHS only" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int ="
+                        , "    let keep : ∀ a. a -> a = λ(value : a) (value : a)"
+                        , "    in keep 1;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case
+                        [ defDeclExpr def
+                        | resolvedModule <- resolvedProgramModules resolved
+                        , DeclDef def <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                        ] of
+                        [ ELet
+                                _
+                                (Just (RSTForall binder Nothing (RSTArrow (RSTVar dom) (RSTVar cod))))
+                                (ELam Param{paramType = Just (RSTVar paramRef)} (EAnn _ (RSTVar annRef)))
+                                _
+                            ] -> do
+                                let identity = resolvedTypeBinderIdentity binder
+                                map resolvedTypeBinderIdentity [dom, cod, paramRef, annRef]
+                                    `shouldBe` replicate 4 identity
+                        other ->
+                            expectationFailure
+                                ("expected one local forall identity across its type and RHS, got " ++ show other)
+            checkProgram program `shouldSatisfy` isRight
 
         it "assigns generated identities to local resolved symbols" $ do
             let programText =
@@ -10421,6 +12276,75 @@ spec = do
     describe "MLF.Program eMLF boundary matrix" $ do
         mapM_ runProgramMatrixCase (nonRuntimeProgramMatrixCases emlfBoundaryMatrix)
 
+    describe "MLF.Program paper bounded-instantiation construction" $ do
+        it "uses N when omega is instantiated at its explicit bound" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (omega, id, main) {"
+                        , "  def omega : ∀(result ⩾ ∀ a. a -> a). (∀ a. a -> a) -> result ="
+                        , "    λ(g : ∀ a. a -> a) g g;"
+                        , "  def id : ∀ a. a -> a = λx x;"
+                        , "  def main : Bool ="
+                        , "    let recovered : ∀ a. a -> a = omega id in recovered true;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            omegaBinding <- requireCheckedBinding "Main__omega" checked
+            idBinding <- requireCheckedBinding "Main__id" checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let omegaVar = checkedBindingResolvedVar omegaBinding
+                idVar = checkedBindingResolvedVar idBinding
+                boundedUses =
+                    [ ()
+                    | Elab.EApp
+                        (Elab.ETyInst (Elab.EVarNode omegaOccurrence) Elab.InstElim)
+                        (Elab.EVarNode idOccurrence) <-
+                        xmlfSubterms (checkedBindingTerm mainBinding)
+                    , Elab.resolvedVarSameIdentity omegaVar omegaOccurrence
+                    , Elab.resolvedVarSameIdentity idVar idOccurrence
+                    ]
+            boundedUses `shouldSatisfy` (not . null)
+
+        it "keeps the recursive Nat application identity-correct after bound computations normalize" $ do
+            program <-
+                requireParsed
+                    =<< readFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
+            checked <- requireChecked program
+            natData <- requireCheckedData "NatPlain" "Nat" checked
+            zeroCtor <- requireDataConstructor "Zero" natData
+            succCtor <- requireDataConstructor "Succ" natData
+            isZeroBinding <- requireCheckedBinding "NatPlain__isZero" checked
+            peelBinding <- requireCheckedBinding "NatPlain__peel" checked
+            mainBinding <- requireCheckedBinding "NatPlain__main" checked
+
+            case applicationArgumentsForResolvedVar
+                (checkedBindingResolvedVar isZeroBinding)
+                (checkedBindingTerm mainBinding) of
+                [isZeroArgument] ->
+                    case applicationArgumentsForResolvedVar
+                        (checkedBindingResolvedVar peelBinding)
+                        isZeroArgument of
+                        [peelArgument] ->
+                            case applicationArgumentsForConstructor succCtor peelArgument of
+                                [zeroArgument]
+                                    | termHeadConstructorRef zeroArgument
+                                        == Just (ProgramTypes.constructorRefFromInfo zeroCtor) ->
+                                        pure ()
+                                arguments ->
+                                    expectationFailure
+                                        ( "expected identity-linked Succ Zero construction, got "
+                                            ++ show arguments
+                                        )
+                        arguments ->
+                            expectationFailure
+                                ("expected identity-linked peel application, got " ++ show arguments)
+                arguments ->
+                    expectationFailure
+                        ( "expected identity-linked isZero application, got "
+                            ++ show arguments
+                        )
+
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
         it "fails for a real type mismatch instead of the old infer-lambda gate" $ do
             let programText =
@@ -10434,6 +12358,201 @@ spec = do
                 `shouldSatisfy` either
                     (\err -> not ("ProgramCannotInferLambda" `isInfixOf` show err))
                     (const False)
+
+        it "preserves the paper's annotated g g construction in checked IR" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀(result ⩾ ∀ a. a -> a). (∀ a. a -> a) -> result ="
+                        , "    λ(g : ∀ a. a -> a) g g;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            binding <- requireCheckedBinding "Main__main" checked
+            case (ProgramTypes.checkedBindingType binding, checkedBindingTerm binding) of
+                ( Elab.TForallRef typeResultRef (Just typeResultBound) (Elab.TArrow parameterTy (Elab.TVarRef typeResultOccurrence))
+                    , Elab.ETyAbsRef termResultRef (Just termResultBound) (Elab.ELam parameter body)
+                    ) -> do
+                        Elab.typeBinderRefsSameIdentity typeResultRef typeResultOccurrence `shouldBe` True
+                        Elab.typeBinderRefsSameIdentity typeResultRef termResultRef `shouldBe` True
+                        isPolymorphicIdentityType (Elab.tyToElab typeResultBound) `shouldBe` True
+                        isPolymorphicIdentityType (Elab.tyToElab termResultBound) `shouldBe` True
+                        isPolymorphicIdentityType parameterTy `shouldBe` True
+                        alphaEqType (Elab.resolvedVarType parameter) parameterTy `shouldBe` True
+                        case body of
+                            Elab.ETyInst
+                                ( Elab.EApp
+                                    (Elab.ETyInst (Elab.EVarNode functionOccurrence) (Elab.InstApp functionArgumentTy))
+                                    (Elab.EVarNode argumentOccurrence)
+                                  )
+                                (Elab.InstAbstrRef abstractedResultRef) -> do
+                                    isPolymorphicIdentityType functionArgumentTy `shouldBe` True
+                                    Elab.typeBinderRefsSameIdentity typeResultRef abstractedResultRef `shouldBe` True
+                                    Elab.resolvedVarDetails functionOccurrence `shouldBe` Elab.resolvedVarDetails parameter
+                                    Elab.resolvedVarDetails argumentOccurrence `shouldBe` Elab.resolvedVarDetails parameter
+                            other ->
+                                expectationFailure ("expected the paper's g g computation spine, got " ++ show other)
+                other ->
+                    expectationFailure ("expected the paper's bounded self-application binding, got " ++ show other)
+            case typeCheck (checkedBindingTerm binding) of
+                Left err -> expectationFailure ("paper self-application checked IR failed to typecheck: " ++ show err)
+                Right inferred ->
+                    alphaEqType inferred (ProgramTypes.checkedBindingType binding) `shouldBe` True
+
+        it "requires an explicit annotation for a polymorphic g g lambda parameter" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀(result ⩾ ∀ a. a -> a). (∀ a. a -> a) -> result ="
+                        , "    λg g g;"
+                        , "}"
+                        ]
+            case checkProgram program of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "Phase 4 (presolution)"
+                    message `shouldSatisfy` isInfixOf "OccursCheckPresolution"
+                Left err ->
+                    expectationFailure ("expected the presolution occurs-check rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected the unannotated polymorphic self-application to be rejected"
+
+        it "does not capture an unrelated ambient type variable to satisfy a forall annotation" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (bad) {"
+                        , "  def bad : ∀ x. (Bool -> x -> x) -> ∀ b. Bool -> b -> b ="
+                        , "    λf (f : ∀ b. Bool -> b -> b);"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isLeft
+
+        it "rejects the paper's looping annotated self-application without an identity exception" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀ a. a -> a ="
+                        , "    ((λ(g : ∀ a. a -> a) g g) : ∀ a. a -> a)"
+                        , "      (λ(g : ∀ a. a -> a) g g);"
+                        , "}"
+                        ]
+            case checkProgram program of
+                Left ProgramTypeMismatch{} -> pure ()
+                Left err -> expectationFailure ("expected a typed mismatch rejection, got " ++ show err)
+                Right _ -> expectationFailure "expected looping annotated self-application rejection"
+
+        it "preserves a vacuous leading method forall as a positional producer and consumer slot" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Pick, pick, main) {"
+                        , "  class Pick a {"
+                        , "    pick : ∀ ghost. ∀ b. a -> b -> b;"
+                        , "  }"
+                        , ""
+                        , "  instance Pick Bool {"
+                        , "    pick = let impl : ∀ ghost. ∀ b. Bool -> b -> b = λflag λvalue value in impl;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = pick true false;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            methodRuntimeName <-
+                case
+                    [ ProgramTypes.valueInfoRuntimeName valueInfo
+                    | checkedModule <- checkedProgramModules checked
+                    , instanceInfo <- checkedModuleInstances checkedModule
+                    , ProgramTypes.instanceClassName instanceInfo == "Pick"
+                    , valueInfo <- Map.elems (instanceMethodsByIdentity instanceInfo)
+                    ]
+                of
+                    [runtimeName] -> pure runtimeName
+                    runtimeNames ->
+                        expectationFailure ("expected one Pick instance method binding, got " ++ show runtimeNames)
+                            >> fail "instance method binding mismatch"
+            methodBinding <- requireCheckedBinding methodRuntimeName checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+
+            case ProgramTypes.checkedBindingType methodBinding of
+                Elab.TForallRef ghostRef Nothing (Elab.TForallRef bRef Nothing bodyTy) -> do
+                    leadingForallIdentities (ProgramTypes.checkedBindingType methodBinding)
+                        `shouldBe` [Elab.typeBinderRefIdentity ghostRef, Elab.typeBinderRefIdentity bRef]
+                    elabTypeMentionsBinder (Elab.typeBinderRefIdentity ghostRef) bodyTy `shouldBe` False
+                    elabTypeMentionsBinder (Elab.typeBinderRefIdentity bRef) bodyTy `shouldBe` True
+                other ->
+                    expectationFailure ("expected two ordered method foralls, got " ++ show other)
+
+            case (ProgramTypes.checkedBindingType methodBinding, checkedBindingTerm methodBinding) of
+                ( Elab.TForallRef methodGhostRef Nothing (Elab.TForallRef methodValueRef Nothing _)
+                    , term@(
+                        Elab.ETyAbsRef termGhostRef Nothing
+                            ( Elab.ETyAbsRef termValueRef Nothing
+                                (Elab.ELet impl scheme rhs implBody)
+                              )
+                        )
+                    ) -> do
+                    Elab.typeBinderRefsSameIdentity methodGhostRef termGhostRef `shouldBe` True
+                    Elab.typeBinderRefsSameIdentity methodValueRef termValueRef `shouldBe` True
+                    leadingTypeAbsIdentities term
+                        `shouldBe`
+                            [ Elab.typeBinderRefIdentity methodGhostRef
+                            , Elab.typeBinderRefIdentity methodValueRef
+                            ]
+                    case Elab.schemeBinderRefs scheme of
+                        [(localGhostRef, Nothing), (localValueRef, Nothing)] -> do
+                            leadingTypeAbsIdentities rhs
+                                `shouldBe` [Elab.typeBinderRefIdentity localGhostRef, Elab.typeBinderRefIdentity localValueRef]
+                            let bodyTy = Elab.schemeBody scheme
+                            elabTypeMentionsBinder (Elab.typeBinderRefIdentity localGhostRef) bodyTy `shouldBe` False
+                            elabTypeMentionsBinder (Elab.typeBinderRefIdentity localValueRef) bodyTy `shouldBe` True
+                            Elab.typeBinderRefsSameIdentity methodGhostRef localGhostRef `shouldBe` False
+                            Elab.typeBinderRefsSameIdentity methodGhostRef localValueRef `shouldBe` False
+                            -- The method producer owns both ordered ABI slots,
+                            -- while the nested explicit let owns two distinct
+                            -- lexical slots.  Its occurrence consumes the
+                            -- local ghost with N, then applies the local value
+                            -- binder to the outer method value slot.  The two
+                            -- schemes remain alpha-equivalent without letting
+                            -- a nested binder escape into the method ABI.
+                            Elab.typeBinderRefsSameIdentity methodValueRef localGhostRef `shouldBe` False
+                            case implBody of
+                                Elab.ETyInst
+                                    (Elab.EVarNode implOccurrence)
+                                    (Elab.InstSeq Elab.InstElim (Elab.InstApp (Elab.TVarRef selectedRef))) -> do
+                                        Elab.typeBinderRefsSameIdentity selectedRef methodValueRef `shouldBe` True
+                                        Elab.resolvedVarSameIdentity impl implOccurrence `shouldBe` True
+                                other ->
+                                    expectationFailure ("expected an identity-bearing local-to-method forall bridge, got " ++ show other)
+                        binders ->
+                            expectationFailure ("expected two ordered local scheme binders, got " ++ show binders)
+                    alphaEqType (Elab.resolvedVarType impl) (ProgramTypes.checkedBindingType methodBinding) `shouldBe` True
+                    case typeCheck rhs of
+                        Left err -> expectationFailure ("method producer rhs failed to typecheck: " ++ show err)
+                        Right inferred -> alphaEqType inferred (Elab.resolvedVarType impl) `shouldBe` True
+                    case typeCheck term of
+                        Left err -> expectationFailure ("method producer failed to typecheck: " ++ show err)
+                        Right inferred -> alphaEqType inferred (ProgramTypes.checkedBindingType methodBinding) `shouldBe` True
+                other ->
+                    expectationFailure ("expected a polymorphic local producer, got " ++ show other)
+
+            case checkedBindingTerm mainBinding of
+                Elab.EApp
+                    ( Elab.EApp
+                        ( Elab.ETyInst
+                            (Elab.ETyInst (Elab.EVarNode methodOccurrence) Elab.InstElim)
+                            (Elab.InstApp selectedTy)
+                          )
+                        (Elab.ELit (LBool True))
+                      )
+                    (Elab.ELit (LBool False)) -> do
+                        Elab.resolvedVarSameIdentity (checkedBindingResolvedVar methodBinding) methodOccurrence `shouldBe` True
+                        alphaEqType selectedTy (ProgramTypes.checkedBindingType mainBinding) `shouldBe` True
+                other ->
+                    expectationFailure ("expected N then Bool method instantiations, got " ++ show other)
 
         it "does not rewrite same-shaped ADT instantiations to another nominal head" $ do
             let programText =
@@ -10460,26 +12579,6 @@ spec = do
             program <- requireParsed =<< readFile path
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
-    runProgramRuntimeCase runtimeCase =
-        it (runtimeCaseName runtimeCase) $ do
-            program <- loadProgramMatrixSource (runtimeCaseSource runtimeCase)
-            let result = stripNewline . programRunOutput <$> runProgramOutput program
-            case runtimeCaseExpectation runtimeCase of
-                ExpectRuntimeValue expectedValue ->
-                    result `shouldBe` Right expectedValue
-                ExpectRuntimePredicate label predicate ->
-                    case result of
-                        Right rendered
-                            | predicate rendered -> pure ()
-                            | otherwise ->
-                                expectationFailure $
-                                    "expected "
-                                        ++ label
-                                        ++ ", got: "
-                                        ++ rendered
-                        Left err ->
-                            expectationFailure ("unexpected program failure: " ++ show err)
-
     nonRuntimeProgramMatrixCases =
         filter (not . isRuntimeProgramMatrixCase)
 
@@ -10494,7 +12593,7 @@ spec = do
             program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
             case matrixCaseExpectation matrixCase of
                 ExpectRunValue _ ->
-                    expectationFailure "runtime-success rows are covered by programRuntimeSuccessCases"
+                    expectationFailure "runtime-success rows are covered by the merged interpreter/LLVM/native parity lane"
                 ExpectCheckSuccess ->
                     checkProgram program `shouldSatisfy` isRight
                 ExpectCheckFailureContaining expectedFragment ->
@@ -10504,16 +12603,17 @@ spec = do
                             (const False)
 
     loadProgramMatrixSource source =
-        withPrelude <$> case source of
+        case source of
             InlineProgram programText -> requireParsed programText
             ProgramFile path -> requireParsed =<< readFile path
 
-    stripNewline s = case reverse s of
-        '\n' : rest -> reverse rest
-        _ -> s
-
     requireChecked program =
         case checkProgram program of
+            Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+            Right checked -> pure checked
+
+    requireCheckedWithPrelude program =
+        case checkProgramWithPrelude program of
             Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
             Right checked -> pure checked
 
@@ -10521,6 +12621,29 @@ spec = do
         case checkLocatedProgram located of
             Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
             Right checked -> pure checked
+
+    requireCheckedLocatedWithPrelude located =
+        case checkLocatedProgramWithPrelude located of
+            Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+            Right checked -> pure checked
+
+    checkProgramWithPrelude =
+        checkProgramPackage . withPreludePackage . trivialProgramPackage
+
+    checkLocatedProgramWithPrelude =
+        checkLocatedProgramPackage
+            . withPreludeLocatedPackage
+            . trivialLocatedProgramPackage
+
+    runLocatedProgramWithPrelude =
+        runLocatedProgramPackage
+            . withPreludeLocatedPackage
+            . trivialLocatedProgramPackage
+
+    runLocatedProgramOutputWithPrelude =
+        runLocatedProgramPackageOutput
+            . withPreludeLocatedPackage
+            . trivialLocatedProgramPackage
 
     requireCheckedBinding name checked =
         case [ binding
@@ -10545,6 +12668,16 @@ spec = do
         case [ctorInfo | ctorInfo <- dataConstructors dataInfo, ctorName ctorInfo == name] of
             ctorInfo : _ -> pure ctorInfo
             [] -> expectationFailure ("missing constructor: " ++ name) >> fail "missing constructor"
+
+    requireLowerConstructorBinding scope ctorInfo =
+        case
+            lowerConstructorBinding
+                (identityGeneratorAfter (ProgramTypes.constructorInfoGeneratedIdentities ctorInfo))
+                scope
+                ctorInfo
+          of
+            Left err -> expectationFailure ("constructor lowering failed: " ++ show err) >> fail "constructor lowering failed"
+            Right (lowered, _) -> pure lowered
 
     requireFinalizeContext scope =
         case mkFinalizeContext scope of
@@ -10740,9 +12873,72 @@ replaceCheckedBindingSourceTypeView name sourceTypeView checked =
                 }
         | otherwise = binding
 
-poisonPrimitiveRuntimeNames :: String -> Elab.XmlfTerm -> Elab.XmlfTerm
-poisonPrimitiveRuntimeNames _replacement =
-    id
+-- A Figure 15.3.5 application must specialize a polymorphic function at the
+-- endpoint constructed for its argument.  The endpoint can be either a
+-- Gamma-bound graph ref or an already closed structural type; requiring the
+-- former would mistake one construction shape for the semantic invariant.
+-- Retain the source forall ref so callers can prove that it did not leak into
+-- the selected endpoint, and typecheck the argument in its exact lexical env.
+polymorphicApplicationEndpointEvidence
+    :: ElabPipeline.Env
+    -> Elab.XmlfTerm
+    -> [ ( Elab.TypeBinderRef
+         , Elab.ElabType
+         , Either ElabPipeline.TypeCheckError Elab.ElabType
+         )
+       ]
+polymorphicApplicationEndpointEvidence = go
+  where
+    go env term =
+        case term of
+            Elab.EVarNode{} -> []
+            Elab.ELit{} -> []
+            Elab.ELam parameter body ->
+                go
+                    ( ElabPipeline.insertResolvedTermBinding
+                        parameter
+                        (Elab.resolvedVarType parameter)
+                        env
+                    )
+                    body
+            Elab.EApp fun arg ->
+                endpointAt env fun arg
+                    ++ go env fun
+                    ++ go env arg
+            Elab.ELet binder scheme rhs body ->
+                let bodyEnv =
+                        ElabPipeline.insertResolvedTermBinding
+                            binder
+                            (ElabPipeline.schemeToType scheme)
+                            env
+                in go bodyEnv rhs ++ go bodyEnv body
+            Elab.ETyAbsRef ref mbBound body ->
+                go
+                    ( ElabPipeline.insertTypeBindingRef
+                        ref
+                        (maybe Elab.TBottom Elab.tyToElab mbBound)
+                        env
+                    )
+                    body
+            Elab.ETyInst body _ -> go env body
+            Elab.ERoll _ body -> go env body
+            Elab.EUnroll body -> go env body
+
+    endpointAt env fun arg =
+        case fun of
+            Elab.ETyInst
+                (Elab.EVarNode ResolvedVar{resolvedVarType = sourceTy})
+                (Elab.InstApp endpointTy) ->
+                case sourceTy of
+                    Elab.TForallRef sourceRef _ (Elab.TArrow (Elab.TVarRef domainRef) _)
+                        | Elab.typeBinderRefsSameIdentity sourceRef domainRef ->
+                            [ ( sourceRef
+                              , endpointTy
+                              , ElabPipeline.typeCheckWithEnv env arg
+                              )
+                            ]
+                    _ -> []
+            _ -> []
 
 poisonTopLevelTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
 poisonTopLevelTermIdentity target replacement _replacementName term =
@@ -11062,83 +13258,6 @@ renameInstanceMethodRuntimeNamesWhere predicate replacement checked =
             valueInfo{valueRuntimeName = replacement}
     replaceValueInfo valueInfo = valueInfo
 
-checkedProgramDeferredEvidenceMethods :: CheckedProgram -> [EvidenceMethod]
-checkedProgramDeferredEvidenceMethods checked =
-    concatMap
-        checkedBindingDeferredEvidenceMethods
-        [ binding
-        | checkedModule <- checkedProgramModules checked
-        , binding <- checkedModuleBindings checkedModule
-        ]
-
-checkedBindingDeferredEvidenceMethods :: CheckedBinding -> [EvidenceMethod]
-checkedBindingDeferredEvidenceMethods binding =
-    concatMap obligationEvidenceMethods (Map.elems (checkedBindingDeferredObligations binding))
-
-obligationEvidenceMethods :: DeferredProgramObligation -> [EvidenceMethod]
-obligationEvidenceMethods obligation =
-    case obligation of
-        DeferredMethod deferred ->
-            maybe [] ((: []) . deferredMethodEvidenceMethod) (deferredMethodEvidence deferred)
-                ++ concatMap evidenceInfoMethods (deferredMethodLocalEvidence deferred)
-        DeferredConstructor{} -> []
-        DeferredCase{} -> []
-
-evidenceInfoMethods :: EvidenceInfo -> [EvidenceMethod]
-evidenceInfoMethods evidence =
-    Map.elems (evidenceMethodsByIdentity evidence)
-
-poisonResolvedDeferredEvidenceRuntimeNames :: String -> CheckedProgram -> CheckedProgram
-poisonResolvedDeferredEvidenceRuntimeNames replacement =
-    mapDeferredEvidenceMethods poisonEvidenceMethod
-  where
-    poisonEvidenceMethod method
-        | Just _ <- evidenceMethodResolvedVar method =
-            method{evidenceMethodRuntimeName = replacement}
-        | otherwise = method
-
-mapDeferredEvidenceMethods :: (EvidenceMethod -> EvidenceMethod) -> CheckedProgram -> CheckedProgram
-mapDeferredEvidenceMethods f checked =
-    checked
-        { checkedProgramModulesInternal =
-            map mapModule (checkedProgramModules checked)
-        }
-  where
-    mapModule checkedModule =
-        checkedModule
-            { checkedModuleBindings =
-                map mapBinding (checkedModuleBindings checkedModule)
-            }
-
-    mapBinding binding =
-        binding
-            { checkedBindingDeferredObligations =
-                fmap mapObligation (checkedBindingDeferredObligations binding)
-            }
-
-    mapObligation obligation =
-        case obligation of
-            DeferredMethod deferred ->
-                DeferredMethod
-                    deferred
-                        { deferredMethodEvidence = mapDeferredMethodEvidence <$> deferredMethodEvidence deferred
-                        , deferredMethodLocalEvidence = map mapEvidenceInfo (deferredMethodLocalEvidence deferred)
-                        }
-            DeferredConstructor{} -> obligation
-            DeferredCase{} -> obligation
-
-    mapDeferredMethodEvidence evidence =
-        evidence
-            { deferredMethodEvidenceMethod =
-                f (deferredMethodEvidenceMethod evidence)
-            }
-
-    mapEvidenceInfo evidence =
-        evidence
-            { evidenceMethodsByIdentity =
-                fmap f (evidenceMethodsByIdentity evidence)
-            }
-
 resolvedConstructorRefs :: Elab.XmlfTerm -> [ProgramTypes.ConstructorRef]
 resolvedConstructorRefs term =
     case term of
@@ -11153,6 +13272,36 @@ resolvedConstructorRefs term =
         Elab.ETyInst body _ -> resolvedConstructorRefs body
         Elab.ERoll _ body -> resolvedConstructorRefs body
         Elab.EUnroll body -> resolvedConstructorRefs body
+
+resolvedConstructorVars :: Elab.XmlfTerm -> [Elab.ResolvedVar]
+resolvedConstructorVars term =
+    case term of
+        Elab.EVarNode resolved@ResolvedVar{resolvedVarDetails = ConstructorId _} ->
+            [resolved]
+        Elab.EVarNode{} -> []
+        Elab.ELit{} -> []
+        Elab.ELam _ body -> resolvedConstructorVars body
+        Elab.EApp fun arg -> resolvedConstructorVars fun ++ resolvedConstructorVars arg
+        Elab.ELet _ _ rhs body -> resolvedConstructorVars rhs ++ resolvedConstructorVars body
+        Elab.ETyAbsRef _ _ body -> resolvedConstructorVars body
+        Elab.ETyInst body _ -> resolvedConstructorVars body
+        Elab.ERoll _ body -> resolvedConstructorVars body
+        Elab.EUnroll body -> resolvedConstructorVars body
+
+resolvedTopLevelIdentities :: Elab.XmlfTerm -> [SymbolIdentity]
+resolvedTopLevelIdentities term =
+    case term of
+        Elab.EVarNode ResolvedVar{resolvedVarDetails = TopLevelId identity} ->
+            [identity]
+        Elab.EVarNode{} -> []
+        Elab.ELit{} -> []
+        Elab.ELam _ body -> resolvedTopLevelIdentities body
+        Elab.EApp fun arg -> resolvedTopLevelIdentities fun ++ resolvedTopLevelIdentities arg
+        Elab.ELet _ _ rhs body -> resolvedTopLevelIdentities rhs ++ resolvedTopLevelIdentities body
+        Elab.ETyAbsRef _ _ body -> resolvedTopLevelIdentities body
+        Elab.ETyInst body _ -> resolvedTopLevelIdentities body
+        Elab.ERoll _ body -> resolvedTopLevelIdentities body
+        Elab.EUnroll body -> resolvedTopLevelIdentities body
 
 resolvedLocalBinders :: Elab.XmlfTerm -> [LocalRef]
 resolvedLocalBinders term =
@@ -11192,6 +13341,70 @@ resolvedEvidenceBinders term =
         Elab.ERoll _ body -> resolvedEvidenceBinders body
         Elab.EUnroll body -> resolvedEvidenceBinders body
 
+reduceLeadingTypeInstantiationRedexesFully :: Elab.XmlfTerm -> Elab.XmlfTerm
+reduceLeadingTypeInstantiationRedexesFully term =
+    case ElabPipeline.reduceLeadingTypeInstantiationRedexes term of
+        Just reduced -> reduceLeadingTypeInstantiationRedexesFully reduced
+        Nothing -> term
+
+renameEvidenceBinderRef :: LocalRef -> LocalRef -> Elab.XmlfTerm -> Elab.XmlfTerm
+renameEvidenceBinderRef sourceRef targetRef = go
+  where
+    go term =
+        case term of
+            Elab.EVarNode{} -> term
+            Elab.ELit{} -> term
+            Elab.ELam resolved body ->
+                Elab.ELam (renameBinder resolved) (go body)
+            Elab.EApp fun arg -> Elab.EApp (go fun) (go arg)
+            Elab.ELet resolved scheme rhs body ->
+                Elab.ELet (renameBinder resolved) scheme (go rhs) (go body)
+            Elab.ETyAbsRef ref mbBound body ->
+                Elab.ETyAbsRef ref mbBound (go body)
+            Elab.ETyInst body inst -> Elab.ETyInst (go body) inst
+            Elab.ERoll ty body -> Elab.ERoll ty (go body)
+            Elab.EUnroll body -> Elab.EUnroll (go body)
+
+    renameBinder resolved@ResolvedVar{resolvedVarDetails = EvidenceId binderRef}
+        | localRefIdentity binderRef == localRefIdentity sourceRef =
+            resolved{resolvedVarDetails = EvidenceId targetRef}
+    renameBinder resolved = resolved
+
+resolvedEvidenceInstApps :: Elab.XmlfTerm -> [(LocalRef, Elab.ElabType)]
+resolvedEvidenceInstApps term =
+    case term of
+        Elab.EVarNode {} -> []
+        Elab.ELam _ body -> resolvedEvidenceInstApps body
+        Elab.ELet _ _ rhs body -> resolvedEvidenceInstApps rhs ++ resolvedEvidenceInstApps body
+        Elab.EApp fun arg -> resolvedEvidenceInstApps fun ++ resolvedEvidenceInstApps arg
+        Elab.ETyAbsRef _ _ body -> resolvedEvidenceInstApps body
+        Elab.ETyInst body inst ->
+            case (body, inst) of
+                (Elab.EVarNode occurrence, Elab.InstApp argumentTy) ->
+                    case Elab.resolvedVarDetails occurrence of
+                        EvidenceId occurrenceRef ->
+                            (occurrenceRef, argumentTy) : resolvedEvidenceInstApps body
+                        _ -> resolvedEvidenceInstApps body
+                _ -> resolvedEvidenceInstApps body
+        Elab.ELit {} -> []
+        Elab.ERoll _ body -> resolvedEvidenceInstApps body
+        Elab.EUnroll body -> resolvedEvidenceInstApps body
+
+resolvedEvidenceOccurrences :: Elab.XmlfTerm -> [LocalRef]
+resolvedEvidenceOccurrences term =
+    case term of
+        Elab.EVarNode ResolvedVar{resolvedVarDetails = EvidenceId localRef} ->
+            [localRef]
+        Elab.EVarNode{} -> []
+        Elab.ELit{} -> []
+        Elab.ELam _ body -> resolvedEvidenceOccurrences body
+        Elab.EApp fun arg -> resolvedEvidenceOccurrences fun ++ resolvedEvidenceOccurrences arg
+        Elab.ELet _ _ rhs body -> resolvedEvidenceOccurrences rhs ++ resolvedEvidenceOccurrences body
+        Elab.ETyAbsRef _ _ body -> resolvedEvidenceOccurrences body
+        Elab.ETyInst body _ -> resolvedEvidenceOccurrences body
+        Elab.ERoll _ body -> resolvedEvidenceOccurrences body
+        Elab.EUnroll body -> resolvedEvidenceOccurrences body
+
 isGeneratedLocalRef :: LocalRef -> Bool
 isGeneratedLocalRef localRef =
     case localRefIdentity localRef of
@@ -11226,6 +13439,22 @@ resolvedLocalLetTypes term =
         Elab.ERoll _ body -> resolvedLocalLetTypes body
         Elab.EUnroll body -> resolvedLocalLetTypes body
 
+localSchemeBinderIdentities :: Elab.XmlfTerm -> [TypeBinderIdentity]
+localSchemeBinderIdentities term =
+    case term of
+        Elab.ELet _ scheme rhs body ->
+            map (Elab.typeBinderRefIdentity . fst) (Elab.schemeBinderRefs scheme)
+                ++ localSchemeBinderIdentities rhs
+                ++ localSchemeBinderIdentities body
+        Elab.EVarNode{} -> []
+        Elab.ELit{} -> []
+        Elab.ELam _ body -> localSchemeBinderIdentities body
+        Elab.EApp fun arg -> localSchemeBinderIdentities fun ++ localSchemeBinderIdentities arg
+        Elab.ETyAbsRef _ _ body -> localSchemeBinderIdentities body
+        Elab.ETyInst body _ -> localSchemeBinderIdentities body
+        Elab.ERoll _ body -> localSchemeBinderIdentities body
+        Elab.EUnroll body -> localSchemeBinderIdentities body
+
 isPolymorphicIdentityType :: Elab.ElabType -> Bool
 isPolymorphicIdentityType ty =
     case ty of
@@ -11239,6 +13468,14 @@ leadingTypeAbsIdentities term =
     case term of
         Elab.ETyAbsRef ref _ body ->
             Elab.typeBinderRefIdentity ref : leadingTypeAbsIdentities body
+        _ ->
+            []
+
+leadingForallIdentities :: Elab.ElabType -> [TypeBinderIdentity]
+leadingForallIdentities ty =
+    case ty of
+        Elab.TForallRef ref _ body ->
+            Elab.typeBinderRefIdentity ref : leadingForallIdentities body
         _ ->
             []
 
@@ -11315,7 +13552,7 @@ replaceElabTypeHeadIdentity oldIdentity newIdentity ty =
             Elab.TBottom
   where
     replace identity
-        | identity == Just oldIdentity = Just newIdentity
+        | identity == oldIdentity = newIdentity
         | otherwise = identity
 
 replaceFreeTypeVarsOnce :: String -> [SrcType] -> SrcType -> SrcType
@@ -11402,6 +13639,72 @@ resolvedLocalOccurrences term =
         Elab.ERoll _ body -> resolvedLocalOccurrences body
         Elab.EUnroll body -> resolvedLocalOccurrences body
 
+applicationArgumentsForRuntimeName :: String -> Elab.XmlfTerm -> [Elab.XmlfTerm]
+applicationArgumentsForRuntimeName runtimeName = go
+  where
+    go term =
+        case term of
+            Elab.EVarNode{} -> []
+            Elab.ELit{} -> []
+            Elab.ELam _ body -> go body
+            Elab.EApp fun arg ->
+                [arg | headRuntimeName fun == Just runtimeName]
+                    ++ go fun
+                    ++ go arg
+            Elab.ELet _ _ rhs body -> go rhs ++ go body
+            Elab.ETyAbsRef _ _ body -> go body
+            Elab.ETyInst body _ -> go body
+            Elab.ERoll _ body -> go body
+            Elab.EUnroll body -> go body
+
+    headRuntimeName term =
+        case term of
+            Elab.EVarNode resolved -> Just (Elab.resolvedVarRuntimeName resolved)
+            Elab.ETyInst inner _ -> headRuntimeName inner
+            _ -> Nothing
+
+xmlfSubterms :: Elab.XmlfTerm -> [Elab.XmlfTerm]
+xmlfSubterms term =
+    term :
+        case term of
+            Elab.EVarNode{} -> []
+            Elab.ELit{} -> []
+            Elab.ELam _ body -> xmlfSubterms body
+            Elab.EApp fun arg -> xmlfSubterms fun ++ xmlfSubterms arg
+            Elab.ELet _ _ rhs body -> xmlfSubterms rhs ++ xmlfSubterms body
+            Elab.ETyAbsRef _ _ body -> xmlfSubterms body
+            Elab.ETyInst body _ -> xmlfSubterms body
+            Elab.ERoll _ body -> xmlfSubterms body
+            Elab.EUnroll body -> xmlfSubterms body
+
+applicationArgumentsForResolvedVar :: ResolvedVar -> Elab.XmlfTerm -> [Elab.XmlfTerm]
+applicationArgumentsForResolvedVar expected term =
+    [ argument
+    | Elab.EApp fun argument <- xmlfSubterms term
+    , Just actual <- [termHeadResolvedVar fun]
+    , Elab.resolvedVarSameIdentity expected actual
+    ]
+
+applicationArgumentsForConstructor :: ConstructorInfo -> Elab.XmlfTerm -> [Elab.XmlfTerm]
+applicationArgumentsForConstructor constructor term =
+    [ argument
+    | Elab.EApp fun argument <- xmlfSubterms term
+    , termHeadConstructorRef fun
+        == Just (ProgramTypes.constructorRefFromInfo constructor)
+    ]
+
+termHeadResolvedVar :: Elab.XmlfTerm -> Maybe ResolvedVar
+termHeadResolvedVar term =
+    case term of
+        Elab.EVarNode resolved -> Just resolved
+        Elab.ETyAbsRef _ _ body -> termHeadResolvedVar body
+        Elab.ETyInst body _ -> termHeadResolvedVar body
+        _ -> Nothing
+
+termHeadConstructorRef :: Elab.XmlfTerm -> Maybe ProgramTypes.ConstructorRef
+termHeadConstructorRef term =
+    Elab.resolvedVarConstructorRef =<< termHeadResolvedVar term
+
 checkedBindingDeferredRefs :: CheckedBinding -> [DeferredRef]
 checkedBindingDeferredRefs binding =
     map deferredObligationRef (Map.elems (checkedBindingDeferredObligations binding))
@@ -11444,10 +13747,12 @@ checkedProgramUnresolvedTermVarNames checked =
 
 reconstructCheckedProgram :: CheckedProgram -> Either ProgramError CheckedProgram
 reconstructCheckedProgram checked =
-    Checked.mkCheckedProgram
-        (Checked.checkedProgramResolved checked)
-        (Checked.checkedProgramModules checked)
-        (Checked.checkedProgramMainResolvedVar checked)
+    Right
+        ( Checked.mkCheckedProgram
+            (Checked.checkedProgramResolved checked)
+            (Checked.checkedProgramModules checked)
+            (Checked.checkedProgramMainResolvedVar checked)
+        )
 
 requireParsed :: String -> IO Program
 requireParsed input =

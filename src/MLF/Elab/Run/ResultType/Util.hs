@@ -19,24 +19,18 @@ where
 
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution (PresolutionPlanBuilder (..), PresolutionView)
 import MLF.Constraint.Types.Graph
   ( Constraint,
     EdgeId (..),
     NodeId (..),
     NodeRef (..),
-    cGenNodes,
-    cLetEdges,
-    getNodeId,
-    gnSchemes,
-    toListGen,
   )
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Types
-import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import MLF.Frontend.ConstraintGen (AnnExpr (..), instantiationSiteEdgeId)
 
 data CandidateSelection a
   = NoCandidateSelection
@@ -102,59 +96,19 @@ resultTypeRoots ::
   AnnExpr ->
   AnnExpr ->
   (AnnExpr, AnnExpr)
-resultTypeRoots canonical sourceConstraint baseConstraint annCanon ann =
-  (peelCanonical annCanon, peelPreCanonical ann)
-  where
-    schemeRootSet =
-      IntSet.fromList
-        [ getNodeId (canonical root)
-          | gen <- map snd (toListGen (cGenNodes sourceConstraint)),
-            root <- gnSchemes gen
-        ]
-    isSchemeRoot nid =
-      IntSet.member (getNodeId (canonical nid)) schemeRootSet
-    letEdges = cLetEdges baseConstraint
-    isLetEdge (EdgeId edgeId) = IntSet.member edgeId letEdges
+resultTypeRoots _canonical _sourceConstraint _baseConstraint annCanon ann =
+  (peelGeneratedLetRoots annCanon, peelGeneratedLetRoots ann)
 
-    peelCanonical ann0 = case ann0 of
-      ALet _ _ _ _ _ _ _ bodyAnn nid ->
-        case bodyAnn of
-          AAnn inner target eid
-            | canonical target == canonical nid
-                && isLetEdge eid ->
-                peelCanonical inner
-            | canonical target == canonical nid
-                && not (isSchemeRoot target) ->
-                peelCanonical inner
-          AUnfold inner target eid
-            | canonical target == canonical nid
-                && isLetEdge eid ->
-                peelCanonical inner
-            | canonical target == canonical nid
-                && not (isSchemeRoot target) ->
-                peelCanonical inner
-          _ -> bodyAnn
-      _ -> ann0
-
-    peelPreCanonical ann0 = case ann0 of
-      ALet _ _ _ _ _ _ _ bodyAnn nid ->
-        case bodyAnn of
-          AAnn inner target eid
-            | target == nid
-                && isLetEdge eid ->
-                peelPreCanonical inner
-            | target == nid
-                && not (isSchemeRoot target) ->
-                peelPreCanonical inner
-          AUnfold inner target eid
-            | target == nid
-                && isLetEdge eid ->
-                peelPreCanonical inner
-            | target == nid
-                && not (isSchemeRoot target) ->
-                peelPreCanonical inner
-          _ -> bodyAnn
-      _ -> ann0
+-- The paired annotations passed to 'resultTypeRoots' are generated from the
+-- same source expression, so syntactic lets are legitimate result-root
+-- wrappers here. This function does not sit behind an elaborated-term identity
+-- check and therefore must not be used for authoritative root selection.
+peelGeneratedLetRoots :: AnnExpr -> AnnExpr
+peelGeneratedLetRoots ann0 =
+  case ann0 of
+    ALet _ _ _ _ _ _ _ bodyAnn _ -> peelGeneratedLetRoots bodyAnn
+    ALetScope bodyAnn _ _ -> peelGeneratedLetRoots bodyAnn
+    _ -> ann0
 
 -- | Check if a type contains foralls in bounds
 containsBoundForall :: ElabType -> Bool
@@ -221,19 +175,24 @@ instantiateImplicitForalls ty0 =
 stripAnn :: AnnExpr -> AnnExpr
 stripAnn ann0 = case ann0 of
   AAnn inner _ _ -> stripAnn inner
+  AExactAnn inner _ _ _ -> stripAnn inner
+  ALetScope inner _ _ -> stripAnn inner
   AUnfold inner _ _ -> stripAnn inner
   _ -> ann0
 
 -- | Collect all edge IDs from an AnnExpr
 collectEdges :: AnnExpr -> [EdgeId]
 collectEdges ann0 = case ann0 of
-  AVar _ _ -> []
   AResolvedVar _ _ _ -> []
   ALit _ _ -> []
-  ALam _ _ _ _ body _ -> collectEdges body
-  AApp f a funEid argEid _ ->
-    funEid : argEid : collectEdges f ++ collectEdges a
+  ALam _ _ _ _ body bodyEid _ -> bodyEid : collectEdges body
+  AApp f a funSite argSite _ ->
+    instantiationSiteEdgeId funSite
+      : instantiationSiteEdgeId argSite
+      : collectEdges f ++ collectEdges a
   ALet _ _ _ _ _ _ rhs body _ ->
     collectEdges rhs ++ collectEdges body
   AAnn inner _ eid -> eid : collectEdges inner
+  AExactAnn inner _ _ eid -> eid : collectEdges inner
+  ALetScope inner _ eid -> eid : collectEdges inner
   AUnfold inner _ eid -> eid : collectEdges inner

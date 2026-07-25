@@ -10,13 +10,19 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , cBindParents
     , cGenNodes
+    , cInstEdges
+    , cLetEdges
     , cNodes
+    , getEdgeId
     , getNodeId
     , gnSchemes
+    , instEdgeId
+    , instRight
     , typeRef
     )
 import qualified MLF.Constraint.Types.Graph as Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Run.Generalize.Common
     ( nodeMapToIntMap
     , reachableFromWithBounds
@@ -38,7 +44,23 @@ restoreSchemeNodes env =
         adoptRef = geAdoptRef env
         adoptNodeId = geAdoptNodeId env
         applyRedirectsToRef = geApplyRedirectsToRef env
-        schemeRootsBase = schemeRootsOf (Types.getGenNodeMap (cGenNodes base))
+        schemeRootsBaseAll = schemeRootsOf (Types.getGenNodeMap (cGenNodes base))
+        schemeRootsSolved = schemeRootsOf (Types.getGenNodeMap (cGenNodes solvedConstraint))
+        schemeRootsSolvedSet =
+            IntSet.fromList (map (getNodeId . canonical) schemeRootsSolved)
+        -- A live base root omitted from finalized scheme metadata has escaped
+        -- its old owner during solving.  Restore only roots that disappeared
+        -- (or were eliminated); solved ownership is authoritative for live
+        -- nodes.
+        schemeRootsBase =
+            [ root
+            | root <- schemeRootsBaseAll
+            , let rootC = canonical root
+                  rootKey = getNodeId rootC
+            , IntSet.member rootKey schemeRootsSolvedSet
+                || IntMap.notMember rootKey nodesSolved0
+                || VarStore.isEliminatedVar solvedConstraint rootC
+            ]
         preferBaseVar new old =
             case (new, old) of
                 (TyVar{ tnBound = Nothing }, TyVar{ tnBound = Just _ }) -> old
@@ -55,6 +77,34 @@ restoreSchemeNodes env =
                         node'
                         acc
                 _ -> acc
+        letSchemeRootKeys =
+            IntSet.fromList
+                [ getNodeId (instRight edge)
+                | edge <- cInstEdges base
+                , IntSet.member (getEdgeId (instEdgeId edge)) (cLetEdges base)
+                ]
+        rootNeedsRedirectRestoration root =
+            IntSet.member (getNodeId root) letSchemeRootKeys
+                && ( IntMap.notMember (getNodeId root) nodesSolved0
+                    || VarStore.isEliminatedVar solvedConstraint root
+                   )
+        targetIsLive target =
+            IntMap.member (getNodeId target) nodesSolved0
+                && not (VarStore.isEliminatedVar solvedConstraint target)
+        redirectedSchemeRootTarget root = do
+            TyVar{ tnBound = Nothing } <- IntMap.lookup (getNodeId root) baseNodes
+            if rootNeedsRedirectRestoration root
+                then
+                    case applyRedirectsToRef (typeRef root) of
+                        TypeRef redirected
+                            | redirected /= root ->
+                                case adoptRef (typeRef root) of
+                                    TypeRef target
+                                        | target /= root
+                                        , targetIsLive target -> Just target
+                                    _ -> Nothing
+                        _ -> Nothing
+                else Nothing
         restoreSchemeRoot acc root =
             let mbBase = do
                     TyVar{ tnBound = mb } <- IntMap.lookup (getNodeId root) baseNodes
@@ -62,20 +112,36 @@ restoreSchemeNodes env =
                     case adoptRef (typeRef bnd) of
                         TypeRef bnd' -> Just bnd'
                         GenRef _ -> Nothing
+                -- Alternative-let scheme roots start unbounded.  When solving
+                -- eliminates one through its identity edge, the typed redirect
+                -- is the construction authority for the restored bound.
+                mbRedirected = redirectedSchemeRootTarget root
+                mbRestored =
+                    case mbBase of
+                        Just baseBound -> Just baseBound
+                        Nothing -> mbRedirected
                 insertRoot bnd' =
                     IntMap.insert (getNodeId root) (TyVar { tnId = root, tnBound = Just bnd' }) acc
                 fillMissing nid bnd' =
                     IntMap.insert (getNodeId root) (TyVar { tnId = nid, tnBound = Just bnd' }) acc
             in case IntMap.lookup (getNodeId root) acc of
-                Nothing -> maybe acc insertRoot mbBase
+                Nothing -> maybe acc insertRoot mbRestored
                 Just TyVar{ tnId = nid, tnBound = Nothing } ->
-                    maybe acc (fillMissing nid) mbBase
+                    maybe acc (fillMissing nid) mbRestored
                 Just _ -> acc
         (schemeRootsBaseSet, schemeRootsAllSet) =
-            let rootsSolved = schemeRootsOf (Types.getGenNodeMap (cGenNodes solvedConstraint))
-                baseSet = IntSet.fromList (map getNodeId schemeRootsBase)
-                solvedSet = IntSet.fromList (map (getNodeId . canonical) rootsSolved)
-            in (baseSet, IntSet.union baseSet solvedSet)
+            let baseSet = IntSet.fromList (map getNodeId schemeRootsBase)
+                solvedSet = schemeRootsSolvedSet
+                restoredSet =
+                    IntSet.fromList
+                        (map getNodeId (IntMap.elems restoredSchemeRootTargets))
+            in (baseSet, IntSet.unions [baseSet, solvedSet, restoredSet])
+        restoredSchemeRootTargets =
+            IntMap.fromList
+                [ (getNodeId root, target)
+                | root <- schemeRootsBase
+                , Just target <- [redirectedSchemeRootTarget root]
+                ]
         nodesSolved1 = foldl' restoreSchemeRoot nodesSolved0 schemeRootsBase
         nodesSolved =
             let
@@ -137,4 +203,5 @@ restoreSchemeNodes env =
         , p1SchemeRootsBase = schemeRootsBase
         , p1SchemeRootsBaseSet = schemeRootsBaseSet
         , p1SchemeRootsAllSet = schemeRootsAllSet
+        , p1RestoredSchemeRootTargets = restoredSchemeRootTargets
         }

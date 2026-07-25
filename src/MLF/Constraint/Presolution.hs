@@ -18,9 +18,11 @@ module MLF.Constraint.Presolution (
     PresolutionPlanBuilder(..),
     PresolutionError(..),
     EdgeTrace(..),
+    EdgeSourceInterior(..),
 ) where
 
 import MLF.Constraint.Presolution.Base (
+    EdgeSourceInterior(..),
     EdgeTrace(..),
     PresolutionError(..),
     PresolutionPlanBuilder(..),

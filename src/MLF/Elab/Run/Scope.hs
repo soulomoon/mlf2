@@ -5,18 +5,40 @@ module MLF.Elab.Run.Scope
     schemeBodyTarget,
     canonicalizeScopeRef,
     resolveCanonicalScope,
-    letScopeOverrides,
+    ConstructionScopes,
+    ApplicationConstructionScopes (..),
+    ConstructionScopeSelection (..),
+    constructionScopes,
+    constructionNodeScopeSelection,
+    constructionBoundaryScopeSelection,
+    resolveConstructionScopeForNode,
+    resolveConstructionScopeForBoundary,
+    resolveApplicationConstructionScopes,
+    applicationGeneralizationScopeForRequirements,
   )
 where
 
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (listToMaybe)
+import qualified Data.Set as Set
 import qualified MLF.Binding.Tree as Binding
+import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (PresolutionView (..))
+import MLF.Constraint.Presolution.Plan.Context
+  ( GaBindParents (..),
+    SolvedToBaseResolution (..),
+    resolveGaSolvedToBase,
+  )
+import MLF.Constraint.Presolution.Plan.Requirements
+  ( GeneralizationRequirements (..),
+    RequiredGammaBinder (..),
+    RequiredGammaPlacement (..),
+  )
 import MLF.Constraint.Types.Graph
-  ( BindingError (..), Constraint,
+  ( BindingError (..), Constraint, EdgeId (..),
     NodeId (..),
     NodeRef (..),
     TyNode (..),
@@ -26,7 +48,11 @@ import MLF.Constraint.Types.Graph
   )
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
-import MLF.Frontend.ConstraintGen.Types (AnnExprF (..))
+import MLF.Frontend.ConstraintGen.Types
+  ( AnnExprF (..),
+    instantiationSiteEdgeId,
+  )
+import MLF.Util.ElabError (ElabError (..))
 
 {- Note [ga′ scope selection — Def. 15.3.2 alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,7 +69,7 @@ binding root in the original constraint χ_p.  The live pipeline in
      stable identifiers not subject to redirect/UF).  TypeRef gets
      redirect-chased then UF-canonicalized.
 
-  3. `letScopeOverrides`: Computes scope on the base constraint c1, compares
+  3. `constructionScopes`: Computes scope on the base constraint c1, compares
      with the solved constraint's scope.  Prefers the base scope when they
      diverge.  This is correct: the thesis defines ga′ on the original χ_p,
      not the solved version.
@@ -168,7 +194,7 @@ Redirect chasing and UF canonicalization preserve ga′ through the pipeline:
   2. TypeRef edge case: When `bindingScopeRef` returns TypeRef (no gen
      ancestor), `canonicalizeScopeRef` applies redirect+UF.  If the redirect
      changes the node to one that *does* have a gen ancestor, the scope
-     remains a TypeRef (not upgraded to GenRef).  However, `letScopeOverrides`
+     remains a TypeRef (not upgraded to GenRef).  However, `constructionScopes`
      detects this divergence between base and solved scopes and records the
      base scope, so the thesis ga′ is preserved.
 
@@ -195,31 +221,248 @@ resolveCanonicalScope constraint presolutionView redirects scopeRoot = do
   scope0 <- bindingScopeRef constraint scopeRoot
   pure (canonicalizeScopeRef presolutionView redirects scope0)
 
-letScopeOverrides :: Constraint p -> Constraint p -> PresolutionView p -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
-letScopeOverrides base solvedForGen presolutionView redirects ann =
+-- | Occurrence-indexed construction scopes.  Canonical type nodes are not
+-- source-constructor identities: union-find can merge sibling applications and
+-- nested let results while their local Gammas remain distinct.  Stable edge IDs
+-- retain that occurrence identity, so local constructors consult the boundary
+-- map and the node map remains only a generic root/scheme fallback.
+data ConstructionScopes = ConstructionScopes
+  { constructionNodeScopeCandidates :: !(IntMap.IntMap (Set.Set NodeRef)),
+    constructionBoundaryScopeCandidates :: !(IntMap.IntMap (Set.Set NodeRef))
+  }
+  deriving (Eq, Show)
+
+instance Semigroup ConstructionScopes where
+  left <> right =
+    ConstructionScopes
+      { constructionNodeScopeCandidates =
+          IntMap.unionWith Set.union
+            (constructionNodeScopeCandidates left)
+            (constructionNodeScopeCandidates right),
+        constructionBoundaryScopeCandidates =
+          IntMap.unionWith Set.union
+            (constructionBoundaryScopeCandidates left)
+            (constructionBoundaryScopeCandidates right)
+      }
+
+instance Monoid ConstructionScopes where
+  mempty = ConstructionScopes IntMap.empty IntMap.empty
+
+-- | The source occurrence and the type selected for its local scheme carry
+-- distinct scope evidence.  In particular, 'generalizeTargetNode' may unwrap
+-- an application result to a bound whose original ga' differs from the
+-- occurrence boundary.  The occurrence scope owns the local Gamma, while the
+-- target scope owns @Gen(Gamma, S(result))@.  An exact requirement placement
+-- carries the former into planning at the latter, so neither authority is
+-- reconstructed from the other.
+data ApplicationConstructionScopes = ApplicationConstructionScopes
+  { applicationOccurrenceScope :: !NodeRef,
+    applicationTargetGeneralizationScope :: !NodeRef
+  }
+  deriving (Eq, Show)
+
+-- | Select the scope that owns one application's @Gen(Gamma, S(result))@.
+-- A raw current-scope Gamma obligation has not yet been stamped with its
+-- source occurrence and therefore must stay at that occurrence.  Once
+-- 'placeCurrentGammaRequirementsAt' has converted it to an exact construction
+-- placement, the type can generalize at the unwrapped target's own scope while
+-- Gamma ownership remains attached to the source constructor.
+applicationGeneralizationScopeForRequirements
+  :: ApplicationConstructionScopes
+  -> GeneralizationRequirements
+  -> NodeRef
+applicationGeneralizationScopeForRequirements scopes requirements
+  | any isCurrentScopeGamma (grRequiredGammaBinders requirements) =
+      applicationOccurrenceScope scopes
+  | otherwise =
+      applicationTargetGeneralizationScope scopes
+  where
+    isCurrentScopeGamma requirement =
+      rgbPlacement requirement == RequiredGammaAtCurrentScope
+
+-- | A construction-scope lookup must distinguish absence from disagreement.
+-- Collapsing both states to 'Nothing' lets an ambiguous node override silently
+-- fall back to a base scope, changing which lexical Gamma owns construction.
+data ConstructionScopeSelection
+  = MissingConstructionScope
+  | UniqueConstructionScope NodeRef
+  | AmbiguousConstructionScope (NonEmpty NodeRef)
+  deriving (Eq, Show)
+
+constructionNodeScopeSelection :: ConstructionScopes -> NodeId -> ConstructionScopeSelection
+constructionNodeScopeSelection scopes (NodeId nodeKey) =
+  constructionScopeSelection
+    nodeKey
+    (constructionNodeScopeCandidates scopes)
+
+constructionBoundaryScopeSelection :: ConstructionScopes -> EdgeId -> ConstructionScopeSelection
+constructionBoundaryScopeSelection scopes (EdgeId edgeKey) =
+  constructionScopeSelection
+    edgeKey
+    (constructionBoundaryScopeCandidates scopes)
+
+resolveConstructionScopeForNode
+  :: (NodeId -> NodeId)
+  -> GaBindParents p
+  -> ConstructionScopes
+  -> NodeId
+  -> Either ElabError NodeRef
+resolveConstructionScopeForNode canonical ga scopes nodeId =
+  case constructionNodeScopeSelection scopes (canonical nodeId) of
+    MissingConstructionScope -> scopeRootFromGaBase canonical ga nodeId
+    UniqueConstructionScope scope -> pure scope
+    AmbiguousConstructionScope candidates ->
+      Left
+        ( ValidationFailed
+            [ "one construction node has conflicting source scopes",
+              "  node: " ++ show (canonical nodeId),
+              "  scopes: " ++ show candidates
+            ]
+        )
+
+resolveConstructionScopeForBoundary
+  :: (NodeId -> NodeId)
+  -> GaBindParents p
+  -> ConstructionScopes
+  -> EdgeId
+  -> NodeId
+  -> Either ElabError NodeRef
+resolveConstructionScopeForBoundary canonical ga scopes edgeId fallbackNode =
+  case constructionBoundaryScopeSelection scopes edgeId of
+    MissingConstructionScope ->
+      resolveConstructionScopeForNode canonical ga scopes fallbackNode
+    UniqueConstructionScope scope -> pure scope
+    AmbiguousConstructionScope candidates ->
+      Left
+        ( ValidationFailed
+            [ "one construction boundary has conflicting source scopes",
+              "  edge: " ++ show edgeId,
+              "  scopes: " ++ show candidates
+            ]
+        )
+
+resolveApplicationConstructionScopes
+  :: (NodeId -> NodeId)
+  -> GaBindParents p
+  -> ConstructionScopes
+  -> EdgeId
+  -> NodeId
+  -> NodeId
+  -> Either ElabError ApplicationConstructionScopes
+resolveApplicationConstructionScopes
+  canonical
+  ga
+  scopes
+  boundaryEdge
+  applicationNode
+  targetNode =
+    ApplicationConstructionScopes
+      <$> resolveConstructionScopeForBoundary
+        canonical
+        ga
+        scopes
+        boundaryEdge
+        applicationNode
+      <*> resolveConstructionScopeForNode
+        canonical
+        ga
+        scopes
+        targetNode
+
+constructionScopeSelection
+  :: Int
+  -> IntMap.IntMap (Set.Set NodeRef)
+  -> ConstructionScopeSelection
+constructionScopeSelection key candidatesByKey =
+  case maybe [] Set.toAscList (IntMap.lookup key candidatesByKey) of
+    [] -> MissingConstructionScope
+    [candidate] -> UniqueConstructionScope candidate
+    first : second : rest ->
+      AmbiguousConstructionScope (first :| second : rest)
+
+scopeRootFromGaBase
+  :: (NodeId -> NodeId)
+  -> GaBindParents p
+  -> NodeId
+  -> Either ElabError NodeRef
+scopeRootFromGaBase canonical ga root =
+  case resolveGaSolvedToBase ga (canonical root) of
+    SolvedToBaseMapped baseNode -> scopeFromBaseNode baseNode
+    SolvedToBaseSameDomain baseNode -> scopeFromBaseNode baseNode
+    SolvedToBaseMissing -> pure (typeRef root)
+  where
+    scopeFromBaseNode baseNode = do
+      path <-
+        bindingPathToRootLocal
+          (gaBindParentsBase ga)
+          (typeRef baseNode)
+      pure $
+        case listToMaybe [gid | GenRef gid <- drop 1 path] of
+          Just gid -> GenRef gid
+          Nothing -> typeRef root
+
+constructionScopes
+  :: Constraint p
+  -> Constraint p
+  -> PresolutionView p
+  -> IntMap.IntMap NodeId
+  -> AnnExpr
+  -> Either BindingError ConstructionScopes
+constructionScopes base solvedForGen presolutionView redirects ann =
   let canonical = pvCanonical presolutionView
-      addOverride acc schemeRootId =
-        case bindingScopeRef base schemeRootId of
-          Right scope0 ->
-            let scope = canonicalizeScopeRef presolutionView redirects scope0
-                schemeRootC = canonical (chaseRedirects redirects schemeRootId)
-                postScope =
-                  case bindingScopeRef solvedForGen schemeRootC of
-                    Right ref -> canonicalizeScopeRef presolutionView redirects ref
-                    Left _ -> scope
-             in if scope == postScope
-                  then acc
-                  else IntMap.insert (getNodeId schemeRootC) scope acc
-          Left _ -> acc
+      addNodeOverride acc schemeRootId = do
+        scope0 <- bindingScopeRef base schemeRootId
+        let scope = canonicalizeScopeRef presolutionView redirects scope0
+            schemeRootC = canonical (chaseRedirects redirects schemeRootId)
+        postScope0 <- bindingScopeRef solvedForGen schemeRootC
+        let postScope =
+              canonicalizeScopeRef presolutionView redirects postScope0
+        pure $
+          if scope == postScope
+            then acc
+            else
+              acc
+                { constructionNodeScopeCandidates =
+                    insertCandidate
+                      (getNodeId schemeRootC)
+                      scope
+                      (constructionNodeScopeCandidates acc)
+                }
+      addBoundaryScope acc edgeId sourceNode = do
+        scope0 <- bindingScopeRef base sourceNode
+        let scope = canonicalizeScopeRef presolutionView redirects scope0
+        pure
+          acc
+            { constructionBoundaryScopeCandidates =
+                insertCandidate
+                  (getEdgeId edgeId)
+                  scope
+                  (constructionBoundaryScopeCandidates acc)
+            }
       alg expr = case expr of
-        AVarF _ _ -> IntMap.empty
-        AResolvedVarF _ _ _ -> IntMap.empty
-        ALitF _ _ -> IntMap.empty
-        ALamF _ _ _ _ body _ -> body
-        AAppF fun arg _ _ _ -> IntMap.union arg fun
-        ALetF _ _ _ schemeRootId _ _ rhs body _ ->
-          let baseMap = addOverride IntMap.empty schemeRootId
-           in IntMap.union body (IntMap.union rhs baseMap)
+        AResolvedVarF _ _ _ -> pure mempty
+        ALitF _ _ -> pure mempty
+        ALamF _ _ _ _ body _ _ -> body
+        AAppF fun arg funSite _argSite resultNode -> do
+          -- The function edge is the application occurrence's unique scope
+          -- authority.  The argument edge contributes to the same local Gamma
+          -- obligation but is never queried as a scope boundary.
+          funScopes <- fun
+          argScopes <- arg
+          addBoundaryScope
+            (funScopes <> argScopes)
+            (instantiationSiteEdgeId funSite)
+            resultNode
+        ALetF _ _ _ schemeRootId _ _ rhs body _ -> do
+          rhsScopes <- rhs
+          bodyScopes <- body
+          addNodeOverride (rhsScopes <> bodyScopes) schemeRootId
         AAnnF inner _ _ -> inner
+        ALetScopeF inner resultNode edgeId -> do
+          innerScopes <- inner
+          addBoundaryScope innerScopes edgeId resultNode
         AUnfoldF inner _ _ -> inner
    in cata alg ann
+  where
+    insertCandidate key candidate =
+      IntMap.insertWith Set.union key (Set.singleton candidate)

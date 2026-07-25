@@ -41,6 +41,10 @@ spec = describe "Repository guardrails" $ do
     offenders <- findFinalizeInternalImportOffenders
     offenders `shouldBe` []
 
+  it "presolution views remain read models rather than snapshot constructors" $ do
+    viewSource <- readFileStrict "src/MLF/Constraint/Presolution/View.hs"
+    viewSource `shouldNotContain` "fromPresolutionResult"
+
   it "split child modules stay implementation-only in Cabal" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc

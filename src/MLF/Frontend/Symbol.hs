@@ -27,8 +27,6 @@ module MLF.Frontend.Symbol
     mkResolvedReference,
     sameSymbolIdentity,
     sameResolvedSymbol,
-    symbolRefMatchesWith,
-    symbolRefMatches,
     symbolIdentityPayloadMatches,
     lookupSymbolIdentityExact,
     memberSymbolIdentityExact,
@@ -45,7 +43,6 @@ where
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Types.Reference (ReferenceMode (..), referenceMatchesWith)
 import MLF.Types.Unique (UniqueIdentity, uniqueIdentityStableName)
 
 data SymbolNamespace
@@ -235,14 +232,6 @@ sameSymbolIdentity left right =
 sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =
   sameSymbolIdentity (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
-
-symbolRefMatchesWith :: ReferenceMode -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
-symbolRefMatchesWith =
-  referenceMatchesWith sameSymbolIdentity
-
-symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
-symbolRefMatches =
-  symbolRefMatchesWith IdentityOnly
 
 symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
 symbolIdentityPayloadMatches =

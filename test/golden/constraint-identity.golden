@@ -1,12 +1,13 @@
 -- Constraint graph summary for: identity
-root: 2
-node-count: 3
-inst-edge-count: 0
+root: 3
+node-count: 4
+inst-edge-count: 1
 unify-edge-count: 0
-bind-parent-count: 3
+bind-parent-count: 4
 nodes:
   0: TyVar
-  1: TyArrow
-  2: TyVar
+  1: TyVar
+  2: TyArrow
+  3: TyVar
 
 

@@ -4,15 +4,30 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module MLF.Constraint.Presolution.Base (
     PresolutionUf(..),
+    ExpansionResultMap(..),
+    emptyExpansionResultMap,
+    lookupExpansionResult,
+    lookupExpansionResultUnder,
+    canonicalizeExpansionResultMap,
     EdgeArtifacts(..),
     emptyEdgeArtifacts,
+    RawExpansionConstruction,
+    emptyRawExpansionConstruction,
+    mkRawExpansionConstruction,
+    combineRawExpansionConstructions,
+    rawExpansionConstructionParents,
+    rawExpansionConstructionArgumentKeys,
+    rawExpansionConstructionSemanticMetaKeys,
     PresolutionResult(..),
     PresolutionPlanBuilder(..),
     PresolutionError(..),
     TranslatabilityIssue(..),
+    EdgeWitnessNonSourceOrigin(..),
+    EdgeExecutionArtifacts(..),
     PresolutionState
         ( PresolutionState
         , PresolutionStateInternal
@@ -22,6 +37,7 @@ module MLF.Constraint.Presolution.Base (
         , psNextNodeId
         , psPendingWeakens
         , psPendingWeakenOwners
+        , psWeakenReplayCertificates
         , psBinderCache
         , psGraphVersion
         , psUnionFindVersion
@@ -31,10 +47,15 @@ module MLF.Constraint.Presolution.Base (
         , psBindingRepairCache
         , psBindingRepairDirty
         , psCachedRootGen
-        , psEdgeExpansions
-        , psEdgeWitnesses
-        , psEdgeTraces
+        , psExpansionResults
+        , psEdgeExecutionArtifacts
         ),
+    psEdgeExpansions,
+    psEdgeWitnesses,
+    psEdgeRaiseAuthorityNodes,
+    psEdgeNonSourceOpOrigins,
+    psEdgeExpansionConstructions,
+    psEdgeTraces,
     CachedBindingModel(..),
     CachedBindingRepairModel(..),
     emptyBindingRepairDirty,
@@ -55,7 +76,20 @@ module MLF.Constraint.Presolution.Base (
     PendingWeakenOwner(..),
     pendingWeakenOwnerFromMaybe,
     pendingWeakenOwnerToMaybe,
+    WeakenReplayCertificate,
+    certifyAppliedNonRootWeakenReplay,
+    certifyEliminatedNonRootWeakenReplay,
+    weakenReplayCertificateSource,
+    weakenReplayCertificateTarget,
+    weakenReplayCertificateReplayBinder,
+    weakenReplayCertificateRoot,
+    weakenReplayCertificateFlexiblePath,
+    weakenReplayCertificateDescendants,
+    weakenReplayCertificateMatches,
     EdgeTrace(..),
+    rootRaiseMergeTraceAuthority,
+    rootRigidRaiseMergeTraceAuthority,
+    rootWeakenRaiseMergeTraceAuthority,
     CopyMapping(..),
     CopyMap,
     lookupCopy,
@@ -63,6 +97,10 @@ module MLF.Constraint.Presolution.Base (
     copiedNodes,
     originalNodes,
     InteriorNodes(..),
+    EdgeSourceInterior(..),
+    EdgeDestinationInterior(..),
+    sourceInteriorFromList,
+    sourceInteriorFromSet,
     FrontierNodes(..),
     InteriorSet,
     FrontierSet,
@@ -74,6 +112,7 @@ module MLF.Constraint.Presolution.Base (
     fromListFrontier,
     emptyTrace,
     unionTrace,
+    recordExpansionResult,
     PresolutionM,
     runPresolutionM,
     MonadPresolution(..),
@@ -96,7 +135,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.State (MonadState, StateT, get, gets, modify', put, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, lift, runReaderT)
 import Control.Monad.Except (MonadError, throwError)
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -104,10 +143,20 @@ import Data.Maybe (listToMaybe)
 
 import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.Presolution.BoundScope as BoundScope
+import MLF.Constraint.Presolution.Construction
+    ( RawExpansionConstruction
+    , combineRawExpansionConstructions
+    , emptyRawExpansionConstruction
+    , mkRawExpansionConstruction
+    , rawExpansionConstructionArgumentKeys
+    , rawExpansionConstructionParents
+    , rawExpansionConstructionSemanticMetaKeys
+    )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Presolved))
 import qualified MLF.Constraint.Types.Graph as Types
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, ReplayContract)
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, InstanceOp, ReplayContract(..))
 import MLF.Constraint.Types.Presolution (Presolution, PresolutionSnapshot (..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -130,7 +179,7 @@ import MLF.Constraint.Presolution.BindingRepair
     , repairBindingParentsWithModel
     )
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
-import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents, GeneralizationRequirements)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeError)
 import MLF.Util.ElabError (ElabError)
@@ -138,15 +187,78 @@ import MLF.Util.ElabError (ElabError)
 newtype PresolutionUf = PresolutionUf { getPresolutionUf :: IntMap NodeId }
     deriving (Eq, Show)
 
+-- | Administrative replacement of an occurrence-site 'TyExp' wrapper by the
+-- already-constructed root of its χe expansion.  This map is deliberately
+-- separate from semantic union-find: wrappers do not occur in the paper graph
+-- and must not induce Raise/Merge operations or quotient term-DAG edges.
+newtype ExpansionResultMap = ExpansionResultMap
+    { getExpansionResultMap :: IntMap NodeId
+    }
+    deriving (Eq, Show)
+
+emptyExpansionResultMap :: ExpansionResultMap
+emptyExpansionResultMap = ExpansionResultMap IntMap.empty
+
+lookupExpansionResult :: NodeId -> ExpansionResultMap -> Maybe NodeId
+lookupExpansionResult wrapper (ExpansionResultMap results) =
+    IntMap.lookup (getNodeId wrapper) results
+
+-- | Canonicalize administrative replacements by semantic union-find class.
+-- A wrapper class has exactly one destination-scoped expansion result; unlike
+-- ordinary unification, resolving a collision here must not emit witness work.
+canonicalizeExpansionResultMap
+    :: (NodeId -> NodeId)
+    -> ExpansionResultMap
+    -> Either PresolutionError ExpansionResultMap
+canonicalizeExpansionResultMap canonical (ExpansionResultMap results) =
+    ExpansionResultMap
+        <$> IntMap.foldlWithKey' insertCanonical (Right IntMap.empty) results
+  where
+    insertCanonical accE wrapperKey result0 = do
+        acc <- accE
+        let wrapper = canonical (NodeId wrapperKey)
+            result = canonical result0
+            key = getNodeId wrapper
+        case IntMap.lookup key acc of
+            Nothing -> pure (IntMap.insert key result acc)
+            Just existing
+                | existing == result -> pure acc
+                | otherwise ->
+                    Left (ExpansionResultConflict wrapper existing result)
+
+lookupExpansionResultUnder
+    :: (NodeId -> NodeId)
+    -> NodeId
+    -> ExpansionResultMap
+    -> Either PresolutionError (Maybe NodeId)
+lookupExpansionResultUnder canonical wrapper results = do
+    normalized <- canonicalizeExpansionResultMap canonical results
+    pure (lookupExpansionResult (canonical wrapper) normalized)
+
 data EdgeArtifacts = EdgeArtifacts
     { eaEdgeExpansions :: IntMap Expansion
     , eaEdgeWitnesses :: IntMap EdgeWitness
     , eaEdgeTraces :: IntMap EdgeTrace
+    , eaIdentityEdges :: IntSet.IntSet
     }
     deriving (Eq, Show)
 
 emptyEdgeArtifacts :: EdgeArtifacts
-emptyEdgeArtifacts = EdgeArtifacts IntMap.empty IntMap.empty IntMap.empty
+emptyEdgeArtifacts = EdgeArtifacts IntMap.empty IntMap.empty IntMap.empty IntSet.empty
+
+-- | Exceptional operand origins for an edge-witness operation.  Source-only
+-- operations need no entry.  A mixed Merge names its operated node in the
+-- frozen source graph and its other node in the constructed destination graph.
+-- An expansion Graft instead names its argument in the destination graph and
+-- its quantified binder in the frozen source graph.  Keeping these cases
+-- distinct prevents witness finalization from restoring both operands through
+-- the same source-domain map.
+data EdgeWitnessNonSourceOrigin
+    = DestinationEdgeOperation
+    | SourceDestinationMergeOperation
+    | DestinationSourceGraftOperation
+    | FlexibleTerminalSourceOperation
+    deriving (Eq, Show)
 
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
@@ -154,6 +266,8 @@ data PresolutionResult = PresolutionResult
     , prEdgeExpansions :: IntMap Expansion
     , prEdgeWitnesses :: IntMap EdgeWitness
     , prEdgeTraces :: IntMap EdgeTrace
+    , prEdgeExpansionConstructions :: IntMap RawExpansionConstruction
+    , prIdentityEdges :: IntSet.IntSet
     , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
     , prUnionFind :: PresolutionUf
     , prPlanBuilder :: PresolutionPlanBuilder
@@ -168,6 +282,7 @@ newtype PresolutionPlanBuilder = PresolutionPlanBuilder
         :: forall p.
            PresolutionView p
         -> Maybe (GaBindParents p)
+        -> GeneralizationRequirements
         -> NodeRef
         -> NodeId
         -> Either ElabError (GeneralizePlan p, ReifyPlan)
@@ -186,7 +301,39 @@ data PresolutionError
     | ArityMismatch String Int Int           -- ^ (context, expected, actual)
     | InstantiateOnNonForall NodeId          -- ^ Tried to instantiate a non-forall node
     | NodeLookupFailed NodeId                -- ^ Missing node in constraint
+    | BoundTargetNotTyVar NodeId TyNode      -- ^ Tried to install a lower bound on a non-variable node
     | OccursCheckPresolution NodeId NodeId   -- ^ Unification would make node reachable from itself
+    | CopyBoundScopeRepairRequired NodeId [NodeId]
+      -- ^ A copied bound needed Raise after binding reset; copying must
+      -- construct the copied scope directly rather than hide witness work.
+    | CopyBindingScopeRepairRequired NodeId [NodeId]
+      -- ^ The complete copied binding projection still needed Raise.  A χe
+      -- copy must publish its binding tree and copied bounds in one already
+      -- well-scoped transaction.
+    | CopySubstitutionConflict NodeId NodeId NodeId
+      -- ^ Canonical aliases of one source binder selected distinct images.
+    | CopyPendingBoundConflict NodeId NodeId NodeId
+      -- ^ One copied variable was assigned two distinct lower-bound roots
+      -- while constructing an atomic χe projection.
+    | CopyBindingParentConflict NodeRef NodeRef NodeRef
+      -- ^ One canonical copied child was assigned two distinct parents while
+      -- constructing the atomic copied binding projection.
+    | ExpansionArgumentScopeRepairRequired NodeId [NodeId]
+      -- ^ Destination rebinding of expansion arguments would require hidden
+      -- Raise work; edge-local execution must record it explicitly.
+    | EdgeBoundRaiseOutsideInterior NodeId [NodeId]
+      -- ^ Installing a bound during chi_e attempted to Raise nodes outside
+      -- the edge's source interior.  Such a mutation cannot be represented by
+      -- that edge's source-domain witness and must fail transactionally.
+    | IdentityExpansionHasBaseOps EdgeId [InstanceOp]
+      -- ^ ExpIdentity has no Omega construction steps.  Reaching execution
+      -- with base operations means the witness plan and expansion disagree.
+    | ExpansionResultConflict NodeId NodeId NodeId
+      -- ^ One administrative TyExp wrapper was associated with two distinct
+      -- expansion-result classes.
+    | MissingExpansionResult NodeId ExpVarId
+      -- ^ A non-identity TyExp reached finalization without χe having
+      -- constructed its destination-scoped result.
     | BindingTreeError BindingError          -- ^ Invalid binding tree when binding edges are in use
     | NonTranslatablePresolution [TranslatabilityIssue]
     | WitnessNormalizationError EdgeId OmegaNormalizeError  -- ^ Normalized witness violates Fig. 15.3.4 invariants
@@ -195,6 +342,18 @@ data PresolutionError
     | ResidualTyExpNodes [NodeId]            -- ^ Presolution artifact must be TyExp-free.
     | MissingEdgeWitnesses [EdgeId]          -- ^ Non-trivial instantiation edges missing witness entries.
     | MissingEdgeTraces [EdgeId]             -- ^ Non-trivial instantiation edges missing trace entries.
+    | ExpansionDestinationConflict ExpVarId [GenNodeId]
+      -- ^ One expansion variable is demanded at more than one propagation
+      -- destination.  Its assignment may later acquire argument payloads, and
+      -- one payload cannot be owned by two distinct n-hat gen nodes
+      -- (Definition 10.3.2).
+    | ExpansionArgumentDestinationConflict NodeId [GenNodeId]
+      -- ^ Distinct expansion arguments collapsed to one canonical node while
+      -- retaining incompatible destination-gen provenance.
+    | NestedTyExpAuthorityMismatch NodeId GenNodeId ExpVarId GenNodeId ExpVarId (Maybe (NodeId, GenNodeId))
+      -- ^ A leading source spine reached a nested expansion wrapper owned by
+      -- another @(gen, expansion-variable)@ authority.  The optional pair is
+      -- the already-materialized result and its owner when one existed.
     | ExpectedTyExpLeftInPlanner EdgeId TyNode
       -- ^ Planner expected normalized `TyExp <= τ` but saw a different left node.
     | PlanError PresolutionError             -- ^ Error surfaced during planner pass
@@ -234,6 +393,19 @@ data BindingRepairOutcome
     | BindingRepairIncremental
     deriving (Eq, Show)
 
+-- | The complete immutable proof packet emitted by one edge execution.
+-- Keeping expansion choice, witness authority, construction provenance, and
+-- replay trace in one value makes partial execution evidence unrepresentable.
+data EdgeExecutionArtifacts = EdgeExecutionArtifacts
+    { eeaExpansion :: !Expansion
+    , eeaWitness :: !EdgeWitness
+    , eeaRaiseAuthorityNodes :: !IntSet.IntSet
+    , eeaNonSourceOpOrigins :: !(IntMap EdgeWitnessNonSourceOrigin)
+    , eeaExpansionConstruction :: !RawExpansionConstruction
+    , eeaTrace :: !EdgeTrace
+    }
+    deriving (Eq, Show)
+
 data PresolutionState p = PresolutionStateInternal
     { psConstraint :: Constraint p
     , psPresolution :: Presolution
@@ -241,6 +413,7 @@ data PresolutionState p = PresolutionStateInternal
     , psNextNodeId :: Int
     , psPendingWeakens :: IntSet.IntSet
     , psPendingWeakenOwners :: IntMap PendingWeakenOwner
+    , psWeakenReplayCertificates :: IntMap (IntMap WeakenReplayCertificate)
     , psBinderCache :: IntMap [NodeId]
     , psGraphVersion :: !Int
     , psUnionFindVersion :: !Int
@@ -250,11 +423,74 @@ data PresolutionState p = PresolutionStateInternal
     , psBindingRepairCache :: Maybe (CachedBindingRepairModel p)
     , psBindingRepairDirty :: Maybe BindingRepairDirty
     , psCachedRootGen :: !(Maybe (Maybe NodeRef))
-    , psEdgeExpansions :: IntMap Expansion
-    , psEdgeWitnesses :: IntMap EdgeWitness
-    , psEdgeTraces :: IntMap EdgeTrace
+    , psExpansionResults :: ExpansionResultMap
+    , psEdgeExecutionArtifacts :: IntMap EdgeExecutionArtifacts
     }
     deriving (Eq, Show)
+
+psEdgeExpansions :: PresolutionState p -> IntMap Expansion
+psEdgeExpansions = IntMap.map eeaExpansion . psEdgeExecutionArtifacts
+
+psEdgeWitnesses :: PresolutionState p -> IntMap EdgeWitness
+psEdgeWitnesses = IntMap.map eeaWitness . psEdgeExecutionArtifacts
+
+psEdgeRaiseAuthorityNodes :: PresolutionState p -> IntMap IntSet.IntSet
+psEdgeRaiseAuthorityNodes =
+    IntMap.map eeaRaiseAuthorityNodes . psEdgeExecutionArtifacts
+
+psEdgeNonSourceOpOrigins
+    :: PresolutionState p
+    -> IntMap (IntMap EdgeWitnessNonSourceOrigin)
+psEdgeNonSourceOpOrigins =
+    IntMap.map eeaNonSourceOpOrigins . psEdgeExecutionArtifacts
+
+psEdgeExpansionConstructions
+    :: PresolutionState p
+    -> IntMap RawExpansionConstruction
+psEdgeExpansionConstructions =
+    IntMap.map eeaExpansionConstruction . psEdgeExecutionArtifacts
+
+psEdgeTraces :: PresolutionState p -> IntMap EdgeTrace
+psEdgeTraces = IntMap.map eeaTrace . psEdgeExecutionArtifacts
+
+edgeExecutionArtifactProjections
+    :: IntMap EdgeExecutionArtifacts
+    -> (IntMap Expansion, IntMap EdgeWitness, IntMap EdgeTrace)
+edgeExecutionArtifactProjections artifacts =
+    ( IntMap.map eeaExpansion artifacts
+    , IntMap.map eeaWitness artifacts
+    , IntMap.map eeaTrace artifacts
+    )
+
+legacyEdgeExecutionArtifacts
+    :: IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntMap EdgeExecutionArtifacts
+legacyEdgeExecutionArtifacts expansions witnesses traces
+    | expansionKeys /= witnessKeys || witnessKeys /= traceKeys =
+        error "PresolutionState: partial legacy edge execution artifacts"
+    | otherwise =
+        IntMap.mapWithKey
+            (\edgeKey witness ->
+                EdgeExecutionArtifacts
+                    { eeaExpansion = require "expansion" edgeKey expansions
+                    , eeaWitness = witness
+                    , eeaRaiseAuthorityNodes = IntSet.empty
+                    , eeaNonSourceOpOrigins = IntMap.empty
+                    , eeaExpansionConstruction = emptyRawExpansionConstruction
+                    , eeaTrace = require "trace" edgeKey traces
+                    }
+            )
+            witnesses
+  where
+    expansionKeys = IntSet.fromAscList (IntMap.keys expansions)
+    witnessKeys = IntSet.fromAscList (IntMap.keys witnesses)
+    traceKeys = IntSet.fromAscList (IntMap.keys traces)
+    require label key values =
+        case IntMap.lookup key values of
+            Just value -> value
+            Nothing -> error ("PresolutionState: missing legacy " ++ label)
 
 pattern PresolutionState
     :: Constraint p
@@ -270,24 +506,18 @@ pattern PresolutionState
     -> PresolutionState p
 pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces <-
     PresolutionStateInternal
-        constraint
-        presolution
-        unionFind
-        nextNodeId
-        pendingWeakens
-        pendingWeakenOwners
-        binderCache
-        _
-        _
-        _
-        _
-        _
-        _
-        _
-        _
-        edgeExpansions
-        edgeWitnesses
-        edgeTraces
+        { psConstraint = constraint
+        , psPresolution = presolution
+        , psUnionFind = unionFind
+        , psNextNodeId = nextNodeId
+        , psPendingWeakens = pendingWeakens
+        , psPendingWeakenOwners = pendingWeakenOwners
+        , psBinderCache = binderCache
+        , psEdgeExecutionArtifacts =
+            ( edgeExecutionArtifactProjections ->
+                (edgeExpansions, edgeWitnesses, edgeTraces)
+            )
+        }
   where
     PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces =
         PresolutionStateInternal
@@ -297,6 +527,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
             nextNodeId
             pendingWeakens
             pendingWeakenOwners
+            IntMap.empty
             binderCache
             0
             0
@@ -306,9 +537,12 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
             Nothing
             (Just dirtyAllBindingRepair)
             Nothing
-            edgeExpansions
-            edgeWitnesses
-            edgeTraces
+            emptyExpansionResultMap
+            ( legacyEdgeExecutionArtifacts
+                edgeExpansions
+                edgeWitnesses
+                edgeTraces
+            )
 
 {-# COMPLETE PresolutionState #-}
 
@@ -323,6 +557,14 @@ invalidateBindingRepairModelState st =
         { psBindingRepairCache = Nothing
         , psBindingRepairDirty = Just dirtyAllBindingRepair
         }
+
+-- | Binder discovery depends on the complete canonical type graph and binding
+-- tree: reachability, eliminated-variable state, ownership, and semantic UF
+-- representatives all participate in 'instantiationBindersFromGenM'.  Keep
+-- entries only while those inputs are stable.
+{-# INLINE invalidateBinderCacheState #-}
+invalidateBinderCacheState :: PresolutionState p -> PresolutionState p
+invalidateBinderCacheState st = st { psBinderCache = IntMap.empty }
 
 {-# INLINE markBindingRepairDirtyState #-}
 markBindingRepairDirtyState :: BindingRepairDirty -> PresolutionState p -> PresolutionState p
@@ -346,6 +588,7 @@ markBindingRepairDirtyBindRefsState dirtyBindRefs st =
 {-# INLINE modifyConstraintState #-}
 modifyConstraintState :: (Constraint p -> Constraint p) -> PresolutionState p -> PresolutionState p
 modifyConstraintState f st =
+    invalidateBinderCacheState $
     invalidateBindingRepairModelState $
     invalidateBindingModelState $
         st
@@ -367,6 +610,7 @@ modifyConstraintDirtyTypesState
     -> PresolutionState p
     -> PresolutionState p
 modifyConstraintDirtyTypesState dirtyTypes f st =
+    invalidateBinderCacheState $
     markBindingRepairDirtyTypesState dirtyTypes $
         st
             { psConstraint = f (psConstraint st)
@@ -381,6 +625,7 @@ setConstraintDirtyBindRefsState
     -> PresolutionState p
     -> PresolutionState p
 setConstraintDirtyBindRefsState dirtyBindRefs constraint st =
+    invalidateBinderCacheState $
     invalidateBindingModelState $
     markBindingRepairDirtyBindRefsState dirtyBindRefs $
         st
@@ -392,6 +637,7 @@ setConstraintDirtyBindRefsState dirtyBindRefs constraint st =
 {-# INLINE modifyBindParentsState #-}
 modifyBindParentsState :: (BindParents -> BindParents) -> PresolutionState p -> PresolutionState p
 modifyBindParentsState f st =
+    invalidateBinderCacheState $
     invalidateBindingRepairModelState $
     invalidateBindingModelState $
         st
@@ -403,6 +649,7 @@ modifyBindParentsState f st =
 {-# INLINE setBindParentState #-}
 setBindParentState :: NodeRef -> (NodeRef, BindFlag) -> PresolutionState p -> PresolutionState p
 setBindParentState child parentInfo st =
+    invalidateBinderCacheState $
     invalidateBindingModelState $
     markBindingRepairDirtyBindRefsState (IntSet.singleton (nodeRefKey child)) $
         st
@@ -425,6 +672,7 @@ setConstraintState constraint =
 {-# INLINE setUnionFindState #-}
 setUnionFindState :: IntMap NodeId -> PresolutionState p -> PresolutionState p
 setUnionFindState unionFind st =
+    invalidateBinderCacheState $
     invalidateBindingRepairModelState $
     invalidateBindingModelState $
         st
@@ -441,14 +689,16 @@ modifyUnionFindState f st =
 {-# INLINE mergeUnionFindState #-}
 mergeUnionFindState :: NodeId -> NodeId -> PresolutionState p -> PresolutionState p
 mergeUnionFindState fromRoot toRoot st =
+    invalidateBinderCacheState $
     invalidateBindingRepairModelState $
     invalidateBindingModelState $
-        st
-            { psUnionFind =
+        let unionFind =
                 IntMap.insert
                     (getNodeId fromRoot)
                     toRoot
                     (psUnionFind st)
+        in st
+            { psUnionFind = unionFind
             , psUnionFindVersion = psUnionFindVersion st + 1
             , psCachedRootGen = Nothing
             }
@@ -535,14 +785,244 @@ pendingWeakenOwnerToMaybe owner = case owner of
     PendingWeakenOwnerGen gid -> Just gid
     PendingWeakenOwnerUnknown -> Nothing
 
+{- Note [Construction-time Weaken replay certificates]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Figure 15.3.4 of the thesis translates a non-root @Weaken(n)@ as
+@C(r -> n)(N)@.  The premise for constructing that computation context is
+that @n@ is transitively flex-bound to the expansion root @r@ /before/ the
+operation.  Applying the Weaken changes the first edge of that very path to
+rigid, so the finalized binding tree cannot reconstruct the premise.
+
+`applyPendingWeaken` is the one point that owns both states.  It creates this
+opaque certificate only when the complete pre-state path is flexible and the
+post-state has changed exactly the operated edge from flexible to rigid (or
+when an earlier Merge in the same witness has already eliminated that copied
+binder).  Besides the normalized operation target, the certificate retains
+the exact operation-time copied binder needed by Φ; union-find may erase that
+identity before witness normalization.  It also snapshots the strict
+descendants needed by the delayed-Weaken ordering law.  Witness normalization
+consumes these producer-owned fields; it must not infer replay from a final
+type shape or treat an arbitrary invalid operation as exempt.
+
+Root Weaken is the identity computation in Figure 15.3.4.  Likewise a
+Graft/Weaken pair is one atomic instantiation step, so it does not publish a
+second standalone-Weaken certificate.  Other operations without the checked
+construction-time premise deliberately receive no certificate.
+-}
+
+-- | Evidence that one raw non-root Weaken had a valid computation context at
+-- the instant its pending graph mutation was applied.  Keep the constructor
+-- private: the pre/post checks below are the only production constructor.
+data WeakenReplayCertificate = WeakenReplayCertificate
+    { weakenReplayCertificateSource :: !NodeId
+    , weakenReplayCertificateTarget :: !NodeId
+    , weakenReplayCertificateReplayBinder :: !NodeId
+    , weakenReplayCertificateRoot :: !NodeId
+    , weakenReplayCertificateFlexiblePath :: ![NodeRef]
+    , weakenReplayCertificateDescendants :: !IntSet.IntSet
+    }
+    deriving (Eq, Show)
+
+-- | Certify the thesis premise for an applied non-root Weaken.
+--
+-- The path is recorded in target-to-root order.  Every edge on it is flexible
+-- in the pre-state; in the post-state only the target's own edge is rigid.
+certifyAppliedNonRootWeakenReplay
+    :: Constraint p
+    -> Constraint q
+    -> (NodeId -> NodeId)
+    -> NodeId
+    -> NodeId
+    -> NodeId
+    -> Maybe WeakenReplayCertificate
+certifyAppliedNonRootWeakenReplay before after canonical source target root = do
+    let targetC = canonical target
+        rootC = canonical root
+        interiorRoot = expansionInteriorRootRef before canonical rootC
+    if targetC == rootC then Nothing else pure ()
+    path <- flexibleRefPathToRoot before canonical (typeRef targetC) interiorRoot
+    parent <- case path of
+        _target : nextParent : _ -> Just nextParent
+        _ -> Nothing
+    case Binding.lookupBindParent after (typeRef targetC) of
+        Just (parentAfter, BindRigid)
+            | canonicalizeRef canonical parentAfter == parent -> pure ()
+        _ -> Nothing
+    if unchangedFlexibleSuffix before after canonical (drop 1 (dropLast path))
+        then pure ()
+        else Nothing
+    descendants <- strictTypeDescendants before canonical targetC
+    pure
+        WeakenReplayCertificate
+            { weakenReplayCertificateSource = source
+            , weakenReplayCertificateTarget = targetC
+            , weakenReplayCertificateReplayBinder = target
+            , weakenReplayCertificateRoot = rootC
+            , weakenReplayCertificateFlexiblePath = path
+            , weakenReplayCertificateDescendants = descendants
+            }
+
+-- | Check the source/copy/root linkage owned by the edge artifact.  This does
+-- not re-check the finalized binding shape; the opaque certificate already
+-- records the operation-time proof from Note [Construction-time Weaken replay
+-- certificates].
+weakenReplayCertificateMatches
+    :: (NodeId -> NodeId)
+    -> NodeId
+    -> NodeId
+    -> NodeId
+    -> WeakenReplayCertificate
+    -> Bool
+weakenReplayCertificateMatches canonical source target root certificate =
+    source == weakenReplayCertificateSource certificate
+        && target == weakenReplayCertificateReplayBinder certificate
+        && canonical target == canonical (weakenReplayCertificateTarget certificate)
+        && canonical root == canonical (weakenReplayCertificateRoot certificate)
+        && case weakenReplayCertificateFlexiblePath certificate of
+            TypeRef pathTarget : _ -> canonical pathTarget == canonical target
+            _ -> False
+
+-- | Certify the no-mutation finalization of a Weaken whose copied binder was
+-- already eliminated by an earlier Merge from the same raw witness.  UF
+-- inequality is the construction-time evidence that changing the surviving
+-- representative's binding edge would mutate the exterior type rather than
+-- finish the copied binder's operation.
+certifyEliminatedNonRootWeakenReplay
+    :: Constraint p
+    -> Constraint q
+    -> (NodeId -> NodeId)
+    -> NodeId
+    -> NodeId
+    -> NodeId
+    -> Maybe WeakenReplayCertificate
+certifyEliminatedNonRootWeakenReplay before after canonical source target root = do
+    let targetRepresentative = canonical target
+        rootC = canonical root
+        interiorRoot = expansionInteriorRootRef before canonical rootC
+    if targetRepresentative == target || targetRepresentative == rootC
+        then Nothing
+        else pure ()
+    path <- flexibleRefPathToRoot before canonical (typeRef target) interiorRoot
+    if unchangedFlexibleSuffix before after canonical (dropLast path)
+        then pure ()
+        else Nothing
+    descendants <- strictTypeDescendants before canonical target
+    pure
+        WeakenReplayCertificate
+            { weakenReplayCertificateSource = source
+            , weakenReplayCertificateTarget = targetRepresentative
+            , weakenReplayCertificateReplayBinder = target
+            , weakenReplayCertificateRoot = rootC
+            , weakenReplayCertificateFlexiblePath = path
+            , weakenReplayCertificateDescendants = descendants
+            }
+
+flexibleRefPathToRoot
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> NodeRef
+    -> NodeRef
+    -> Maybe [NodeRef]
+flexibleRefPathToRoot constraint canonical target root =
+    go IntSet.empty target []
+  where
+    go seen current acc
+        | current == root = Just (reverse (current : acc))
+        | IntSet.member (nodeRefKey current) seen = Nothing
+        | otherwise =
+            case Binding.lookupBindParent constraint current of
+                Just (parent, BindFlex) ->
+                    go
+                        (IntSet.insert (nodeRefKey current) seen)
+                        (canonicalizeRef canonical parent)
+                        (current : acc)
+                _ -> Nothing
+
+unchangedFlexibleSuffix
+    :: Constraint p
+    -> Constraint q
+    -> (NodeId -> NodeId)
+    -> [NodeRef]
+    -> Bool
+unchangedFlexibleSuffix before after canonical =
+    all unchanged
+  where
+    unchanged ref =
+        let refC = canonicalizeRef canonical ref
+        in case Binding.lookupBindParent before refC of
+            Nothing -> Binding.lookupBindParent after refC == Nothing
+            Just (parentBefore, BindFlex) ->
+                case Binding.lookupBindParent after refC of
+                    Just (parentAfter, BindFlex) ->
+                        canonicalizeRef canonical parentBefore
+                            == canonicalizeRef canonical parentAfter
+                    _ -> False
+            Just _ -> False
+
+canonicalizeRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
+canonicalizeRef canonical ref =
+    case ref of
+        TypeRef node -> TypeRef (canonical node)
+        GenRef gid -> GenRef gid
+
+dropLast :: [a] -> [a]
+dropLast values =
+    case values of
+        [] -> []
+        [_] -> []
+        value : rest -> value : dropLast rest
+
+-- | The expansion result and its copied binders are scheme siblings when the
+-- result is directly owned by a gen node.  In that representation the gen
+-- node, rather than the result type node, is the binding-tree authority for
+-- I(r).  Otherwise the result node itself is the authority.
+expansionInteriorRootRef
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> NodeId
+    -> NodeRef
+expansionInteriorRootRef constraint canonical root =
+    let rootC = canonical root
+    in case Binding.lookupBindParent constraint (typeRef rootC) of
+        Just (owner@GenRef{}, _flag) -> owner
+        _ -> typeRef rootC
+
+strictTypeDescendants
+    :: Constraint p
+    -> (NodeId -> NodeId)
+    -> NodeId
+    -> Maybe IntSet.IntSet
+strictTypeDescendants constraint canonical target = do
+    raw <- either (const Nothing) Just (Binding.interiorOf constraint (typeRef target))
+    pure $
+        IntSet.delete (getNodeId target) $
+            IntSet.fromList
+                [ getNodeId (canonical node)
+                | key <- IntSet.toList raw
+                , TypeRef node <- [nodeRefFromKey key]
+                ]
+
 -- | Per-edge provenance for instantiation-related operations.
 --
 -- Source-ID contract (consumed by Φ):
 --   * `EdgeWitness.ewWitness` operation node IDs
---   * `etBinderArgs`
+--   * `etRoot`
+--   * the source side of `etBinderArgs`
 --   * `etCopyMap` keys
 --   * `etInterior`
 -- all live in one source-ID domain.
+--
+-- The argument side of `etBinderArgs` is an instantiation/destination ID;
+-- `etCopyMap` values are destination IDs; and replay-map values are replay
+-- IDs.  These mappings are preserved verbatim across final materialization,
+-- but their two sides intentionally inhabit different domains.  Consumers
+-- canonicalize destination IDs locally when they need solved-graph lookup;
+-- replacing them in the trace would discard the construction provenance.
+--
+-- Destination-ID contract (consumed by Ω normalization):
+--   * `etResultRoot` is the authoritative root @r@ of the expansion at the
+--     edge destination.  It is produced by edge expansion construction and
+--     may be outside the binding-tree interior of the source `etRoot`.
 --
 -- Replay-map contract:
 --   * `etBinderReplayMap` maps source binder keys to replay-domain binder
@@ -552,6 +1032,10 @@ pendingWeakenOwnerToMaybe owner = case owner of
 --     of re-deriving binder scope from `etRoot`.
 --   * The map is required, total over the source binder domain (`etBinderArgs`),
 --     and injective over replay-domain TyVar binders.
+--   * This operation-authority domain can be wider than the leading quantified
+--     producer scheme after final unification.  It must not be used as a
+--     quantifier count: Phase 4 classifies the actual replay spine from the
+--     producer `SchemeInfo`, then matches those identities through this map.
 --
 -- Canonical IDs are derived locally at lookup sites. Global canonicalization
 -- must not rewrite provenance collections across this boundary.
@@ -561,15 +1045,84 @@ pendingWeakenOwnerToMaybe owner = case owner of
 -- (see `papers/xmlf.txt` Fig. 10). For now, we only track the binder↦argument
 -- pairing chosen by `ExpInstantiate`.
 data EdgeTrace = EdgeTrace
-    { etRoot :: NodeId
+    { etRoot :: NodeId -- ^ Source scheme root used by Φ/replay provenance.
+    , etResultRoot :: NodeId -- ^ Destination expansion root used to validate rewritten Ω.
     , etBinderArgs :: [(NodeId, NodeId)] -- ^ (binder node, instantiation argument node)
-    , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
+    , etInterior :: EdgeSourceInterior -- ^ Frozen source nodes in I(r).
     , etReplayContract :: ReplayContract -- ^ Producer-owned replay contract authority.
     , etBinderReplayMap :: IntMap NodeId -- ^ source binder key -> replay-domain binder node
     , etReplayDomainBinders :: [NodeId] -- ^ Explicit replay-domain binders for strict replay lanes.
     , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)
+
+-- | Decide Figure 15.3.4's flexible terminal @RaiseMerge(r,n')@ case
+-- entirely from one edge's frozen source-domain trace.  The rigid-target lane
+-- carries replay metadata for the exact source root and begins with
+-- @Weaken(r)@; replay owned by another source binder on the same edge does not
+-- classify the root transition.
+rootRaiseMergeTraceAuthority :: NodeId -> NodeId -> EdgeTrace -> Bool
+rootRaiseMergeTraceAuthority operated exterior traceInfo =
+    operated == etRoot traceInfo
+        && IntSet.member (getNodeId operated) sourceInterior
+        && IntSet.notMember (getNodeId exterior) sourceInterior
+        && not (sourceOwnsReplay operated)
+        && replayContractLeavesRootFlexible
+  where
+    EdgeSourceInterior (InteriorNodes sourceInterior) = etInterior traceInfo
+    sourceOwnsReplay source =
+        any ((== source) . fst) (etBinderArgs traceInfo)
+            || IntMap.member
+                (getNodeId source)
+                (etBinderReplayMap traceInfo)
+    replayContractLeavesRootFlexible =
+        case etReplayContract traceInfo of
+            ReplayContractNone ->
+                null (etBinderArgs traceInfo)
+                    && IntMap.null (etBinderReplayMap traceInfo)
+                    && null (etReplayDomainBinders traceInfo)
+            ReplayContractStrict ->
+                not (null (etBinderArgs traceInfo))
+                    && not (IntMap.null (etBinderReplayMap traceInfo))
+                    && not (null (etReplayDomainBinders traceInfo))
+
+-- | Decide the rigid-target root lane from its exact producer bridge.  The
+-- normalized operation sequence is @Weaken(r); RaiseMerge(r,n')@: weakening
+-- changes the operation-time binding flag of @r@, so both computations are
+-- identity.  This authority must never be used to emit @alpha_n' triangle@.
+rootRigidRaiseMergeTraceAuthority :: NodeId -> NodeId -> EdgeTrace -> Bool
+rootRigidRaiseMergeTraceAuthority operated exterior traceInfo =
+    operated == etRoot traceInfo
+        && IntSet.member (getNodeId operated) sourceInterior
+        && IntSet.notMember (getNodeId exterior) sourceInterior
+        && etReplayContract traceInfo == ReplayContractStrict
+        && case
+            ( etBinderArgs traceInfo,
+              IntMap.toList (etBinderReplayMap traceInfo),
+              etReplayDomainBinders traceInfo
+            )
+          of
+            ( [(sourceRoot, _argument)],
+              [(sourceKey, replayRoot)],
+              [domainRoot]
+              ) ->
+                sourceRoot == operated
+                    && sourceKey == getNodeId operated
+                    && replayRoot == domainRoot
+                    && lookupCopy operated (etCopyMap traceInfo) == Just replayRoot
+            _ -> False
+  where
+    EdgeSourceInterior (InteriorNodes sourceInterior) = etInterior traceInfo
+
+-- | Validate the trace half of an adjacent
+-- @Weaken(r); RaiseMerge(r,n')@ construction certificate.  The operation
+-- pair itself records that @r@ became rigid; the trace may come either from a
+-- copied strict-replay expansion or from an uncopied/no-replay expansion.
+-- Callers must check the adjacent same-root pair before using this predicate.
+rootWeakenRaiseMergeTraceAuthority :: NodeId -> NodeId -> EdgeTrace -> Bool
+rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo =
+    rootRigidRaiseMergeTraceAuthority operated exterior traceInfo
+        || rootRaiseMergeTraceAuthority operated exterior traceInfo
 
 newtype CopyMapping = CopyMapping { getCopyMapping :: IntMap NodeId }
     deriving (Eq, Show)
@@ -599,6 +1152,35 @@ type InteriorSet = IntSet.IntSet
 type FrontierSet = IntSet.IntSet
 
 newtype InteriorNodes = InteriorNodes IntSet.IntSet
+    deriving (Eq, Show)
+
+-- | Frozen source-domain membership for one instantiation edge.  These IDs
+-- align with witness operands, trace roots/binder arguments, and copy-map
+-- keys; they must not be rewritten when the destination graph is copied or
+-- canonicalized.
+newtype EdgeSourceInterior = EdgeSourceInterior
+    { getEdgeSourceInterior :: InteriorNodes
+    }
+    deriving (Eq, Show)
+
+instance Semigroup EdgeSourceInterior where
+    EdgeSourceInterior a <> EdgeSourceInterior b = EdgeSourceInterior (a <> b)
+
+instance Monoid EdgeSourceInterior where
+    mempty = EdgeSourceInterior mempty
+
+sourceInteriorFromList :: [NodeId] -> EdgeSourceInterior
+sourceInteriorFromList = EdgeSourceInterior . fromListInterior
+
+sourceInteriorFromSet :: IntSet.IntSet -> EdgeSourceInterior
+sourceInteriorFromSet = EdgeSourceInterior . InteriorNodes
+
+-- | Membership of the fresh/canonical graph constructed at an edge
+-- destination.  This domain is used only while executing or reusing chi_e and
+-- must never be stored in 'EdgeTrace.etInterior'.
+newtype EdgeDestinationInterior = EdgeDestinationInterior
+    { getEdgeDestinationInterior :: InteriorSet
+    }
     deriving (Eq, Show)
 
 instance Semigroup InteriorNodes where
@@ -648,6 +1230,43 @@ newtype PresolutionM p a = PresolutionM
     { unPresolutionM :: ReaderT TraceConfig (StateT (PresolutionState p) (Either PresolutionError)) a
     }
     deriving (Functor, Applicative, Monad, MonadReader TraceConfig, MonadState (PresolutionState p), MonadError PresolutionError)
+
+-- | Record the non-semantic collapse of a 'TyExp' occurrence wrapper onto the
+-- root constructed for its propagation.  Replays may report the same result
+-- class; distinct result classes are an invariant violation.
+recordExpansionResult :: NodeId -> NodeId -> PresolutionM p ()
+recordExpansionResult wrapper result0 = do
+    st <- get
+    let c = psConstraint st
+        canonical = UnionFind.frWith (psUnionFind st)
+        wrapperClass = canonical wrapper
+        result = canonical result0
+    case NodeAccess.lookupNode c wrapper of
+        Just TyExp{} -> pure ()
+        Just node ->
+            throwError $
+                InternalError $
+                    "expansion result expected TyExp wrapper, got " ++ show node
+        Nothing -> throwError (NodeLookupFailed wrapper)
+    normalized <-
+        either throwError pure $
+            canonicalizeExpansionResultMap canonical (psExpansionResults st)
+    case lookupExpansionResult wrapperClass normalized of
+        Nothing ->
+            put $
+                st
+                    { psExpansionResults =
+                        ExpansionResultMap $
+                            IntMap.insert
+                                (getNodeId wrapperClass)
+                                result
+                                (getExpansionResultMap normalized)
+                    }
+        Just existing
+            | existing == result ->
+                put st { psExpansionResults = normalized }
+            | otherwise ->
+                throwError (ExpansionResultConflict wrapperClass existing result)
 
 -- | Run a PresolutionM action with an initial state (testing helper).
 runPresolutionM
@@ -714,43 +1333,59 @@ instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
     throwPresolutionError = throwError
     modifyPresolution f = modify' $ \st -> st { psPresolution = f (psPresolution st) }
     bindExpansionArgs expansionRoot pairs = do
-        (c0, canonical, quotient) <- cachedBindingModelM
-        let expansionRootC = canonical expansionRoot
+        (_c0, canonical, quotient) <- cachedBindingModelM
+        let
+            expansionRootC = canonical expansionRoot
             bindParents = Binding.qbpBindParents quotient
-        st <- get
-        rootGen <- case psCachedRootGen st of
-            Just cached -> pure cached
-            Nothing -> do
-                let genIds = IntMap.keys (getGenNodeMap (cGenNodes c0))
-                    pickRoot acc gidInt =
-                        case acc of
-                            Just _ -> acc
-                            Nothing ->
-                                let gref = genRef (GenNodeId gidInt)
-                                in case IntMap.lookup (nodeRefKey gref) bindParents of
-                                    Nothing -> Just gref
-                                    Just _ -> Nothing
-                    result :: Maybe NodeRef
-                    result = foldl' pickRoot Nothing genIds
-                modify' $ \s -> s { psCachedRootGen = Just result }
-                pure result
-        forM_ pairs $ \(_bv, arg) -> do
-            let argC = canonical arg
-            case IntMap.lookup (nodeRefKey (typeRef argC)) bindParents of
-                Just _ -> pure ()
-                Nothing ->
-                    case rootGen of
-                        Just gref ->
-                            modify' $
-                                setBindParentState
-                                    (typeRef argC)
-                                    (gref, BindFlex)
-                        Nothing ->
-                            when (Binding.isUpper c0 (typeRef expansionRootC) (typeRef argC)) $
-                                modify' $
-                                    setBindParentState
-                                        (typeRef argC)
-                                        (typeRef expansionRootC, BindFlex)
+        destinationGen <-
+            case BindingPath.bindingPathToRootLocal
+                bindParents
+                (typeRef expansionRootC) of
+                Left err -> throwError (BindingTreeError err)
+                Right path ->
+                    case [gref | gref@GenRef{} <- path] of
+                        (gref : _) -> pure gref
+                        [] ->
+                            throwError
+                                (InternalError "expansion root has no destination gen binder")
+        st0 <- get
+        let cBefore = psConstraint st0
+            -- Expansion ownership is defined when an argument is first
+            -- allocated.  A reused argument may already have been Raised by
+            -- an earlier edge-local operation; lowering it back to the
+            -- destination would violate the monotone binding-tree semantics
+            -- and immediately require the same Raise again.
+            cCandidate =
+                foldr
+                    bindFreshArgument
+                    cBefore
+                    pairs
+            bindFreshArgument (_binder, arg) c =
+                let argC = canonical arg
+                    existingParent =
+                        Binding.lookupBindParent cBefore (typeRef arg)
+                            <|> Binding.lookupBindParent cBefore (typeRef argC)
+                    bindOne ownedArg =
+                        Binding.setBindParent
+                            (typeRef ownedArg)
+                            (destinationGen, BindFlex)
+                in case existingParent of
+                    Just _ -> c
+                    Nothing -> bindOne arg (bindOne argC c)
+        (cScoped, raiseTrace) <-
+            case BoundScope.repairAllVarBoundScopes canonical cCandidate of
+                Left err -> throwError (BindingTreeError err)
+                Right result -> pure result
+        if null raiseTrace
+            then do
+                let dirtyBindRefs =
+                        BoundScope.changedBindParentRefs cBefore cScoped
+                if IntSet.null dirtyBindRefs
+                    then pure ()
+                    else put (setConstraintDirtyBindRefsState dirtyBindRefs cScoped st0)
+            else
+                throwError
+                    (ExpansionArgumentScopeRepairRequired expansionRootC raiseTrace)
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
@@ -848,6 +1483,7 @@ repairBindingParentsFromScratchOrDirty c0 uf canonical mbValidRepairCache dirty0
             qbp0
                 { Binding.qbpBindParents = bp1
                 , Binding.qbpChildrenByParent = quotientChildrenByParent bp1
+                , Binding.qbpRawParentAssignments = IntMap.map (: []) bp1
                 }
         bindingCache =
             CachedBindingModel
@@ -866,6 +1502,7 @@ repairBindingParentsFromScratchOrDirty c0 uf canonical mbValidRepairCache dirty0
                 , psBindingRepairCache = Just repairCache
                 , psBindingRepairDirty = Nothing
                 , psCachedRootGen = if changed then Nothing else psCachedRootGen st0
+                , psBinderCache = if changed then IntMap.empty else psBinderCache st0
                 }
     put stFinal
     pure
@@ -890,7 +1527,13 @@ edgeInteriorExact :: NodeId -> PresolutionM p IntSet.IntSet
 edgeInteriorExact root0 = do
     (c0, canonical, _qbp) <- cachedBindingModelM
     let interiorRootRef = traceInteriorRootRef canonical c0 root0
-    interiorOfUnderCachedM canonical interiorRootRef
+    refs <- interiorOfUnderCachedM canonical interiorRootRef
+    pure $
+        IntSet.fromList
+            [ getNodeId (canonical node)
+            | key <- IntSet.toList refs
+            , TypeRef node <- [nodeRefFromKey key]
+            ]
 
 -- | Compute interior I(r) using the cached quotient binding model.
 interiorOfUnderCachedM :: (NodeId -> NodeId) -> NodeRef -> PresolutionM p IntSet.IntSet
@@ -944,8 +1587,8 @@ orderedBindersRawM binder0 = do
         Left err -> throwError (BindingTreeError err)
         Right binders -> pure binders
 
--- | Resolve the instantiation binders for a node, skipping vacuous ∀ nodes.
--- Returns the body root to instantiate and the ordered binder list.
+-- | Resolve the instantiation binders for a node, skipping vacuous forall
+-- nodes.  A single graph forall remains a single instantiation boundary.
 instantiationBindersM :: GenNodeId -> NodeId -> PresolutionM p (NodeId, [NodeId])
 instantiationBindersM gid nid0 = do
     st <- get
@@ -963,7 +1606,7 @@ instantiationBindersM gid nid0 = do
                 else do
                     let root =
                             case nodeAtNid of
-                                Just TyForall{ tnBody = inner } -> canonical inner
+                                Just TyForall {tnBody = inner} -> canonical inner
                                 _ -> nid
                     let debugMsg =
                             "instantiationBindersM: nid="
@@ -1018,6 +1661,16 @@ instantiationBindersFromGenM gid bodyRoot0 = do
         canonical = UnionFind.frWith uf0
         bodyC = canonical bodyRoot0
         nodes = cNodes c0
+        schemeRoots =
+            case NodeAccess.lookupGenNode c0 gid of
+                Nothing -> []
+                Just gen -> map canonical (gnSchemes gen)
+        ownsBody root =
+            root == bodyC
+                || case VarStore.lookupVarBound c0 root of
+                    Just bound -> canonical bound == bodyC
+                    Nothing -> False
+        hasSchemeProvenance = any ownsBody schemeRoots
 
     -- 1. Get flex children under the gen node's scope
     bindersUnderGen <- case Binding.boundFlexChildrenUnder canonical c0 (genRef gid) of
@@ -1068,9 +1721,11 @@ instantiationBindersFromGenM gid bodyRoot0 = do
                         Nothing -> False
                 _ -> False
         candidates =
-            if bodyIsWrapper
-                then filter (/= bodyC) sorted
-                else sorted
+            if not hasSchemeProvenance
+                then []
+                else if bodyIsWrapper
+                    then filter (/= bodyC) sorted
+                    else sorted
 
     pure (bodyC, candidates)
 
@@ -1098,11 +1753,13 @@ dropTrivialSchemeEdges
     -> EdgeArtifacts
 dropTrivialSchemeEdges constraint edgeArtifacts =
     let dropEdgeIds = cLetEdges constraint
+        identityEdgeIds = dropEdgeIds `IntSet.union` cGraftedEdges constraint
         keepEdge eid = not (IntSet.member eid dropEdgeIds)
         witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeWitnesses edgeArtifacts)
         traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeTraces edgeArtifacts)
         expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeExpansions edgeArtifacts)
-    in EdgeArtifacts expansions' witnesses' traces'
+        identityEdges' = eaIdentityEdges edgeArtifacts `IntSet.union` identityEdgeIds
+    in EdgeArtifacts expansions' witnesses' traces' identityEdges'
 
 {- Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

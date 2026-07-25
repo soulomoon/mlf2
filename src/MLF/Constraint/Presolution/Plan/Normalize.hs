@@ -2,7 +2,10 @@
 module MLF.Constraint.Presolution.Plan.Normalize (
     substTypeRef,
     simplifySchemeBindingsRefs,
+    simplifySchemeBindingsRefsWhen,
+    simplifySchemeBindingsRefsWhenPreserving,
     promoteArrowAliasRefs,
+    promoteArrowAliasRefsWhen,
     isBaseBound,
     isVarBound,
     containsForall,
@@ -11,7 +14,6 @@ module MLF.Constraint.Presolution.Plan.Normalize (
 
 import MLF.Reify.TypeOps
     ( composeTypeHeadRef
-    , freeTypeVarRefsFrom
     , freeTypeVarRefsType
     , substTypeSimpleRef
     )
@@ -36,7 +38,31 @@ simplifySchemeBindingsRefs
     -> [(TypeBinderRef, Maybe BoundType)]
     -> ElabType
     -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
-simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
+simplifySchemeBindingsRefs inlineBaseBounds =
+    simplifySchemeBindingsRefsWhen (const inlineBaseBounds)
+
+simplifySchemeBindingsRefsWhen
+    :: (TypeBinderRef -> Bool)
+    -> [TypeBinderRef]
+    -> [(TypeBinderRef, Maybe BoundType)]
+    -> ElabType
+    -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+simplifySchemeBindingsRefsWhen shouldInlineBaseBound namedBinders binds ty =
+    simplifySchemeBindingsRefsWhenPreserving
+        shouldInlineBaseBound
+        (const False)
+        namedBinders
+        binds
+        ty
+
+simplifySchemeBindingsRefsWhenPreserving
+    :: (TypeBinderRef -> Bool)
+    -> (TypeBinderRef -> Bool)
+    -> [TypeBinderRef]
+    -> [(TypeBinderRef, Maybe BoundType)]
+    -> ElabType
+    -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+simplifySchemeBindingsRefsWhenPreserving shouldInlineBaseBound preserveBinder namedBinders binds ty =
     let binders = map fst binds
     in simplify binders binds ty
   where
@@ -54,47 +80,27 @@ simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
                 in ((ref, Nothing) : rest', body')
             Just bound ->
                 let boundElab = tyToElab bound
-                    bodyUsesV = refMember ref (freeTypeVarRefsFrom [] body)
-                    restUsesV =
-                        any
-                            (refMember ref)
-                                [ freeTypeVarRefsType b
-                                | (_, Just b) <- rest
-                                ]
-                in if not bodyUsesV && not restUsesV
+                    bindingIsUsed = bindingOccursFree ref rest body
+                in if not bindingIsUsed && not (preserveBinder ref)
                     then simplify (deleteRef ref binders) rest body
                     else case body of
                     TVarRef bodyRef | typeBinderRefsSameIdentity bodyRef ref ->
-                        let freeBound = freeTypeVarRefsFrom [] bound
+                        -- See Note [Eq-Var normalization].
+                        let freeBound = freeTypeVarRefsType bound
                             boundMentionsSelf = refMember ref freeBound
-                            boundDeps = deleteRef ref freeBound
-                            boundIsBase = isBaseBound bound
-                            boundIsVar = isVarBound bound
-                            boundMentionsNamed =
-                                any (`refMember` namedBinders) freeBound
-                            canInlineAliasSimple =
-                                null boundDeps
-                                    && (not boundIsBase || inlineBaseBounds)
-                                    && not isNamedBinder
-                                    && not boundMentionsNamed
-                            canInlineStructured =
-                                not boundIsBase
-                                    && not boundIsVar
-                                    && not isNamedBinder
-                        in if not boundMentionsSelf
-                            && (canInlineAliasSimple || canInlineStructured)
+                        in if not boundMentionsSelf && not (preserveBinder ref)
                             then
                                 let body' = boundElab
                                     restSub =
                                         [ (name, fmap (substBoundRef ref boundElab) mb)
                                         | (name, mb) <- rest
                                         ]
-                                in simplify (deleteRef ref binders) restSub body'
+                                in eliminateBinding ref bound binders rest restSub body body'
                             else
                                 let (rest', body') = simplify binders rest body
                                 in ((ref, Just bound) : rest', body')
                     _ ->
-                        let freeBound = freeTypeVarRefsFrom [] bound
+                        let freeBound = freeTypeVarRefsType bound
                             boundMentionsSelf = refMember ref freeBound
                             boundDeps = deleteRef ref freeBound
                             dependsOnBinders =
@@ -103,9 +109,8 @@ simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
                             boundMentionsNamed =
                                 any (`refMember` namedBinders) freeBound
                             canInlineBase =
-                                inlineBaseBounds
+                                shouldInlineBaseBound ref
                                     && not dependsOnBinders
-                                    && not restUsesV
                                     && isBaseBound bound
                                     && not boundMentionsNamed
                             canInlineNonBase =
@@ -114,12 +119,9 @@ simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
                                     && isVarBound bound
                                     && not isNamedBinder
                                     && not boundMentionsNamed
-                            canInlineStructured =
-                                not (isBaseBound bound)
-                                    && not (isVarBound bound)
-                                    && not isNamedBinder
                         in if not boundMentionsSelf
-                            && (canInlineBase || canInlineNonBase || canInlineStructured)
+                            && not (preserveBinder ref)
+                            && (canInlineBase || canInlineNonBase)
                             then
                                 let replacement = boundElab
                                     bodySub = substTypeRef ref replacement body
@@ -127,15 +129,54 @@ simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
                                         [ (name, fmap (substBoundRef ref replacement) mb)
                                         | (name, mb) <- rest
                                         ]
-                                in simplify binders restSub bodySub
+                                in eliminateBinding ref bound binders rest restSub body bodySub
                             else
                                 let (rest', body') = simplify binders rest body
                                 in ((ref, Just bound) : rest', body')
 
+    bindingOccursFree ref remainingBindings body =
+        refMember ref (freeTypeVarRefsType body)
+            || any
+                (refMember ref . freeTypeVarRefsType)
+                [ bound
+                | (_, Just bound) <- remainingBindings
+                ]
+
+    -- Binder elimination is one capability: rewrite the body and every
+    -- remaining bound, then retire the declaration only if that exact
+    -- identity is absent from the rewritten scope.  A nested forall shadows
+    -- its body but not its own bound, so the lexical free-reference query is
+    -- essential here.
+    eliminateBinding ref bound binders originalRest rewrittenRest originalBody rewrittenBody
+        | bindingOccursFree ref rewrittenRest rewrittenBody =
+            let (rest', body') = simplify binders originalRest originalBody
+            in ((ref, Just bound) : rest', body')
+        | otherwise =
+            simplify (deleteRef ref binders) rewrittenRest rewrittenBody
+
+{- Note [Eq-Var normalization]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The thesis's Eq-Var rule states that @forall (a > tau). a@ is equivalent
+to @tau@ (Section 8.2, Figure 8.2.3), provided the bound does not mention
+the binder itself.  Apply that equivalence regardless of the shape of @tau@
+for ordinary binders.  A caller-protected binder is construction authority
+(notably a required Gamma entry for a root RaiseMerge), whose explicit
+abstraction and instantiation must survive even when it is type-vacuous or its
+erased type is Eq-Var equivalent to the bound.
+-}
+
 promoteArrowAliasRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
-promoteArrowAliasRefs binds ty = case ty of
+promoteArrowAliasRefs = promoteArrowAliasRefsWhen (const True)
+
+promoteArrowAliasRefsWhen
+    :: (TypeBinderRef -> Bool)
+    -> [(TypeBinderRef, Maybe BoundType)]
+    -> ElabType
+    -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+promoteArrowAliasRefsWhen canPromote binds ty = case ty of
     TArrow (TVarRef ref1) (TVarRef ref2)
-        | typeBinderRefsSameIdentity ref1 ref2 ->
+        | typeBinderRefsSameIdentity ref1 ref2
+        , canPromote ref1 ->
             case lookupRef ref1 binds of
                 Just (Just bnd)
                     | isBaseBound bnd || bnd == TBottom ->

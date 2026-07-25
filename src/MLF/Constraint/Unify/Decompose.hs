@@ -45,8 +45,8 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
     (TyMu { tnBody = b1 }, TyMu { tnBody = b2 }) ->
         Right [UnifyEdge b1 b2]
 
-    (TyBase { tnBase = b1 }, TyBase { tnBase = b2 })
-        | b1 == b2 -> Right []
+    (TyBase { tnBaseIdentity = identity1, tnBase = b1 }, TyBase { tnBaseIdentity = identity2, tnBase = b2 })
+        | identity1 == identity2 -> Right []
         | otherwise -> Left (MismatchBase b1 b2)
 
     (TyBottom{}, TyBottom{}) ->
@@ -56,8 +56,8 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
         | s1 == s2 -> Right [UnifyEdge b1 b2]
         | otherwise -> Left (MismatchExpVar s1 s2)
 
-    (TyCon { tnCon = c1, tnArgs = args1 }, TyCon { tnCon = c2, tnArgs = args2 })
-        | c1 /= c2 -> Left (MismatchTyCon c1 c2)
+    (TyCon { tnConIdentity = identity1, tnCon = c1, tnArgs = args1 }, TyCon { tnConIdentity = identity2, tnCon = c2, tnArgs = args2 })
+        | identity1 /= identity2 -> Left (MismatchTyCon c1 c2)
         | NE.length args1 /= NE.length args2 -> Left (MismatchTyConArity c1 (NE.length args1) (NE.length args2))
         | otherwise -> Right (zipWith UnifyEdge (NE.toList args1) (NE.toList args2))
 

@@ -6,15 +6,7 @@
   "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-007",
   "controller_stage": "dispatch-rounds",
   "max_parallel_rounds": 1,
-  "active_rounds": [
-    {
-      "round_id": "round-362",
-      "stage": "finalize-round",
-      "branch": "orchestrator/round-362-platform-contract-next",
-      "worktree_path": "orchestrator/worktrees/round-362",
-      "resume_error": null
-    }
-  ],
+  "active_rounds": [],
   "roadmap_update": null,
   "resume_errors": {},
   "retry": null

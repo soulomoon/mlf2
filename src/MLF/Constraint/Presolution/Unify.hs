@@ -14,11 +14,10 @@ module MLF.Constraint.Presolution.Unify (
     unifyAcyclicRawWithRaiseTracePrefer
 ) where
 
-import Control.Monad.State (get, modify, put)
+import Control.Monad.State (get, put)
 import Control.Monad.Except (throwError)
 import Control.Monad (when)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Constraint.Traversal as Traversal
@@ -31,7 +30,13 @@ import MLF.Constraint.Presolution.Base
     , setConstraintDirtyBindRefsState
     , mergeUnionFindState
     )
-import MLF.Constraint.Presolution.Ops (findRoot)
+import MLF.Constraint.Presolution.Ops
+    ( findRoot )
+import MLF.Constraint.Presolution.BoundScope
+    ( changedBindParentRefs
+    , repairAllVarBoundScopes
+    )
+import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 
 -- | Lightweight reachability to prevent emitting a unification that would
@@ -76,14 +81,11 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
     st0 <- get
     let c0 = psConstraint st0
 
-    (c1, trace0) <-
+    (c1, rootTrace) <-
         case BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag root1) (TypeRefTag root2) c0 of
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
 
-    let dirtyBindRefs = changedBindParentRefs c0 c1
-    when (c1 /= c0) $
-        put (setConstraintDirtyBindRefsState dirtyBindRefs c1 st0)
     let nodes = cNodes c1
         aElim = VarStore.isEliminatedVar c1 root1
         bElim = VarStore.isEliminatedVar c1 root2
@@ -118,22 +120,32 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
                     | p == root2 && not bElim -> (root1, root2)
                     | otherwise -> (fromRoot, toRoot)
                 Nothing -> (fromRoot, toRoot)
-    modify $ mergeUnionFindState fromRoot' toRoot'
+        unionFindCandidate =
+            IntMap.insert
+                (getNodeId fromRoot')
+                toRoot'
+                (psUnionFind st0)
+        canonicalCandidate = UnionFind.frWith unionFindCandidate
 
-    pure trace0
+    -- A UF merge can make a previously external node reachable through a
+    -- variable's lower bound.  Validate and repair against the prospective
+    -- quotient, then publish the binding tree and UF link together.  Repairing
+    -- only before the union leaves an invalid intermediate relation to be
+    -- discovered by an unrelated later operation.
+    (c2, boundTrace) <-
+        case repairAllVarBoundScopes canonicalCandidate c1 of
+            Left err -> throwError (BindingTreeError err)
+            Right result -> pure result
 
-changedBindParentRefs :: Constraint p -> Constraint p -> IntSet.IntSet
-changedBindParentRefs before after =
-    IntSet.filter changed allKeys
-  where
-    beforeParents = cBindParents before
-    afterParents = cBindParents after
-    allKeys =
-        IntSet.union
-            (IntSet.fromAscList (IntMap.keys beforeParents))
-            (IntSet.fromAscList (IntMap.keys afterParents))
-    changed key =
-        IntMap.lookup key beforeParents /= IntMap.lookup key afterParents
+    let dirtyBindRefs = changedBindParentRefs c0 c2
+        stMerged = mergeUnionFindState fromRoot' toRoot' st0
+        stCommitted =
+            if c2 == c0
+                then stMerged
+                else setConstraintDirtyBindRefsState dirtyBindRefs c2 stMerged
+    put stCommitted
+
+    pure (rootTrace ++ boundTrace)
 
 unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM p (Int, Int)
 unifyAcyclicRawWithRaiseCounts n1 n2 = do

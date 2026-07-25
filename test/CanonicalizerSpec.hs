@@ -11,7 +11,7 @@ import Test.QuickCheck
 
 import MLF.Constraint.Canonicalizer
 import MLF.Constraint.Presolution (EdgeTrace(..))
-import MLF.Constraint.Presolution.TestSupport (CopyMapping(..), fromListInterior)
+import MLF.Constraint.Presolution.TestSupport (CopyMapping(..), sourceInteriorFromList)
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
@@ -89,18 +89,20 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
             let InstanceWitness ops1 = ewWitness w1
             ops1 `shouldBe` ops0
 
-        it "canonicalizes trace root and preserves source-domain provenance fields" $ do
+        it "preserves the trace source root and canonicalizes only the destination root" $ do
             let tr0 = EdgeTrace
                     { etRoot = NodeId 1
+                    , etResultRoot = NodeId 1
                     , etBinderArgs = [(NodeId 1, NodeId 3), (NodeId 2, NodeId 4)]
-                    , etInterior = fromListInterior [NodeId 1, NodeId 2, NodeId 3]
+                    , etInterior = sourceInteriorFromList [NodeId 1, NodeId 2, NodeId 3]
                     , etBinderReplayMap = mempty
                     , etReplayDomainBinders = []
                     , etCopyMap = CopyMapping (IntMap.fromList [(1, NodeId 2), (3, NodeId 4)])
                     , etReplayContract = ReplayContractNone
                     }
                 tr1 = canonicalizeTrace canon tr0
-            etRoot tr1 `shouldBe` canonNode (etRoot tr0)
+            etRoot tr1 `shouldBe` etRoot tr0
+            etResultRoot tr1 `shouldBe` canonNode (etResultRoot tr0)
             etBinderArgs tr1 `shouldBe` etBinderArgs tr0
             etInterior tr1 `shouldBe` etInterior tr0
             let CopyMapping cmap = etCopyMap tr1
@@ -108,7 +110,11 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
 
         it "canonicalizes expansions" $ do
             let spec0 = ForallSpec
-                    { fsBounds = [Just (BoundNode (NodeId 1)), Just (BoundBinder 0)]
+                    { fsBounds =
+                        [ Just (BoundNode (NodeId 1))
+                        , Just (BoundProjection (NodeId 2) (NodeId 3))
+                        , Just (BoundBinder 0)
+                        ]
                     }
                 exp0 =
                     ExpCompose (ExpForall (spec0 NE.:| []) NE.:| [ExpInstantiate [NodeId 3]])
@@ -120,6 +126,11 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                             ( ForallSpec
                                 { fsBounds =
                                     [ Just (BoundNode (canonNode (NodeId 1)))
+                                    , Just
+                                        ( BoundProjection
+                                            (canonNode (NodeId 2))
+                                            (canonNode (NodeId 3))
+                                        )
                                     , Just (BoundBinder 0)
                                     ]
                                 }

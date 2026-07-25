@@ -11,16 +11,15 @@ normalization before this matcher is used.
 -}
 module MLF.Backend.StructuralRecursiveData
   ( BackendParameterBounds,
-    BackendDataScope (..),
+    BackendDataScope,
+    backendDataScopeByIdentity,
     StructuralConstructorMatch (..),
     StructuralRecursiveDataMatch (..),
     StructuralRecursiveDataMismatch (..),
     alphaEqBackendType,
     backendDataScope,
     backendStructuralDataBoundaryMatches,
-    backendStructuralDataBoundaryMatchesWith,
     completeBackendParameterSubstitution,
-    completeDataParameterSubstitution,
     decomposeBackendTypeHead,
     isVacuousRecursiveBinderWithIdentity,
     lookupTypeBound,
@@ -28,9 +27,6 @@ module MLF.Backend.StructuralRecursiveData
     matchConstructorResult,
     matchFocusedStructuralConstructor,
     matchStructuralDataDeclaration,
-    metadataLightStructuralDataMatches,
-    metadataLightStructuralDataMatchesWithIdentity,
-    structuralIdentityAllowsNameFallback,
     structuralBackendHandlerFields,
     structuralDataArgumentSubstitution,
     structuralDataDeclarationMatches,
@@ -38,7 +34,6 @@ module MLF.Backend.StructuralRecursiveData
     structuralMuAsActualDataType,
     structuralMuAsDataType,
     structuralMuHandlerTypes,
-    structuralMuNameMatches,
     structuralMuPayloadTypes,
     structuralMuTypesHaveBinderIdentityMismatch,
     structuralPayloadsMayInstantiate,
@@ -56,45 +51,51 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Backend.IR.Types
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityExact, symbolDefiningName, symbolRefMatchesWith, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityExact, sameSymbolIdentity, symbolDefiningName, symbolUniqueIdentity)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
-import MLF.Types.Reference (ReferenceMode (..))
+import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityGeneratedUnique, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 type BackendParameterBounds = Map.Map BackendTypeSubstitutionKey (Maybe BackendType)
 
 type AlphaBinderEnv = Map.Map BackendTypeSubstitutionKey (Set.Set BackendTypeSubstitutionKey)
 
-data BackendDataScope
+newtype BackendDataScope
   = BackendDataScope
-      { backendDataScopeByName :: Map.Map String BackendData,
-        backendDataScopeByIdentity :: Map.Map SymbolIdentity BackendData
+      { backendDataScopeByIdentity :: Map.Map SymbolIdentity BackendData
       }
   deriving (Eq, Show)
 
-backendDataScope :: Map.Map String BackendData -> Map.Map SymbolIdentity BackendData -> BackendDataScope
-backendDataScope dataDeclsByName =
-  BackendDataScope (Map.filter ((== Nothing) . backendDataIdentity) dataDeclsByName)
+backendDataScope :: Map.Map SymbolIdentity BackendData -> BackendDataScope
+backendDataScope =
+  BackendDataScope
 
 typeBoundKeyNames :: BackendParameterBounds -> Set.Set String
 typeBoundKeyNames =
   Set.map backendTypeSubstitutionKeyName . Map.keysSet
 
-lookupTypeBound :: Maybe TypeBinderIdentity -> String -> BackendParameterBounds -> Maybe (Maybe BackendType)
-lookupTypeBound identity name =
-  Map.lookup (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name)
+lookupTypeBound :: TypeBinderIdentity -> BackendParameterBounds -> Maybe (Maybe BackendType)
+lookupTypeBound identity =
+  Map.lookup (backendTypeSubstitutionKeyFromIdentity identity)
 
 data StructuralRecursiveDataMatch = StructuralRecursiveDataMatch
-  { srdmDataName :: String,
+  { srdmDataIdentity :: SymbolIdentity,
+    srdmDataName :: String,
     srdmParameterSubstitution :: Map.Map BackendTypeSubstitutionKey BackendType,
     srdmPayloadFields :: [[BackendType]]
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq StructuralRecursiveDataMatch where
+  left == right =
+    sameSymbolIdentity (srdmDataIdentity left) (srdmDataIdentity right)
+      && srdmParameterSubstitution left == srdmParameterSubstitution right
+      && srdmPayloadFields left == srdmPayloadFields right
 
 data StructuralConstructorMatch = StructuralConstructorMatch
-  { srcmDataName :: String,
-    srcmConstructorIdentity :: Maybe SymbolIdentity,
+  { srcmDataIdentity :: SymbolIdentity,
+    srcmDataName :: String,
+    srcmConstructorIdentity :: SymbolIdentity,
     srcmConstructorName :: String,
     srcmFieldTypes :: [BackendType]
   }
@@ -102,11 +103,8 @@ data StructuralConstructorMatch = StructuralConstructorMatch
 
 instance Eq StructuralConstructorMatch where
   left == right =
-    symbolRefMatchesWith MetadataLight (srcmConstructorIdentity left) (srcmConstructorName left) (srcmConstructorIdentity right) (srcmConstructorName right)
-      && case (srcmConstructorIdentity left, srcmConstructorIdentity right) of
-        (Just {}, Just {}) -> True
-        (Nothing, Nothing) -> srcmDataName left == srcmDataName right
-        _ -> False
+    sameSymbolIdentity (srcmDataIdentity left) (srcmDataIdentity right)
+      && sameSymbolIdentity (srcmConstructorIdentity left) (srcmConstructorIdentity right)
       && srcmFieldTypes left == srcmFieldTypes right
 
 data StructuralRecursiveDataMismatch
@@ -127,32 +125,32 @@ alphaEqBackendType =
   where
     go leftEnv rightEnv leftTy rightTy =
       case (leftTy, rightTy) of
-        (BTVarWithIdentity leftIdentity leftName, BTVarWithIdentity rightIdentity rightName) ->
-          typeVarMatches leftEnv rightEnv leftIdentity leftName rightIdentity rightName
+        (BTVarWithIdentity leftIdentity _, BTVarWithIdentity rightIdentity _) ->
+          typeVarMatches leftEnv rightEnv leftIdentity rightIdentity
         (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
           go leftEnv rightEnv leftDom rightDom && go leftEnv rightEnv leftCod rightCod
-        (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
-          backendTypeHeadMatchesWith MetadataLight leftIdentity leftBase rightIdentity rightBase
-        (BTBaseWithIdentity leftIdentity leftBase, BTMuWithIdentity rightIdentity rightName rightBody) ->
-          metadataLightStructuralDataMatchesAgainstHead leftIdentity leftBase [] rightIdentity rightName rightBody
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTBaseWithIdentity rightIdentity rightBase) ->
-          metadataLightStructuralDataMatchesAgainstHead rightIdentity rightBase [] leftIdentity leftName leftBody
-        (BTConWithIdentity leftIdentity leftCon leftArgs, BTConWithIdentity rightIdentity rightCon rightArgs) ->
-          backendTypeHeadMatchesWith MetadataLight leftIdentity leftCon rightIdentity rightCon
+        (BTBaseWithIdentity leftIdentity _, BTBaseWithIdentity rightIdentity _) ->
+          backendTypeHeadMatches leftIdentity rightIdentity
+        (BTBaseWithIdentity leftIdentity _, BTMuWithIdentity rightIdentity _ rightBody) ->
+          structuralDataMatchesHead leftIdentity [] rightIdentity rightBody
+        (BTMuWithIdentity leftIdentity _ leftBody, BTBaseWithIdentity rightIdentity _) ->
+          structuralDataMatchesHead rightIdentity [] leftIdentity leftBody
+        (BTConWithIdentity leftIdentity _ leftArgs, BTConWithIdentity rightIdentity _ rightArgs) ->
+          backendTypeHeadMatches leftIdentity rightIdentity
             && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
-        (BTConWithIdentity leftIdentity leftCon leftArgs, BTMuWithIdentity rightIdentity rightName rightBody) ->
-          metadataLightStructuralDataMatchesAgainstHead leftIdentity leftCon (NE.toList leftArgs) rightIdentity rightName rightBody
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTConWithIdentity rightIdentity rightCon rightArgs) ->
-          metadataLightStructuralDataMatchesAgainstHead rightIdentity rightCon (NE.toList rightArgs) leftIdentity leftName leftBody
-        (BTVarAppWithIdentity leftIdentity leftName leftArgs, BTVarAppWithIdentity rightIdentity rightName rightArgs) ->
-          typeVarMatches leftEnv rightEnv leftIdentity leftName rightIdentity rightName
+        (BTConWithIdentity leftIdentity _ leftArgs, BTMuWithIdentity rightIdentity _ rightBody) ->
+          structuralDataMatchesHead leftIdentity (NE.toList leftArgs) rightIdentity rightBody
+        (BTMuWithIdentity leftIdentity _ leftBody, BTConWithIdentity rightIdentity _ rightArgs) ->
+          structuralDataMatchesHead rightIdentity (NE.toList rightArgs) leftIdentity leftBody
+        (BTVarAppWithIdentity leftIdentity _ leftArgs, BTVarAppWithIdentity rightIdentity _ rightArgs) ->
+          typeVarMatches leftEnv rightEnv leftIdentity rightIdentity
             && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
-        (BTForallWithIdentity leftIdentity leftName leftBound leftBody, BTForallWithIdentity rightIdentity rightName rightBound rightBody) ->
+        (BTForallWithIdentity leftIdentity _ leftBound leftBody, BTForallWithIdentity rightIdentity _ rightBound rightBody) ->
           maybeAlphaEq leftEnv rightEnv leftBound rightBound
-            && let (leftEnv', rightEnv') = extendBinderScope leftIdentity leftName rightIdentity rightName leftEnv rightEnv
+            && let (leftEnv', rightEnv') = extendBinderScope leftIdentity rightIdentity leftEnv rightEnv
                 in go leftEnv' rightEnv' leftBody rightBody
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTMuWithIdentity rightIdentity rightName rightBody) ->
-          let (leftEnv', rightEnv') = extendBinderScope leftIdentity leftName rightIdentity rightName leftEnv rightEnv
+        (BTMuWithIdentity leftIdentity _ leftBody, BTMuWithIdentity rightIdentity _ rightBody) ->
+          let (leftEnv', rightEnv') = extendBinderScope leftIdentity rightIdentity leftEnv rightEnv
            in go leftEnv' rightEnv' leftBody rightBody
         (BTBottom, BTBottom) ->
           True
@@ -160,18 +158,16 @@ alphaEqBackendType =
           False
 
     extendBinderScope ::
-      Maybe TypeBinderIdentity ->
-      String ->
-      Maybe TypeBinderIdentity ->
-      String ->
+      TypeBinderIdentity ->
+      TypeBinderIdentity ->
       AlphaBinderEnv ->
       AlphaBinderEnv ->
       (AlphaBinderEnv, AlphaBinderEnv)
-    extendBinderScope leftIdentity leftName rightIdentity rightName leftEnv rightEnv =
+    extendBinderScope leftIdentity rightIdentity leftEnv rightEnv =
       (insertAliasScope leftAliases rightAliases leftEnv, insertAliasScope rightAliases leftAliases rightEnv)
       where
-        leftAliases = binderAliasKeys leftIdentity leftName
-        rightAliases = binderAliasKeys rightIdentity rightName
+        leftAliases = binderAliasKeys leftIdentity
+        rightAliases = binderAliasKeys rightIdentity
 
     insertAliasScope :: [BackendTypeSubstitutionKey] -> [BackendTypeSubstitutionKey] -> AlphaBinderEnv -> AlphaBinderEnv
     insertAliasScope aliases targets env =
@@ -179,22 +175,17 @@ alphaEqBackendType =
       where
         targetSet = Set.fromList targets
 
-    binderAliasKeys :: Maybe TypeBinderIdentity -> String -> [BackendTypeSubstitutionKey]
-    binderAliasKeys identity name =
-      let key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
-       in case backendTypeSubstitutionKeyIdentity key of
-            Just {} -> [key]
-            Nothing -> []
+    binderAliasKeys :: TypeBinderIdentity -> [BackendTypeSubstitutionKey]
+    binderAliasKeys identity =
+      [backendTypeSubstitutionKeyFromIdentity identity]
 
     typeVarMatches ::
       AlphaBinderEnv ->
       AlphaBinderEnv ->
-      Maybe TypeBinderIdentity ->
-      String ->
-      Maybe TypeBinderIdentity ->
-      String ->
+      TypeBinderIdentity ->
+      TypeBinderIdentity ->
       Bool
-    typeVarMatches leftEnv rightEnv leftIdentity leftName rightIdentity rightName =
+    typeVarMatches leftEnv rightEnv leftIdentity rightIdentity =
       case (Map.lookup leftKey leftEnv, Map.lookup rightKey rightEnv) of
         (Just expectedRights, Just expectedLefts) ->
           Set.member rightKey expectedRights && Set.member leftKey expectedLefts
@@ -203,8 +194,8 @@ alphaEqBackendType =
         _ ->
           False
       where
-        leftKey = backendTypeSubstitutionKeyFromMaybeMetadataLight leftIdentity leftName
-        rightKey = backendTypeSubstitutionKeyFromMaybeMetadataLight rightIdentity rightName
+        leftKey = backendTypeSubstitutionKeyFromIdentity leftIdentity
+        rightKey = backendTypeSubstitutionKeyFromIdentity rightIdentity
 
     maybeAlphaEq _ _ Nothing Nothing =
       True
@@ -213,137 +204,59 @@ alphaEqBackendType =
     maybeAlphaEq _ _ _ _ =
       False
 
-metadataLightStructuralDataMatches :: BaseTy -> [BackendType] -> String -> BackendType -> Bool
-metadataLightStructuralDataMatches base args muName body =
-  metadataLightStructuralDataMatchesWithIdentity base args Nothing muName body
-
-metadataLightStructuralDataMatchesWithIdentity :: BaseTy -> [BackendType] -> Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-metadataLightStructuralDataMatchesWithIdentity base@(BaseTy dataName) args muIdentity muName body
-  | PrimitiveInventory.isOpaqueBuiltinTypeName dataName = False
-  | otherwise =
-      case matchStructuralDataLightWithIdentity base args muIdentity muName body of
-        Right _ -> True
-        Left _ -> False
-
-metadataLightStructuralDataMatchesAgainstHead :: Maybe SymbolIdentity -> BaseTy -> [BackendType] -> Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-metadataLightStructuralDataMatchesAgainstHead mbDataIdentity base args muIdentity muName body =
-  case mbDataIdentity of
-    Just dataIdentity
-      | structuralMuIdentityMatches (Just dataIdentity) muIdentity ->
-          identityBearingStructuralDataMatches dataIdentity base args muIdentity muName body
-      | otherwise ->
-          False
-    Nothing ->
-      metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
-
-structuralIdentityAllowsNameFallback :: Maybe TypeBinderIdentity -> Bool
--- Metadata-light inputs may still match by structural name. Once a binder
--- identity exists, callers must use that identity instead of generated/name
--- aliases.
-structuralIdentityAllowsNameFallback Nothing =
-  True
-structuralIdentityAllowsNameFallback (Just _) =
-  False
-
-structuralMuRefsMatchIdentityFirst :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
-structuralMuRefsMatchIdentityFirst expectedIdentity expectedName actualIdentity actualName =
-  typeBinderRefMatchesWith IdentityOnly expectedIdentity expectedName actualIdentity actualName
-    || ( structuralIdentityAllowsNameFallback expectedIdentity
-           && structuralIdentityAllowsNameFallback actualIdentity
-           && structuralRecursiveDataNamesMatch expectedName actualName
-       )
-
-structuralRecursiveDataNamesMatch :: String -> String -> Bool
-structuralRecursiveDataNamesMatch expectedName actualName =
-  case (structuralRecursiveDataName expectedName, structuralRecursiveDataName actualName) of
-    (Just expectedDataName, Just actualDataName) -> expectedDataName == actualDataName
-    _ -> False
-
-matchStructuralDataLightWithIdentity ::
-  BaseTy ->
-  [BackendType] ->
-  Maybe TypeBinderIdentity ->
-  String ->
-  BackendType ->
-  Either StructuralRecursiveDataMismatch StructuralRecursiveDataMatch
-matchStructuralDataLightWithIdentity (BaseTy dataName) args muIdentity muName body = do
-  structuralName <-
-    case structuralRecursiveDataName muName of
-      Just name -> Right name
-      Nothing -> Left (StructuralRecursiveDataNameUnavailable muName)
-  if dataName == structuralName
-    then pure ()
-    else Left (StructuralRecursiveDataNameMismatch dataName structuralName)
-  matchStructuralDataPayload dataName args muIdentity muName body
-
-identityBearingStructuralDataMatches :: SymbolIdentity -> BaseTy -> [BackendType] -> Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-identityBearingStructuralDataMatches dataIdentity (BaseTy dataName) args muIdentity muName body =
-  not (opaqueBuiltinIdentity dataIdentity)
-    && case matchStructuralDataPayload dataName args muIdentity muName body of
-      Right _ -> True
-      Left _ -> False
+structuralDataMatchesHead :: SymbolIdentity -> [BackendType] -> TypeBinderIdentity -> BackendType -> Bool
+structuralDataMatchesHead dataIdentity args muIdentity body =
+  structuralMuIdentityMatches dataIdentity muIdentity
+    && not (opaqueBuiltinIdentity dataIdentity)
+    && structuralDataPayloadMatches args muIdentity body
   where
     opaqueBuiltinIdentity identity =
       any
         ((== Just identity) . PrimitiveInventory.builtinTypeHeadIdentity)
         (Set.toList PrimitiveInventory.builtinOpaqueTypeNames)
 
-matchStructuralDataPayload :: String -> [BackendType] -> Maybe TypeBinderIdentity -> String -> BackendType -> Either StructuralRecursiveDataMismatch StructuralRecursiveDataMatch
-matchStructuralDataPayload dataName args muIdentity muName body = do
-  payloadFields <-
-    case structuralBackendHandlerFields body of
-      Just fields -> Right fields
-      Nothing -> Left (StructuralRecursiveDataPayloadUnavailable muName)
-  let payloadTypes = filter (not . recursiveSelfField muIdentity muName) (concat payloadFields)
-      matches
-        | null args = null payloadTypes
-        | null payloadTypes = all isBareTypeVariable args
-        | otherwise = zipAllWith metadataLightPayloadTypeMatches args payloadTypes
-  if matches
-    then
-      Right
-        StructuralRecursiveDataMatch
-          { srdmDataName = dataName,
-            srdmParameterSubstitution = Map.empty,
-            srdmPayloadFields = payloadFields
-          }
-    else Left (StructuralRecursiveDataArgumentMismatch dataName args payloadTypes)
+structuralMuRefsMatch :: TypeBinderIdentity -> TypeBinderIdentity -> Bool
+structuralMuRefsMatch =
+  typeBinderRefMatches
 
-metadataLightPayloadTypeMatches :: BackendType -> BackendType -> Bool
-metadataLightPayloadTypeMatches left right =
+structuralDataPayloadMatches :: [BackendType] -> TypeBinderIdentity -> BackendType -> Bool
+structuralDataPayloadMatches args muIdentity body =
+  case structuralBackendHandlerFields body of
+    Nothing -> False
+    Just payloadFields ->
+      let payloadTypes = filter (not . recursiveSelfField muIdentity) (concat payloadFields)
+       in if null args
+            then null payloadTypes
+            else
+              if null payloadTypes
+                then all isBareTypeVariable args
+                else zipAllWith structuralPayloadTypeMatches args payloadTypes
+
+structuralPayloadTypeMatches :: BackendType -> BackendType -> Bool
+structuralPayloadTypeMatches left right =
   alphaEqBackendType left right
 
-recursiveSelfField :: Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-recursiveSelfField muIdentity muName ty =
+recursiveSelfField :: TypeBinderIdentity -> BackendType -> Bool
+recursiveSelfField muIdentity ty =
   case ty of
-    BTVarWithIdentity fieldIdentity fieldName ->
-      structuralSelfFieldMatches muIdentity muName fieldIdentity fieldName
+    BTVarWithIdentity fieldIdentity _ ->
+      structuralSelfFieldMatches muIdentity fieldIdentity
     _ ->
       False
 
-structuralSelfFieldMatches :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
-structuralSelfFieldMatches muIdentity muName fieldIdentity fieldName =
-  typeBinderRefMatchesWith IdentityOnly fieldIdentity fieldName muIdentity muName
-    || case (muIdentity, fieldIdentity) of
-      (Nothing, Nothing) ->
-        structuralRecursiveDataName fieldName == structuralRecursiveDataName muName
-      _ ->
-        False
+structuralSelfFieldMatches :: TypeBinderIdentity -> TypeBinderIdentity -> Bool
+structuralSelfFieldMatches muIdentity fieldIdentity =
+  typeBinderRefMatches fieldIdentity muIdentity
 
-structuralDataSelfFieldMatches :: String -> Maybe TypeBinderIdentity -> Maybe TypeBinderIdentity -> String -> Bool
-structuralDataSelfFieldMatches dataName muIdentity fieldIdentity fieldName =
-  typeBinderRefMatchesWith IdentityOnly fieldIdentity fieldName muIdentity ("$" ++ dataName ++ "_self")
-    || case (muIdentity, fieldIdentity) of
-      (Nothing, Nothing) ->
-        structuralRecursiveDataName fieldName == Just dataName
-      _ ->
-        False
+structuralDataSelfFieldMatches :: TypeBinderIdentity -> TypeBinderIdentity -> Bool
+structuralDataSelfFieldMatches muIdentity fieldIdentity =
+  typeBinderRefMatches fieldIdentity muIdentity
 
-backendTypeVarMatches :: Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-backendTypeVarMatches expectedIdentity expectedName =
+backendTypeVarMatches :: TypeBinderIdentity -> BackendType -> Bool
+backendTypeVarMatches expectedIdentity =
   \case
-    BTVarWithIdentity actualIdentity actualName ->
-      typeBinderRefMatchesWith MetadataLight actualIdentity actualName expectedIdentity expectedName
+    BTVarWithIdentity actualIdentity _ ->
+      typeBinderRefMatches actualIdentity expectedIdentity
     _ ->
       False
 
@@ -374,6 +287,7 @@ matchFocusedStructuralConstructor typeBounds dataDecl constructor substitution s
   Right
     StructuralConstructorMatch
       { srcmDataName = dataName,
+        srcmDataIdentity = backendDataIdentity dataDecl,
         srcmConstructorIdentity = backendConstructorIdentity matchedConstructor,
         srcmConstructorName = backendConstructorName matchedConstructor,
         srcmFieldTypes = fields
@@ -390,12 +304,9 @@ matchFocusedStructuralConstructor typeBounds dataDecl constructor substitution s
       ]
 
     constructorsMatch expected candidate =
-      symbolRefMatchesWith
-        MetadataLight
+      sameSymbolIdentity
         (backendConstructorIdentity expected)
-        constructorName
         (backendConstructorIdentity candidate)
-        (backendConstructorName candidate)
 
 matchStructuralDataDeclaration ::
   BackendParameterBounds ->
@@ -406,7 +317,7 @@ matchStructuralDataDeclaration ::
 matchStructuralDataDeclaration typeBounds dataDecl substitution =
   \case
     structuralTy@(BTMuWithIdentity muIdentity muName body)
-      | structuralMuMatchesDataDecl dataDecl muIdentity muName -> do
+      | structuralMuMatchesDataDecl dataDecl muIdentity -> do
           (resultIdentity, resultName, handlers) <-
             case structuralMuHandlerTypes body of
               Just value -> Right value
@@ -420,10 +331,11 @@ matchStructuralDataDeclaration typeBounds dataDecl substitution =
                     (length constructors)
                     (length handlers)
                 )
-          payloadFields <- structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity muName resultIdentity resultName handlers
+          payloadFields <- structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity resultIdentity resultName handlers
           Right
             StructuralRecursiveDataMatch
-              { srdmDataName = backendDataName dataDecl,
+              { srdmDataIdentity = backendDataIdentity dataDecl,
+                srdmDataName = backendDataName dataDecl,
                 srdmParameterSubstitution = dataSubstitution,
                 srdmPayloadFields = payloadFields
               }
@@ -451,13 +363,7 @@ matchStructuralDataDeclarationForSelectedData typeBounds dataDecl substitution s
   case matchStructuralDataDeclaration typeBounds dataDecl substitution structuralTy of
     Right match -> Right match
     Left mismatch ->
-      case (backendDataIdentity dataDecl, structuralTy) of
-        (Just {}, _) ->
-          matchSelectedDataShape mismatch structuralTy
-        (Nothing, BTMuWithIdentity (Just {}) _ _) ->
-          matchSelectedDataShape mismatch structuralTy
-        _ ->
-          Left mismatch
+      matchSelectedDataShape mismatch structuralTy
   where
     constructors =
       backendDataConstructors dataDecl
@@ -468,8 +374,8 @@ matchStructuralDataDeclarationForSelectedData typeBounds dataDecl substitution s
 
     matchSelectedDataShape fallback =
       \case
-        structuralTy'@(BTMuWithIdentity muIdentity muName body)
-          | selectedMuIdentityAllowed muIdentity muName -> do
+        structuralTy'@(BTMuWithIdentity muIdentity _ body)
+          | selectedMuIdentityAllowed muIdentity -> do
               (resultIdentity, resultName, handlers) <-
                 case structuralMuHandlerTypes body of
                   Just value -> Right value
@@ -478,29 +384,21 @@ matchStructuralDataDeclarationForSelectedData typeBounds dataDecl substitution s
                 then pure ()
                 else Left fallback
               payloadFields <-
-                case structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy' muIdentity muName resultIdentity resultName handlers of
+                case structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy' muIdentity resultIdentity resultName handlers of
                   Right fields -> Right fields
                   Left _ -> Left fallback
               Right
                 StructuralRecursiveDataMatch
-                  { srdmDataName = backendDataName dataDecl,
+                  { srdmDataIdentity = backendDataIdentity dataDecl,
+                    srdmDataName = backendDataName dataDecl,
                     srdmParameterSubstitution = dataSubstitution,
                     srdmPayloadFields = payloadFields
                   }
         _ -> Left fallback
 
-    selectedMuIdentityAllowed muIdentity muName =
-      case backendDataIdentity dataDecl of
-        Just {} ->
-          case muIdentity of
-            Nothing -> True
-            Just identity ->
-              isGeneratedTypeBinder identity
-                || structuralMuMatchesDataDecl dataDecl muIdentity muName
-        Nothing ->
-          case muIdentity of
-            Just {} -> True
-            Nothing -> structuralMuMatchesDataDecl dataDecl muIdentity muName
+    selectedMuIdentityAllowed muIdentity =
+      isGeneratedTypeBinder muIdentity
+        || structuralMuMatchesDataDecl dataDecl muIdentity
 
 structuralDataDeclarationMatches ::
   BackendParameterBounds ->
@@ -524,20 +422,21 @@ backendStructuralDataBoundaryMatches ::
   BackendType ->
   Bool
 backendStructuralDataBoundaryMatches =
-  backendStructuralDataBoundaryMatchesWith MetadataLight
+  go
+  where
+    go = backendStructuralDataBoundaryMatchesCore
 
-backendStructuralDataBoundaryMatchesWith ::
-  ReferenceMode ->
+backendStructuralDataBoundaryMatchesCore ::
   BackendParameterBounds ->
   Maybe BackendDataScope ->
   BackendType ->
   BackendType ->
   Bool
-backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls expectedTy actualTy =
+backendStructuralDataBoundaryMatchesCore typeBounds mbDataDecls expectedTy actualTy =
   go expectedTy actualTy
   where
     typeHeadMatches =
-      backendTypeHeadMatchesWith referenceMode
+      backendTypeHeadMatches
 
     go expected actual
       | structuralMuTypesHaveBinderIdentityMismatch expected actual =
@@ -547,28 +446,28 @@ backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls ex
             || case (expected, actual) of
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
                 go expectedDom actualDom && go expectedCod actualCod
-              (BTBaseWithIdentity expectedIdentity expectedBase, BTBaseWithIdentity actualIdentity actualBase) ->
-                typeHeadMatches expectedIdentity expectedBase actualIdentity actualBase
-              (BTBaseWithIdentity expectedDataIdentity expectedBase, BTMuWithIdentity actualIdentity actualName actualBody) ->
-                structuralMuMatchesKnownData expectedDataIdentity expectedBase [] actualIdentity actualName actualBody
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTBaseWithIdentity actualDataIdentity actualBase) ->
-                structuralMuMatchesKnownData actualDataIdentity actualBase [] expectedIdentity expectedName expectedBody
-              (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTConWithIdentity actualIdentity actualCon actualArgs) ->
-                typeHeadMatches expectedIdentity expectedCon actualIdentity actualCon
+              (BTBaseWithIdentity expectedIdentity _, BTBaseWithIdentity actualIdentity _) ->
+                typeHeadMatches expectedIdentity actualIdentity
+              (BTBaseWithIdentity expectedDataIdentity _, BTMuWithIdentity actualIdentity actualName actualBody) ->
+                structuralMuMatchesKnownData expectedDataIdentity [] actualIdentity actualName actualBody
+              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTBaseWithIdentity actualDataIdentity _) ->
+                structuralMuMatchesKnownData actualDataIdentity [] expectedIdentity expectedName expectedBody
+              (BTConWithIdentity expectedIdentity _ expectedArgs, BTConWithIdentity actualIdentity _ actualArgs) ->
+                typeHeadMatches expectedIdentity actualIdentity
                   && zipAllWith go (NE.toList expectedArgs) (NE.toList actualArgs)
-              (BTConWithIdentity expectedDataIdentity expectedCon expectedArgs, BTMuWithIdentity actualIdentity actualName actualBody) ->
-                structuralMuMatchesKnownData expectedDataIdentity expectedCon (NE.toList expectedArgs) actualIdentity actualName actualBody
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTConWithIdentity actualDataIdentity actualCon actualArgs) ->
-                structuralMuMatchesKnownData actualDataIdentity actualCon (NE.toList actualArgs) expectedIdentity expectedName expectedBody
+              (BTConWithIdentity expectedDataIdentity _ expectedArgs, BTMuWithIdentity actualIdentity actualName actualBody) ->
+                structuralMuMatchesKnownData expectedDataIdentity (NE.toList expectedArgs) actualIdentity actualName actualBody
+              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTConWithIdentity actualDataIdentity _ actualArgs) ->
+                structuralMuMatchesKnownData actualDataIdentity (NE.toList actualArgs) expectedIdentity expectedName expectedBody
               (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTMuWithIdentity actualIdentity actualName actualBody) ->
                 structuralMuBodiesMatchKnownData expectedIdentity expectedName expectedBody actualIdentity actualName actualBody
                   || structuralPayloadsMayInstantiate typeBounds expectedIdentity expectedName expectedBody actualIdentity actualName actualBody
               (BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody, BTForallWithIdentity actualIdentity actualName actualBound actualBody) ->
                 maybeBoundaryMatches expectedBound actualBound
                   && let freshName = freshBinderName expectedName actualName expectedBound actualBound expectedBody actualBody
-                         freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshName
-                         expectedBody' = substituteBackendTypeForBinder expectedIdentity expectedName freshTy expectedBody
-                         actualBody' = substituteBackendTypeForBinder actualIdentity actualName freshTy actualBody
+                         freshTy = freshBackendTypeBinderVar expectedIdentity freshName
+                         expectedBody' = substituteBackendTypeForBinder expectedIdentity freshTy expectedBody
+                         actualBody' = substituteBackendTypeForBinder actualIdentity freshTy actualBody
                       in go expectedBody' actualBody'
               (BTBottom, BTBottom) ->
                 True
@@ -593,31 +492,15 @@ backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls ex
             || identityHeadNeedsScopedData expectedBody actualBody
         (BTMuWithIdentity _ _ expectedBody, BTMuWithIdentity _ _ actualBody, _) ->
           identityHeadNeedsScopedData expectedBody actualBody
-        (BTBaseWithIdentity (Just {}) _, BTMuWithIdentity {}, Just {}) -> True
-        (BTMuWithIdentity {}, BTBaseWithIdentity (Just {}) _, Just {}) -> True
-        (BTConWithIdentity (Just {}) _ _, BTMuWithIdentity {}, Just {}) -> True
-        (BTMuWithIdentity {}, BTConWithIdentity (Just {}) _ _, Just {}) -> True
-        (BTBaseWithIdentity Nothing base, BTMuWithIdentity _ muName _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTMuWithIdentity _ muName _, BTBaseWithIdentity Nothing base, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTConWithIdentity Nothing base _, BTMuWithIdentity _ muName _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTMuWithIdentity _ muName _, BTConWithIdentity Nothing base _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
+        (BTBaseWithIdentity {}, BTMuWithIdentity {}, Just {}) -> True
+        (BTMuWithIdentity {}, BTBaseWithIdentity {}, Just {}) -> True
+        (BTConWithIdentity {}, BTMuWithIdentity {}, Just {}) -> True
+        (BTMuWithIdentity {}, BTConWithIdentity {}, Just {}) -> True
         _ -> False
-
-    identitylessHeadNeedsScopedData dataScope (BaseTy name) muName =
-      identityBearingScopedDataName dataScope name
-        || maybe False (identityBearingScopedDataName dataScope) (structuralRecursiveDataName muName)
-
-    identityBearingScopedDataName (BackendDataScope dataDecls dataDeclsByIdentity) dataName =
-      identityBearingDataName dataName dataDecls
-        || identityBearingDataName dataName dataDeclsByIdentity
 
     structuralMuBodiesMatchKnownData expectedIdentity expectedName expectedBody actualIdentity actualName actualBody =
       case
-        ( structuralDataDeclForMuPair expectedIdentity expectedName actualIdentity actualName,
+        ( structuralDataDeclForMuPair expectedIdentity actualIdentity,
           structuralMuHandlerTypesWithIdentity expectedBody,
           structuralMuHandlerTypesWithIdentity actualBody
         )
@@ -646,54 +529,48 @@ backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls ex
                                 freeBackendTypeVars actualBody
                               ]
                           )
-                      freshSelfTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshSelf
-                      freshResultTy = freshBackendTypeBinderVar expectedResultIdentity actualResultIdentity freshResult
-                      normalizeHandler selfIdentity selfName resultIdentity resultName =
+                      freshSelfTy = freshBackendTypeBinderVar expectedIdentity freshSelf
+                      freshResultTy = freshBackendTypeBinderVar expectedResultIdentity freshResult
+                      normalizeHandler selfIdentity resultIdentity =
                         substituteBackendTypesByKey
                           ( Map.fromList $
-                              binderReplacement selfIdentity selfName freshSelfTy
-                                ++ binderReplacement resultIdentity resultName freshResultTy
+                              binderReplacement selfIdentity freshSelfTy
+                                ++ binderReplacement resultIdentity freshResultTy
                           )
                    in zipAllWith
                         go
-                        (map (normalizeHandler expectedIdentity expectedName expectedResultIdentity expectedResultName) expectedHandlers)
-                        (map (normalizeHandler actualIdentity actualName actualResultIdentity actualResultName) actualHandlers)
+                        (map (normalizeHandler expectedIdentity expectedResultIdentity) expectedHandlers)
+                        (map (normalizeHandler actualIdentity actualResultIdentity) actualHandlers)
           _ ->
             False
 
-    structuralDataDeclForMuPair expectedIdentity expectedName actualIdentity actualName =
+    structuralDataDeclForMuPair expectedIdentity actualIdentity =
       case (structuralSelfIdentityUnique expectedIdentity, structuralSelfIdentityUnique actualIdentity) of
         (Just expectedOwner, Just actualOwner)
           | expectedOwner == actualOwner ->
               lookupDataByStructuralSelfIdentity expectedIdentity
-        (Nothing, Nothing)
-          | referenceMode == MetadataLight -> do
-              expectedDataName <- structuralRecursiveDataName expectedName
-              actualDataName <- structuralRecursiveDataName actualName
-              guard (expectedDataName == actualDataName)
-              lookupDataByName expectedDataName
         _ ->
           Nothing
 
     structuralMuHandlerTypesWithIdentity =
       \case
         BTForallWithIdentity resultIdentity resultName _ handlerTy -> do
-          handlers <- collectHandlerTypes resultIdentity resultName handlerTy
+          handlers <- collectHandlerTypes resultIdentity handlerTy
           Just (resultIdentity, resultName, handlers)
         _ -> Nothing
 
-    collectHandlerTypes resultIdentity resultName =
+    collectHandlerTypes resultIdentity =
       collect []
       where
         collect handlers ty
-          | alphaEqBackendType ty (BTVarWithIdentity resultIdentity resultName) = Just handlers
+          | backendTypeVarMatches resultIdentity ty = Just handlers
           | otherwise =
               case ty of
                 BTArrow handlerTy rest -> collect (handlers ++ [handlerTy]) rest
                 _ -> Nothing
 
-    binderReplacement identity name replacement =
-      [(backendTypeSubstitutionKeyFromMaybeMetadataLight identity name, replacement)]
+    binderReplacement identity replacement =
+      [(backendTypeSubstitutionKeyFromIdentity identity, replacement)]
 
     maybeBoundaryMatches Nothing Nothing =
       True
@@ -702,128 +579,63 @@ backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls ex
     maybeBoundaryMatches _ _ =
       False
 
-    structuralMuMatchesKnownData dataIdentity base@(BaseTy dataName) args muIdentity muName body =
+    structuralMuMatchesKnownData dataIdentity args muIdentity muName body =
       structuralSelfIdentityCompatibleWithDataIdentity dataIdentity muIdentity
-        && ( metadataLightTrusted dataIdentity dataName muIdentity
-               && metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
-               || case matchingDataDecl dataIdentity dataName muIdentity muName of
-                 Just dataDecl
-                   | structuralMuMatchesSelectedData dataIdentity dataDecl muIdentity muName,
-                     Just substitution <- structuralDataArgumentSubstitution dataDecl args ->
-                       structuralDataDeclarationMatchesSelectedByIdentity dataIdentity dataDecl substitution (BTMuWithIdentity muIdentity muName body)
-                 _ ->
-                   False
-           )
+        && case matchingDataDecl dataIdentity muIdentity of
+          Just dataDecl
+            | structuralMuMatchesSelectedData dataIdentity dataDecl muIdentity,
+              Just substitution <- structuralDataArgumentSubstitution dataDecl args ->
+                structuralDataDeclarationMatchesSelectedByIdentity dataIdentity dataDecl substitution (BTMuWithIdentity muIdentity muName body)
+          _ ->
+            False
 
     structuralSelfIdentityCompatibleWithDataIdentity dataIdentity muIdentity =
-      case (dataIdentity, structuralSelfIdentityUnique muIdentity) of
-        (Just identity, Just unique) -> symbolUniqueIdentity identity == unique
-        (Just {}, Nothing) -> False
-        _ -> True
+      structuralSelfIdentityUnique muIdentity == Just (symbolUniqueIdentity dataIdentity)
 
-    structuralSelfIdentityPinsData dataIdentity muIdentity =
-      case (dataIdentity, structuralSelfIdentityUnique muIdentity) of
-        (Just identity, Just unique) -> symbolUniqueIdentity identity == unique
-        _ -> False
-
-    metadataLightTrusted dataIdentity dataName muIdentity =
-      case referenceMode of
-        IdentityOnly -> False
-        MetadataLight ->
-          metadataLightAllowed dataIdentity dataName
-            || structuralSelfIdentityPinsData dataIdentity muIdentity
-
-    metadataLightAllowed dataIdentity dataName =
-      case referenceMode of
-        IdentityOnly ->
-          False
-        MetadataLight ->
-          case (dataIdentity, mbDataDecls) of
-            (Just {}, _) -> False
-            (Nothing, Just (BackendDataScope dataDecls dataDeclsByIdentity)) ->
-              not (identityBearingDataName dataName dataDecls)
-                && not (identityBearingDataName dataName dataDeclsByIdentity)
-            _ -> True
-
-    identityBearingDataName dataName =
-      any
-        ( \dataDecl ->
-            backendDataName dataDecl == dataName
-              && backendDataIdentity dataDecl /= Nothing
-        )
-        . Map.elems
-
-    matchingDataDecl dataIdentity dataName muIdentity muName =
-      case dataIdentity >>= lookupDataByIdentity of
-        Just dataDecl -> Just dataDecl
-        Nothing
-          | Just {} <- dataIdentity,
-            Just {} <- mbDataDecls ->
-              Nothing
-          | Just {} <- structuralSelfIdentityUnique muIdentity ->
-              lookupDataByStructuralSelfIdentity muIdentity
-        Nothing ->
-          case referenceMode of
-            IdentityOnly -> Nothing
-            MetadataLight ->
-              lookupDataByName dataName
-                <|> (structuralRecursiveDataName muName >>= lookupDataByName)
-
-    lookupDataByName name = do
-      BackendDataScope dataDecls _ <- mbDataDecls
-      Map.lookup name dataDecls
+    matchingDataDecl dataIdentity muIdentity =
+      lookupDataByIdentity dataIdentity
+        <|> lookupDataByStructuralSelfIdentity muIdentity
 
     lookupDataByIdentity identity = do
-      BackendDataScope _ dataDeclsByIdentity <- mbDataDecls
+      BackendDataScope dataDeclsByIdentity <- mbDataDecls
       lookupSymbolIdentityExact identity dataDeclsByIdentity
 
     lookupDataByStructuralSelfIdentity muIdentity = do
       unique <- structuralSelfIdentityUnique muIdentity
-      BackendDataScope _ dataDeclsByIdentity <- mbDataDecls
+      BackendDataScope dataDeclsByIdentity <- mbDataDecls
       case
         [ dataDecl
         | dataDecl <- Map.elems dataDeclsByIdentity,
-          Just dataIdentity <- [backendDataIdentity dataDecl],
-          symbolUniqueIdentity dataIdentity == unique
+          symbolUniqueIdentity (backendDataIdentity dataDecl) == unique
         ]
         of
         [dataDecl] -> Just dataDecl
         _ -> Nothing
 
     structuralSelfIdentityUnique muIdentity = do
-      identity <- muIdentity
-      (unique, StructuralSelfBinder) <- typeBinderIdentityStructural identity
+      (unique, StructuralSelfBinder) <- typeBinderIdentityStructural muIdentity
       pure unique
 
     structuralSelfIdentityMatchesData muIdentity dataDecl =
-      case (structuralSelfIdentityUnique muIdentity, backendDataIdentity dataDecl) of
-        (Just unique, Just dataDeclIdentity) -> symbolUniqueIdentity dataDeclIdentity == unique
-        (Nothing, Nothing) -> True
-        _ -> False
+      structuralSelfIdentityUnique muIdentity
+        == Just (symbolUniqueIdentity (backendDataIdentity dataDecl))
 
-    structuralMuMatchesSelectedData dataIdentity dataDecl muIdentity muName =
-      case dataIdentity of
-        Just identity ->
-          backendDataIdentity dataDecl == Just identity
-            && structuralSelfIdentityMatchesData muIdentity dataDecl
-        Nothing ->
-          structuralMuMatchesDataDecl dataDecl muIdentity muName
+    structuralMuMatchesSelectedData dataIdentity dataDecl muIdentity =
+      sameSymbolIdentity (backendDataIdentity dataDecl) dataIdentity
+        && structuralSelfIdentityMatchesData muIdentity dataDecl
 
     structuralDataDeclarationMatchesSelectedByIdentity dataIdentity dataDecl substitution structuralTy =
-      case dataIdentity of
-        Just identity
-          | backendDataIdentity dataDecl == Just identity ->
-              structuralDataDeclarationShapeMatches dataDecl substitution structuralTy
-        _ ->
-          structuralDataDeclarationMatches typeBounds dataDecl substitution structuralTy
+      if sameSymbolIdentity (backendDataIdentity dataDecl) dataIdentity
+        then structuralDataDeclarationShapeMatches dataDecl substitution structuralTy
+        else structuralDataDeclarationMatches typeBounds dataDecl substitution structuralTy
 
     structuralDataDeclarationShapeMatches dataDecl substitution structuralTy =
       case structuralTy of
-        BTMuWithIdentity muIdentity muName body ->
+        BTMuWithIdentity muIdentity _ body ->
           case structuralMuHandlerTypes body of
             Just (resultIdentity, resultName, handlers)
               | length handlers == length (backendDataConstructors dataDecl) ->
-                  case structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity muName resultIdentity resultName handlers of
+                  case structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity resultIdentity resultName handlers of
                     Right _ -> True
                     Left _ -> False
             _ -> False
@@ -844,10 +656,10 @@ backendStructuralDataBoundaryMatchesWith referenceMode typeBounds mbDataDecls ex
 
 structuralPayloadsMayInstantiate ::
   BackendParameterBounds ->
-  Maybe TypeBinderIdentity ->
+  TypeBinderIdentity ->
   String ->
   BackendType ->
-  Maybe TypeBinderIdentity ->
+  TypeBinderIdentity ->
   String ->
   BackendType ->
   Bool
@@ -863,10 +675,10 @@ structuralPayloadsMayInstantiate typeBounds expectedIdentity expectedName expect
                      freeBackendTypeVars actualBody
                    ]
                )
-           freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshSelf
-           freshKey = freshBackendTypeBinderKey expectedIdentity actualIdentity freshSelf
-           expectedBody' = substituteBackendTypeForBinder expectedIdentity expectedName freshTy expectedBody
-           actualBody' = substituteBackendTypeForBinder actualIdentity actualName freshTy actualBody
+           freshTy = freshBackendTypeBinderVar expectedIdentity freshSelf
+           freshKey = freshBackendTypeBinderKey expectedIdentity
+           expectedBody' = substituteBackendTypeForBinder expectedIdentity freshTy expectedBody
+           actualBody' = substituteBackendTypeForBinder actualIdentity freshTy actualBody
         in case (structuralMuPayloadTypes expectedBody', structuralMuPayloadTypes actualBody') of
              (Just expectedPayloadTypes, Just actualPayloadTypes) ->
                structuralPayloadTypesMayInstantiate
@@ -878,13 +690,7 @@ structuralPayloadsMayInstantiate typeBounds expectedIdentity expectedName expect
                False
   where
     structuralOwnersMatch =
-      case (expectedIdentity, actualIdentity) of
-        (Just _, Just _) ->
-          structuralMuRefsMatchIdentityFirst expectedIdentity expectedName actualIdentity actualName
-        (Nothing, Nothing) ->
-          structuralRecursiveDataNamesMatch expectedName actualName
-        _ ->
-          False
+      structuralMuRefsMatch expectedIdentity actualIdentity
 
 structuralMuTypesHaveBinderIdentityMismatch :: BackendType -> BackendType -> Bool
 structuralMuTypesHaveBinderIdentityMismatch left right =
@@ -899,15 +705,15 @@ structuralMuTypesHaveBinderIdentityMismatch left right =
     (BTForallWithIdentity _ _ leftBound leftBody, BTForallWithIdentity _ _ rightBound rightBody) ->
       maybe False (uncurry structuralMuTypesHaveBinderIdentityMismatch) ((,) <$> leftBound <*> rightBound)
         || structuralMuTypesHaveBinderIdentityMismatch leftBody rightBody
-    (BTMuWithIdentity leftIdentity leftName leftBody, BTMuWithIdentity rightIdentity rightName rightBody) ->
-      structuralMuBinderIdentityMismatch leftIdentity leftName rightIdentity rightName
+    (BTMuWithIdentity leftIdentity _ leftBody, BTMuWithIdentity rightIdentity _ rightBody) ->
+      structuralMuBinderIdentityMismatch leftIdentity rightIdentity
         || structuralMuTypesHaveBinderIdentityMismatch leftBody rightBody
     _ ->
       False
 
-structuralMuBinderIdentityMismatch :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
-structuralMuBinderIdentityMismatch expectedIdentity _ actualIdentity _ =
-  case (expectedIdentity >>= typeBinderIdentityStructural, actualIdentity >>= typeBinderIdentityStructural) of
+structuralMuBinderIdentityMismatch :: TypeBinderIdentity -> TypeBinderIdentity -> Bool
+structuralMuBinderIdentityMismatch expectedIdentity actualIdentity =
+  case (typeBinderIdentityStructural expectedIdentity, typeBinderIdentityStructural actualIdentity) of
     (Nothing, Nothing) -> False
     (Just left, Just right) -> left /= right
     _ -> True
@@ -925,68 +731,43 @@ stripStructuralSelfSuffix :: String -> Maybe String
 stripStructuralSelfSuffix value =
   stripSuffixSimple "_self" (dropWhileEndSimple isDigit value)
 
-structuralMuNameMatches :: String -> String -> Bool
-structuralMuNameMatches dataName muName =
-  case structuralRecursiveDataName muName of
-    Just structuralName -> dataName == structuralName
-    Nothing -> False
+structuralMuMatchesDataDecl :: BackendData -> TypeBinderIdentity -> Bool
+structuralMuMatchesDataDecl dataDecl muIdentity =
+  structuralMuIdentityMatches (backendDataIdentity dataDecl) muIdentity
 
-structuralMuMatchesDataDecl :: BackendData -> Maybe TypeBinderIdentity -> String -> Bool
-structuralMuMatchesDataDecl dataDecl muIdentity muName =
-  case backendDataIdentity dataDecl of
-    Just dataIdentity ->
-      structuralMuIdentityMatches (Just dataIdentity) muIdentity
-    Nothing ->
-      structuralIdentityAllowsNameFallback muIdentity
-        && structuralMuNameMatches (backendDataName dataDecl) muName
-
-structuralMuIdentityMatches :: Maybe SymbolIdentity -> Maybe TypeBinderIdentity -> Bool
-structuralMuIdentityMatches (Just dataIdentity) (Just identity)
+structuralMuIdentityMatches :: SymbolIdentity -> TypeBinderIdentity -> Bool
+structuralMuIdentityMatches dataIdentity identity
   | Just (unique, StructuralSelfBinder) <- typeBinderIdentityStructural identity =
       unique == symbolUniqueIdentity dataIdentity
 structuralMuIdentityMatches _ _ =
   False
 
-structuralMuAsDataType :: Maybe SymbolIdentity -> [BackendDataParameterRef] -> Maybe TypeBinderIdentity -> String -> Maybe BackendType
-structuralMuAsDataType dataIdentity dataParameterRefs muIdentity muName = do
+structuralMuAsDataType :: SymbolIdentity -> [BackendDataParameterRef] -> TypeBinderIdentity -> Maybe BackendType
+structuralMuAsDataType dataIdentity dataParameterRefs muIdentity = do
   guard (structuralMuIdentityCompatible dataIdentity muIdentity)
-  dataName <-
-    case dataIdentity of
-      Just identity -> Just (symbolDefiningName identity)
-      Nothing -> structuralRecursiveDataName muName
+  let dataName = symbolDefiningName dataIdentity
   let parameterArgs = map backendDataParameterRefType dataParameterRefs
   Just $
     case parameterArgs of
       [] -> BTBaseWithIdentity dataIdentity (BaseTy dataName)
       arg : rest -> BTConWithIdentity dataIdentity (BaseTy dataName) (arg :| rest)
 
-structuralMuAsActualDataType :: Maybe SymbolIdentity -> Maybe TypeBinderIdentity -> String -> BackendType -> Maybe BackendType
-structuralMuAsActualDataType dataIdentity muIdentity muName actual =
+structuralMuAsActualDataType :: SymbolIdentity -> TypeBinderIdentity -> BackendType -> Maybe BackendType
+structuralMuAsActualDataType dataIdentity muIdentity actual =
   case actual of
-    BTBaseWithIdentity actualIdentity (BaseTy actualName)
-      | structuralMuHeadMatches dataIdentity actualIdentity actualName muIdentity muName -> Just actual
-    BTConWithIdentity actualIdentity (BaseTy actualName) _
-      | structuralMuHeadMatches dataIdentity actualIdentity actualName muIdentity muName -> Just actual
+    BTBaseWithIdentity actualIdentity _
+      | structuralMuHeadMatches dataIdentity actualIdentity muIdentity -> Just actual
+    BTConWithIdentity actualIdentity _ _
+      | structuralMuHeadMatches dataIdentity actualIdentity muIdentity -> Just actual
     _ -> Nothing
   where
-    structuralMuHeadMatches (Just expected) (Just actualIdentity) _ identity _ =
-      expected == actualIdentity
-        && structuralMuIdentityCompatible (Just expected) identity
-    structuralMuHeadMatches Nothing (Just actualIdentity) _ (Just identity) _ =
-      structuralMuIdentityMatches (Just actualIdentity) (Just identity)
-    structuralMuHeadMatches Nothing Nothing actualName identity structuralName =
-      structuralIdentityAllowsNameFallback identity
-        && structuralMuNameMatches actualName structuralName
-    structuralMuHeadMatches _ _ _ _ _ =
-      False
+    structuralMuHeadMatches expected actualIdentity identity =
+      sameSymbolIdentity expected actualIdentity
+        && structuralMuIdentityCompatible expected identity
 
-structuralMuIdentityCompatible :: Maybe SymbolIdentity -> Maybe TypeBinderIdentity -> Bool
-structuralMuIdentityCompatible (Just dataIdentity) (Just muIdentity) =
-  structuralMuIdentityMatches (Just dataIdentity) (Just muIdentity)
-structuralMuIdentityCompatible (Just {}) Nothing =
-  False
-structuralMuIdentityCompatible _ _ =
-  True
+structuralMuIdentityCompatible :: SymbolIdentity -> TypeBinderIdentity -> Bool
+structuralMuIdentityCompatible =
+  structuralMuIdentityMatches
 
 isGeneratedTypeBinder :: TypeBinderIdentity -> Bool
 isGeneratedTypeBinder =
@@ -995,27 +776,27 @@ isGeneratedTypeBinder =
 nominalBackendDataIdentity :: BackendType -> Maybe SymbolIdentity
 nominalBackendDataIdentity =
   \case
-    BTBaseWithIdentity identity _ -> identity
-    BTConWithIdentity identity _ _ -> identity
+    BTBaseWithIdentity identity _ -> Just identity
+    BTConWithIdentity identity _ _ -> Just identity
     _ -> Nothing
 
 structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
 structuralMuPayloadTypes body =
   concat <$> structuralBackendHandlerFields body
 
-structuralMuHandlerTypes :: BackendType -> Maybe (Maybe TypeBinderIdentity, String, [BackendType])
+structuralMuHandlerTypes :: BackendType -> Maybe (TypeBinderIdentity, String, [BackendType])
 structuralMuHandlerTypes =
   \case
     BTForallWithIdentity resultIdentity resultName _ handlerTy -> do
-      handlers <- collectHandlerTypes resultIdentity resultName handlerTy
+      handlers <- collectHandlerTypes resultIdentity handlerTy
       Just (resultIdentity, resultName, handlers)
     _ -> Nothing
   where
-    collectHandlerTypes resultIdentity resultName =
+    collectHandlerTypes resultIdentity =
       go []
       where
         go handlers ty
-          | backendTypeVarMatches resultIdentity resultName ty = Just handlers
+          | backendTypeVarMatches resultIdentity ty = Just handlers
           | otherwise =
               case ty of
                 BTArrow handlerTy rest -> go (handlers ++ [handlerTy]) rest
@@ -1024,27 +805,27 @@ structuralMuHandlerTypes =
 structuralBackendHandlerFields :: BackendType -> Maybe [[BackendType]]
 structuralBackendHandlerFields =
   \case
-    BTForallWithIdentity resultIdentity resultName _ handlerTy -> collectHandlers resultIdentity resultName handlerTy
+    BTForallWithIdentity resultIdentity _ _ handlerTy -> collectHandlers resultIdentity handlerTy
     _ -> Nothing
   where
-    collectHandlers resultIdentity resultName =
+    collectHandlers resultIdentity =
       go []
       where
         go handlers ty
-          | backendTypeVarMatches resultIdentity resultName ty = Just handlers
+          | backendTypeVarMatches resultIdentity ty = Just handlers
           | otherwise =
               case ty of
                 BTForall _ _ body -> go handlers body
                 BTArrow handlerTy rest -> do
-                  fields <- collectHandlerFields resultIdentity resultName handlerTy
+                  fields <- collectHandlerFields resultIdentity handlerTy
                   go (handlers ++ [fields]) rest
                 _ -> Nothing
 
-    collectHandlerFields resultIdentity resultName =
+    collectHandlerFields resultIdentity =
       go []
       where
         go fields ty
-          | backendTypeVarMatches resultIdentity resultName ty = Just fields
+          | backendTypeVarMatches resultIdentity ty = Just fields
           | otherwise =
               case ty of
                 BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
@@ -1065,13 +846,12 @@ structuralPayloadHandlersMatchForData ::
   BackendData ->
   Map.Map BackendTypeSubstitutionKey BackendType ->
   BackendType ->
-  Maybe TypeBinderIdentity ->
-  String ->
-  Maybe TypeBinderIdentity ->
+  TypeBinderIdentity ->
+  TypeBinderIdentity ->
   String ->
   [BackendType] ->
   Either StructuralRecursiveDataMismatch [[BackendType]]
-structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity muName resultIdentity resultName handlers =
+structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structuralTy muIdentity resultIdentity resultName handlers =
   traverse constructorHandlerMatches (zip constructors handlers)
   where
     dataName =
@@ -1087,14 +867,14 @@ structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structura
     structuralTyWithData =
       substituteBackendTypesByKey dataSubstitution structuralTy
     structuralSelfTy =
-      case (muIdentity >>= typeBinderIdentityGeneratedUnique, backendDataIdentity dataDecl) of
-        (Just {}, dataIdentity@(Just {})) ->
+      case typeBinderIdentityGeneratedUnique muIdentity of
+        Just {} ->
           case map (substituteBackendTypesByKey dataSubstitution . backendDataParameterRefType) dataParameterRefs of
-            [] -> BTBaseWithIdentity dataIdentity (BaseTy dataName)
-            arg : args -> BTConWithIdentity dataIdentity (BaseTy dataName) (arg :| args)
+            [] -> BTBaseWithIdentity (backendDataIdentity dataDecl) (BaseTy dataName)
+            arg : args -> BTConWithIdentity (backendDataIdentity dataDecl) (BaseTy dataName) (arg :| args)
         _ -> structuralTyWithData
     substituteKnownTypes =
-      substituteStructuralSelfExact muIdentity muName structuralSelfTy . substituteBackendTypesByKey dataSubstitution
+      substituteStructuralSelfExact muIdentity structuralSelfTy . substituteBackendTypesByKey dataSubstitution
     constructorHandlerMatches (constructor, handlerTy) =
       case
         matchBackendTypeParametersWithTypeBounds
@@ -1124,26 +904,26 @@ structuralPayloadHandlersMatchForData typeBounds dataDecl substitution structura
         actualHandlerTy =
           substituteKnownTypes handlerTy
         protectedBinders =
-          Set.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight resultIdentity resultName) $
-            case muIdentity >>= typeBinderIdentityStructural of
-              Just {} -> Set.singleton (backendTypeSubstitutionKeyFromMaybeMetadataLight muIdentity muName)
+          Set.insert (backendTypeSubstitutionKeyFromIdentity resultIdentity) $
+            case typeBinderIdentityStructural muIdentity of
+              Just {} -> Set.singleton (backendTypeSubstitutionKeyFromIdentity muIdentity)
               Nothing -> Set.empty
         handlerFieldsOrPayloadError =
-          case structuralHandlerFields resultIdentity resultName actualHandlerTy of
+          case structuralHandlerFields resultIdentity actualHandlerTy of
             Just fields -> Right fields
             Nothing -> Left (StructuralRecursiveDataPayloadUnavailable dataName)
         parameters =
           Map.map (fmap substituteKnownTypes) $
             constructorTypeParameterBoundsForData dataDecl constructor
 
-substituteStructuralSelfExact :: Maybe TypeBinderIdentity -> String -> BackendType -> BackendType -> BackendType
-substituteStructuralSelfExact targetIdentity targetName replacement =
+substituteStructuralSelfExact :: TypeBinderIdentity -> BackendType -> BackendType -> BackendType
+substituteStructuralSelfExact targetIdentity replacement =
   go
   where
     go =
       \case
         BTVarWithIdentity identity name
-          | targetBinderMatches identity name -> replacement
+          | targetBinderMatches identity -> replacement
           | otherwise -> BTVarWithIdentity identity name
         BTArrow dom cod ->
           BTArrow (go dom) (go cod)
@@ -1152,27 +932,26 @@ substituteStructuralSelfExact targetIdentity targetName replacement =
         BTConWithIdentity identity con args ->
           BTConWithIdentity identity con (fmap go args)
         BTVarAppWithIdentity identity name args
-          | targetBinderMatches identity name ->
+          | targetBinderMatches identity ->
               case applyExactReplacement (NE.toList (fmap go args)) of
                 Just ty -> ty
                 Nothing -> BTVarAppWithIdentity identity name (fmap go args)
           | otherwise -> BTVarAppWithIdentity identity name (fmap go args)
         BTForallWithIdentity identity name mbBound body ->
           let mbBound' = fmap go mbBound
-           in if targetBinderMatches identity name
+           in if targetBinderMatches identity
                 then BTForallWithIdentity identity name mbBound' body
                 else BTForallWithIdentity identity name mbBound' (go body)
         BTMuWithIdentity identity name body
-          | targetBinderMatches identity name ->
+          | targetBinderMatches identity ->
               BTMuWithIdentity identity name body
           | otherwise ->
               BTMuWithIdentity identity name (go body)
         BTBottom ->
           BTBottom
 
-    targetBinderMatches identity name =
+    targetBinderMatches identity =
       identity == targetIdentity
-        && (name == targetName || maybe False (not . isGeneratedTypeBinder) targetIdentity)
 
     applyExactReplacement args =
       case (replacement, args) of
@@ -1183,7 +962,7 @@ substituteStructuralSelfExact targetIdentity targetName replacement =
         (BTVarAppWithIdentity identity name existing, _) -> Just (BTVarAppWithIdentity identity name (existing <> NE.fromList args))
         _ -> Nothing
 
-constructorStructuralHandlerType :: Maybe TypeBinderIdentity -> String -> BackendConstructor -> BackendType
+constructorStructuralHandlerType :: TypeBinderIdentity -> String -> BackendConstructor -> BackendType
 constructorStructuralHandlerType resultIdentity resultName constructor =
   foldr wrapForall handlerBody (backendConstructorForalls constructor)
   where
@@ -1197,12 +976,12 @@ constructorStructuralHandlerType resultIdentity resultName constructor =
         (backendTypeBinderBound binder)
         body
 
-structuralHandlerFields :: Maybe TypeBinderIdentity -> String -> BackendType -> Maybe [BackendType]
-structuralHandlerFields resultIdentity resultName =
+structuralHandlerFields :: TypeBinderIdentity -> BackendType -> Maybe [BackendType]
+structuralHandlerFields resultIdentity =
   go []
   where
     go fields ty
-      | backendTypeVarMatches resultIdentity resultName ty = Just fields
+      | backendTypeVarMatches resultIdentity ty = Just fields
       | otherwise =
           case ty of
             BTForall _ _ body -> go fields body
@@ -1213,7 +992,7 @@ constructorTypeParameterBoundsForData :: BackendData -> BackendConstructor -> Ba
 constructorTypeParameterBoundsForData dataDecl constructor =
   Map.fromList $
     [(key, Nothing) | key <- backendDataParameterKeys dataDecl]
-      ++ [ (backendTypeSubstitutionKeyFromMaybeMetadataLight (backendTypeBinderIdentity binder) (backendTypeBinderName binder), backendTypeBinderBound binder)
+      ++ [ (backendTypeSubstitutionKeyFromIdentity (backendTypeBinderIdentity binder), backendTypeBinderBound binder)
            | binder <- backendConstructorForalls constructor
          ]
 
@@ -1226,7 +1005,7 @@ matchConstructorResult ::
   Maybe (Map.Map BackendTypeSubstitutionKey BackendType)
 matchConstructorResult dataParameterOrder parameters substitution expected actual =
   case expected of
-    BTVarWithIdentity identity name
+    BTVarWithIdentity identity _
       | Set.member key parameters ->
           case Map.lookup key substitution of
             Nothing -> Just (Map.insert key actual substitution)
@@ -1234,69 +1013,69 @@ matchConstructorResult dataParameterOrder parameters substitution expected actua
               | alphaEqBackendType previous actual -> Just substitution
               | otherwise -> Nothing
       where
-        key = parameterKey identity name
+        key = parameterKey identity
     _ ->
       if alphaEqBackendType expected actual
         then Just substitution
         else
             ( case (expected, actual) of
-              (BTVarWithIdentity expectedIdentity expectedName, BTVarWithIdentity actualIdentity actualName)
-                | typeBinderRefMatchesWith MetadataLight expectedIdentity expectedName actualIdentity actualName ->
+              (BTVarWithIdentity expectedIdentity _, BTVarWithIdentity actualIdentity _)
+                | typeBinderRefMatches expectedIdentity actualIdentity ->
                     Just substitution
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
                 matchConstructorResult dataParameterOrder parameters substitution expectedDom actualDom
                   >>= \subst -> matchConstructorResult dataParameterOrder parameters subst expectedCod actualCod
-              (BTBaseWithIdentity expectedIdentity expectedBase, BTBaseWithIdentity actualIdentity actualBase)
-                | backendTypeHeadMatchesWith MetadataLight expectedIdentity expectedBase actualIdentity actualBase -> Just substitution
-              (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTConWithIdentity actualIdentity actualCon actualArgs)
-                | backendTypeHeadMatchesWith MetadataLight expectedIdentity expectedCon actualIdentity actualCon && length expectedArgs == length actualArgs ->
+              (BTBaseWithIdentity expectedIdentity _, BTBaseWithIdentity actualIdentity _)
+                | backendTypeHeadMatches expectedIdentity actualIdentity -> Just substitution
+              (BTConWithIdentity expectedIdentity _ expectedArgs, BTConWithIdentity actualIdentity _ actualArgs)
+                | backendTypeHeadMatches expectedIdentity actualIdentity && length expectedArgs == length actualArgs ->
                     foldM
                       (\subst (expectedArg, actualArg) -> matchConstructorResult dataParameterOrder parameters subst expectedArg actualArg)
                       substitution
                       (zip (NE.toList expectedArgs) (NE.toList actualArgs))
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, actualTy@(BTBase {})) ->
-                matchStructuralMuExpected expectedIdentity expectedName expectedBody actualTy
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, actualTy@(BTCon {})) ->
-                matchStructuralMuExpected expectedIdentity expectedName expectedBody actualTy
-              (expectedTy@(BTBase {}), BTMuWithIdentity actualIdentity actualName actualBody) ->
-                matchStructuralMuActual expectedTy actualIdentity actualName actualBody
-              (expectedTy@(BTCon {}), BTMuWithIdentity actualIdentity actualName actualBody) ->
-                matchStructuralMuActual expectedTy actualIdentity actualName actualBody
+              (BTMuWithIdentity expectedIdentity _ expectedBody, actualTy@(BTBase {})) ->
+                matchStructuralMuExpected expectedIdentity expectedBody actualTy
+              (BTMuWithIdentity expectedIdentity _ expectedBody, actualTy@(BTCon {})) ->
+                matchStructuralMuExpected expectedIdentity expectedBody actualTy
+              (expectedTy@(BTBase {}), BTMuWithIdentity actualIdentity _ actualBody) ->
+                matchStructuralMuActual expectedTy actualIdentity actualBody
+              (expectedTy@(BTCon {}), BTMuWithIdentity actualIdentity _ actualBody) ->
+                matchStructuralMuActual expectedTy actualIdentity actualBody
               (BTVarAppWithIdentity expectedIdentity expectedName expectedArgs, _) ->
                 matchConstructorResultApplication dataParameterOrder parameters substitution expectedIdentity expectedName (NE.toList expectedArgs) actual
-              (BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody, BTForallWithIdentity actualIdentity actualName actualBound actualBody) -> do
+              (BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody, BTForallWithIdentity actualIdentity _ actualBound actualBody) -> do
                 subst <-
                   case (expectedBound, actualBound) of
                     (Nothing, Nothing) -> Just substitution
                     (Just expectedBoundTy, Just actualBoundTy) -> matchConstructorResult dataParameterOrder parameters substitution expectedBoundTy actualBoundTy
                     _ -> Nothing
-                matchConstructorResult dataParameterOrder parameters subst expectedBody (substituteBackendTypeForBinder actualIdentity actualName (BTVarWithIdentity expectedIdentity expectedName) actualBody)
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTMuWithIdentity actualIdentity actualName actualBody) ->
-                matchConstructorResult dataParameterOrder parameters substitution expectedBody (substituteBackendTypeForBinder actualIdentity actualName (BTVarWithIdentity expectedIdentity expectedName) actualBody)
+                matchConstructorResult dataParameterOrder parameters subst expectedBody (substituteBackendTypeForBinder actualIdentity (BTVarWithIdentity expectedIdentity expectedName) actualBody)
+              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTMuWithIdentity actualIdentity _ actualBody) ->
+                matchConstructorResult dataParameterOrder parameters substitution expectedBody (substituteBackendTypeForBinder actualIdentity (BTVarWithIdentity expectedIdentity expectedName) actualBody)
               (BTBottom, BTBottom) ->
                 Just substitution
               _ ->
                 Nothing
           )
   where
-    parameterKey identity name =
-      backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+    parameterKey identity =
+      backendTypeSubstitutionKeyFromIdentity identity
 
-    matchStructuralMuExpected muIdentity muName _body actualTy =
+    matchStructuralMuExpected muIdentity _body actualTy =
       let dataIdentity = nominalBackendDataIdentity actualTy
        in firstJust
-            [ structuralMuAsDataType dataIdentity dataParameterOrder muIdentity muName
+            [ (dataIdentity >>= \identity -> structuralMuAsDataType identity dataParameterOrder muIdentity)
                 >>= \expectedTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy,
-              structuralMuAsActualDataType dataIdentity muIdentity muName actualTy
+              (dataIdentity >>= \identity -> structuralMuAsActualDataType identity muIdentity actualTy)
                 >>= \expectedTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy
             ]
 
-    matchStructuralMuActual expectedTy muIdentity muName _body =
+    matchStructuralMuActual expectedTy muIdentity _body =
       let dataIdentity = nominalBackendDataIdentity expectedTy
        in firstJust
-            [ structuralMuAsDataType dataIdentity dataParameterOrder muIdentity muName
+            [ (dataIdentity >>= \identity -> structuralMuAsDataType identity dataParameterOrder muIdentity)
                 >>= \actualTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy,
-              structuralMuAsActualDataType dataIdentity muIdentity muName expectedTy
+              (dataIdentity >>= \identity -> structuralMuAsActualDataType identity muIdentity expectedTy)
                 >>= \actualTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy
             ]
 
@@ -1304,7 +1083,7 @@ matchConstructorResultApplication ::
   [BackendDataParameterRef] ->
   Set.Set BackendTypeSubstitutionKey ->
   Map.Map BackendTypeSubstitutionKey BackendType ->
-  Maybe TypeBinderIdentity ->
+  TypeBinderIdentity ->
   String ->
   [BackendType] ->
   BackendType ->
@@ -1324,7 +1103,7 @@ matchConstructorResultApplication dataParameterOrder parameters substitution ide
     _ -> Nothing
   where
     key =
-      backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+      backendTypeSubstitutionKeyFromIdentity identity
 
     insertParameterSubstitution paramKey actualHead substitution0 =
       case Map.lookup paramKey substitution0 of
@@ -1337,7 +1116,7 @@ matchConstructorResultApplication dataParameterOrder parameters substitution ide
           | otherwise -> Nothing
     parameterPlaceholderMatchesKey paramKey =
       \case
-        BTVarWithIdentity (Just binderIdentity) _ ->
+        BTVarWithIdentity binderIdentity _ ->
           backendTypeSubstitutionKeyFromIdentity binderIdentity == paramKey
         _ ->
           False
@@ -1353,22 +1132,17 @@ matchBackendTypeParametersWithTypeBounds ::
 matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameterBounds =
   go Set.empty
   where
-    matchParameterKey identity name =
-      case identity of
-        Just {} ->
-          if Map.member key parameterBounds
-            then Just key
-            else Nothing
-        Nothing
-          | Map.member key parameterBounds -> Just key
-          | otherwise -> Nothing
+    matchParameterKey identity =
+      if Map.member key parameterBounds
+        then Just key
+        else Nothing
       where
-        key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+        key = backendTypeSubstitutionKeyFromIdentity identity
 
     go bound substitution expected actual =
       case expected of
-        BTVarWithIdentity identity name
-          | Just key <- matchParameterKey identity name,
+        BTVarWithIdentity identity _
+          | Just key <- matchParameterKey identity,
             Set.notMember key bound ->
               insertParameterSubstitution key actual substitution
         _ ->
@@ -1378,11 +1152,11 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
             (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
               go bound substitution expectedDom actualDom
                 >>= \substitution' -> go bound substitution' expectedCod actualCod
-            (BTBaseWithIdentity expectedIdentity expectedBase, BTBaseWithIdentity actualIdentity actualBase)
-              | backendTypeHeadMatchesWith MetadataLight expectedIdentity expectedBase actualIdentity actualBase ->
+            (BTBaseWithIdentity expectedIdentity _, BTBaseWithIdentity actualIdentity _)
+              | backendTypeHeadMatches expectedIdentity actualIdentity ->
                   Just substitution
-            (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTConWithIdentity actualIdentity actualCon actualArgs)
-              | backendTypeHeadMatchesWith MetadataLight expectedIdentity expectedCon actualIdentity actualCon ->
+            (BTConWithIdentity expectedIdentity _ expectedArgs, BTConWithIdentity actualIdentity _ actualArgs)
+              | backendTypeHeadMatches expectedIdentity actualIdentity ->
                   foldM
                     ( \(substitutionAcc, matched) (expectedArg, actualArg) ->
                         if matched
@@ -1398,14 +1172,14 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
               where
                 expectedArgsList = NE.toList expectedArgs
                 actualArgsList = NE.toList actualArgs
-            (BTMuWithIdentity expectedIdentity expectedName expectedBody, actualTy@(BTBase {})) ->
-              matchStructuralMuExpected bound substitution expectedIdentity expectedName expectedBody actualTy
-            (BTMuWithIdentity expectedIdentity expectedName expectedBody, actualTy@(BTCon {})) ->
-              matchStructuralMuExpected bound substitution expectedIdentity expectedName expectedBody actualTy
-            (expectedTy@(BTBase {}), BTMuWithIdentity actualIdentity actualName actualBody) ->
-              matchStructuralMuActual bound substitution expectedTy actualIdentity actualName actualBody
-            (expectedTy@(BTCon {}), BTMuWithIdentity actualIdentity actualName actualBody) ->
-              matchStructuralMuActual bound substitution expectedTy actualIdentity actualName actualBody
+            (BTMuWithIdentity expectedIdentity _ expectedBody, actualTy@(BTBase {})) ->
+              matchStructuralMuExpected bound substitution expectedIdentity expectedBody actualTy
+            (BTMuWithIdentity expectedIdentity _ expectedBody, actualTy@(BTCon {})) ->
+              matchStructuralMuExpected bound substitution expectedIdentity expectedBody actualTy
+            (expectedTy@(BTBase {}), BTMuWithIdentity actualIdentity _ actualBody) ->
+              matchStructuralMuActual bound substitution expectedTy actualIdentity actualBody
+            (expectedTy@(BTCon {}), BTMuWithIdentity actualIdentity _ actualBody) ->
+              matchStructuralMuActual bound substitution expectedTy actualIdentity actualBody
             (BTVarAppWithIdentity expectedIdentity expectedName expectedArgs, _) ->
               matchBackendTypeApplication bound substitution expectedIdentity expectedName (NE.toList expectedArgs) actual
             (BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody, BTForallWithIdentity actualIdentity actualName actualBound actualBody) -> do
@@ -1422,19 +1196,19 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
                         maybe Set.empty freeBackendTypeVars actualBound
                       ]
                   freshName = freshNameLike expectedName used
-                  freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshName
-                  freshKey = freshBackendTypeBinderKey expectedIdentity actualIdentity freshName
-                  expectedBody' = substituteBinder expectedIdentity expectedName freshTy expectedBody
-                  actualBody' = substituteBinder actualIdentity actualName freshTy actualBody
+                  freshTy = freshBackendTypeBinderVar expectedIdentity freshName
+                  freshKey = freshBackendTypeBinderKey expectedIdentity
+                  expectedBody' = substituteBinder expectedIdentity freshTy expectedBody
+                  actualBody' = substituteBinder actualIdentity freshTy actualBody
               go (Set.insert freshKey bound) substitution' expectedBody' actualBody'
             (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTMuWithIdentity actualIdentity actualName actualBody) ->
-              if structuralMuBinderIdentityMismatch expectedIdentity expectedName actualIdentity actualName
+              if structuralMuBinderIdentityMismatch expectedIdentity actualIdentity
                 then Nothing
                 else
                   case
-                    ( null dataParameterOrder && sameStructuralDataRef expectedIdentity expectedName actualIdentity actualName,
-                      isVacuousRecursiveBinderWithIdentity expectedIdentity expectedName expectedBody,
-                      isVacuousRecursiveBinderWithIdentity actualIdentity actualName actualBody
+                    ( null dataParameterOrder && sameStructuralDataRef expectedIdentity actualIdentity,
+                      isVacuousRecursiveBinderWithIdentity expectedIdentity expectedBody,
+                      isVacuousRecursiveBinderWithIdentity actualIdentity actualBody
                     )
                   of
                     (True, _, _) ->
@@ -1442,7 +1216,7 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
                     (_, True, True) ->
                       go bound substitution expectedBody actualBody
                     (_, True, False)
-                      | recursiveBodyCompatibleWithIdentity actualIdentity actualName actualBody expectedBody
+                      | recursiveBodyCompatibleWithIdentity actualIdentity actualBody expectedBody
                           && expectedBodyHasNoParameters expectedBody ->
                           Just substitution
                       | expectedBodyHasNoParameters expectedBody ->
@@ -1450,7 +1224,7 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
                       | otherwise ->
                           go bound substitution expectedBody actual
                     (_, False, True)
-                      | recursiveBodyCompatibleWithIdentity expectedIdentity expectedName expectedBody actualBody
+                      | recursiveBodyCompatibleWithIdentity expectedIdentity expectedBody actualBody
                           && expectedBodyHasNoParameters expectedBody ->
                           Just substitution
                       | expectedBodyHasNoParameters expectedBody ->
@@ -1468,16 +1242,16 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
                                 freeBackendTypeVars actualBody
                               ]
                           freshName = freshNameLike expectedName used
-                          freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshName
-                          freshKey = freshBackendTypeBinderKey expectedIdentity actualIdentity freshName
-                          expectedBody' = substituteBinder expectedIdentity expectedName freshTy expectedBody
-                          actualBody' = substituteBinder actualIdentity actualName freshTy actualBody
+                          freshTy = freshBackendTypeBinderVar expectedIdentity freshName
+                          freshKey = freshBackendTypeBinderKey expectedIdentity
+                          expectedBody' = substituteBinder expectedIdentity freshTy expectedBody
+                          actualBody' = substituteBinder actualIdentity freshTy actualBody
                       go (Set.insert freshKey bound) substitution expectedBody' actualBody'
-            (BTMuWithIdentity expectedIdentity expectedName expectedBody, _)
-              | isVacuousRecursiveBinderWithIdentity expectedIdentity expectedName expectedBody ->
+            (BTMuWithIdentity expectedIdentity _ expectedBody, _)
+              | isVacuousRecursiveBinderWithIdentity expectedIdentity expectedBody ->
                   go bound substitution expectedBody actual
-            (_, BTMuWithIdentity actualIdentity actualName actualBody)
-              | isVacuousRecursiveBinderWithIdentity actualIdentity actualName actualBody ->
+            (_, BTMuWithIdentity actualIdentity _ actualBody)
+              | isVacuousRecursiveBinderWithIdentity actualIdentity actualBody ->
                   go bound substitution expected actualBody
             (BTBottom, BTBottom) ->
               Just substitution
@@ -1492,40 +1266,40 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
     matchMaybeBound _ _ _ _ =
       Nothing
 
-    matchStructuralMuExpected bound substitution muIdentity muName body actualTy =
+    matchStructuralMuExpected bound substitution muIdentity body actualTy =
       let dataIdentity = nominalBackendDataIdentity actualTy
        in firstJust
-            [ structuralMuNominalTypeMatches actualTy muIdentity muName body >>= \() -> Just substitution,
-              structuralMuAsDataTypeForBody dataIdentity muIdentity muName body
+            [ structuralMuNominalTypeMatches actualTy muIdentity body >>= \() -> Just substitution,
+              (dataIdentity >>= \identity -> structuralMuAsDataTypeForBody identity muIdentity body)
                 >>= \expectedTy -> go bound substitution expectedTy actualTy,
-              structuralMuAsActualDataType dataIdentity muIdentity muName actualTy
+              (dataIdentity >>= \identity -> structuralMuAsActualDataType identity muIdentity actualTy)
                 >>= \expectedTy -> go bound substitution expectedTy actualTy
             ]
 
-    matchStructuralMuActual bound substitution expectedTy muIdentity muName body =
+    matchStructuralMuActual bound substitution expectedTy muIdentity body =
       let dataIdentity = nominalBackendDataIdentity expectedTy
        in firstJust
-            [ structuralMuNominalTypeMatches expectedTy muIdentity muName body >>= \() -> Just substitution,
-              structuralMuAsDataTypeForBody dataIdentity muIdentity muName body
+            [ structuralMuNominalTypeMatches expectedTy muIdentity body >>= \() -> Just substitution,
+              (dataIdentity >>= \identity -> structuralMuAsDataTypeForBody identity muIdentity body)
                 >>= \actualTy -> go bound substitution expectedTy actualTy,
-              structuralMuAsActualDataType dataIdentity muIdentity muName expectedTy
+              (dataIdentity >>= \identity -> structuralMuAsActualDataType identity muIdentity expectedTy)
                 >>= \actualTy -> go bound substitution expectedTy actualTy
             ]
 
-    structuralMuAsDataTypeForBody dataIdentity muIdentity muName body =
-      structuralMuPayloadTypes body *> structuralMuAsDataType dataIdentity dataParameterOrder muIdentity muName
+    structuralMuAsDataTypeForBody dataIdentity muIdentity body =
+      structuralMuPayloadTypes body *> structuralMuAsDataType dataIdentity dataParameterOrder muIdentity
 
-    structuralMuNominalTypeMatches nominalTy muIdentity muName body =
+    structuralMuNominalTypeMatches nominalTy muIdentity body =
       if nominalMatches
         then Just ()
         else Nothing
       where
         nominalMatches =
           case nominalTy of
-            BTBaseWithIdentity identity base ->
-              metadataLightStructuralDataMatchesAgainstHead identity base [] muIdentity muName body
-            BTConWithIdentity identity base args ->
-              metadataLightStructuralDataMatchesAgainstHead identity base (NE.toList args) muIdentity muName body
+            BTBaseWithIdentity identity _ ->
+              structuralDataMatchesHead identity [] muIdentity body
+            BTConWithIdentity identity _ args ->
+              structuralDataMatchesHead identity (NE.toList args) muIdentity body
             _ ->
               False
 
@@ -1534,7 +1308,7 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
         Just (actualHead, actualArgs)
           | length expectedArgs == length actualArgs -> do
               substitution' <-
-                case matchParameterKey identity name of
+                case matchParameterKey identity of
                   Just key
                     | Set.notMember key bound ->
                         insertParameterSubstitution key actualHead substitution
@@ -1568,42 +1342,28 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
 
     parameterPlaceholderMatchesKey key =
       \case
-        BTVarWithIdentity identity name ->
-          matchParameterKey identity name == Just key
+        BTVarWithIdentity identity _ ->
+          matchParameterKey identity == Just key
         _ ->
           False
 
     repeatedParameterTypeMatches previous actual =
       not (structuralMuTypesHaveBinderIdentityMismatch previous actual)
-        && (alphaEqBackendType previous actual || metadataLightSameStructuralType previous actual)
+        && (alphaEqBackendType previous actual || sameStructuralType previous actual)
 
-    metadataLightSameStructuralType left right =
+    sameStructuralType left right =
       case (left, right) of
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTMuWithIdentity rightIdentity rightName rightBody)
-          | not (structuralMuRefsMatchIdentityFirst leftIdentity leftName rightIdentity rightName) ->
+        (BTMuWithIdentity leftIdentity _ leftBody, BTMuWithIdentity rightIdentity _ rightBody)
+          | not (structuralMuRefsMatch leftIdentity rightIdentity) ->
               False
           | otherwise ->
-              case (leftIdentity, rightIdentity) of
-                (Just leftOwner, Just rightOwner) ->
-                  identityPayloadMatches leftOwner leftName leftBody
-                    && identityPayloadMatches rightOwner rightName rightBody
-                (Nothing, Nothing) ->
-                  case (structuralRecursiveDataName leftName, structuralRecursiveDataName rightName) of
-                    (Just leftDataName, Just rightDataName)
-                      | leftDataName == rightDataName ->
-                          metadataLightStructuralDataMatchesWithIdentity (BaseTy leftDataName) [] Nothing leftName leftBody
-                            && metadataLightStructuralDataMatchesWithIdentity (BaseTy rightDataName) [] Nothing rightName rightBody
-                    _ ->
-                      False
-                _ ->
-                  False
+              identityPayloadMatches leftIdentity leftBody
+                && identityPayloadMatches rightIdentity rightBody
         _ ->
           False
 
-    identityPayloadMatches identity name body =
-      case matchStructuralDataPayload (typeBinderIdentityStableName identity) [] (Just identity) name body of
-        Right _ -> True
-        Left _ -> False
+    identityPayloadMatches identity body =
+      structuralDataPayloadMatches [] identity body
 
     backendParameterBoundMatches key actual substitution =
       case Map.lookup key parameterBounds of
@@ -1625,8 +1385,8 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
 
     actualTypeVariableBoundMatches actual expectedBound =
       case actual of
-        BTVarWithIdentity actualIdentity actualName ->
-          case lookupTypeBound actualIdentity actualName typeBounds of
+        BTVarWithIdentity actualIdentity _ ->
+          case lookupTypeBound actualIdentity typeBounds of
             Just (Just actualBound) ->
               typeBoundDependenciesMatch actualBound expectedBound
             _ ->
@@ -1643,14 +1403,14 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
     expectedBodyHasNoParameters expectedBody =
       Set.null (freeBackendTypeVarKeys expectedBody `Set.intersection` Map.keysSet parameterBounds)
 
-    sameStructuralDataRef expectedIdentity expectedName actualIdentity actualName =
-      structuralMuRefsMatchIdentityFirst expectedIdentity expectedName actualIdentity actualName
+    sameStructuralDataRef expectedIdentity actualIdentity =
+      structuralMuRefsMatch expectedIdentity actualIdentity
 
-    substituteBinder identity name replacement =
-      substituteBackendTypesByKey (Map.fromList (binderReplacement identity name replacement))
+    substituteBinder identity replacement =
+      substituteBackendTypesByKey (Map.fromList (binderReplacement identity replacement))
 
-    binderReplacement identity name replacement =
-      [(backendTypeSubstitutionKeyFromMaybeMetadataLight identity name, replacement)]
+    binderReplacement identity replacement =
+      [(backendTypeSubstitutionKeyFromIdentity identity, replacement)]
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map.Map BackendTypeSubstitutionKey BackendType -> Map.Map BackendTypeSubstitutionKey BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =
@@ -1692,10 +1452,6 @@ completeBackendParameterSubstitution parameterBounds substitution0 =
         Nothing ->
           substitution
 
-completeDataParameterSubstitution :: BackendData -> Map.Map BackendTypeSubstitutionKey BackendType -> Map.Map BackendTypeSubstitutionKey BackendType
-completeDataParameterSubstitution _ substitution =
-  substitution
-
 decomposeBackendTypeHead :: BackendType -> Maybe (BackendType, [BackendType])
 decomposeBackendTypeHead ty =
   case ty of
@@ -1705,35 +1461,35 @@ decomposeBackendTypeHead ty =
     BTVarAppWithIdentity identity name args -> Just (BTVarWithIdentity identity name, NE.toList args)
     _ -> Nothing
 
-isVacuousRecursiveBinderWithIdentity :: Maybe TypeBinderIdentity -> String -> BackendType -> Bool
-isVacuousRecursiveBinderWithIdentity identity name body =
-  Set.notMember (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) (freeBackendTypeVarKeys body)
+isVacuousRecursiveBinderWithIdentity :: TypeBinderIdentity -> BackendType -> Bool
+isVacuousRecursiveBinderWithIdentity identity body =
+  Set.notMember (backendTypeSubstitutionKeyFromIdentity identity) (freeBackendTypeVarKeys body)
 
-recursiveBodyCompatibleWithIdentity :: Maybe TypeBinderIdentity -> String -> BackendType -> BackendType -> Bool
-recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBody plainBody =
+recursiveBodyCompatibleWithIdentity :: TypeBinderIdentity -> BackendType -> BackendType -> Bool
+recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveBody plainBody =
   case go Set.empty Map.empty Nothing recursiveBody plainBody of
     Just _ -> True
     Nothing -> False
   where
     go patternVars patternBindings recursiveAlias leftTy rightTy =
       case (leftTy, rightTy) of
-        (BTVarWithIdentity identity name, _)
-          | typeBinderRefMatchesWith MetadataLight identity name recursiveIdentity recursiveName ->
+        (BTVarWithIdentity identity _, _)
+          | typeBinderRefMatches identity recursiveIdentity ->
               matchRecursiveAlias patternVars patternBindings recursiveAlias rightTy
-          | Set.member (recursiveKey identity name) patternVars ->
-              matchPatternVar (recursiveKey identity name) patternBindings recursiveAlias rightTy
-        (BTVarWithIdentity leftIdentity leftName, BTVarWithIdentity rightIdentity rightName)
-          | typeBinderRefMatchesWith MetadataLight leftIdentity leftName rightIdentity rightName ->
+          | Set.member (recursiveKey identity) patternVars ->
+              matchPatternVar (recursiveKey identity) patternBindings recursiveAlias rightTy
+        (BTVarWithIdentity leftIdentity _, BTVarWithIdentity rightIdentity _)
+          | typeBinderRefMatches leftIdentity rightIdentity ->
               Just (patternBindings, recursiveAlias)
         (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
           go patternVars patternBindings recursiveAlias leftDom rightDom
             >>= \(patternBindings', recursiveAlias') ->
               go patternVars patternBindings' recursiveAlias' leftCod rightCod
-        (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase)
-          | backendTypeHeadMatchesWith MetadataLight leftIdentity leftBase rightIdentity rightBase ->
+        (BTBaseWithIdentity leftIdentity _, BTBaseWithIdentity rightIdentity _)
+          | backendTypeHeadMatches leftIdentity rightIdentity ->
               Just (patternBindings, recursiveAlias)
-        (BTConWithIdentity leftIdentity leftCon leftArgs, BTConWithIdentity rightIdentity rightCon rightArgs)
-          | backendTypeHeadMatchesWith MetadataLight leftIdentity leftCon rightIdentity rightCon ->
+        (BTConWithIdentity leftIdentity _ leftArgs, BTConWithIdentity rightIdentity _ rightArgs)
+          | backendTypeHeadMatches leftIdentity rightIdentity ->
               foldM
                 ( \(patternBindingsAcc, recursiveAliasAcc) (leftArg, rightArg) ->
                     go patternVars patternBindingsAcc recursiveAliasAcc leftArg rightArg
@@ -1746,25 +1502,25 @@ recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBod
                     else Nothing
         (BTForallWithIdentity leftIdentity leftName Nothing leftBody, BTForallWithIdentity rightIdentity rightName Nothing rightBody) ->
           let freshName = freshRecursiveBodyBinder leftName rightName leftBody rightBody
-              freshTy = freshBackendTypeBinderVar leftIdentity rightIdentity freshName
-              leftBody' = substituteBackendTypeForBinder leftIdentity leftName freshTy leftBody
-              rightBody' = substituteBackendTypeForBinder rightIdentity rightName freshTy rightBody
+              freshTy = freshBackendTypeBinderVar leftIdentity freshName
+              leftBody' = substituteBackendTypeForBinder leftIdentity freshTy leftBody
+              rightBody' = substituteBackendTypeForBinder rightIdentity freshTy rightBody
            in go patternVars patternBindings recursiveAlias leftBody' rightBody'
         (BTForallWithIdentity leftIdentity leftName (Just leftBound) leftBody, BTForallWithIdentity rightIdentity rightName (Just rightBound) rightBody)
           | alphaEqBackendType leftBound rightBound ->
               let freshName = freshRecursiveBodyBinder leftName rightName leftBody rightBody
-                  freshTy = freshBackendTypeBinderVar leftIdentity rightIdentity freshName
-                  leftBody' = substituteBackendTypeForBinder leftIdentity leftName freshTy leftBody
-                  rightBody' = substituteBackendTypeForBinder rightIdentity rightName freshTy rightBody
+                  freshTy = freshBackendTypeBinderVar leftIdentity freshName
+                  leftBody' = substituteBackendTypeForBinder leftIdentity freshTy leftBody
+                  rightBody' = substituteBackendTypeForBinder rightIdentity freshTy rightBody
                in go patternVars patternBindings recursiveAlias leftBody' rightBody'
-        (BTForallWithIdentity leftIdentity leftName Nothing leftBody, _) ->
-          go (Set.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight leftIdentity leftName) patternVars) patternBindings recursiveAlias leftBody rightTy
+        (BTForallWithIdentity leftIdentity _ Nothing leftBody, _) ->
+          go (Set.insert (backendTypeSubstitutionKeyFromIdentity leftIdentity) patternVars) patternBindings recursiveAlias leftBody rightTy
         (_, BTForallWithIdentity rightIdentity rightName Nothing rightBody)
           | Set.member recursiveBinderKey (freeBackendTypeVarKeys leftTy) ->
               let aliasName = freshNameLike rightName (freeBackendTypeVars leftTy `Set.union` freeBackendTypeVars rightBody)
                   aliasTy = BTVarWithIdentity rightIdentity aliasName
-                  aliasKey = backendTypeSubstitutionKeyFromMaybeMetadataLight rightIdentity aliasName
-                  rightBody' = substituteBackendTypeForBinder rightIdentity rightName aliasTy rightBody
+                  aliasKey = backendTypeSubstitutionKeyFromIdentity rightIdentity
+                  rightBody' = substituteBackendTypeForBinder rightIdentity aliasTy rightBody
                in case recursiveAlias of
                     Nothing ->
                       go patternVars patternBindings (Just aliasKey) leftTy rightBody'
@@ -1779,10 +1535,10 @@ recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBod
           Nothing
 
     recursiveBinderKey =
-      backendTypeSubstitutionKeyFromMaybeMetadataLight recursiveIdentity recursiveName
+      backendTypeSubstitutionKeyFromIdentity recursiveIdentity
 
-    recursiveKey identity name =
-      backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+    recursiveKey identity =
+      backendTypeSubstitutionKeyFromIdentity identity
 
     matchPatternVar key patternBindings recursiveAlias rightTy =
       case Map.lookup key patternBindings of
@@ -1799,8 +1555,8 @@ recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBod
         BTForallWithIdentity rightIdentity rightName Nothing rightBody ->
           let aliasName = freshNameLike rightName (freeBackendTypeVars rightBody)
               aliasTy = BTVarWithIdentity rightIdentity aliasName
-              aliasKey = backendTypeSubstitutionKeyFromMaybeMetadataLight rightIdentity aliasName
-              rightBody' = substituteBackendTypeForBinder rightIdentity rightName aliasTy rightBody
+              aliasKey = backendTypeSubstitutionKeyFromIdentity rightIdentity
+              rightBody' = substituteBackendTypeForBinder rightIdentity aliasTy rightBody
            in case recursiveAlias of
                 Nothing ->
                   matchRecursiveAlias patternVars patternBindings (Just aliasKey) rightBody'
@@ -1809,8 +1565,8 @@ recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBod
                       matchRecursiveAlias patternVars patternBindings recursiveAlias rightBody'
                 _ ->
                   Nothing
-        BTVarWithIdentity rightIdentity rightName ->
-          let rightKey = backendTypeSubstitutionKeyFromMaybeMetadataLight rightIdentity rightName
+        BTVarWithIdentity rightIdentity _ ->
+          let rightKey = backendTypeSubstitutionKeyFromIdentity rightIdentity
            in case recursiveAlias of
                 Nothing ->
                   Just (patternBindings, Just rightKey)
@@ -1826,7 +1582,7 @@ recursiveBodyCompatibleWithIdentity recursiveIdentity recursiveName recursiveBod
       freshNameLike
         leftName
         ( Set.unions
-            [ Set.fromList [leftName, rightName, recursiveName],
+            [ Set.fromList [leftName, rightName],
               freeBackendTypeVars leftBody,
               freeBackendTypeVars rightBody
             ]
@@ -1851,24 +1607,24 @@ structuralPayloadTypeMayInstantiate ::
   BackendType ->
   Bool
 structuralPayloadTypeMayInstantiate typeBounds bound expected actual =
-  metadataLightPayloadTypeMatches expected actual
+  structuralPayloadTypeMatches expected actual
     || case (expected, actual) of
-      (BTVarWithIdentity identity name, _)
+      (BTVarWithIdentity identity _, _)
         | Set.notMember key bound && Map.notMember key typeBounds ->
             True
         where
-          key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+          key = backendTypeSubstitutionKeyFromIdentity identity
       (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
         structuralPayloadTypeMayInstantiate typeBounds bound expectedDom actualDom
           && structuralPayloadTypeMayInstantiate typeBounds bound expectedCod actualCod
-      (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTConWithIdentity actualIdentity actualCon actualArgs) ->
-        backendTypeHeadMatchesWith MetadataLight expectedIdentity expectedCon actualIdentity actualCon
+      (BTConWithIdentity expectedIdentity _ expectedArgs, BTConWithIdentity actualIdentity _ actualArgs) ->
+        backendTypeHeadMatches expectedIdentity actualIdentity
           && zipAllWith
             (structuralPayloadTypeMayInstantiate typeBounds bound)
             (NE.toList expectedArgs)
             (NE.toList actualArgs)
-      (BTVarAppWithIdentity expectedIdentity expectedName expectedArgs, BTVarAppWithIdentity actualIdentity actualName actualArgs) ->
-        typeBinderRefMatchesWith MetadataLight expectedIdentity expectedName actualIdentity actualName
+      (BTVarAppWithIdentity expectedIdentity _ expectedArgs, BTVarAppWithIdentity actualIdentity _ actualArgs) ->
+        typeBinderRefMatches expectedIdentity actualIdentity
           && zipAllWith
             (structuralPayloadTypeMayInstantiate typeBounds bound)
             (NE.toList expectedArgs)
@@ -1887,13 +1643,13 @@ structuralPayloadTypeMayInstantiate typeBounds bound expected actual =
                            freeBackendTypeVars actualForallBody
                          ]
                      )
-                 freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshName
-                 freshKey = freshBackendTypeBinderKey expectedIdentity actualIdentity freshName
-                 expectedForallBody' = substituteBackendTypeForBinder expectedIdentity expectedBinder freshTy expectedForallBody
-                 actualForallBody' = substituteBackendTypeForBinder actualIdentity actualBinder freshTy actualForallBody
+                 freshTy = freshBackendTypeBinderVar expectedIdentity freshName
+                 freshKey = freshBackendTypeBinderKey expectedIdentity
+                 expectedForallBody' = substituteBackendTypeForBinder expectedIdentity freshTy expectedForallBody
+                 actualForallBody' = substituteBackendTypeForBinder actualIdentity freshTy actualForallBody
               in structuralPayloadTypeMayInstantiate typeBounds (Set.insert freshKey bound) expectedForallBody' actualForallBody'
       (BTMuWithIdentity expectedIdentity expectedMuName expectedMuBody, BTMuWithIdentity actualIdentity actualMuName actualMuBody) ->
-        structuralMuRefsMatchIdentityFirst expectedIdentity expectedMuName actualIdentity actualMuName
+        structuralMuRefsMatch expectedIdentity actualIdentity
           && let freshName =
                    freshNameLike
                      expectedMuName
@@ -1904,10 +1660,10 @@ structuralPayloadTypeMayInstantiate typeBounds bound expected actual =
                            freeBackendTypeVars actualMuBody
                          ]
                      )
-                 freshTy = freshBackendTypeBinderVar expectedIdentity actualIdentity freshName
-                 freshKey = freshBackendTypeBinderKey expectedIdentity actualIdentity freshName
-                 expectedMuBody' = substituteBackendTypeForBinder expectedIdentity expectedMuName freshTy expectedMuBody
-                 actualMuBody' = substituteBackendTypeForBinder actualIdentity actualMuName freshTy actualMuBody
+                 freshTy = freshBackendTypeBinderVar expectedIdentity freshName
+                 freshKey = freshBackendTypeBinderKey expectedIdentity
+                 expectedMuBody' = substituteBackendTypeForBinder expectedIdentity freshTy expectedMuBody
+                 actualMuBody' = substituteBackendTypeForBinder actualIdentity freshTy actualMuBody
               in structuralPayloadTypeMayInstantiate typeBounds (Set.insert freshKey bound) expectedMuBody' actualMuBody'
       _ ->
         backendStructuralDataBoundaryMatches typeBounds Nothing expected actual
@@ -1940,13 +1696,13 @@ firstJust =
         Just value -> Just value
         Nothing -> firstJust rest
 
-freshBackendTypeBinderVar :: Maybe TypeBinderIdentity -> Maybe TypeBinderIdentity -> String -> BackendType
-freshBackendTypeBinderVar leftIdentity rightIdentity =
-  BTVarWithIdentity (leftIdentity <|> rightIdentity)
+freshBackendTypeBinderVar :: TypeBinderIdentity -> String -> BackendType
+freshBackendTypeBinderVar leftIdentity =
+  BTVarWithIdentity leftIdentity
 
-freshBackendTypeBinderKey :: Maybe TypeBinderIdentity -> Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
-freshBackendTypeBinderKey leftIdentity rightIdentity =
-  backendTypeSubstitutionKeyFromMaybeMetadataLight (leftIdentity <|> rightIdentity)
+freshBackendTypeBinderKey :: TypeBinderIdentity -> BackendTypeSubstitutionKey
+freshBackendTypeBinderKey leftIdentity =
+  backendTypeSubstitutionKeyFromIdentity leftIdentity
 
 atMay :: [a] -> Int -> Maybe a
 atMay xs index0

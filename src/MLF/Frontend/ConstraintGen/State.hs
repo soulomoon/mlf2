@@ -5,7 +5,7 @@ module MLF.Frontend.ConstraintGen.State
     runConstraintM,
     mkInitialState,
     mkInitialStateWithPolySyms,
-    mkInitialStateWithPolySymsAndIdentityGenerator,
+    resolveTypeHeadIdentity,
     buildConstraint,
     withModuleRootOwner,
     recordNodeRootOwner,
@@ -15,7 +15,7 @@ module MLF.Frontend.ConstraintGen.State
   )
 where
 
-import Control.Monad.Except (Except, runExcept)
+import Control.Monad.Except (Except, runExcept, throwError)
 import Control.Monad.State.Strict (StateT, gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -23,9 +23,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Graph
-import MLF.Frontend.ConstraintGen.Types (Binding, BindingKey, ConstraintError)
-import MLF.Frontend.Syntax (NormSrcType)
-import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
+import MLF.Frontend.ConstraintGen.Types (Binding, BindingKey, ConstraintError (UnknownTypeHead))
+import MLF.Frontend.Symbol (SymbolIdentity)
+import MLF.Frontend.Syntax (NormSrcType, ResolvedSrcType)
+import MLF.Types.Identity (TypeBinderIdentity)
 
 data ScopeFrame = ScopeFrame
   { sfNodes :: !IntSet.IntSet
@@ -40,9 +41,21 @@ data BuildState = BuildState
     bsNextExpVar :: !Int,
     -- | Next available EdgeId
     bsNextEdge :: !Int,
-    -- | Module/pipeline-owned supply for lexical binders introduced while
-    -- translating metadata-light surface syntax.
-    bsLocalIdentityGenerator :: !IdentityGenerator,
+    -- | Resolved type heads available while translating annotations.
+    bsTypeHeadIdentities :: !(Map.Map String SymbolIdentity),
+    -- | Resolved source type binders available while translating annotations.
+    bsTypeBinderIdentities :: !(Map.Map String TypeBinderIdentity),
+    -- | One graph node per source binder and definition root.
+    bsTypeBinderNodes :: !(Map.Map (GenNodeId, TypeBinderIdentity) NodeId),
+    -- | Source identity carried by each graph node allocated for, or proven by
+    -- an annotation boundary to denote, a source-type binder, and by the
+    -- forall/mu node that owns a bound binder. Constraint solving may rename or
+    -- copy any of those representations; this sidecar lets root generalization
+    -- restore the semantic binder identity instead of manufacturing a
+    -- NodeId-derived replacement.
+    bsTypeBinderNodeIdentities :: !(IntMap.IntMap TypeBinderIdentity),
+    -- | Definition root that owns source-level free type binders.
+    bsTypeBinderRoot :: !(Maybe GenNodeId),
     -- | Map of all allocated type nodes
     bsNodes :: !(IntMap.IntMap TyNode),
     -- | Instantiation edges (accumulated in reverse)
@@ -59,12 +72,18 @@ data BuildState = BuildState
     bsScopes :: ![ScopeFrame],
     -- | Let-scope instantiation edges (body → trivial root)
     bsLetEdges :: !IntSet.IntSet,
+    -- | Authoritative producer types for compiler exact annotations, keyed by
+    -- their construction-time instantiation edge.  This is provenance rather
+    -- than a paper constraint flag: later root partitioning must retain the
+    -- exact producer even when the wrapper is outside the retained term root.
+    bsExactProducerTypes :: !(IntMap.IntMap ResolvedSrcType),
     -- | Arity of each type constructor (paper Σ arity function)
     bsTyConArity :: !(Map.Map BaseTy Int),
-    -- | Original source annotation types keyed by AAnn codomain NodeId.
-    -- Preserves the exact lowered 'NormSrcType' from 'buildCoerce' so that
-    -- elaboration can recover annotation types that presolution strips
-    -- (e.g. TForall inside a μ body).
+    -- | Authoritative source types keyed by their graph node. Source κσ
+    -- annotations use the AAnn codomain; compiler-owned exact lambdas use the
+    -- parameter node. Preserving the lowered 'NormSrcType' lets elaboration
+    -- retain binder identities and types that presolution may strip (e.g.
+    -- TForall inside a μ body).
     bsAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
     -- | External assumptions materialized selectively for referenced free
     -- variables.  The initial environment keeps compact lazy entries; once a
@@ -90,16 +109,16 @@ mkInitialState = mkInitialStateWithPolySyms Set.empty
 
 mkInitialStateWithPolySyms :: PolySyms -> BuildState
 mkInitialStateWithPolySyms polySyms =
-  mkInitialStateWithPolySymsAndIdentityGenerator polySyms initialIdentityGenerator
-
-mkInitialStateWithPolySymsAndIdentityGenerator :: PolySyms -> IdentityGenerator -> BuildState
-mkInitialStateWithPolySymsAndIdentityGenerator polySyms identityGenerator =
   BuildState
     { bsNextNode = 0,
       bsNextGen = 0,
       bsNextExpVar = 0,
       bsNextEdge = 0,
-      bsLocalIdentityGenerator = identityGenerator,
+      bsTypeHeadIdentities = Map.empty,
+      bsTypeBinderIdentities = Map.empty,
+      bsTypeBinderNodes = Map.empty,
+      bsTypeBinderNodeIdentities = IntMap.empty,
+      bsTypeBinderRoot = Nothing,
       bsNodes = IntMap.empty,
       bsInstEdges = [],
       bsUnifyEdges = [],
@@ -108,12 +127,20 @@ mkInitialStateWithPolySymsAndIdentityGenerator polySyms identityGenerator =
       bsPolySyms = polySyms,
       bsScopes = [ScopeFrame IntSet.empty],
       bsLetEdges = IntSet.empty,
+      bsExactProducerTypes = IntMap.empty,
       bsTyConArity = Map.empty,
       bsAnnSourceTypes = IntMap.empty,
       bsExternalBindingCache = Map.empty,
       bsCurrentRootOwner = Nothing,
       bsRootOwnership = emptyRootOwnershipIndex
     }
+
+resolveTypeHeadIdentity :: String -> ConstraintM SymbolIdentity
+resolveTypeHeadIdentity name = do
+  identities <- gets bsTypeHeadIdentities
+  case Map.lookup name identities of
+    Just identity -> pure identity
+    Nothing -> throwError (UnknownTypeHead name)
 
 buildConstraint :: BuildState -> Constraint p
 buildConstraint st =
@@ -127,6 +154,8 @@ buildConstraint st =
       cWeakenedVars = IntSet.empty,
       cAnnEdges = IntSet.empty,
       cLetEdges = bsLetEdges st,
+      cGraftedEdges = IntSet.empty,
+      cGraftResultConstructions = IntMap.empty,
       cGenNodes = bsGenNodes st
     }
 

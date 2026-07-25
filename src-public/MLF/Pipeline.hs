@@ -99,6 +99,7 @@ module MLF.Pipeline
     , SymbolOwnerIdentity(..)
     , SymbolIdentity
     , symbolIdentityFromParts
+    , builtinTypeIdentity
     , symbolIdentityWithUnique
     , symbolUniqueIdentity
     , symbolNamespace
@@ -236,6 +237,7 @@ import MLF.Frontend.Program.Run
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Primitive.Identity (builtinTypeIdentity)
 import MLF.Elab.Pipeline
     ( ElabError (..)
     , ElabScheme

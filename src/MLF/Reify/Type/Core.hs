@@ -3,6 +3,8 @@
 module MLF.Reify.Type.Core
   ( ReifyRoot (..),
     reifyWithRefs,
+    reifyWithExternalRefs,
+    reifyWithOuterBinderRefs,
     reifyWithReadModelRefs,
     reifyWithAsRefs,
   )
@@ -38,6 +40,7 @@ Paper references:
 import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (partition)
 import qualified Data.List.NonEmpty as NE
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
@@ -46,7 +49,6 @@ import MLF.Elab.ReadModel
   ( ElabReadModel (..),
     buildElabReadModel,
   )
-import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.Cache
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
@@ -54,9 +56,9 @@ import MLF.Util.Graph (topoSortBy)
 import qualified MLF.Util.Order as Order
 
 data ReifyRoot
-  = RootType
-  | RootTypeNoFallback
-  | RootBound
+  = RootType -- ^ Reify the node itself, preserving a bounded result variable.
+  | RootTypeNoFallback -- ^ Reify the node without missing-node fallbacks.
+  | RootBound -- ^ Reify the node's lower-bound view.
 
 reifyWithRefs ::
   String ->
@@ -70,6 +72,42 @@ reifyWithRefs contextLabel presolutionView refForVar isNamed rootMode nid = do
   readModel <- buildElabReadModel presolutionView
   reifyWithReadModelRefs contextLabel readModel refForVar isNamed rootMode nid
 
+-- | Reify with a second, construction-time distinction inside the named set.
+-- External names are inherited from the enclosing Gamma. They must be emitted
+-- as variables by S', but must never be wrapped as binders in this packet.
+reifyWithExternalRefs ::
+  String ->
+  PresolutionView p ->
+  (NodeId -> TypeBinderRef) ->
+  (NodeId -> Bool) ->
+  (NodeId -> Bool) ->
+  IntMap.IntMap [NodeId] ->
+  ReifyRoot ->
+  NodeId ->
+  Either ElabError ElabType
+reifyWithExternalRefs contextLabel presolutionView refForVar isNamed isExternal structuralBinders rootMode nid = do
+  readModel <- buildElabReadModel presolutionView
+  reifyWithReadModelExternalRefs contextLabel readModel refForVar isNamed isExternal (const False) structuralBinders rootMode nid
+
+-- | Reify a type body whose enclosing scheme already owns some binder
+-- declarations.  Those identities are emitted only as variable occurrences:
+-- even a structural forall carrying the same identity must not construct a
+-- second declaration inside the body.
+reifyWithOuterBinderRefs ::
+  String ->
+  PresolutionView p ->
+  (NodeId -> TypeBinderRef) ->
+  (NodeId -> Bool) ->
+  (NodeId -> Bool) ->
+  (NodeId -> Bool) ->
+  IntMap.IntMap [NodeId] ->
+  ReifyRoot ->
+  NodeId ->
+  Either ElabError ElabType
+reifyWithOuterBinderRefs contextLabel presolutionView refForVar isNamed isExternal isOuterOwned structuralBinders rootMode nid = do
+  readModel <- buildElabReadModel presolutionView
+  reifyWithReadModelExternalRefs contextLabel readModel refForVar isNamed isExternal isOuterOwned structuralBinders rootMode nid
+
 reifyWithReadModelRefs ::
   String ->
   ElabReadModel p ->
@@ -78,7 +116,33 @@ reifyWithReadModelRefs ::
   ReifyRoot ->
   NodeId ->
   Either ElabError ElabType
-reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
+reifyWithReadModelRefs contextLabel readModel refForVar isNamed rootMode nid =
+  reifyWithReadModelExternalRefs
+    contextLabel
+    readModel
+    refForVar
+    isNamed
+    -- The legacy entrypoint has only one named-node predicate.  Preserve its
+    -- original contract by treating every supplied name as inherited.  The
+    -- external-aware entrypoint is what permits named packet-local binders.
+    isNamed
+    (const False)
+    IntMap.empty
+    rootMode
+    nid
+
+reifyWithReadModelExternalRefs ::
+  String ->
+  ElabReadModel p ->
+  (NodeId -> TypeBinderRef) ->
+  (NodeId -> Bool) ->
+  (NodeId -> Bool) ->
+  (NodeId -> Bool) ->
+  IntMap.IntMap [NodeId] ->
+  ReifyRoot ->
+  NodeId ->
+  Either ElabError ElabType
+reifyWithReadModelExternalRefs _contextLabel readModel refForVar isNamed isExternal isOuterOwned structuralBinders rootMode nid =
   let start = case rootMode of
         RootType -> goType
         RootTypeNoFallback -> goTypeNoFallback
@@ -203,6 +267,27 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
       let key = getNodeId (canonical nodeId)
        in isNamed nodeId || IntSet.member key namedExtra
 
+    isAlreadyBoundLocal namedExtra nodeId =
+      IntSet.member (getNodeId (canonical nodeId)) namedExtra
+
+    isExternalLocal nodeId = isExternal (canonical nodeId)
+
+    isOuterOwnedLocal nodeId = isOuterOwned (canonical nodeId)
+
+    structuralBinderKeys =
+      IntSet.fromList
+        [ getNodeId (canonical binder)
+        | binders <- IntMap.elems structuralBinders
+        , binder <- binders
+        ]
+
+    structuralBindersForOwner owner =
+      IntSet.toList $
+        IntSet.fromList
+          [ getNodeId (canonical binder)
+          | binder <- IntMap.findWithDefault [] (getNodeId (canonical owner)) structuralBinders
+          ]
+
     cacheLookupLocal mode cache key namedExtra =
       if IntSet.null namedExtra
         then cacheLookup mode cache key
@@ -213,7 +298,18 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
         then cacheInsert mode key ty cache
         else cache
 
-    goType cache = goFull cache IntSet.empty ModeType
+    -- RootType denotes the graph node itself.  In particular, a live result
+    -- variable stays a variable even when W-normalization marked it weakened;
+    -- callers that want its lower bound select RootBound (or the paper-style
+    -- no-fallback translation) at construction time instead.
+    goType cache n0 =
+      let n = canonical n0
+       in case lookupNodeIn nodes n of
+            Just TyVar {}
+              | not (isEliminatedVarS n) ->
+                  let ty = varFor n
+                   in pure (cacheInsert ModeType (getNodeId n) ty cache, ty)
+            _ -> goFull cache IntSet.empty ModeType n
     goTypeNoFallback cache = goFull cache IntSet.empty ModeTypeNoFallback
     goBoundRoot cache = goBound cache IntSet.empty
 
@@ -352,10 +448,17 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                            in pure (markDone cache', t)
                       | TyMu {tnBody = b} <- node -> do
                           binders <- orderedFlexChildren mode namedExtra n
-                          case binders of
-                            [bndr] -> do
+                          case binderIdentityGroups binders of
+                            [binderGroup@(bndr : _)] -> do
                               let binder = canonical bndr
-                                  namedExtra' = IntSet.insert (getNodeId binder) namedExtra
+                                  namedExtra' =
+                                    IntSet.union
+                                      namedExtra
+                                      ( IntSet.fromList
+                                          [ getNodeId (canonical binderAlias)
+                                          | binderAlias <- binderGroup
+                                          ]
+                                      )
                               (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
                               let t = TMuRef (varRef binder) bodyTy
                                   cacheFinal = cacheInsertLocal mode key t cache' namedExtra
@@ -373,7 +476,18 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                               Left $
                                 BindingTreeError $
                                   InvalidBindingTree $
-                                    "reifyType: TyMu " ++ show n ++ " has multiple binder children " ++ show binders
+                                    "reifyType: TyMu "
+                                      ++ show n
+                                      ++ " body="
+                                      ++ show (canonical b)
+                                      ++ " has multiple binder children "
+                                      ++ show
+                                        [ ( binder,
+                                            lookupNodeIn nodes binder,
+                                            IntMap.lookup (nodeRefKey (typeRef binder)) (ermSoftBindParents readModel)
+                                          )
+                                        | binder <- binders
+                                        ]
                       | otherwise -> do
                           binders <- orderedFlexChildren mode namedExtra n
                           let binderKeys =
@@ -383,13 +497,13 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                                   ]
                               namedExtra' = IntSet.union namedExtra binderKeys
                           (cache', core) <- case node of
-                            TyBase {tnBase = b@(BaseTy name)} -> pure (cache0, TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) b)
+                            TyBase {tnBaseIdentity = identity, tnBase = b} -> pure (cache0, TBaseWithIdentity identity b)
                             TyBottom {} -> pure (cache0, TBottom)
                             TyArrow {tnDom = d, tnCod = c} -> do
                               (cache1, d') <- vChild cache0 namedExtra' mode (canonical d)
                               (cache2, c') <- vChild cache1 namedExtra' mode (canonical c)
                               pure (cache2, TArrow d' c')
-                            TyCon {tnCon = con, tnArgs = args} -> do
+                            TyCon {tnConIdentity = conIdentity, tnCon = con, tnArgs = args} -> do
                               (cache', args') <-
                                 foldM
                                   ( \(cacheAcc, acc) arg -> do
@@ -398,9 +512,6 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                                   )
                                   (cache0, [])
                                   (NE.toList args)
-                              let conIdentity =
-                                    case con of
-                                      BaseTy name -> PrimitiveIdentity.builtinTypeHeadIdentity name
                               pure (cache', TConWithIdentity conIdentity con (NE.fromList (reverse args')))
                             TyVarApp {tnVarHead = headNode, tnArgs = args} -> do
                               (cache1, headTy) <- vChild cache0 namedExtra' mode (canonical headNode)
@@ -447,11 +558,6 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                         if bndC == n
                           then pure (cache, TBottom)
                           else do
-                            mbParent <- lookupBindParentUnderSoft (typeRef n)
-                            let isRigid =
-                                  case mbParent of
-                                    Just (_, BindRigid) -> True
-                                    _ -> False
                             mbBoundParent <- lookupBindParentUnderSoft (typeRef bndC)
                             let bndRoot =
                                   case mbBoundParent of
@@ -461,10 +567,16 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                                         Just TyMu {} -> canonical parent
                                         _ -> bndC
                                     _ -> bndC
-                            if isRigid
-                              then goFull cache namedExtra ModeBound bndRoot
-                              else do
-                                goFull cache namedExtra ModeBound bndRoot
+                                boundRootIsRigidAlias =
+                                  bndRoot == bndC
+                                    && case (lookupNodeIn nodes bndRoot, mbBoundParent) of
+                                      (Just TyVar {}, Just (_, BindRigid)) -> True
+                                      _ -> False
+                            if boundRootIsRigidAlias
+                              -- Rigid quantification is inlined by the thesis
+                              -- translation, so follow the alias's bound.
+                              then goBound cache namedExtra bndRoot
+                              else goFull cache namedExtra ModeBound bndRoot
         _ -> goFull cache namedExtra ModeBound n
 
     boundIsPoly n =
@@ -548,10 +660,23 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
     wrapBinders cache namedExtra inner binders =
       foldrM
         ( \b (cacheAcc, acc) -> do
-            (cache', boundTy) <- goBound cacheAcc namedExtra b
+            let binderRef = varRef b
+                -- Replay may name a copied binder with the identity of its
+                -- authoritative live binder. Bounds belong to that identity,
+                -- not necessarily to the traversal node.
+                boundSource =
+                  case typeBinderRefNode binderRef of
+                    Just identityNode
+                      | let identityNodeC = canonical identityNode,
+                        identityNodeC /= canonical b,
+                        Just TyVar {} <- lookupNodeIn nodes identityNodeC,
+                        Just _ <- lookupVarBoundS identityNodeC ->
+                          identityNodeC
+                    _ -> b
+            (cache', boundTy) <- goBound cacheAcc namedExtra boundSource
             let selfBound =
                   case boundTy of
-                    TVarRef ref -> typeBinderRefsSameIdentity ref (varRef b)
+                    TVarRef ref -> typeBinderRefsSameIdentity ref binderRef
                     _ -> False
                 mbBound =
                   case boundTy of
@@ -560,10 +685,25 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                     _
                       | selfBound -> Nothing
                       | otherwise -> either (const Nothing) Just (elabToBound boundTy)
-            pure (cache', TForallRef (varRef b) mbBound acc)
+            pure
+              ( cache'
+              , TForallRef binderRef mbBound acc
+              )
         )
         (cache, inner)
         binders
+
+    -- Solving may collapse several graph copies of one source structural
+    -- binder under a single mu owner.  The graph nodes remain useful routing
+    -- aliases, but the source binder identity denotes one declaration.  Keep
+    -- every alias named while constructing exactly one semantic mu binder.
+    binderIdentityGroups [] = []
+    binderIdentityGroups (binder : rest) =
+      let (aliases, remaining) =
+            partition
+              (typeBinderRefsSameIdentity (varRef binder) . varRef)
+              rest
+       in (binder : aliases) : binderIdentityGroups remaining
 
     orderedFlexChildren mode namedExtra n0 = do
       let n = canonical n0
@@ -576,53 +716,142 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
           orderKeys = Order.orderKeysFromConstraintWith canonical originalConstraint orderRoot Nothing
       let includeRigid =
             isForall node
+              || isMu node
               || mode == ModeBound
               || IntSet.member (getNodeId n) schemeRootSet
       let schemeOwner =
             if IntSet.member (getNodeId n) schemeRootSet
               then IntMap.lookup (getNodeId n) schemeGenByRoot
               else Nothing
-      let parentRefForBinders =
+      let parentRefsForBinders =
             case node of
-              TyForall {} -> typeRef n
+              TyForall {} -> [typeRef n]
+              -- A mu binder is created as an exact child of its TyMu owner.
+              -- Scheme-level Q(g) siblings are outside that recursive scope;
+              -- treating them as candidate mu binders can select unrelated
+              -- rigid parameters of a higher-kinded declaration.
+              TyMu {} -> [typeRef n]
               _ ->
                 case schemeOwner of
-                  Just gid -> genRef gid
-                  Nothing -> typeRef n
-      bindersBase <- directFlexChildren (mode == ModeTypeNoFallback || mode == ModeBound) includeRigid parentRefForBinders
+                  -- A scheme root can own both Q(g) binders and binders local
+                  -- to its structural packet.  Looking only under the gen node
+                  -- loses the latter (for example a named variable directly
+                  -- under an arrow root).
+                  Just gid -> [genRef gid, typeRef n]
+                  Nothing -> [typeRef n]
+      bindersBase0 <-
+        concat
+          <$> traverse
+            ( directFlexChildren
+                (mode == ModeTypeNoFallback || mode == ModeBound || isMu node)
+                includeRigid
+            )
+            parentRefsForBinders
+      let structuralForOwner = structuralBindersForOwner n
+          structuralForOwnerSet = IntSet.fromList structuralForOwner
+          bindersBase =
+            [ NodeId key
+            | key <-
+                IntSet.toList $
+                  IntSet.union
+                    structuralForOwnerSet
+                    ( IntSet.fromList
+                        [ getNodeId (canonical binder)
+                        | binder <- bindersBase0
+                        , let key = getNodeId (canonical binder)
+                        , not (IntSet.member key structuralBinderKeys)
+                            || IntSet.member key structuralForOwnerSet
+                        ]
+                    )
+            ]
       let keepNamedForScheme =
             mode == ModeBound && IntSet.member (getNodeId n) schemeRootSet
       let isBinderNode candidate =
-            case lookupNodeIn nodes (canonical candidate) of
-              Just TyExp {} -> False
-              Just TyBase {} -> False
-              Just TyBottom {} -> False
-              Just _ -> True
-              Nothing -> False
+            case (node, lookupNodeIn nodes (canonical candidate)) of
+              (TyMu {}, Just TyVar {}) -> True
+              (TyMu {}, _) -> False
+              (_, Just TyExp {}) -> False
+              (_, Just TyBase {}) -> False
+              (_, Just TyBottom {}) -> False
+              (_, Just _) -> True
+              (_, Nothing) -> False
           bindersReachable0 =
             [ canonical b
               | b <- bindersBase,
                 isBinderNode b,
-                IntMap.member (getNodeId (canonical b)) orderKeys
+                let binderKey = getNodeId (canonical b),
+                IntMap.member binderKey orderKeys
+                  || IntSet.member binderKey structuralForOwnerSet
             ]
           bindersReachable =
+            let withoutOuterOwned =
+                  filter
+                    (not . isOuterOwnedLocal . canonical)
+                    bindersReachable0
+                withoutExternal =
+                  filter
+                    ( \binder ->
+                        let key = getNodeId (canonical binder)
+                         in not (isExternalLocal (canonical binder))
+                              || IntSet.member key structuralForOwnerSet
+                    )
+                    withoutOuterOwned
+            in
             case mode of
               ModeBound ->
-                let base = filter (/= n) bindersReachable0
+                let base = filter (/= n) withoutExternal
                  in if keepNamedForScheme
                       then base
-                      else filter (not . isNamedLocal namedExtra . canonical) base
+                      else
+                        filter
+                          ( \binder ->
+                              let key = getNodeId (canonical binder)
+                               in IntSet.member key structuralForOwnerSet
+                                    || not (isAlreadyBoundLocal namedExtra (canonical binder))
+                          )
+                          base
               ModeTypeNoFallback
-                | isForall node -> bindersReachable0
+                | isForall node -> withoutExternal
                 | otherwise ->
-                    filter (not . isNamedLocal namedExtra . canonical) bindersReachable0
-              _ -> bindersReachable0
-          binderKeys = map (getNodeId . canonical) bindersReachable
+                    filter (not . isAlreadyBoundLocal namedExtra . canonical) withoutExternal
+              _ -> withoutExternal
+          -- A UF merge can leave the allocation identity that used to be the
+          -- recursive binder as a bounded occurrence proxy beside its lower
+          -- bound.  Both nodes are then direct children of the copied TyMu,
+          -- but only the lower-bound identity is the declaration: reifying
+          -- the bounded child itself already follows that identity through
+          -- 'goBound'.  Treating both siblings as declarations fabricates a
+          -- second mu binder after an otherwise valid quotient projection.
+          --
+          -- This is the same structural-role distinction used by the
+          -- generalization reify plan for base/live aliases.  Do it from the
+          -- graph relation here as well because local RHS reification has no
+          -- source-binder map to carry that plan.
+          bindersForOwner =
+            case node of
+              TyMu {} ->
+                let candidateSet =
+                      IntSet.fromList
+                        [ getNodeId (canonical binder)
+                        | binder <- bindersReachable
+                        ]
+                    isBoundedOccurrenceProxy binder =
+                      case lookupVarBoundS (canonical binder) of
+                        Just bound ->
+                          let binderKey = getNodeId (canonical binder)
+                              boundKey = getNodeId (canonical bound)
+                           in boundKey /= binderKey
+                                && IntSet.member boundKey candidateSet
+                        Nothing -> False
+                 in filter (not . isBoundedOccurrenceProxy) bindersReachable
+              _ -> bindersReachable
+          binderKeys = map (getNodeId . canonical) bindersForOwner
           binderSet = IntSet.fromList binderKeys
           missing =
             [ NodeId k
               | k <- binderKeys,
-                not (IntMap.member k orderKeys)
+                not (IntMap.member k orderKeys),
+                not (IntSet.member k structuralForOwnerSet)
             ]
           depsFor k =
             [ d
@@ -673,6 +902,10 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
     isForall :: TyNode -> Bool
     isForall TyForall {} = True
     isForall _ = False
+
+    isMu :: TyNode -> Bool
+    isMu TyMu {} = True
+    isMu _ = False
 
     foldrM :: (a -> b -> Either ElabError b) -> b -> [a] -> Either ElabError b
     foldrM _ z [] = Right z
@@ -725,6 +958,19 @@ freeVarsInView presolutionView nid visited
     key = getNodeId (canonical nid)
 
     freeVarsChild visited' child =
-      case pvLookupBindParent presolutionView (typeRef (canonical child)) of
-        Just (_, BindRigid) -> freeVarsInView presolutionView (canonical child) visited'
-        _ -> IntSet.singleton (getNodeId (canonical child))
+      let childC = canonical child
+       in case lookupNodeIn nodes childC of
+            Just TyVar {} ->
+              case pvLookupBindParent presolutionView (typeRef childC) of
+                Just (_, BindRigid) ->
+                  freeVarsInView presolutionView childC visited'
+                _ ->
+                  IntSet.singleton (getNodeId childC)
+            -- A flexible structural child is still type structure, not a
+            -- binder dependency by itself.  Traverse it until the actual
+            -- flexible variables are reached; otherwise a variable nested in
+            -- an arrow/con application is omitted from the topological order
+            -- and can be quantified after a sibling bound that mentions it.
+            Just _ ->
+              freeVarsInView presolutionView childC visited'
+            Nothing -> IntSet.empty

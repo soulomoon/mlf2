@@ -6,7 +6,6 @@ module Parity.ProgramMatrix
     , ProgramRuntimeCase (..)
     , fixturePaths
     , unifiedFixtureExpectations
-    , fixtureRuntimeExpectations
     , staticCrossModulePackageRoot
     , staticSearchPathMainRoot
     , staticSearchPathLibRoot
@@ -14,8 +13,6 @@ module Parity.ProgramMatrix
     , emlfSurfaceParityMatrix
     , emlfBoundaryMatrix
     , programRuntimeSuccessCases
-    , programSpecStandaloneRuntimeSuccessCases
-    , programSpecToLLVMParityCases
     ) where
 
 fixturePaths :: [FilePath]
@@ -47,11 +44,6 @@ unifiedFixtureExpectations =
     , ("test/programs/unified/higher-order-partial-application.mlfp", "1")
     , ("test/programs/unified/higher-order-returned-function.mlfp", "41")
     ]
-
-fixtureRuntimeExpectations :: [(FilePath, String)]
-fixtureRuntimeExpectations =
-    [(path, "true") | path <- fixturePaths]
-        ++ unifiedFixtureExpectations
 
 staticCrossModulePackageRoot :: FilePath
 staticCrossModulePackageRoot =
@@ -133,6 +125,27 @@ emlfSurfaceParityMatrix =
                 ]
         )
         (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "checks let-polymorphic self-application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : ∀ a. a -> a = let g = λx x in g g;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "checks the paper's annotated self-application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : ∀(result ⩾ ∀ a. a -> a). (∀ a. a -> a) -> result ="
+                , "    λ(g : ∀ a. a -> a) g g;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
     , ProgramMatrixCase
         "runs typed let annotation"
         ( InlineProgram $
@@ -2805,15 +2818,30 @@ data ProgramRuntimeCase = ProgramRuntimeCase
 
 programRuntimeSuccessCases :: [ProgramRuntimeCase]
 programRuntimeSuccessCases =
-    programSpecToLLVMParityCases
-
-programSpecToLLVMParityCases :: [ProgramRuntimeCase]
-programSpecToLLVMParityCases =
     matrixRuntimeCases "surface" emlfSurfaceParityMatrix
         ++ matrixRuntimeCases "boundary" emlfBoundaryMatrix
         ++ fixtureRuntimeCases
         ++ unifiedFixtureRuntimeCases
-        ++ programSpecStandaloneRuntimeSuccessCases
+        ++ standaloneRuntimeSuccessCases
+        ++ paperBoundedInstantiationRuntimeCases
+
+paperBoundedInstantiationRuntimeCases :: [ProgramRuntimeCase]
+paperBoundedInstantiationRuntimeCases =
+    [ ProgramRuntimeCase
+        "paper: runs annotated self-application at its explicit bound"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (omega, id, main) {"
+                , "  def omega : ∀(result ⩾ ∀ a. a -> a). (∀ a. a -> a) -> result ="
+                , "    λ(g : ∀ a. a -> a) g g;"
+                , "  def id : ∀ a. a -> a = λx x;"
+                , "  def main : Bool ="
+                , "    let recovered : ∀ a. a -> a = omega id in recovered true;"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "true")
+    ]
 
 matrixRuntimeCases :: String -> [ProgramMatrixCase] -> [ProgramRuntimeCase]
 matrixRuntimeCases prefix matrixCases =
@@ -2837,8 +2865,8 @@ unifiedFixtureRuntimeCases =
     | (path, expectedValue) <- unifiedFixtureExpectations
     ]
 
-programSpecStandaloneRuntimeSuccessCases :: [ProgramRuntimeCase]
-programSpecStandaloneRuntimeSuccessCases =
+standaloneRuntimeSuccessCases :: [ProgramRuntimeCase]
+standaloneRuntimeSuccessCases =
     [ ProgramRuntimeCase
         "standalone: chooses the exported main instead of a hidden helper main"
         ( InlineProgram $

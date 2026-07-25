@@ -32,6 +32,10 @@ canonicalizeExpansion canon expn =
         ExpForall specs ->
             let canonBound bnd = case bnd of
                     BoundNode nid -> BoundNode (canonNode nid)
+                    BoundProjection sourceForall boundRoot ->
+                        BoundProjection
+                            (canonNode sourceForall)
+                            (canonNode boundRoot)
                     BoundBinder ix -> BoundBinder ix
                 canonSpec spec =
                     spec

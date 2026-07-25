@@ -18,10 +18,13 @@ module MLF.Constraint.Presolution.Rewrite (
     -- * Bind parent reconstruction
     RebuildBindParentsEnv(..),
     rebuildBindParents,
+    contractExpansionWrapperBindings,
     -- * Node rewriting
     rewriteNode,
+    rewriteEliminatedVarSet,
     rewriteVarSet,
     rewriteGenNodes,
+    filterOwnedGenSchemes,
 ) where
 
 import Control.Monad (forM, foldM)
@@ -42,6 +45,24 @@ import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), Pre
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Trace (traceBindingM)
 
+-- | Keep only scheme roots that are still directly owned by their gen node.
+-- Rewriting can raise a live node across a gen boundary; retaining its old
+-- scheme entry would let later generalization resurrect stale ownership.
+filterOwnedGenSchemes :: BindParents -> GenNodeMap GenNode -> GenNodeMap GenNode
+filterOwnedGenSchemes bindParents (GenNodeMap genNodes) =
+    GenNodeMap (IntMap.map keepOwned genNodes)
+  where
+    keepOwned gen =
+        gen
+            { gnSchemes =
+                [ root
+                | root <- gnSchemes gen
+                , case IntMap.lookup (nodeRefKey (typeRef root)) bindParents of
+                    Just (GenRef gid, _) -> gid == gnId gen
+                    _ -> False
+                ]
+            }
+
 -- | Canonicalize an expansion through a node ID mapping.
 canonicalizeExpansion :: Canonicalizer -> Expansion -> Expansion
 canonicalizeExpansion canon = cata alg
@@ -50,8 +71,18 @@ canonicalizeExpansion canon = cata alg
     alg layer = case layer of
         ExpIdentityF -> ExpIdentity
         ExpInstantiateF args -> ExpInstantiate (map canonical args)
-        ExpForallF levels -> ExpForall levels
+        ExpForallF levels -> ExpForall (fmap canonicalizeForallSpec levels)
         ExpComposeF exps -> ExpCompose exps
+
+    canonicalizeForallSpec spec =
+        spec {fsBounds = map (fmap canonicalizeBoundRef) (fsBounds spec)}
+
+    canonicalizeBoundRef boundRef =
+        case boundRef of
+            BoundNode node -> BoundNode (canonical node)
+            BoundProjection sourceForall root ->
+                BoundProjection (canonical sourceForall) (canonical root)
+            BoundBinder index -> BoundBinder index
 
 -- | Canonicalize an instance operation.
 canonicalizeOp :: Canonicalizer -> InstanceOp -> InstanceOp
@@ -88,11 +119,12 @@ canonicalizeTrace :: Canonicalizer -> EdgeTrace -> EdgeTrace
 canonicalizeTrace canon tr =
     let canonical = canonicalizeNode canon
         -- Contract: preserve source-domain provenance in `etBinderArgs`,
-        -- `etInterior`, and `etCopyMap`; preserve replay-map metadata in
-        -- `etBinderReplayMap`; `etRoot` is structural and may be
-        -- canonicalized for solved-graph lookup.
+        -- `etRoot`, `etInterior`, and `etCopyMap`; preserve replay-map metadata
+        -- in `etBinderReplayMap`.  Only `etResultRoot` is a destination lookup
+        -- field.  Solved-graph consumers canonicalize source IDs locally.
     in tr
-        { etRoot = canonical (etRoot tr)
+        { etRoot = etRoot tr
+        , etResultRoot = canonical (etResultRoot tr)
         , etBinderArgs = etBinderArgs tr
         , etInterior = etInterior tr
         , etReplayContract = etReplayContract tr
@@ -115,12 +147,12 @@ rewriteNode canonical = \case
     TyArrow { tnId = nid, tnDom = d, tnCod = cod } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyArrow nid' (canonical d) (canonical cod))
-    TyBase { tnId = nid, tnBase = b } ->
+    TyBase { tnId = nid, tnBaseIdentity = identity, tnBase = b } ->
         let nid' = canonical nid
-        in Just (getNodeId nid', TyBase nid' b)
-    TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
+        in Just (getNodeId nid', TyBase nid' identity b)
+    TyCon { tnId = nid, tnConIdentity = identity, tnCon = con, tnArgs = args } ->
         let nid' = canonical nid
-        in Just (getNodeId nid', TyCon nid' con (fmap canonical args))
+        in Just (getNodeId nid', TyCon nid' identity con (fmap canonical args))
     TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyVarApp nid' (canonical headNode) (fmap canonical args))
@@ -140,6 +172,27 @@ rewriteVarSet canonical nodes0 vars0 =
         | vid <- IntSet.toList vars0
         , let vC = canonical (NodeId vid)
         , case IntMap.lookup (getNodeId vC) nodes0 of
+            Just TyVar{} -> True
+            _ -> False
+        ]
+
+-- | Retain elimination markers only for variables that survive as their own
+-- canonical representatives.
+--
+-- Elimination is owned by the copied binder identity recorded in the edge
+-- witness.  If that identity has already been merged into a live exterior
+-- variable, moving the marker to the UF representative would eliminate the
+-- survivor rather than the binder that disappeared.  The merge itself has
+-- already removed the non-representative node from the canonical graph, so
+-- its marker must be dropped at this boundary.
+rewriteEliminatedVarSet :: (NodeId -> NodeId) -> IntMap TyNode -> IntSet.IntSet -> IntSet.IntSet
+rewriteEliminatedVarSet canonical nodes0 vars0 =
+    IntSet.fromList
+        [ vid
+        | vid <- IntSet.toList vars0
+        , let nid = NodeId vid
+        , canonical nid == nid
+        , case IntMap.lookup vid nodes0 of
             Just TyVar{} -> True
             _ -> False
         ]
@@ -173,9 +226,14 @@ data RebuildBindParentsEnv p = RebuildBindParentsEnv
     , rbpGenNodes :: !(GenNodeMap GenNode)
       -- ^ The rewritten gen nodes
     , rbpCanonical :: !(NodeId -> NodeId)
-      -- ^ Canonicalization function
+      -- ^ Final canonicalization, including administrative TyExp replacement
+    , rbpSemanticCanonical :: !(NodeId -> NodeId)
+      -- ^ Union-find-only canonicalization used to contract wrapper binding
+      -- classes without grafting their source children under expansion results
     , rbpIncomingParents :: !(IntMap IntSet.IntSet)
       -- ^ Map from child node ID to set of structural parent IDs
+    , rbpExpansionArgParents :: !(IntMap NodeRef)
+      -- ^ Canonical expansion argument -> destination gen provenance fallback
     }
 
 -- | Rebuild binding parents after constraint rewriting.
@@ -187,12 +245,26 @@ data RebuildBindParentsEnv p = RebuildBindParentsEnv
 -- 4. Fix any parent references that violate the binding tree invariant
 rebuildBindParents :: RebuildBindParentsEnv p -> PresolutionM q BindParents
 rebuildBindParents env = do
+    bindingEdges0 <-
+        case contractExpansionWrapperBindings
+            (rbpSemanticCanonical env)
+            (rbpOriginalConstraint env) of
+            Left err -> throwError (BindingTreeError err)
+            Right edges -> pure edges
     let c = rbpOriginalConstraint env
         newNodes = rbpNewNodes env
         genNodes' = rbpGenNodes env
         canonical = rbpCanonical env
         incomingParents = rbpIncomingParents env
-        bindingEdges0 = cBindParents c
+        expansionArgParents = rbpExpansionArgParents env
+        -- TyExp nodes are occurrence-site administrative wrappers, not paper
+        -- binding nodes.  Eliminating one contracts its binding-tree edge:
+        -- children owned directly by the wrapper inherit the wrapper's
+        -- external parent (and the strongest flag on the contracted path),
+        -- while the wrapper's own edge disappears.  Structural references to
+        -- the wrapper are still redirected by rbpCanonical to the expansion
+        -- result; keeping these two rewrites separate prevents source-scheme
+        -- ownership from leaking into the destination copy.
         cStruct = c { cNodes = NodeMap newNodes, cGenNodes = genNodes' }
 
         rootGenRef =
@@ -217,6 +289,29 @@ rebuildBindParents env = do
                 ]
 
         canonicalRef = Canonicalize.canonicalRef canonical
+
+        expansionArgParent childRef =
+            case childRef of
+                TypeRef child -> IntMap.lookup (getNodeId child) expansionArgParents
+                GenRef _ -> Nothing
+
+        refExists ref =
+            case ref of
+                TypeRef nid -> typeExists nid
+                GenRef gid -> genExists gid
+
+        -- See Note [Live bind parents outrank expansion provenance].
+        currentLiveBindParent childRef = do
+            (parent0, _) <- IntMap.lookup (nodeRefKey childRef) bindingEdges0
+            let parent = canonicalRef parent0
+            if parent == childRef || not (refExists parent)
+                then Nothing
+                else Just parent
+
+        ownershipParent childRef =
+            case currentLiveBindParent childRef of
+                Just parent -> Just parent
+                Nothing -> expansionArgParent childRef
 
         -- Initial entries from original binding edges
         entries0 =
@@ -281,7 +376,8 @@ rebuildBindParents env = do
 
                         candidates =
                             map canonicalRef $
-                                [ parent0 ]
+                                maybe [] pure (ownershipParent childRef)
+                                    ++ [ parent0 ]
                                     ++ maybe [] pure (IntMap.lookup (getNodeId child') schemeParents)
                                     ++ mapMaybe expBody [parent0]
                                     ++ bindingAncestors parent0
@@ -330,9 +426,12 @@ rebuildBindParents env = do
                                     TypeRef nid -> IntMap.lookup (getNodeId nid) schemeParents
                                     GenRef _ -> Nothing
                             pickParent0 =
-                                case schemeParent of
-                                    Just sp -> sp
-                                    Nothing -> parent0
+                                case ownershipParent childRef of
+                                    Just owner -> owner
+                                    Nothing ->
+                                        case schemeParent of
+                                            Just sp -> sp
+                                            Nothing -> parent0
                             pickParent =
                                 if Binding.isUpper cStruct pickParent0 childRef
                                     then pickParent0
@@ -388,9 +487,12 @@ rebuildBindParents env = do
                                         [] -> Nothing
                                         (p:_) -> Just (typeRef (NodeId p))
                         parent =
-                            case IntMap.lookup nidInt schemeParents of
-                                Just gp -> Just gp
-                                Nothing -> structuralParent
+                            case ownershipParent childRef of
+                                Just owner -> Just owner
+                                Nothing ->
+                                    case IntMap.lookup nidInt schemeParents of
+                                        Just gp -> Just gp
+                                        Nothing -> structuralParent
                         parent' =
                             case parent of
                                 Just p -> Just p
@@ -439,6 +541,119 @@ rebuildBindParents env = do
                 )
                 bp
     pure (fixUpper bp1)
+
+contractExpansionWrapperBindings
+    :: (NodeId -> NodeId)
+    -> Constraint p
+    -> Either BindingError BindParents
+contractExpansionWrapperBindings semanticCanonical constraint = do
+    rawParents <- canonicalBindingParentsFailClosed
+    let
+        wrapperKeys =
+            IntSet.fromList
+                [ nodeRefKey (typeRef (semanticCanonical (tnId node)))
+                | node@TyExp{} <- NodeAccess.allNodes constraint
+                ]
+
+        contractEntry accE childKey parentInfo = do
+            acc <- accE
+            contracted <- contractChild childKey parentInfo
+            case contracted of
+                Nothing -> pure acc
+                Just info -> pure (IntMap.insert childKey info acc)
+
+        contractChild childKey (parent, flag)
+            | IntSet.member childKey wrapperKeys = pure Nothing
+            | otherwise = do
+                (parent', flag') <- contractParent IntSet.empty parent flag
+                pure $
+                    if nodeRefKey parent' == childKey
+                        then Nothing
+                        else Just (parent', flag')
+
+        contractParent seen parent flag
+            | IntSet.notMember (nodeRefKey parent) wrapperKeys =
+                pure (parent, flag)
+            | IntSet.member (nodeRefKey parent) seen =
+                Left $
+                    InvalidBindingTree $
+                        "cycle while contracting TyExp binding class " ++ show parent
+            | otherwise =
+                case IntMap.lookup (nodeRefKey parent) rawParents of
+                    Nothing -> Left (MissingBindParent parent)
+                    Just (nextParent, wrapperFlag) ->
+                        contractParent
+                            (IntSet.insert (nodeRefKey parent) seen)
+                            nextParent
+                            (max flag wrapperFlag)
+    IntMap.foldlWithKey' contractEntry (Right IntMap.empty) rawParents
+  where
+    allCanonicalRefs =
+        IntSet.fromList
+            ( [ nodeRefKey (typeRef (semanticCanonical (tnId node)))
+              | node <- NodeAccess.allNodes constraint
+              ]
+                ++ [ nodeRefKey (genRef (gnId gen))
+                   | gen <- IntMap.elems (getGenNodeMap (cGenNodes constraint))
+                   ]
+            )
+
+    canonicalBindingParentsFailClosed =
+        IntMap.foldlWithKey'
+            insertCanonicalParent
+            (Right IntMap.empty)
+            (cBindParents constraint)
+
+    insertCanonicalParent accE childKey (parent0, flag) = do
+        acc <- accE
+        let child =
+                Canonicalize.canonicalRef
+                    semanticCanonical
+                    (nodeRefFromKey childKey)
+            parent = Canonicalize.canonicalRef semanticCanonical parent0
+            childCanonicalKey = nodeRefKey child
+            parentCanonicalKey = nodeRefKey parent
+        if childCanonicalKey == parentCanonicalKey
+            then pure acc
+            else do
+                if IntSet.notMember childCanonicalKey allCanonicalRefs
+                    then Left (InvalidBindingTree ("missing canonical binding child " ++ show child))
+                    else pure ()
+                if IntSet.notMember parentCanonicalKey allCanonicalRefs
+                    then Left (InvalidBindingTree ("missing canonical binding parent " ++ show parent))
+                    else pure ()
+                case IntMap.lookup childCanonicalKey acc of
+                    Nothing ->
+                        pure $
+                            IntMap.insert
+                                childCanonicalKey
+                                (parent, flag)
+                                acc
+                    Just (existingParent, existingFlag)
+                        | existingParent == parent ->
+                            pure $
+                                IntMap.insert
+                                    childCanonicalKey
+                                    (parent, max existingFlag flag)
+                                    acc
+                        | otherwise ->
+                            Left $
+                                InvalidBindingTree $
+                                    "canonical binding child "
+                                        ++ show child
+                                        ++ " has conflicting parents "
+                                        ++ show existingParent
+                                        ++ " and "
+                                        ++ show parent
+
+{- Note [Live bind parents outrank expansion provenance]
+Expansion-argument provenance records the gen node where an argument was
+created.  It is not current ownership: later unification can raise the
+canonical representative across that gen boundary.  During final rewriting,
+the representative's surviving direct bind parent is therefore authoritative.
+Destination provenance is consulted only when that representative has no live
+parent, so reconstruction cannot undo a raise with stale creation history.
+-}
 
 -- | Debug binding operations (uses global trace config).
 debugBindParents :: String -> a -> PresolutionM p a

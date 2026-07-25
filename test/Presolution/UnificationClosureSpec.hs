@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Presolution.UnificationClosureSpec (spec) where
 
+import IdentityTestSupport
 import Control.Monad (forM_)
 import Data.Either (isLeft)
 import qualified Data.IntMap.Strict as IntMap
@@ -14,16 +15,22 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution.Base (PresolutionUf(..))
+import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
-    ( toListInterior
+    ( PresolutionState(..)
+    , getEdgeSourceInterior
+    , runPresolutionM
+    , toListInterior
+    , unifyStructureForTest
     , validateTranslatablePresolution
     )
-import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
-import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), GenNode(..), GenNodeId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..), fromListGen, genRef, nodeRefKey, typeRef)
+import MLF.Constraint.Types.Presolution (Presolution(..))
+import MLF.Constraint.Types.Witness (Expansion(..), InstanceOp(..))
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Unify.Closure (SolveError(..), runUnifyClosureWithSeed)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
+import qualified MLF.Util.UnionFind as UF
 import SpecUtil
     ( bindParentsFromPairs
     , computePresolutionRaw
@@ -55,7 +62,15 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
 
     it "exposes presolution UF metadata without assuming non-empty UF" $ do
         pres <- requireRight (runToPresolutionDefault Set.empty (ELam "x" (EVar "x")))
-        IntMap.null (getPresolutionUf (prUnionFind pres)) `shouldBe` True
+        let canonical = UF.frWith (getPresolutionUf (prUnionFind pres))
+            arrowChildren =
+                [ (domain, codomain)
+                | TyArrow {tnDom = domain, tnCod = codomain} <-
+                    NodeAccess.allNodes (prConstraint pres)
+                ]
+        arrowChildren `shouldSatisfy` (not . null)
+        forM_ arrowChildren $ \(domain, codomain) ->
+            canonical domain `shouldBe` canonical codomain
 
     it "solves initial unify edges before inst-edge traversal effects are persisted" $ do
         let bodyId = NodeId 0
@@ -65,11 +80,11 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
             boolId = NodeId 4
             nodes =
                 nodeMapFromList
-                    [ (0, TyBase bodyId (BaseTy "int"))
-                    , (1, TyBase targetId (BaseTy "int"))
+                    [ (0, TestTyBase bodyId (BaseTy "int"))
+                    , (1, TestTyBase targetId (BaseTy "int"))
                     , (2, TyExp expNodeId (ExpVarId 0) bodyId)
                     , (3, TyArrow rootId expNodeId targetId)
-                    , (4, TyBase boolId (BaseTy "bool"))
+                    , (4, TestTyBase boolId (BaseTy "bool"))
                     ]
             edge = InstEdge (EdgeId 0) expNodeId targetId
             constraint =
@@ -90,8 +105,8 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
             nodes =
                 nodeMapFromList
                     [ (0, TyVar { tnId = n0, tnBound = Nothing })
-                    , (1, TyBase n1 (BaseTy "Int"))
-                    , (2, TyBase n2 (BaseTy "Bool"))
+                    , (1, TestTyBase n1 (BaseTy "Int"))
+                    , (2, TestTyBase n2 (BaseTy "Bool"))
                     ]
             c0 =
                 rootedConstraint $
@@ -125,6 +140,104 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
         cInstEdges c `shouldBe` []
         tyExpNodes `shouldBe` []
 
+    it "resolves a one-sided nested expansion before rigid structural matching" $ do
+        let sourceRecursiveBinder = NodeId 0
+            sourceMu = NodeId 1
+            sourceExp = NodeId 2
+            leftOuter = NodeId 3
+            targetRecursiveBinder = NodeId 4
+            targetMu = NodeId 5
+            rightOuter = NodeId 6
+            rootGen = GenNodeId 0
+            sourceGen = GenNodeId 1
+            nodes =
+                nodeMapFromList
+                    [ (0, TyVar {tnId = sourceRecursiveBinder, tnBound = Nothing})
+                    , (1, TyMu sourceMu sourceRecursiveBinder)
+                    , (2, TyExp sourceExp (ExpVarId (-1)) sourceMu)
+                    , (3, TyMu leftOuter sourceExp)
+                    , (4, TyVar {tnId = targetRecursiveBinder, tnBound = Nothing})
+                    , (5, TyMu targetMu targetRecursiveBinder)
+                    , (6, TyMu rightOuter targetMu)
+                    ]
+            bindParents =
+                IntMap.insert (nodeRefKey (genRef sourceGen)) (genRef rootGen, BindFlex) $
+                    IntMap.insert (nodeRefKey (typeRef sourceRecursiveBinder)) (typeRef sourceMu, BindRigid) $
+                        IntMap.insert (nodeRefKey (typeRef sourceMu)) (genRef sourceGen, BindFlex) $
+                            IntMap.insert (nodeRefKey (typeRef sourceExp)) (genRef rootGen, BindFlex) $
+                                IntMap.insert (nodeRefKey (typeRef leftOuter)) (genRef rootGen, BindFlex) $
+                                    IntMap.insert (nodeRefKey (typeRef targetRecursiveBinder)) (typeRef targetMu, BindRigid) $
+                                        IntMap.insert (nodeRefKey (typeRef rightOuter)) (genRef rootGen, BindRigid) $
+                                            inferBindParents nodes
+            constraint =
+                emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes =
+                        fromListGen
+                            [ (rootGen, GenNode rootGen [leftOuter, rightOuter])
+                            , (sourceGen, GenNode sourceGen [sourceMu])
+                            ]
+                    }
+            initialState =
+                PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty 7 IntSet.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+            assertOrientation label left right =
+                case runPresolutionM defaultTraceConfig initialState (unifyStructureForTest left right) of
+                    Left err -> expectationFailure (label ++ ": nested expansion failed: " ++ show err)
+                    Right ((), finalState) ->
+                        IntMap.lookup (-1) (getAssignments (psPresolution finalState))
+                            `shouldBe` Just ExpIdentity
+
+        assertOrientation "TyExp on left" leftOuter rightOuter
+        assertOrientation "TyExp on right" rightOuter leftOuter
+
+    it "still rejects an incompatible rigid structure after nested expansion" $ do
+        let sourceBase = NodeId 0
+            sourceExp = NodeId 1
+            leftOuter = NodeId 2
+            targetBinder = NodeId 3
+            targetMu = NodeId 4
+            rightOuter = NodeId 5
+            rootGen = GenNodeId 0
+            sourceGen = GenNodeId 1
+            nodes =
+                nodeMapFromList
+                    [ (0, TestTyBase sourceBase (BaseTy "Int"))
+                    , (1, TyExp sourceExp (ExpVarId (-1)) sourceBase)
+                    , (2, TyMu leftOuter sourceExp)
+                    , (3, TyVar {tnId = targetBinder, tnBound = Nothing})
+                    , (4, TyMu targetMu targetBinder)
+                    , (5, TyMu rightOuter targetMu)
+                    ]
+            bindParents =
+                IntMap.insert (nodeRefKey (genRef sourceGen)) (genRef rootGen, BindFlex) $
+                    IntMap.insert (nodeRefKey (typeRef sourceBase)) (genRef sourceGen, BindFlex) $
+                        IntMap.insert (nodeRefKey (typeRef sourceExp)) (genRef rootGen, BindFlex) $
+                            IntMap.insert (nodeRefKey (typeRef leftOuter)) (genRef rootGen, BindFlex) $
+                                IntMap.insert (nodeRefKey (typeRef rightOuter)) (genRef rootGen, BindRigid) $
+                                    inferBindParents nodes
+            constraint =
+                emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = bindParents
+                    , cGenNodes =
+                        fromListGen
+                            [ (rootGen, GenNode rootGen [leftOuter, rightOuter])
+                            , (sourceGen, GenNode sourceGen [sourceBase])
+                            ]
+                    }
+            initialState =
+                PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty 6 IntSet.empty IntMap.empty
+                    IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+
+        case runPresolutionM defaultTraceConfig initialState (unifyStructureForTest leftOuter rightOuter) of
+            Left (UnmatchableTypes _ _ "rigid structural mismatch") -> pure ()
+            Left err -> expectationFailure ("expected rigid structural mismatch, got " ++ show err)
+            Right _ -> expectationFailure "expected incompatible expanded structure to remain rejected"
+
     it "keeps witness/trace keys aligned for retained instantiation edges" $ do
         pres <-
             requireRight
@@ -150,7 +263,7 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                     , (getNodeId arrow, TyArrow arrow a a)
                     , (getNodeId forallNode, TyForall forallNode arrow)
                     , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                    , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                    , (getNodeId intNode, TestTyBase intNode (BaseTy "Int"))
                     , (getNodeId targetArrow, TyArrow targetArrow intNode intNode)
                     , (getNodeId rootArrow, TyArrow rootArrow expNode targetArrow)
                     ]
@@ -189,8 +302,16 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                 [ (eid, weakenTargetsForWitness ew)
                 | (eid, ew) <- IntMap.toList (prEdgeWitnesses pres)
                 ]
-            nonEmptyWeakenEdges = [eid | (eid, ns) <- weakenTargetsByEdge, not (null ns)]
-        nonEmptyWeakenEdges `shouldSatisfy` (not . null)
+            witnessOpsByEdge =
+                [ (eid, getInstanceOps (ewWitness ew))
+                | (eid, ew) <- IntMap.toList (prEdgeWitnesses pres)
+                ]
+            isWeaken op =
+                case op of
+                    OpWeaken _ -> True
+                    _ -> False
+        witnessOpsByEdge
+            `shouldSatisfy` any (any isWeaken . snd)
         forM_ weakenTargetsByEdge $ \(eid, weakenTargets) ->
             case IntMap.lookup eid (prEdgeTraces pres) of
                 Nothing ->
@@ -199,7 +320,7 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                     let interiorKeys =
                             IntSet.fromList
                                 [ getNodeId nid
-                                | nid <- toListInterior (etInterior tr)
+                                | nid <- toListInterior (getEdgeSourceInterior (etInterior tr))
                                 ]
                     forM_ weakenTargets $ \nid ->
                         IntSet.member (getNodeId nid) interiorKeys `shouldBe` True

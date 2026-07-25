@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Constraint.SolvedSpec (spec) where
 
+import IdentityTestSupport
 import Control.Monad (forM_)
 import Data.List (isInfixOf)
 import Data.Maybe (isJust)
@@ -9,7 +10,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 
 import qualified MLF.Constraint.Presolution as Presolution
-import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
+import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -59,9 +60,9 @@ import SpecUtil
 -- | Build a small solved graph by hand:
 --
 --   Node 0: TyVar (non-canonical, merged into 1)
---   Node 1: TyBase "Int" (canonical representative)
+--   Node 1: TestTyBase "Int" (canonical representative)
 --   Node 2: TyArrow 2 1 3
---   Node 3: TyBase "Bool"
+--   Node 3: TestTyBase "Bool"
 --
 --   Union-find: 0 -> 1
 --   Bind parents: node 1 bound flex under node 2
@@ -70,9 +71,9 @@ import SpecUtil
 testSolved :: Solved
 testSolved =
     let var0  = TyVar { tnId = NodeId 0, tnBound = Nothing }
-        base1 = TyBase (NodeId 1) (BaseTy "Int")
+        base1 = TestTyBase (NodeId 1) (BaseTy "Int")
         arrow2 = TyArrow (NodeId 2) (NodeId 1) (NodeId 3)
-        base3 = TyBase (NodeId 3) (BaseTy "Bool")
+        base3 = TestTyBase (NodeId 3) (BaseTy "Bool")
         nodes = nodeMapFromList
             [ (0, var0), (1, base1), (2, arrow2), (3, base3) ]
         inst = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
@@ -92,9 +93,9 @@ testSolved =
 snapshotEquiv :: Either String (Solved, [NodeId])
 snapshotEquiv =
     let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-        base1 = TyBase (NodeId 1) (BaseTy "Int")
+        base1 = TestTyBase (NodeId 1) (BaseTy "Int")
         arrow2 = TyArrow (NodeId 2) (NodeId 0) (NodeId 3)
-        bool3 = TyBase (NodeId 3) (BaseTy "Bool")
+        bool3 = TestTyBase (NodeId 3) (BaseTy "Bool")
         var4 = TyVar { tnId = NodeId 4, tnBound = Just (NodeId 0) }
         nodes = nodeMapFromList
             [ (0, var0)
@@ -128,7 +129,7 @@ spec = describe "MLF.Constraint.Solved" $ do
     describe "Constructor compatibility" $ do
         it "test mkTestSolved helper builds canonical queries from union-find and preserves original graph" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                base1 = TestTyBase (NodeId 1) (BaseTy "Int")
                 inst = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 nodes = nodeMapFromList [(0, var0), (1, base1)]
                 constraint = emptyConstraint
@@ -195,7 +196,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                 runCase (label, expr)
 
     describe "Presolution view parity guards" $ do
-        it "PresolutionView 'Raw mirrors solved canonical/node/bound queries" $ do
+        it "finalized PresolutionView mirrors solved canonical/node/bound queries" $ do
             let fixtures =
                     [ ("id", ELam "x" (EVar "x"))
                     , ("let-poly-use", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1))))
@@ -215,8 +216,12 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 (snapshotUnionFind pres)
                                 (snapshotConstraint pres)
                             )
-                        let view = PresolutionViewBoundary.fromPresolutionResult pres
-                            nodeIds = map fst (toListNode (cNodes (prConstraint pres)))
+                        view <- requireRight
+                            (Finalize.finalizePresolutionViewFromSnapshot
+                                (snapshotConstraint pres)
+                                (snapshotUnionFind pres)
+                            )
+                        let nodeIds = map fst (toListNode (cNodes (prConstraint pres)))
                             probes = nodeIds ++ [NodeId 999]
                         forM_ probes $ \nid -> do
                             Presolution.pvCanonical view nid `shouldBe` canonical solved nid
@@ -233,8 +238,8 @@ spec = describe "MLF.Constraint.Solved" $ do
 
         it "originalConstraint + canonical reproduces canonicalized lookup" $ do
             -- Looking up non-canonical 0 should find the node at canonical 1
-            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 0)) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
-            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 1)) `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 0)) `shouldBe` Just (TestTyBase (NodeId 1) (BaseTy "Int"))
+            NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 1)) `shouldBe` Just (TestTyBase (NodeId 1) (BaseTy "Int"))
             NodeAccess.lookupNode (originalConstraint s) (canonical s (NodeId 99)) `shouldBe` Nothing
 
         it "originalConstraint exposes all nodes in the constraint" $ do
@@ -260,8 +265,8 @@ spec = describe "MLF.Constraint.Solved" $ do
             toListGen gns `shouldBe` [(GenNodeId 0, GenNode (GenNodeId 0) [NodeId 2])]
 
         it "lookupVarBound canonicalizes and returns bound" $ do
-            -- Node 0 is a TyVar with no bound; canonical is 1 which is TyBase
-            -- so lookupVarBound should return Nothing (TyBase is not a TyVar)
+            -- Node 0 is a TyVar with no bound; canonical is 1 which is TestTyBase
+            -- so lookupVarBound should return Nothing (TestTyBase is not a TyVar)
             NodeAccess.lookupVarBound (originalConstraint s) (canonical s (NodeId 0)) `shouldBe` Nothing
             NodeAccess.lookupVarBound (originalConstraint s) (canonical s (NodeId 99)) `shouldBe` Nothing
 
@@ -339,7 +344,7 @@ spec = describe "MLF.Constraint.Solved" $ do
             SolvedTest.wasOriginalBinder s (NodeId 2) `shouldBe` False
 
         it "originalNode returns pre-merge node data" $ do
-            -- Node 0 is a TyVar that was merged into node 1 (TyBase "Int").
+            -- Node 0 is a TyVar that was merged into node 1 (TestTyBase "Int").
             -- originalNode returns the pre-merge TyVar, not the canonical TyBase.
             SolvedTest.originalNode s (NodeId 0)
                 `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
@@ -360,7 +365,7 @@ spec = describe "MLF.Constraint.Solved" $ do
             SolvedTest.originalNode s (NodeId 0)
                 `shouldBe` Just (TyVar { tnId = NodeId 0, tnBound = Nothing })
             SolvedTest.originalNode s (NodeId 1)
-                `shouldBe` Just (TyBase (NodeId 1) (BaseTy "Int"))
+                `shouldBe` Just (TestTyBase (NodeId 1) (BaseTy "Int"))
             SolvedTest.originalNode s (NodeId 99) `shouldBe` Nothing
 
         it "originalBindParent returns pre-merge binding parents" $ do
@@ -376,7 +381,7 @@ spec = describe "MLF.Constraint.Solved" $ do
     describe "lookupVarBound with actual bound" $ do
         it "returns the bound when the canonical node is a TyVar with a bound" $ do
             let boundVar = TyVar { tnId = NodeId 10, tnBound = Just (NodeId 11) }
-                base11 = TyBase (NodeId 11) (BaseTy "Int")
+                base11 = TestTyBase (NodeId 11) (BaseTy "Int")
                 nodes = nodeMapFromList [(10, boundVar), (11, base11)]
                 c = emptyConstraint { cNodes = nodes }
                 s' = SolvedTest.mkTestSolved c IntMap.empty
@@ -388,7 +393,7 @@ spec = describe "MLF.Constraint.Solved" $ do
             alphaBodyId = NodeId 12
             parentNodeId = NodeId 13
             alphaNode = TyForall alphaNodeId alphaBodyId
-            intNode = TyBase intNodeId (BaseTy "Int")
+            intNode = TestTyBase intNodeId (BaseTy "Int")
             alphaBody = TyVar { tnId = alphaBodyId, tnBound = Nothing }
             parentNode = TyArrow parentNodeId alphaNodeId intNodeId
             rootGen = GenNode (GenNodeId 0) [parentNodeId]
@@ -472,7 +477,7 @@ spec = describe "MLF.Constraint.Solved" $ do
 
         it "fromSolveOutput derives canonical constraint from the snapshot-only output" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                base1 = TyBase (NodeId 1) (BaseTy "Int")
+                base1 = TestTyBase (NodeId 1) (BaseTy "Int")
                 outputRootGen = GenNode (GenNodeId 0) [NodeId 1]
                 preRewriteForOutput = emptyConstraint
                     { cNodes = nodeMapFromList [(0, var0), (1, base1)]

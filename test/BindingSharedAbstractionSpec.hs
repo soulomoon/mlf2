@@ -1,5 +1,6 @@
 module BindingSharedAbstractionSpec (spec) where
 
+import IdentityTestSupport
 import Data.Either (isLeft)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -42,7 +43,7 @@ spec = describe "Binding shared abstractions" $ do
                 nodeMapFromList
                     [ (0, TyArrow { tnId = NodeId 0, tnDom = NodeId 1, tnCod = NodeId 2 })
                     , (1, TyVar { tnId = NodeId 1, tnBound = Just (NodeId 2) })
-                    , (2, TyBase { tnId = NodeId 2, tnBase = BaseTy "Int" })
+                    , (2, TestTyBase (NodeId 2) (BaseTy "Int") )
                     , (3, TyForall { tnId = NodeId 3, tnBody = NodeId 1 })
                     ]
             expected =
@@ -57,7 +58,7 @@ spec = describe "Binding shared abstractions" $ do
         let nodes =
                 nodeMapFromList
                     [ (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
-                    , (2, TyBase { tnId = NodeId 2, tnBase = BaseTy "Int" })
+                    , (2, TestTyBase (NodeId 2) (BaseTy "Int") )
                     ]
             genNodes =
                 fromListGen

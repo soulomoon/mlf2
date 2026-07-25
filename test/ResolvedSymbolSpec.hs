@@ -7,31 +7,26 @@ import qualified Data.Map.Strict as Map
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate (classInfoForConstraint, lowerType, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
+import MLF.Frontend.Syntax.Program (resolvedExportTypeRefFromSymbols, refDisplayName)
 import qualified MLF.Frontend.Symbol as Symbol
 import MLF.Frontend.Symbol
   ( symbolIdentityAliasMapWith,
     symbolIdentityStableName,
-    symbolRefMatchesWith,
-    symbolRefMatches,
+    sameSymbolIdentity,
   )
-import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Frontend.Syntax
   ( ResolvedSrcTy (..),
     ResolvedTypeBinderRef,
-    resolvedTypeBinderName,
     resolvedTypeBinderRefFromIdentity,
     SrcKind (..),
     SrcBound (..),
     SrcTy (..),
     SrcType,
-    TypeParam (..),
     resolvedSrcTypeIdentityType,
     resolvedTypeBinderTypeIdentity,
-    typeParamName,
-    typeParamRef,
   )
 import MLF.Types.Identity (TypeBinderIdentity, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import qualified MLF.Types.Elab as Elab
 import Test.Hspec
 import TypeViewTestSupport
   ( fixtureTypeView,
@@ -84,6 +79,14 @@ higherCtorIdentity :: SymbolIdentity
 higherCtorIdentity =
   generatedSymbolIdentity 106 SymbolConstructor "Lib" "Higher" (Just higherOwnerIdentity)
 
+higherFIdentity :: TypeBinderIdentity
+higherFIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 110)
+
+higherAIdentity :: TypeBinderIdentity
+higherAIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 111)
+
 eqClassIdentity :: SymbolIdentity
 eqClassIdentity =
   generatedSymbolIdentity 107 SymbolClass "Lib" "Eq" Nothing
@@ -104,9 +107,9 @@ eqParamIdentity :: TypeBinderIdentity
 eqParamIdentity =
   typeBinderIdentityFromUnique eqParamUnique
 
-eqParam :: TypeParam
+eqParam :: CheckedTypeParam
 eqParam =
-  ResolvedTypeParam (resolvedTypeBinderRef eqParamUnique "a") KType
+  CheckedTypeParam (resolvedTypeBinderRef eqParamUnique "a") KType
 
 resolvedTypeBinderRef :: UniqueIdentity -> String -> ResolvedTypeBinderRef
 resolvedTypeBinderRef identity name =
@@ -198,20 +201,15 @@ spec = do
       sameResolvedSymbol first conflictingPayload `shouldBe` False
       sameResolvedSymbol first second `shouldBe` False
 
-    it "does not match symbol refs through stable identity names without metadata" $ do
-      let stableName = symbolIdentityStableName valueInfoIdentity
+    it "matches resolved symbols by semantic identity, independent of display names" $ do
+      let renamedPayload =
+            generatedSymbolIdentity 101 SymbolValue "Lib" "stale-answer" Nothing
+          distinctPayload =
+            generatedSymbolIdentity 101 SymbolValue "Other" "answer" Nothing
 
-      symbolRefMatches (Just valueInfoIdentity) "stale-answer" Nothing stableName `shouldBe` False
-      symbolRefMatches Nothing stableName (Just valueInfoIdentity) "answer" `shouldBe` False
-      symbolRefMatches (Just valueInfoIdentity) "answer" Nothing "answer" `shouldBe` False
-      symbolRefMatchesWith IdentityOnly Nothing "answer" Nothing "answer" `shouldBe` False
-      symbolRefMatches
-        (Just valueInfoIdentity)
-        "answer"
-        (Just (generatedSymbolIdentity 101 SymbolValue "Lib" "stale-answer" Nothing))
-        "stale-answer"
-        `shouldBe` False
-      symbolRefMatches (Just valueInfoIdentity) "answer" (Just valueInfoIdentity) "renamed-answer" `shouldBe` True
+      sameSymbolIdentity valueInfoIdentity renamedPayload `shouldBe` False
+      sameSymbolIdentity valueInfoIdentity distinctPayload `shouldBe` False
+      sameSymbolIdentity valueInfoIdentity valueInfoIdentity `shouldBe` True
 
     it "uses semantic identity for resolved symbol and reference equality" $ do
       let first =
@@ -263,7 +261,6 @@ spec = do
             InstanceInfo
               { instanceClassSymbol = eqClassIdentity,
                 instanceOriginModuleIdentity = generatedSymbolIdentity 905 SymbolModule "Lib" "Lib" Nothing,
-                instanceConstraints = [],
                 instanceConstraintInfos = [],
                 instanceHeadTypeViews = mkTypeView (STBase "Token") (STBase "Token") :| [],
                 instanceMethodsByIdentity = Map.singleton eqMethodIdentity eqMethodValue
@@ -361,10 +358,12 @@ spec = do
                     )
               }
 
-      typeViewHeadIdentities (methodTypeView methodInfo)
-        `shouldBe` Map.singleton stableToken tokenTypeIdentity
-      typeViewHeadIdentities (methodResultTypeView methodInfo)
-        `shouldBe` Map.fromList [(stableToken, tokenTypeIdentity), ("Token", tokenTypeIdentity)]
+      Map.lookup stableToken (typeViewHeadIdentities (methodTypeView methodInfo))
+        `shouldBe` Just tokenTypeIdentity
+      Map.lookup stableToken (typeViewHeadIdentities (methodResultTypeView methodInfo))
+        `shouldBe` Just tokenTypeIdentity
+      Map.lookup "Token" (typeViewHeadIdentities (methodResultTypeView methodInfo))
+        `shouldBe` Just tokenTypeIdentity
 
     it "keeps method result head identities by payload stable name" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
@@ -380,8 +379,10 @@ spec = do
                     )
               }
 
-      typeViewHeadIdentities (methodResultTypeView methodInfo)
-        `shouldBe` Map.singleton "Token" tokenTypeIdentity
+      Map.lookup "Token" (typeViewHeadIdentities (methodResultTypeView methodInfo))
+        `shouldBe` Just tokenTypeIdentity
+      Map.lookup stableToken (typeViewHeadIdentities (methodResultTypeView methodInfo))
+        `shouldBe` Just tokenTypeIdentity
 
     it "keeps method parameter head identities by payload stable name" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
@@ -397,10 +398,12 @@ spec = do
                     )
               }
 
-      map typeViewHeadIdentities (methodParamTypeViews (methodTypeView methodInfo))
-        `shouldBe` [Map.singleton "Token" tokenTypeIdentity]
+      map (Map.lookup "Token" . typeViewHeadIdentities) (methodParamTypeViews (methodTypeView methodInfo))
+        `shouldBe` [Just tokenTypeIdentity]
+      map (Map.lookup stableToken . typeViewHeadIdentities) (methodParamTypeViews (methodTypeView methodInfo))
+        `shouldBe` [Just tokenTypeIdentity]
 
-    it "keeps projected method result head identities through display pairs" $ do
+    it "keeps projected method result head identities from carried payloads" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view =
             setTypeViewHeadIdentities
@@ -411,7 +414,7 @@ spec = do
       Map.lookup "Token" (typeViewHeadIdentities resultView) `shouldBe` Just tokenTypeIdentity
       Map.lookup "Bool" (typeViewHeadIdentities resultView) `shouldBe` Nothing
 
-    it "keeps partial arrow result head identities through display pairs" $ do
+    it "keeps partial arrow result head identities from carried payloads" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view =
             setTypeViewHeadIdentities
@@ -563,14 +566,9 @@ spec = do
     it "assigns identities to builtin opaque type parameters" $ do
       case (Map.lookup "IO" Builtins.builtinOpaqueTypes, Map.lookup "IORef" Builtins.builtinOpaqueTypes) of
         (Just DataInfo {dataTypeParams = [ioParam]}, Just DataInfo {dataTypeParams = [ioRefParam]}) -> do
-          typeParamName ioParam `shouldBe` "a"
-          typeParamName ioRefParam `shouldBe` "a"
-          case (typeParamRef ioParam, typeParamRef ioRefParam) of
-            (Just ioRef, Just ioRefRef) -> do
-              resolvedTypeBinderName ioRef `shouldBe` "a"
-              resolvedTypeBinderName ioRefRef `shouldBe` "a"
-              ioRef `shouldNotBe` ioRefRef
-            refs -> expectationFailure ("expected builtin opaque param identities, got " ++ show refs)
+          checkedTypeParamName ioParam `shouldBe` "a"
+          checkedTypeParamName ioRefParam `shouldBe` "a"
+          checkedTypeParamIdentity ioParam `shouldNotBe` checkedTypeParamIdentity ioRefParam
         other -> expectationFailure ("expected IO and IORef opaque params, got " ++ show other)
 
     it "keeps same-named type binders distinct in identity types" $ do
@@ -601,23 +599,16 @@ spec = do
       Map.lookup "a" (typeViewBinderIdentities view) `shouldBe` Just identity
       Map.lookup "$typevar#203" (typeViewBinderIdentities view) `shouldBe` Just identity
 
-    it "requires carried identities for every resolved type head and binder" $ do
+    it "constructs resolved type views with carried head and binder identities" $ do
       let ref = resolvedTypeBinderRef (UniqueIdentity 204) "a"
           tokenSymbol = resolvedDataInfoSymbol (SymbolLocal "Lib") "Token" tokenDataInfo
           resolvedView =
             typeViewFromResolved
               (RSTForall ref Nothing (RSTArrow (RSTBase tokenSymbol) (RSTVar ref)))
-          missingHead = mkTypeView (STBase "Token") (STBase "Token")
-          missingBinder =
-            mkTypeView
-              (STForall "a" Nothing (STVar "a"))
-              (STForall "a" Nothing (STVar "a"))
-      typeViewIdentityGaps resolvedView `shouldBe` []
-      typeViewIdentityComplete resolvedView `shouldBe` True
-      typeViewIdentityGaps missingHead
-        `shouldBe` [MissingTypeHeadIdentity "Token"]
-      typeViewIdentityGaps missingBinder
-        `shouldBe` [MissingTypeBinderIdentity "a"]
+      Map.lookup "Token" (typeViewHeadIdentities resolvedView)
+        `shouldBe` Just (resolvedSymbolIdentity tokenSymbol)
+      Map.lookup "a" (typeViewBinderIdentities resolvedView)
+        `shouldBe` Just (resolvedTypeBinderTypeIdentity ref)
 
     it "compares type views by identity metadata when display names are stale" $ do
       let headName = symbolIdentityStableName tokenTypeIdentity
@@ -631,8 +622,7 @@ spec = do
               (Map.singleton binderKey binderIdentity)
           staleView = view "$stale.Token" "$stale.Token" "$stale_a"
       view "Token" "Token" "a" `shouldBe` staleView
-      view "Token" "Token" "a"
-        `shouldNotBe` setTypeViewBinderIdentities Map.empty staleView
+      setTypeViewBinderIdentities Map.empty staleView `shouldBe` staleView
 
     it "compares type views by carried identities when identity names are stale" $ do
       let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 209)
@@ -644,8 +634,7 @@ spec = do
               (Map.singleton binderName binderIdentity)
           staleView = view "$stale.Token" "$stale_a"
       view "Token" "a" `shouldBe` staleView
-      view "Token" "a"
-        `shouldNotBe` setTypeViewHeadIdentities Map.empty staleView
+      setTypeViewHeadIdentities Map.empty staleView `shouldBe` staleView
 
     it "does not compare type views equal when carried head payloads conflict" $ do
       let originalIdentity = generatedSymbolIdentity 210 SymbolType "Lib" "Token" Nothing
@@ -724,35 +713,30 @@ spec = do
       constructorOwnerRuntimeTypeTrackable staleOwnersByIdentity someCtor `shouldBe` True
       constructorOwnerHasVariableHeadApplication staleOwnersByIdentity someCtor `shouldBe` False
 
-    it "compares evidence methods by symbol identity when runtime names are stale" $ do
+    it "compares evidence methods by symbol identity" $ do
       let methodView = methodTypeView eqMethodInfo
-          evidence runtimeName symbol =
+          evidence symbol =
             EvidenceMethod
-              { evidenceMethodRuntimeName = runtimeName,
-                evidenceMethodSymbol = symbol,
-                evidenceMethodResolvedVar = Nothing,
+              { evidenceMethodSymbol = symbol,
+                evidenceMethodResolvedVar = resolvedVarFromValueInfo valueInfo Elab.TBottom,
                 evidenceMethodTypeView = methodView
               }
-      evidence "Lib__eq" eqMethodIdentity
-        `shouldBe` evidence "$stale.eq" eqMethodIdentity
-      evidence "Lib__eq" eqMethodIdentity
-        `shouldNotBe` evidence "Lib__eq" someCtorIdentity
+      evidence eqMethodIdentity `shouldBe` evidence eqMethodIdentity
+      evidence eqMethodIdentity `shouldNotBe` evidence someCtorIdentity
 
     it "does not choose arbitrary evidence methods after duplicate collapse" $ do
       let methodView = methodTypeView eqMethodInfo
           conflictingView = mkTypeView (STBase "Bool") (STBase "Bool")
-          evidence runtimeName view =
+          evidence view =
             EvidenceMethod
-              { evidenceMethodRuntimeName = runtimeName,
-                evidenceMethodSymbol = eqMethodIdentity,
-                evidenceMethodResolvedVar = Nothing,
+              { evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = resolvedVarFromValueInfo valueInfo Elab.TBottom,
                 evidenceMethodTypeView = view
               }
-          first = evidence "Lib__eq_first" methodView
-          duplicate = evidence "Lib__eq_second" methodView
-          conflicting = evidence "Lib__eq_conflicting" conflictingView
-      fmap evidenceMethodRuntimeName (uniqueEvidenceMethod [first, duplicate])
-        `shouldBe` Just "Lib__eq_first"
+          first = evidence methodView
+          duplicate = evidence methodView
+          conflicting = evidence conflictingView
+      uniqueEvidenceMethod [first, duplicate] `shouldBe` Just first
       uniqueEvidenceMethod [first, conflicting] `shouldBe` Nothing
 
     it "does not choose arbitrary evidence method substitutions after duplicate collapse" $ do
@@ -761,18 +745,16 @@ spec = do
           conflictingReplacement = mkTypeView (STBase "Bool") (STBase "Bool")
           binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 210)
           binderKey = binderIdentity
-          evidence runtimeName =
+          evidence =
             EvidenceMethod
-              { evidenceMethodRuntimeName = runtimeName,
-                evidenceMethodSymbol = eqMethodIdentity,
-                evidenceMethodResolvedVar = Nothing,
+              { evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = resolvedVarFromValueInfo valueInfo Elab.TBottom,
                 evidenceMethodTypeView = methodView
               }
-          first = (evidence "Lib__eq_first", Map.singleton binderKey replacement)
-          duplicate = (evidence "Lib__eq_second", Map.singleton binderKey replacement)
-          conflicting = (evidence "Lib__eq_conflicting", Map.singleton binderKey conflictingReplacement)
-      fmap (evidenceMethodRuntimeName . fst) (uniqueEvidenceMethodMatch [first, duplicate])
-        `shouldBe` Just "Lib__eq_first"
+          first = (evidence, Map.singleton binderKey replacement)
+          duplicate = (evidence, Map.singleton binderKey replacement)
+          conflicting = (evidence, Map.singleton binderKey conflictingReplacement)
+      uniqueEvidenceMethodMatch [first, duplicate] `shouldBe` Just first
       uniqueEvidenceMethodMatch [first, conflicting] `shouldBe` Nothing
 
     it "compares method infos by symbol identity when display names are stale" $ do
@@ -784,57 +766,55 @@ spec = do
     it "uses resolved constraint metadata for method class value and instance equality" $ do
       let scope = mkElaborateScope Map.empty (Map.singleton "Token" tokenDataInfo) Map.empty []
           tokenView = sourceTypeViewInScope scope (STBase "Token")
-          parsedConstraint = ClassConstraint "Eq" (STBase "Token" :| [])
-          staleDisplayConstraint = ClassConstraint "$stale.Eq" (STBase "$stale.Token" :| [])
           constraintInfo =
             ConstraintInfo
               { constraintDisplayClass = "Eq",
                 constraintClassSymbol = eqClassIdentity,
                 constraintTypeViews = tokenView :| []
               }
+          staleConstraintInfo =
+            constraintInfo
+              { constraintDisplayClass = "$stale.Eq",
+                constraintTypeViews = setTypeViewDisplay (STBase "$stale.Token") tokenView :| []
+              }
           paramIdentity = typeBinderIdentityFromUnique (UniqueIdentity 211)
-          methodWith displays infos paramName =
+          methodWith infos paramName =
             eqMethodInfo
-              { methodConstraints = displays,
-                methodConstraintInfos = infos,
+              { methodConstraintInfos = infos,
                 methodParamBinders = (paramName, paramIdentity) :| []
               }
-          classWith displays infos =
+          classWith infos =
             eqClassInfo
-              { classSuperclasses = displays,
-                classSuperclassInfos = infos
+              { classSuperclassInfos = infos
               }
-          valueWith runtimeName displays infos =
+          valueWith runtimeName infos =
             OrdinaryValue
               { valueRuntimeName = runtimeName,
                 valueInfoSymbol = valueInfoIdentity,
                 valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
-                valueConstraints = displays,
                 valueConstraintInfos = infos
               }
           instanceOrigin = generatedSymbolIdentity 135 SymbolModule "Lib" "Lib" Nothing
-          instanceWith displays infos =
+          instanceWith infos =
             InstanceInfo
               { instanceClassSymbol = eqClassIdentity,
                 instanceOriginModuleIdentity = instanceOrigin,
-                instanceConstraints = displays,
                 instanceConstraintInfos = infos,
                 instanceHeadTypeViews = tokenView :| [],
                 instanceMethodsByIdentity = Map.empty
               }
-          displayConstraints = [parsedConstraint]
-          staleDisplayConstraints = [staleDisplayConstraint]
           constraintInfos = [constraintInfo]
-      methodWith displayConstraints constraintInfos "a"
-        `shouldBe` methodWith staleDisplayConstraints constraintInfos "$stale_a"
-      methodWith displayConstraints constraintInfos "a"
-        `shouldNotBe` methodWith staleDisplayConstraints [] "$stale_a"
-      classWith displayConstraints constraintInfos
-        `shouldBe` classWith staleDisplayConstraints constraintInfos
-      valueWith "Lib__answer" displayConstraints constraintInfos
-        `shouldBe` valueWith "$stale.answer" staleDisplayConstraints constraintInfos
-      instanceWith displayConstraints constraintInfos
-        `shouldBe` instanceWith staleDisplayConstraints constraintInfos
+          staleConstraintInfos = [staleConstraintInfo]
+      methodWith constraintInfos "a"
+        `shouldBe` methodWith staleConstraintInfos "$stale_a"
+      methodWith constraintInfos "a"
+        `shouldNotBe` methodWith [] "$stale_a"
+      classWith constraintInfos
+        `shouldBe` classWith staleConstraintInfos
+      valueWith "Lib__answer" constraintInfos
+        `shouldBe` valueWith "$stale.answer" staleConstraintInfos
+      instanceWith constraintInfos
+        `shouldBe` instanceWith staleConstraintInfos
 
     it "compares export metadata by identity payloads when display maps are stale" $ do
       let exportedType =
@@ -895,9 +875,8 @@ spec = do
           staleModuleIdentity = renameSymbolDefiningName "$stale.Lib" moduleIdentity
           methodEvidence =
             EvidenceMethod
-              { evidenceMethodRuntimeName = "Lib__eq",
-                evidenceMethodSymbol = eqMethodIdentity,
-                evidenceMethodResolvedVar = Nothing,
+              { evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = resolvedVarFromValueInfo valueInfo Elab.TBottom,
                 evidenceMethodTypeView = methodTypeView eqMethodInfo
               }
           evidence =
@@ -914,7 +893,6 @@ spec = do
             InstanceInfo
               { instanceClassSymbol = eqClassIdentity,
                 instanceOriginModuleIdentity = moduleIdentity,
-                instanceConstraints = [],
                 instanceConstraintInfos = [],
                 instanceHeadTypeViews = tokenView :| [],
                 instanceMethodsByIdentity = Map.singleton eqMethodIdentity eqMethodValue
@@ -1001,7 +979,6 @@ spec = do
               { constructorShapeSymbol = someCtorIdentity,
                 constructorShapeRuntimeName = "Lib__Some",
                 constructorShapeTypeView = ctorTypeView someCtor,
-                constructorShapeForallBinderInfo = [],
                 constructorShapeIndex = 0,
                 constructorShapeOwnerTypeParams = []
               }
@@ -1055,7 +1032,6 @@ spec = do
               { valueInfoSymbol = valueInfoIdentity,
                 valueRuntimeName = "$stale.answer",
                 valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
-                valueConstraints = [],
                 valueConstraintInfos = []
               }
           staleRuntimeValueIdentity =
@@ -1067,7 +1043,6 @@ spec = do
               { valueInfoSymbol = localValueIdentity,
                 valueRuntimeName = "$stale.local_answer",
                 valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
-                valueConstraints = [],
                 valueConstraintInfos = []
               }
           localLoweredIdentity =
@@ -1162,7 +1137,6 @@ valueInfo =
     { valueInfoSymbol = valueInfoIdentity,
       valueRuntimeName = "Lib__answer",
       valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
-      valueConstraints = [],
       valueConstraintInfos = []
     }
 
@@ -1172,7 +1146,6 @@ mainValueInfo =
     { valueInfoSymbol = mainValueIdentity,
       valueRuntimeName = "Main__main",
       valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
-      valueConstraints = [],
       valueConstraintInfos = []
     }
 
@@ -1182,7 +1155,6 @@ someCtor =
     { ctorInfoSymbol = someCtorIdentity,
       ctorRuntimeName = "Lib__Some",
       ctorTypeView = mkTypeView (STBase "Token") (STBase "Lib.Token"),
-      ctorForallBinderInfo = [],
       ctorOwningTypeIdentity = tokenTypeIdentity,
       ctorIndex = 0,
       ctorOwnerConstructors = []
@@ -1202,7 +1174,7 @@ higherCtor =
     { ctorInfoSymbol = higherCtorIdentity,
       ctorRuntimeName = "Lib__Higher",
       ctorTypeView =
-        mkTypeView
+        fixtureTypeView
           ( STArrow
               (STVarApp "f" (STVar "a" :| []))
               (STCon "Higher" (STVar "f" :| [STVar "a"]))
@@ -1210,8 +1182,9 @@ higherCtor =
           ( STArrow
               (STVarApp "f" (STVar "a" :| []))
               (STCon "Lib.Higher" (STVar "f" :| [STVar "a"]))
-          ),
-      ctorForallBinderInfo = [],
+          )
+          (Map.fromList [("Higher", higherTypeIdentity), ("Lib.Higher", higherTypeIdentity)])
+          (Map.fromList [("f", higherFIdentity), ("a", higherAIdentity)]),
       ctorOwningTypeIdentity = higherTypeIdentity,
       ctorIndex = 0,
       ctorOwnerConstructors = []
@@ -1222,8 +1195,8 @@ higherDataInfo =
   DataInfo
     { dataInfoSymbol = higherTypeIdentity,
       dataTypeParams =
-        [ ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 110) "f") KType,
-          ResolvedTypeParam (resolvedTypeBinderRef (UniqueIdentity 111) "a") KType
+        [ CheckedTypeParam (resolvedTypeBinderRefFromIdentity higherFIdentity "f") KType,
+          CheckedTypeParam (resolvedTypeBinderRefFromIdentity higherAIdentity "a") KType
         ],
       dataConstructors = [higherCtor]
     }
@@ -1237,7 +1210,6 @@ eqMethodInfo =
         mkTypeView
           (STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")))
           (STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool"))),
-      methodConstraints = [],
       methodConstraintInfos = [],
       methodParamBinders = ("a", eqParamIdentity) :| []
     }
@@ -1251,7 +1223,6 @@ eqClassInfo =
   ClassInfo
     { classInfoSymbol = eqClassIdentity,
       classTypeParams = eqParam :| [],
-      classSuperclasses = [],
       classSuperclassInfos = [],
       classFunctionalDependencies = [],
       classMethodsByIdentity = Map.singleton (methodInfoSymbolIdentity eqMethodInfo) eqMethodInfo
@@ -1262,7 +1233,6 @@ qualifiedEqClassInfo =
   ClassInfo
     { classInfoSymbol = eqClassIdentity,
       classTypeParams = eqParam :| [],
-      classSuperclasses = [],
       classSuperclassInfos = [],
       classFunctionalDependencies = [],
       classMethodsByIdentity = Map.singleton (methodInfoSymbolIdentity qualifiedEqMethodInfo) qualifiedEqMethodInfo

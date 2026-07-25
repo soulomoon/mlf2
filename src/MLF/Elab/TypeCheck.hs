@@ -25,6 +25,7 @@ where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Data.Foldable as Foldable
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst
@@ -45,6 +46,7 @@ import MLF.Types.Identity
 import MLF.Reify.TypeOps
   ( alphaEqType,
     churchAwareEqType,
+    churchRepresentationEqType,
     firstNonContractiveRecursiveType,
     freeTypeVarRefsType,
     matchTypeRefs,
@@ -176,10 +178,8 @@ canonicalizeResolvedTermTypes = go
 
     canonicalResolved env resolved =
       case lookupResolvedTermEnvEntry (resolvedTermEnv env) resolved of
-        Just (_, ty)
-          | not (resolvedVarIsLocal resolved)
-              || resolvedVarTypeMatches ty (resolvedVarType resolved) ->
-              mapResolvedVarType (const ty) resolved
+        Just (_, ty) ->
+          mapResolvedVarType (const ty) resolved
         _ -> resolved
 
 typeCheckWithEnvSummary :: TypeCheckEnvSummary -> ResolvedTermEnv -> Env -> XmlfTerm -> Either TypeCheckError ElabType
@@ -200,8 +200,27 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
     aTy <- typeCheckWithEnvSummary envSummary resolvedEnv env a
     case fTy of
       TArrow argTy resTy ->
-        let argTy' = stripVacuousForallsDeep (inlineTypeEnvBounds env argTy)
-            aTy' = stripVacuousForallsDeep (inlineTypeEnvBounds env aTy)
+        let argTyOperational = inlineTypeEnvBounds env argTy
+            aTyOperational = inlineTypeEnvBounds env aTy
+            explicitEndpointMatch =
+              forallPlacementAgrees argTy aTy
+                && alphaEqType argTy aTy
+            operationalForallPlacementAgrees =
+              forallPlacementAgrees argTyOperational aTyOperational
+            boundProjectionIsExplicit =
+              alphaEqType argTy argTyOperational
+                && alphaEqType aTy aTyOperational
+            recursiveRepresentationMatch =
+              not
+                ( alphaEqType
+                    argTyOperational
+                    aTyOperational
+                )
+                && churchRepresentationEqType
+                  argTyOperational
+                  aTyOperational
+            argTy' = stripVacuousForallsDeep argTyOperational
+            aTy' = stripVacuousForallsDeep aTyOperational
             peelLeadingUnboundedForalls ty = case ty of
               TForallRef _ Nothing body -> peelLeadingUnboundedForalls body
               _ -> ty
@@ -248,15 +267,20 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
                         || maybe False (\ty -> ty == actualTy || alphaEqType ty actualTy || churchAwareEqType ty actualTy) instantiatedExpected
                 _ -> False
          in if argTy' == TBottom
-              || argTy' == aTy'
-              || alphaEqType argTy' aTy'
-              || churchAwareEqType argTy' aTy'
-              || nominalStructuralMuCompatible argTy' aTy'
-              || opaqueIOCompatible argTy' aTy'
-              || muCompatible
+              || explicitEndpointMatch
+              || recursiveRepresentationMatch
+              || boundProjectionIsExplicit
+                && operationalForallPlacementAgrees
+                && ( argTy' == aTy'
+                      || alphaEqType argTy' aTy'
+                      || churchAwareEqType argTy' aTy'
+                      || nominalStructuralTypeCompatible argTy' aTy'
+                      || opaqueIOCompatible argTy' aTy'
+                      || muCompatible
+                   )
               then Right resTy
               else
-                case specializeFlexibleArgumentResult env argTy' aTy' resTy of
+                case specializeFlexibleArgumentResult env argTyOperational aTyOperational resTy of
                   Just resTy' -> Right resTy'
                   Nothing -> Left (TCArgumentMismatch argTy' aTy')
       _ -> Left (TCExpectedArrow fTy)
@@ -337,18 +361,13 @@ checkInstantiation env ty inst =
   let canonicalizeAppLikeInst inst0 = case inst0 of
         InstApp ty' -> InstApp ty'
         InstSeq (InstInside (InstBot ty')) InstElim -> InstApp ty'
-        InstSeq (InstInside (InstApp ty')) InstElim -> InstApp ty'
         _ -> inst0
       inst' = canonicalizeAppLikeInst inst
-      staleAppLikeInst inst0 = case inst0 of
-        InstApp {} -> True
-        InstSeq (InstInside (InstBot _)) InstElim -> True
-        InstSeq (InstInside (InstApp _)) InstElim -> True
-        _ -> False
-   in case ty of
-        TForallRef {} -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterTypeAndInstantiation ty inst', env, ty)
-        _ | staleAppLikeInst inst' -> Right ty
-        _ -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterTypeAndInstantiation ty inst', env, ty)
+   in (\(_, _, ty') -> ty')
+        <$> evalInstantiationWith
+          spec
+          inst'
+          (identityGeneratorAfterTypeAndInstantiation ty inst', env, ty)
   where
     spec :: InstEvalSpec Env TypeCheckError
     spec =
@@ -365,7 +384,14 @@ checkInstantiation env ty inst =
                       then Right (k, env', TVarRef ref)
                       else Left (TCInstantiationError (InstAbstrRef ref) t ("InstAbstr expects bound " ++ pretty bound)),
           instElimError = \inst0 t ->
-            TCInstantiationError inst0 t ("InstElim expects forall, got " ++ pretty t),
+            let operation =
+                  case inst0 of
+                    InstSeq (InstInside (InstBot _)) InstElim -> "InstApp"
+                    _ -> "InstElim"
+             in TCInstantiationError
+                  inst0
+                  t
+                  (operation ++ " expects forall, got " ++ pretty t),
           instInsideError = \_inst0 t ->
             TCInstantiationError InstId t ("InstInside expects forall, got " ++ pretty t),
           instUnderError = \phiInst t ->
@@ -385,7 +411,7 @@ litType = \case
 
 builtinLiteralType :: String -> ElabType
 builtinLiteralType name =
-  TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (BaseTy name)
+  TBaseWithIdentity (Builtins.builtinTypeIdentity name) (BaseTy name)
 
 boundType :: Maybe BoundType -> ElabType
 boundType = maybe TBottom tyToElab
@@ -655,6 +681,42 @@ stripVacuousForallsDeep ty = case ty of
   TMuRef ref body -> TMuRef ref (stripVacuousForallsDeep body)
   _ -> ty
 
+forallPlacementAgrees :: ElabType -> ElabType -> Bool
+forallPlacementAgrees expected actual =
+  case (expected, actual) of
+    (TForallRef _ expectedBound expectedBody, TForallRef _ actualBound actualBody) ->
+      boundPlacementAgrees expectedBound actualBound
+        && forallPlacementAgrees expectedBody actualBody
+    (TForallRef {}, _) -> False
+    (_, TForallRef {}) -> False
+    (TArrow expectedDomain expectedCodomain, TArrow actualDomain actualCodomain) ->
+      forallPlacementAgrees expectedDomain actualDomain
+        && forallPlacementAgrees expectedCodomain actualCodomain
+    (TConWithIdentity _ _ expectedArgs, TConWithIdentity _ _ actualArgs) ->
+      length expectedArgs == length actualArgs
+        && and
+          ( zipWith
+              forallPlacementAgrees
+              (Foldable.toList expectedArgs)
+              (Foldable.toList actualArgs)
+          )
+    (TVarAppRef _ expectedArgs, TVarAppRef _ actualArgs) ->
+      length expectedArgs == length actualArgs
+        && and
+          ( zipWith
+              forallPlacementAgrees
+              (Foldable.toList expectedArgs)
+              (Foldable.toList actualArgs)
+          )
+    (TMuRef _ expectedBody, TMuRef _ actualBody) ->
+      forallPlacementAgrees expectedBody actualBody
+    _ -> True
+  where
+    boundPlacementAgrees Nothing Nothing = True
+    boundPlacementAgrees (Just expectedBound) (Just actualBound) =
+      forallPlacementAgrees (tyToElab expectedBound) (tyToElab actualBound)
+    boundPlacementAgrees _ _ = False
+
 stripVacuousForallsDeepBound :: BoundType -> BoundType
 stripVacuousForallsDeepBound bound = case bound of
   TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
@@ -675,10 +737,8 @@ opaqueIOCompatible expected actual =
         && opaqueIOCompatible expectedCod actualCod
     _ -> False
   where
-    isOpaqueIOHead (Just identity) _ =
+    isOpaqueIOHead identity _ =
       identity == Builtins.builtinTypeIdentity "IO"
-    isOpaqueIOHead Nothing _ =
-      False
 
     opaqueIODomainCompatible expectedDom actualDom =
       expectedDom == actualDom
@@ -688,32 +748,70 @@ opaqueIOCompatible expected actual =
           (TVarRef {}, TVarRef {}) -> True
           _ -> False
 
-nominalStructuralMuCompatible :: ElabType -> ElabType -> Bool
-nominalStructuralMuCompatible expected actual =
-  case (expected, actual) of
-    (TBaseWithIdentity expectedIdentity expectedBase, actualMu@TMuRef {}) ->
+-- | Compare the nominal and Church-encoded presentations of an ADT using
+-- only semantic identities.  The frontend can retain a nominal constructor
+-- application inside another structural datatype while its imported binding
+-- type has already been expanded to @mu@.  Propagating the representation
+-- equivalence through an otherwise identity-equal type keeps those two
+-- checked presentations coherent without admitting display-name matching.
+nominalStructuralTypeCompatible :: ElabType -> ElabType -> Bool
+nominalStructuralTypeCompatible = go
+  where
+    go expected actual
+      | alphaEqType expected actual || churchAwareEqType expected actual = True
+    go (TArrow expectedDomain expectedCodomain) (TArrow actualDomain actualCodomain) =
+      go expectedDomain actualDomain && go expectedCodomain actualCodomain
+    go (TConWithIdentity expectedIdentity _ expectedArgs) (TConWithIdentity actualIdentity _ actualArgs) =
+      expectedIdentity == actualIdentity
+        && compatibleArgs expectedArgs actualArgs
+    go (TVarAppRef expectedRef expectedArgs) (TVarAppRef actualRef actualArgs) =
+      typeBinderRefsSameIdentity expectedRef actualRef
+        && compatibleArgs expectedArgs actualArgs
+    go (TBaseWithIdentity expectedIdentity _) (TBaseWithIdentity actualIdentity _) =
+      expectedIdentity == actualIdentity
+    go (TForallRef expectedRef expectedBound expectedBody) (TForallRef actualRef actualBound actualBody) =
+      typeBinderRefsSameIdentity expectedRef actualRef
+        && compatibleBounds expectedBound actualBound
+        && go expectedBody actualBody
+    go (TMuRef expectedRef expectedBody) (TMuRef actualRef actualBody) =
+      typeBinderRefsSameIdentity expectedRef actualRef
+        && go expectedBody actualBody
+    go (TBaseWithIdentity expectedIdentity expectedBase) actualMu@TMuRef {} =
       nominalHeadMatchesStructuralMu expectedIdentity expectedBase actualMu
-    (TConWithIdentity expectedIdentity expectedBase _, actualMu@TMuRef {}) ->
+    go (TConWithIdentity expectedIdentity expectedBase _) actualMu@TMuRef {} =
       nominalHeadMatchesStructuralMu expectedIdentity expectedBase actualMu
-    (expectedMu@TMuRef {}, TBaseWithIdentity actualIdentity actualBase) ->
+    go expectedMu@TMuRef {} (TBaseWithIdentity actualIdentity actualBase) =
       nominalHeadMatchesStructuralMu actualIdentity actualBase expectedMu
-    (expectedMu@TMuRef {}, TConWithIdentity actualIdentity actualBase _) ->
+    go expectedMu@TMuRef {} (TConWithIdentity actualIdentity actualBase _) =
       nominalHeadMatchesStructuralMu actualIdentity actualBase expectedMu
-    _ -> False
+    go TBottom TBottom = True
+    go _ _ = False
 
-nominalHeadMatchesStructuralMu :: Maybe SymbolIdentity -> BaseTy -> ElabType -> Bool
+    compatibleArgs expectedArgs actualArgs =
+      length expectedArgs == length actualArgs
+        && and
+          ( zipWith
+              go
+              (Foldable.toList expectedArgs)
+              (Foldable.toList actualArgs)
+          )
+
+    compatibleBounds Nothing Nothing = True
+    compatibleBounds (Just expectedBound) (Just actualBound) =
+      go (tyToElab expectedBound) (tyToElab actualBound)
+    compatibleBounds _ _ = False
+
+nominalHeadMatchesStructuralMu :: SymbolIdentity -> BaseTy -> ElabType -> Bool
 nominalHeadMatchesStructuralMu nominalIdentity _ (TMuRef selfRef _) =
   structuralSelfMatchesNominalIdentity nominalIdentity selfRef
 nominalHeadMatchesStructuralMu _ _ _ =
   False
 
-structuralSelfMatchesNominalIdentity :: Maybe SymbolIdentity -> TypeBinderRef -> Bool
-structuralSelfMatchesNominalIdentity (Just identity) selfRef =
+structuralSelfMatchesNominalIdentity :: SymbolIdentity -> TypeBinderRef -> Bool
+structuralSelfMatchesNominalIdentity identity selfRef =
   case typeBinderIdentityStructural (typeBinderRefIdentity selfRef) of
     Just (unique, StructuralSelfBinder) -> unique == symbolUniqueIdentity identity
     _ -> False
-structuralSelfMatchesNominalIdentity Nothing _ =
-  False
 
 collapseRecursiveAlias :: TypeBinderRef -> ElabType -> ElabType -> ElabType
 collapseRecursiveAlias muRef recursiveTy = go

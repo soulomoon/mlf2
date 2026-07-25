@@ -19,6 +19,7 @@ module SpecUtil
     runToPresolutionDefault,
     runToPresolutionWithAnnDefault,
     runPipelineArtifactsDefault,
+    runPipelineArtifactsWithAutomaticMuDefault,
     runToSolvedDefault,
     expectRight,
     requireRight,
@@ -93,6 +94,8 @@ emptyConstraint =
       cWeakenedVars = IntSet.empty,
       cAnnEdges = IntSet.empty,
       cLetEdges = IntSet.empty,
+      cGraftedEdges = IntSet.empty,
+      cGraftResultConstructions = IntMap.empty,
       cGenNodes = fromListGen []
     }
 
@@ -108,6 +111,8 @@ eraseConstraintPhaseForTest c =
       cWeakenedVars = cWeakenedVars c,
       cAnnEdges = cAnnEdges c,
       cLetEdges = cLetEdges c,
+      cGraftedEdges = cGraftedEdges c,
+      cGraftResultConstructions = cGraftResultConstructions c,
       cGenNodes = cGenNodes c
     }
 
@@ -247,6 +252,31 @@ runPipelineArtifactsDefault poly expr = do
         paRoot = root
       }
 
+-- | Build the same artifacts after the production cycle-breaking step used
+-- for automatic recursive-type introduction.
+runPipelineArtifactsWithAutomaticMuDefault ::
+  PolySyms ->
+  SurfaceExpr ->
+  Either String PipelineArtifacts
+runPipelineArtifactsWithAutomaticMuDefault poly expr = do
+  ConstraintResult {crAnnotated = ann, crRoot = root, crConstraint = c0} <-
+    runConstraintDefault poly expr
+  let cNormalized = CNormalize.normalize c0
+  (cAcyclic, acyc) <-
+    firstShowE (Acyc.breakCyclesAndCheckAcyclicity cNormalized)
+  pres <- firstShowE (computePresolution defaultTraceConfig acyc cAcyclic)
+  solved <-
+    firstShowE
+      (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
+  pure
+    PipelineArtifacts
+      { paConstraintNorm = eraseConstraintPhaseForTest cAcyclic,
+        paPresolution = pres,
+        paSolved = solved,
+        paAnnotated = ann,
+        paRoot = root
+      }
+
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
 runToSolvedDefault poly expr = do
   pres <- runToPresolutionDefault poly expr
@@ -293,15 +323,14 @@ collectVarNodes :: VarName -> AnnExpr -> [NodeId]
 collectVarNodes name = go
   where
     go ann = case ann of
-      AVar v nid | v == name -> [nid]
       AResolvedVar _ v nid | v == name -> [nid]
-      AVar _ _ -> []
       AResolvedVar _ _ _ -> []
       ALit _ _ -> []
-      ALam _ _ _ _ body _ -> go body
+      ALam _ _ _ _ body _ _ -> go body
       AApp fun arg _ _ _ -> go fun ++ go arg
       ALet _ _ _ _ _ _ rhs body _ -> go rhs ++ go body
       AAnn expr _ _ -> go expr
+      ALetScope expr _ _ -> go expr
       AUnfold expr _ _ -> go expr
 
 -- | Normalize a constraint and erase the phase index back to 'Raw.

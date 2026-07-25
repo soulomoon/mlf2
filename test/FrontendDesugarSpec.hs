@@ -2,8 +2,13 @@ module FrontendDesugarSpec (spec) where
 
 import Test.Hspec
 
-import MLF.Frontend.Desugar (desugarSurface)
+import MLF.Frontend.Desugar (desugarResolvedSurface, desugarSurface)
 import MLF.Frontend.Syntax
+import MLF.Types.Identity
+    ( IdDetails (EvidenceId, LocalId)
+    , freshLocalRef
+    , initialIdentityGenerator
+    )
 
 spec :: Spec
 spec = describe "MLF.Frontend.Desugar" $ do
@@ -48,3 +53,53 @@ spec = describe "MLF.Frontend.Desugar" $ do
                 ELet "id"
                     (EApp (ECoerceConst ann) (ELam "x" (EVar "x")))
                     (EVar "id")
+
+    it "desugars compiler-owned evidence parameters to exact core lambdas" $ do
+        let ty = STArrow (STBase "Int") (STBase "Bool")
+            (evidenceRef, generator) = freshLocalRef "$evidence" initialIdentityGenerator
+            reference = ResolvedTermReference (EvidenceId evidenceRef) "$evidence"
+            expr = ELamAnnNode reference ty (EVarNode reference)
+            (core, _) = desugarResolvedSurface generator expr
+        core
+            `shouldBe` EExactLamNode reference ty (EVarNode reference)
+
+    it "redirects an annotation mediator by identity, not display spelling" $ do
+        let ty = STBase "Int"
+            (sourceLocal, generator1) = freshLocalRef "x" initialIdentityGenerator
+            (shadowLocal, generator2) = freshLocalRef "x" generator1
+            (mediatorLocal, expectedGenerator) = freshLocalRef "x" generator2
+            sourceRef = ResolvedTermReference (LocalId sourceLocal) "x"
+            staleSourceOccurrence = ResolvedTermReference (LocalId sourceLocal) "$stale-x"
+            shadowOccurrence = ResolvedTermReference (LocalId shadowLocal) "x"
+            mediatorRef = ResolvedTermReference (LocalId mediatorLocal) "x"
+            expr =
+                ELamAnnNode sourceRef ty
+                    (EApp (EVarNode staleSourceOccurrence) (EVarNode shadowOccurrence))
+            (core, actualGenerator) = desugarResolvedSurface generator2 expr
+        core
+            `shouldBe`
+                ELamNode sourceRef
+                    ( ELetNode mediatorRef
+                        (EApp (ECoerceConst ty) (EVarNode sourceRef))
+                        (EApp (EVarNode mediatorRef) (EVarNode shadowOccurrence))
+                    )
+        actualGenerator `shouldBe` expectedGenerator
+
+    it "redirects both annotated self-application occurrences to one mediator" $ do
+        let sigmaId = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+            (sourceLocal, generator1) = freshLocalRef "g" initialIdentityGenerator
+            (mediatorLocal, expectedGenerator) = freshLocalRef "g" generator1
+            sourceRef = ResolvedTermReference (LocalId sourceLocal) "g"
+            mediatorRef = ResolvedTermReference (LocalId mediatorLocal) "g"
+            expr =
+                ELamAnnNode sourceRef sigmaId
+                    (EApp (EVarNode sourceRef) (EVarNode sourceRef))
+            (core, actualGenerator) = desugarResolvedSurface generator1 expr
+        core
+            `shouldBe`
+                ELamNode sourceRef
+                    ( ELetNode mediatorRef
+                        (EApp (ECoerceConst sigmaId) (EVarNode sourceRef))
+                        (EApp (EVarNode mediatorRef) (EVarNode mediatorRef))
+                    )
+        actualGenerator `shouldBe` expectedGenerator

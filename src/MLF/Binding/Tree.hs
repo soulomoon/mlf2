@@ -414,7 +414,12 @@ forallSpecFromForall canonical c0 binder0 = do
                     let bndC = canonical bnd
                     in case IntMap.lookup (getNodeId bndC) binderIndex of
                         Just idx -> Just (BoundBinder idx)
-                        Nothing -> Just (BoundNode bndC)
+                        Nothing ->
+                            Just
+                                ( BoundProjection
+                                    (canonical binder0)
+                                    bndC
+                                )
     pure
         ForallSpec
             { fsBounds = map boundFor binders

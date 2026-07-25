@@ -10,10 +10,14 @@ Phi translation pipeline, keeping the main Phi facade focused on orchestration.
 module MLF.Elab.Phi.Omega (
     OmegaContext(..),
     phiWithSchemeOmega,
+    phiWithSchemeOmegaOccurrence,
     normalizeInst,
     collapseAdjacentPairs
 ) where
 
 import MLF.Elab.Phi.Omega.Domain (OmegaContext(..))
-import MLF.Elab.Phi.Omega.Interpret (phiWithSchemeOmega)
+import MLF.Elab.Phi.Omega.Interpret
+    ( phiWithSchemeOmega
+    , phiWithSchemeOmegaOccurrence
+    )
 import MLF.Elab.Phi.Omega.Normalize (collapseAdjacentPairs, normalizeInst)

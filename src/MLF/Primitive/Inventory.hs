@@ -13,6 +13,8 @@ module MLF.Primitive.Inventory
     builtinOpaqueTypeNames,
     builtinTypeIdentity,
     builtinTypeHeadIdentity,
+    primitivePreludeTypeHeadIdentity,
+    primitiveTypeHeadIdentity,
     builtinValueIdentity,
     isBuiltinTypeName,
     isOpaqueBuiltinTypeName,
@@ -369,7 +371,11 @@ primitiveValueSpecs =
       ( stringFromListPrimitiveName,
         primitiveValueSpec
           PrimitiveNativeStringFromList
-          (listCharStructuralTy `PrimitiveTypeArrow` stringTy)
+          -- Retain the nominal owner in the canonical signature.  Frontend
+          -- lowering constructs its Church encoding with structural binder
+          -- identities; backend validation relates that representation to
+          -- this nominal primitive type by the same owner identity.
+          (listOf charTy `PrimitiveTypeArrow` stringTy)
           Set.empty
       ),
       ( stringToListPrimitiveName,
@@ -616,17 +622,6 @@ primitiveValueSpecs =
     natTy = PrimitiveTypeBase "Nat"
     stringTy = PrimitiveTypeBase "String"
     unitTy = PrimitiveTypeBase "Unit"
-    listCharStructuralTy =
-      PrimitiveTypeMu
-        "$List_self"
-        ( PrimitiveTypeForall
-            "$List_result"
-            ( PrimitiveTypeVar "$List_result"
-                `PrimitiveTypeArrow` ( (charTy `PrimitiveTypeArrow` (PrimitiveTypeVar "$List_self" `PrimitiveTypeArrow` PrimitiveTypeVar "$List_result"))
-                                         `PrimitiveTypeArrow` PrimitiveTypeVar "$List_result"
-                                     )
-            )
-        )
     ioOf ty = PrimitiveTypeCon "IO" (ty :| [])
     ioRefOf ty = PrimitiveTypeCon "IORef" (ty :| [])
     listOf ty = PrimitiveTypeCon "List" (ty :| [])
@@ -990,10 +985,10 @@ primitiveTypeToElabTypeFrom generator0 ty =
           let (dom', generator1) = go env generator dom
               (cod', generator2) = go env generator1 cod
            in (TArrow dom' cod', generator2)
-        PrimitiveTypeBase name -> (TBaseWithIdentity (builtinTypeHeadIdentity name) (BaseTy name), generator)
+        PrimitiveTypeBase name -> (TBaseWithIdentity (requiredPrimitiveTypeHeadIdentity name) (BaseTy name), generator)
         PrimitiveTypeCon name args ->
           let (args', generator') = mapAccumPrimitiveTypes env generator args
-           in (TConWithIdentity (builtinTypeHeadIdentity name) (BaseTy name) args', generator')
+           in (TConWithIdentity (requiredPrimitiveTypeHeadIdentity name) (BaseTy name) args', generator')
         PrimitiveTypeForall name body ->
           let (ref, generator1) = primitiveTypeBinderRefForName name generator
               (body', generator2) = go (Map.insert name ref env) generator1 body
@@ -1025,9 +1020,9 @@ primitiveTypeHeadIdentities =
   \case
     PrimitiveTypeVar {} -> []
     PrimitiveTypeArrow dom cod -> primitiveTypeHeadIdentities dom ++ primitiveTypeHeadIdentities cod
-    PrimitiveTypeBase name -> maybe [] pure (builtinTypeHeadIdentity name)
+    PrimitiveTypeBase name -> maybe [] pure (primitiveTypeHeadIdentity name)
     PrimitiveTypeCon name (arg :| args) ->
-      maybe [] pure (builtinTypeHeadIdentity name) ++ concatMap primitiveTypeHeadIdentities (arg : args)
+      maybe [] pure (primitiveTypeHeadIdentity name) ++ concatMap primitiveTypeHeadIdentities (arg : args)
     PrimitiveTypeForall _ body -> primitiveTypeHeadIdentities body
     PrimitiveTypeMu _ body -> primitiveTypeHeadIdentities body
 
@@ -1040,6 +1035,18 @@ builtinTypeIdentity = PrimitiveIdentity.builtinTypeIdentity
 
 builtinTypeHeadIdentity :: String -> Maybe SymbolIdentity
 builtinTypeHeadIdentity = PrimitiveIdentity.builtinTypeHeadIdentity
+
+primitivePreludeTypeHeadIdentity :: String -> Maybe SymbolIdentity
+primitivePreludeTypeHeadIdentity = PrimitiveIdentity.primitivePreludeTypeHeadIdentity
+
+primitiveTypeHeadIdentity :: String -> Maybe SymbolIdentity
+primitiveTypeHeadIdentity = PrimitiveIdentity.primitiveTypeHeadIdentity
+
+requiredPrimitiveTypeHeadIdentity :: String -> SymbolIdentity
+requiredPrimitiveTypeHeadIdentity name =
+  case primitiveTypeHeadIdentity name of
+    Just identity -> identity
+    Nothing -> error ("primitive type head lacks an ABI identity: " ++ name)
 
 builtinValueIdentity :: String -> SymbolIdentity
 builtinValueIdentity = PrimitiveIdentity.builtinValueIdentity

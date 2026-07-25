@@ -53,13 +53,7 @@ module MLF.Types.Elab (
     elabToBound,
     containsForallTy,
     containsArrowTy,
-    ElabTypeIdentityGap(..),
-    elabTypeIdentityGaps,
-    elabTypeIdentityComplete,
-    xmlfTermTypeIdentityGaps,
     typeHeadRefMatches,
-    typeHeadRefMatchesWith,
-    typeHeadRefMatchesMetadataLight,
     ElabScheme,
     mkElabSchemeWithRefs,
     schemeBinderRefs,
@@ -81,7 +75,6 @@ module MLF.Types.Elab (
     renameTypeBinderRef,
     freshTypeBinderRef,
     sourceTypeBinderRefForName,
-    typeBinderRefFromIdentityOrFresh,
     sourceTypeBinderRefsFromIdentities,
     sourceTypeBinderRefOrFresh,
     sourceTypeBinderRefOrFreshInScope,
@@ -177,17 +170,15 @@ import Data.Kind (Type)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (mapAccumL)
+import Data.List (find, mapAccumL)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), NodeId(..))
-import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatchesWith)
+import MLF.Frontend.Symbol (SymbolIdentity, sameSymbolIdentity)
 import MLF.Frontend.Syntax (Lit(..))
-import qualified MLF.Primitive.Identity as PrimitiveIdentity
-import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Types.Identity
     ( ConstructorRef
     , DeferredRef
@@ -263,27 +254,13 @@ data TopVar = AllowVar | NoTopVar
 data Ty (v :: TopVar) where
     TVarRef :: TypeBinderRef -> Ty 'AllowVar
     TArrow :: Ty AllowVar -> Ty AllowVar -> Ty a
-    TConWithIdentity :: Maybe SymbolIdentity -> BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
+    TConWithIdentity :: SymbolIdentity -> BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
     TVarAppRef :: TypeBinderRef -> NonEmpty (Ty AllowVar) -> Ty a
-    TBaseWithIdentity :: Maybe SymbolIdentity -> BaseTy -> Ty a
+    TBaseWithIdentity :: SymbolIdentity -> BaseTy -> Ty a
     TForallRef :: TypeBinderRef -> Maybe (Ty 'NoTopVar) -> Ty AllowVar -> Ty a -- ∀(α ⩾ τ?). σ
     TMuRef :: TypeBinderRef -> Ty 'AllowVar -> Ty a
     TBottom :: Ty a
 
-{- Note [Lawful shared Ty equality and the checked identity gate]
-
-`Ty` is shared with graph/reification fixtures that intentionally construct
-metadata-light type heads.  Its `Eq` instance must remain reflexive for those
-values, so two identityless heads compare by their stored spelling.  This is
-representation equality, not the checked-program semantic contract.
-
-Checked programs are fenced separately: `elabTypeIdentityGaps` and
-`xmlfTermTypeIdentityGaps` let the frontend publication gate reject every
-identityless type head before a checked artifact is exposed to production
-consumers.  Identity-sensitive algorithms should use `typeHeadRefMatches`;
-outside this lawful representation instance, metadata-light callers must opt
-in through the explicitly named helper.
--}
 instance Eq (Ty v) where
     left == right =
         case (left, right) of
@@ -291,12 +268,12 @@ instance Eq (Ty v) where
                 leftRef == rightRef
             (TArrow leftArg leftResult, TArrow rightArg rightResult) ->
                 leftArg == rightArg && leftResult == rightResult
-            (TConWithIdentity leftIdentity leftCon leftArgs, TConWithIdentity rightIdentity rightCon rightArgs) ->
-                typeHeadRefMatchesMetadataLight leftIdentity leftCon rightIdentity rightCon && leftArgs == rightArgs
+            (TConWithIdentity leftIdentity _ leftArgs, TConWithIdentity rightIdentity _ rightArgs) ->
+                typeHeadRefMatches leftIdentity rightIdentity && leftArgs == rightArgs
             (TVarAppRef leftRef leftArgs, TVarAppRef rightRef rightArgs) ->
                 leftRef == rightRef && leftArgs == rightArgs
-            (TBaseWithIdentity leftIdentity leftBase, TBaseWithIdentity rightIdentity rightBase) ->
-                typeHeadRefMatchesMetadataLight leftIdentity leftBase rightIdentity rightBase
+            (TBaseWithIdentity leftIdentity _, TBaseWithIdentity rightIdentity _) ->
+                typeHeadRefMatches leftIdentity rightIdentity
             (TForallRef leftRef leftBound leftBody, TForallRef rightRef rightBound rightBody) ->
                 leftRef == rightRef && leftBound == rightBound && leftBody == rightBody
             (TMuRef leftRef leftBody, TMuRef rightRef rightBody) ->
@@ -306,48 +283,14 @@ instance Eq (Ty v) where
             _ ->
                 False
 
-typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatches =
-    typeHeadRefMatchesWith IdentityOnly
-
-typeHeadRefMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatchesMetadataLight =
-    typeHeadRefMatchesWith MetadataLight
-
-typeHeadRefMatchesWith :: ReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatchesWith mode leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
-    symbolRefMatchesWith mode leftIdentity leftName rightIdentity rightName
+typeHeadRefMatches :: SymbolIdentity -> SymbolIdentity -> Bool
+typeHeadRefMatches leftIdentity rightIdentity =
+    sameSymbolIdentity leftIdentity rightIdentity
 
 deriving instance Show (Ty v)
 
 type ElabType = Ty 'AllowVar
 type BoundType = Ty 'NoTopVar
-
-data ElabTypeIdentityGap
-    = MissingElabTypeHeadIdentity BaseTy
-    deriving (Eq, Ord, Show)
-
-elabTypeIdentityGaps :: Ty v -> [ElabTypeIdentityGap]
-elabTypeIdentityGaps = Set.toList . go
-  where
-    go :: Ty w -> Set.Set ElabTypeIdentityGap
-    go ty =
-        case ty of
-            TVarRef {} -> Set.empty
-            TArrow dom cod -> go dom <> go cod
-            TConWithIdentity mbIdentity base args ->
-                missingHead mbIdentity base <> foldMap go args
-            TVarAppRef _ args -> foldMap go args
-            TBaseWithIdentity mbIdentity base -> missingHead mbIdentity base
-            TForallRef _ mbBound body -> maybe Set.empty go mbBound <> go body
-            TMuRef _ body -> go body
-            TBottom -> Set.empty
-
-    missingHead (Just _) _ = Set.empty
-    missingHead Nothing base = Set.singleton (MissingElabTypeHeadIdentity base)
-
-elabTypeIdentityComplete :: Ty v -> Bool
-elabTypeIdentityComplete = null . elabTypeIdentityGaps
 
 tVarWithRef :: TypeBinderRef -> Ty 'AllowVar
 tVarWithRef = TVarRef
@@ -355,13 +298,11 @@ tVarWithRef = TVarRef
 tVarAppWithRef :: TypeBinderRef -> NonEmpty (Ty AllowVar) -> Ty a
 tVarAppWithRef = TVarAppRef
 
-tCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
-tCon con@(BaseTy name) args =
-    TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
+tCon :: SymbolIdentity -> BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
+tCon = TConWithIdentity
 
-tBase :: BaseTy -> Ty a
-tBase base@(BaseTy name) =
-    TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
+tBase :: SymbolIdentity -> BaseTy -> Ty a
+tBase = TBaseWithIdentity
 
 tForallWithRef :: TypeBinderRef -> Maybe BoundType -> ElabType -> Ty a
 tForallWithRef = TForallRef
@@ -373,9 +314,9 @@ tMuWithRef = TMuRef
 data TyIF (v :: TopVar) (r :: TopVar -> Type) where
     TVarIFRef :: TypeBinderRef -> TyIF 'AllowVar r
     TArrowIF :: r 'AllowVar -> r 'AllowVar -> TyIF v r
-    TConIFWithIdentity :: Maybe SymbolIdentity -> BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
+    TConIFWithIdentity :: SymbolIdentity -> BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
     TVarAppIFRef :: TypeBinderRef -> NonEmpty (r 'AllowVar) -> TyIF v r
-    TBaseIFWithIdentity :: Maybe SymbolIdentity -> BaseTy -> TyIF v r
+    TBaseIFWithIdentity :: SymbolIdentity -> BaseTy -> TyIF v r
     TForallIFRef :: TypeBinderRef -> Maybe (r 'NoTopVar) -> r 'AllowVar -> TyIF v r
     TMuIFRef :: TypeBinderRef -> r 'AllowVar -> TyIF v r
     TBottomIF :: TyIF v r
@@ -551,12 +492,6 @@ sourceTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, Ide
 sourceTypeBinderRefForName name generator =
     freshTypeBinderRef name generator
 
-typeBinderRefFromIdentityOrFresh :: Maybe TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
-typeBinderRefFromIdentityOrFresh (Just identity) name generator =
-    (typeBinderRefFromIdentity identity name, generator)
-typeBinderRefFromIdentityOrFresh Nothing name generator =
-    sourceTypeBinderRefForName name generator
-
 sourceTypeBinderRefsFromIdentities :: Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map String TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefsFromIdentities binderIdentities names generator0 =
     go names Map.empty generator0
@@ -568,7 +503,9 @@ sourceTypeBinderRefsFromIdentities binderIdentities names generator0 =
 
 sourceTypeBinderRefOrFresh :: Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFresh binderIdentities name generator =
-    typeBinderRefFromIdentityOrFresh (lookupTypeBinderIdentityAlias binderIdentities name) name generator
+    case lookupTypeBinderIdentityAlias binderIdentities name of
+        Just identity -> (typeBinderRefFromIdentity identity name, generator)
+        Nothing -> sourceTypeBinderRefForName name generator
 
 sourceTypeBinderRefOrFreshInScope :: Bool -> Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
@@ -585,14 +522,44 @@ freshTypeBinderRefFromNames used generator =
 
 schemeInfoFromRefSubst :: ElabScheme -> IntMap TypeBinderRef -> SchemeInfo
 schemeInfoFromRefSubst scheme refs =
-    SchemeInfo
-        { siScheme = attachBinderRefsToScheme refs scheme
-        , siSubstRefs = refs
+    let scheme' = attachBinderRefsToScheme refs scheme
+        identityRefs =
+            IntMap.fromList
+                [ (getNodeId node, ref)
+                | ref <- schemeInfoSpineBinderRefs scheme'
+                , Just node <- [typeBinderRefNode ref]
+                ]
+    in SchemeInfo
+        { siScheme = scheme'
+        , siSubstRefs = IntMap.union refs identityRefs
         }
 
 schemeInfoBinderIdentityKeys :: SchemeInfo -> [Int]
-schemeInfoBinderIdentityKeys =
-    IntMap.keys . siSubstRefs
+schemeInfoBinderIdentityKeys schemeInfo =
+    IntSet.toAscList $
+        IntSet.fromList
+            [ key
+            | ref <- schemeInfoSpineBinderRefs (siScheme schemeInfo)
+            , key <- binderIdentityKey ref
+            ]
+  where
+    binderIdentityKey ref =
+        case typeBinderRefNode ref of
+            Just node -> [getNodeId node]
+            Nothing ->
+                [ key
+                | (key, substRef) <- IntMap.toList (siSubstRefs schemeInfo)
+                , typeBinderRefsSameIdentity ref substRef
+                ]
+
+schemeInfoSpineBinderRefs :: ElabScheme -> [TypeBinderRef]
+schemeInfoSpineBinderRefs scheme =
+    map fst (schemeBinderRefs scheme) ++ leadingBodyRefs (schemeBody scheme)
+  where
+    leadingBodyRefs ty =
+        case ty of
+            TForallRef ref _bound body -> ref : leadingBodyRefs body
+            _ -> []
 
 schemeInfoBinderIdentityKeySet :: SchemeInfo -> IntSet.IntSet
 schemeInfoBinderIdentityKeySet =
@@ -604,14 +571,14 @@ schemeInfoBinderRefSubst =
 
 attachBinderRefsToScheme :: IntMap TypeBinderRef -> ElabScheme -> ElabScheme
 attachBinderRefsToScheme refs (Scheme binds body) =
-    Scheme binds' (applyBinderRefRenames renames body)
+    Scheme binds' body'
   where
-    refList = IntMap.elems refs
-    ((_, renames), binds') = mapAccumL attachToBinder (refList, []) binds
+    ((remainingAfterOuter, outerRenames), binds') = mapAccumL attachToBinder (refs, []) binds
+    (_, _, body') = attachLeadingBinders remainingAfterOuter outerRenames body
 
     attachToBinder (remaining, renamesSoFar) (FlexBinder ref mb) =
         let mb' = fmap (applyBinderRefRenames renamesSoFar) mb
-         in case takeFirstRef (typeBinderRefsSameIdentity ref) remaining of
+         in case takeBinderRef ref remaining of
                 Just (ref', remaining') -> attachRef remaining' renamesSoFar ref ref' mb'
                 Nothing -> ((remaining, renamesSoFar), FlexBinder ref mb')
 
@@ -619,49 +586,81 @@ attachBinderRefsToScheme refs (Scheme binds body) =
         | typeBinderRefsSameIdentityAndName ref ref' = ((remaining, renamesSoFar), FlexBinder ref' mb)
         | otherwise = ((remaining, renamesSoFar ++ [(ref, ref')]), FlexBinder ref' mb)
 
-    takeFirstRef _ [] = Nothing
-    takeFirstRef predicate (ref : rest)
-        | predicate ref = Just (ref, rest)
-        | otherwise = do
-            (ref', rest') <- takeFirstRef predicate rest
-            pure (ref', ref : rest')
-
-    applyBinderRefRenames renames0 ty =
-        foldr
-            (\(oldRef, newRef) acc -> replaceBinderRef oldRef newRef acc)
-            ty
-            renames0
-
-    replaceBinderRef :: TypeBinderRef -> TypeBinderRef -> Ty v -> Ty v
-    replaceBinderRef target replacement ty =
+    -- A local construction scheme is represented by an empty outer binder
+    -- list whose body starts with the binders owned by that construction.
+    -- Those leading foralls are part of the same authoritative binder spine
+    -- as the explicit Scheme binders and must be projected at the same time.
+    -- Stop at the first non-forall so nested polymorphism retains its own
+    -- lexical identity domain.
+    attachLeadingBinders remaining renamesSoFar ty =
         case ty of
-            TVarRef ref
-                | binderRefMatches target ref -> TVarRef replacement
-                | otherwise -> TVarRef ref
-            TArrow a b -> TArrow (replaceBinderRef target replacement a) (replaceBinderRef target replacement b)
+            TForallRef ref mb forallBody ->
+                let mb' = fmap (applyBinderRefRenames renamesSoFar) mb
+                 in case takeBinderRef ref remaining of
+                        Just (ref', remaining') ->
+                            let renames' = appendRename ref ref' renamesSoFar
+                                (remaining'', renames'', body'') =
+                                    attachLeadingBinders remaining' renames' forallBody
+                             in (remaining'', renames'', TForallRef ref' mb' body'')
+                        Nothing ->
+                            let (remaining', renames', body'') =
+                                    attachLeadingBinders remaining renamesSoFar forallBody
+                             in (remaining', renames', TForallRef ref mb' body'')
+            _ -> (remaining, renamesSoFar, applyBinderRefRenames renamesSoFar ty)
+
+    appendRename oldRef newRef renamesSoFar
+        | typeBinderRefsSameIdentityAndName oldRef newRef = renamesSoFar
+        | otherwise = renamesSoFar ++ [(oldRef, newRef)]
+
+    -- The substitution key is the graph binder node.  Its value may carry a
+    -- non-graph source identity, so key provenance must win over an identity
+    -- comparison.  The latter remains the fallback for legacy substitutions
+    -- whose value still has the graph identity.
+    takeBinderRef ref remaining =
+        case typeBinderRefNode ref >>= (\node -> IntMap.lookup (getNodeId node) remaining) of
+            Just ref' ->
+                case typeBinderRefNode ref of
+                    Just node -> Just (ref', IntMap.delete (getNodeId node) remaining)
+                    Nothing -> Nothing
+            Nothing -> do
+                (key, ref') <-
+                    find
+                        (typeBinderRefsSameIdentity ref . snd)
+                        (IntMap.toList remaining)
+                pure (ref', IntMap.delete key remaining)
+
+    -- Apply all routes against the original identity in one traversal.  A
+    -- sequence of single substitutions collapses a legitimate swap such as
+    -- @a#14 -> b#15, b#15 -> a#14@.  Binder declarations below the leading
+    -- spine are not projected and shadow an outer route in their bodies.
+    applyBinderRefRenames :: [(TypeBinderRef, TypeBinderRef)] -> Ty v -> Ty v
+    applyBinderRefRenames renames0 = go renames0
+      where
+        go :: [(TypeBinderRef, TypeBinderRef)] -> Ty i -> Ty i
+        go renames ty =
+          case ty of
+            TVarRef ref -> TVarRef (renameOccurrence renames ref)
+            TArrow a b -> TArrow (go renames a) (go renames b)
             TConWithIdentity identity c args ->
-                TConWithIdentity identity c (fmap (replaceBinderRef target replacement) args)
-            TVarAppRef ref args
-                | binderRefMatches target ref -> TVarAppRef replacement args'
-                | otherwise -> TVarAppRef ref args'
-              where
-                args' = fmap (replaceBinderRef target replacement) args
+                TConWithIdentity identity c (fmap (go renames) args)
+            TVarAppRef ref args ->
+                TVarAppRef (renameOccurrence renames ref) (fmap (go renames) args)
             TBaseWithIdentity identity b -> TBaseWithIdentity identity b
             TBottom -> TBottom
             TForallRef ref mb forallBody ->
-                let mb' = fmap (replaceBinderRef target replacement) mb
-                 in if binderRefShadows target ref
-                        then TForallRef ref mb' forallBody
-                        else TForallRef ref mb' (replaceBinderRef target replacement forallBody)
-            TMuRef ref muBody
-                | binderRefShadows target ref -> TMuRef ref muBody
-                | otherwise -> TMuRef ref (replaceBinderRef target replacement muBody)
+                let mb' = fmap (go renames) mb
+                    bodyRenames = removeShadowedRoute ref renames
+                 in TForallRef ref mb' (go bodyRenames forallBody)
+            TMuRef ref muBody ->
+                TMuRef ref (go (removeShadowedRoute ref renames) muBody)
 
-    binderRefMatches target ref =
-        typeBinderRefsSameIdentity target ref
+        renameOccurrence renames ref =
+            case find (\(oldRef, _) -> typeBinderRefsSameIdentity oldRef ref) renames of
+                Just (_, newRef) -> newRef
+                Nothing -> ref
 
-    binderRefShadows target ref =
-        typeBinderRefsSameIdentity target ref
+        removeShadowedRoute binderRef =
+            filter (not . typeBinderRefsSameIdentity binderRef . fst)
 
 data ResolvedVar = ResolvedVar
     { resolvedVarType :: ElabType,
@@ -881,10 +880,10 @@ generatedIdentitiesInType ty =
         TVarRef ref -> generatedIdentitiesInTypeBinderRef ref
         TArrow a b -> generatedIdentitiesInType a ++ generatedIdentitiesInType b
         TConWithIdentity identity _ args ->
-            maybe [] symbolGeneratedIdentities identity ++ foldMap generatedIdentitiesInType args
+            symbolGeneratedIdentities identity ++ foldMap generatedIdentitiesInType args
         TVarAppRef ref args ->
             generatedIdentitiesInTypeBinderRef ref ++ foldMap generatedIdentitiesInType args
-        TBaseWithIdentity identity _ -> maybe [] symbolGeneratedIdentities identity
+        TBaseWithIdentity identity _ -> symbolGeneratedIdentities identity
         TForallRef ref mb body ->
             generatedIdentitiesInTypeBinderRef ref
                 ++ maybe [] generatedIdentitiesInType mb
@@ -1000,42 +999,3 @@ instance Corecursive XmlfTerm where
         ETyInstF e inst -> ETyInst e inst
         ERollF ty body -> ERoll ty body
         EUnrollF body -> EUnroll body
-
-xmlfTermTypeIdentityGaps :: XmlfTerm -> [ElabTypeIdentityGap]
-xmlfTermTypeIdentityGaps = Set.toList . termGaps
-  where
-    termGaps term =
-        case term of
-            EVarNode resolved -> resolvedGaps resolved
-            ELit {} -> Set.empty
-            ELam resolved body -> resolvedGaps resolved <> termGaps body
-            EApp fun arg -> termGaps fun <> termGaps arg
-            ELet resolved scheme rhs body ->
-                resolvedGaps resolved
-                    <> schemeGaps scheme
-                    <> termGaps rhs
-                    <> termGaps body
-            ETyAbsRef _ mbBound body -> maybe Set.empty typeGaps mbBound <> termGaps body
-            ETyInst inner inst -> termGaps inner <> instantiationGaps inst
-            ERoll ty body -> typeGaps ty <> termGaps body
-            EUnroll body -> termGaps body
-
-    resolvedGaps = typeGaps . resolvedVarType
-
-    schemeGaps scheme =
-        foldMap (maybe Set.empty typeGaps . snd) (schemeBinderRefs scheme)
-            <> typeGaps (schemeBody scheme)
-
-    instantiationGaps inst =
-        case inst of
-            InstId -> Set.empty
-            InstApp ty -> typeGaps ty
-            InstBot ty -> typeGaps ty
-            InstIntro -> Set.empty
-            InstElim -> Set.empty
-            InstAbstrRef {} -> Set.empty
-            InstUnderRef _ inner -> instantiationGaps inner
-            InstInside inner -> instantiationGaps inner
-            InstSeq left right -> instantiationGaps left <> instantiationGaps right
-
-    typeGaps = Set.fromList . elabTypeIdentityGaps

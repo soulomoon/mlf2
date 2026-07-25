@@ -28,6 +28,7 @@ module MLF.Constraint.Presolution.Validation (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (liftBindingError)
@@ -82,11 +83,7 @@ validateTranslatablePresolution c0 = do
                 _ -> True
             ]
 
-    let interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems (getGenNodeMap genNodes)
-                ]
+    interiorByGen <- bindingToPres (structuralInteriorsByGen c0)
 
     let issuesOutside =
             [ NonInteriorNodeNotRigid gid child
@@ -161,12 +158,8 @@ rigidifyTranslatablePresolutionM = do
         bindParents2 =
             foldl' rigidifyKey bindParents1' (map typeRef schemeRoots)
 
-        interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems (getGenNodeMap genNodes)
-                ]
-
+    interiorByGen <- bindingToPresM (structuralInteriorsByGen c1)
+    let
         bindParents3 =
             foldl'
                 (\bp (childKey, (parent, flag)) ->
@@ -187,12 +180,98 @@ rigidifyTranslatablePresolutionM = do
     c3 <- bindingToPresM (Inert.weakenInertNodes c2)
     modifyConstraint (const c3)
 
--- | Compute the structural interior of a set of scheme roots.
+-- | Compute the type-node projection of the paper's structural interior
+-- @I^s(g) = I^c(g) ∩ (g ↠ₛ⁺)@ (Definition 9.2.16).
 --
--- The interior is the set of all nodes reachable from the roots by following
--- structural children and instance bounds.
-structuralInterior :: NodeMap TyNode -> [NodeId] -> IntSet.IntSet
-structuralInterior nodes =
+-- A gen node's structural successors are represented by its scheme roots.
+-- Structural reachability alone is not enough: a scheme may refer to a node
+-- whose binding scope is strictly above @g@.  Such a node is on the structural
+-- graph below a scheme root, but it is not in @I^c(g)@ and therefore must not
+-- become a named flexible abstraction for @g@.
+structuralInterior :: Constraint p -> GenNode -> Either PresolutionError IntSet.IntSet
+structuralInterior c gen = bindingToPres $ do
+    genAncestorsByType <- bindingGenAncestorsByType c
+    pure (structuralInteriorFromIndex c gen genAncestorsByType)
+
+structuralInteriorFromIndex
+    :: Constraint p
+    -> GenNode
+    -> IntMap.IntMap IntSet.IntSet
+    -> IntSet.IntSet
+structuralInteriorFromIndex c gen genAncestorsByType =
+    let reachable = structurallyReachableFromSchemeRoots (cNodes c) (gnSchemes gen)
+        ownerKey = genNodeKey (gnId gen)
+        isBoundUnderOwner nid =
+            IntSet.member
+                ownerKey
+                (IntMap.findWithDefault IntSet.empty nid genAncestorsByType)
+    in IntSet.filter isBoundUnderOwner reachable
+
+structuralInteriorsByGen
+    :: Constraint p
+    -> Either BindingError (IntMap.IntMap IntSet.IntSet)
+structuralInteriorsByGen c = do
+    genAncestorsByType <- bindingGenAncestorsByType c
+    pure $
+        IntMap.fromList
+            [ (genNodeKey (gnId gen), structuralInteriorFromIndex c gen genAncestorsByType)
+            | gen <- IntMap.elems (getGenNodeMap (cGenNodes c))
+            ]
+
+-- | Index each type node by the gen nodes in its binding-ancestor chain.
+--
+-- Building this once avoids recomputing @I^c(g)@ from scratch for every gen
+-- node (which is quadratic on deeply nested programs such as the Prelude).
+bindingGenAncestorsByType
+    :: Constraint p
+    -> Either BindingError (IntMap.IntMap IntSet.IntSet)
+bindingGenAncestorsByType c = do
+    binding <- Binding.quotientBindParentsContextUnder id c
+    let liveRefs = Binding.qbpAllRoots binding
+        childRefs = IntSet.fromList (IntMap.keys (Binding.qbpBindParents binding))
+        roots = IntSet.toList (IntSet.difference liveRefs childRefs)
+        initial = [(root, IntSet.empty) | root <- roots]
+    walk binding liveRefs IntSet.empty IntMap.empty initial
+  where
+    walk _binding liveRefs visited ancestorsByType []
+        | visited == liveRefs = Right ancestorsByType
+        | otherwise =
+            Left $
+                InvalidBindingTree
+                    "structural interior: binding forest contains an unreachable cycle"
+    walk binding liveRefs visited ancestorsByType ((refKey, genAncestors) : rest)
+        | IntSet.member refKey visited =
+            Left $
+                InvalidBindingTree
+                    ("structural interior: binding node visited twice: " ++ show refKey)
+        | otherwise =
+            let ref = nodeRefFromKey refKey
+                genAncestors' =
+                    case ref of
+                        GenRef gid -> IntSet.insert (genNodeKey gid) genAncestors
+                        TypeRef _ -> genAncestors
+                ancestorsByType' =
+                    case ref of
+                        TypeRef nid ->
+                            IntMap.insert (getNodeId nid) genAncestors' ancestorsByType
+                        GenRef _ -> ancestorsByType
+                children =
+                    [ (childKey, genAncestors')
+                    | (childKey, _parentInfo) <-
+                        IntMap.findWithDefault
+                            []
+                            refKey
+                            (Binding.qbpChildrenByParent binding)
+                    ]
+            in walk
+                binding
+                liveRefs
+                (IntSet.insert refKey visited)
+                ancestorsByType'
+                (children ++ rest)
+
+structurallyReachableFromSchemeRoots :: NodeMap TyNode -> [NodeId] -> IntSet.IntSet
+structurallyReachableFromSchemeRoots nodes =
     Traversal.reachableFromNodes id children
   where
     children nid =
@@ -205,8 +284,9 @@ structuralInterior nodes =
 -- - Rigidly bound scheme roots
 -- - Rigidly bound arrow nodes
 -- - Rigidly bound non-interior children
-translatableWeakenedNodes :: Constraint p -> IntSet.IntSet
-translatableWeakenedNodes c0 =
+translatableWeakenedNodes :: Constraint p -> Either PresolutionError IntSet.IntSet
+translatableWeakenedNodes c0 = do
+    interiorByGen <- bindingToPres (structuralInteriorsByGen c0)
     let nodes = cNodes c0
         genNodes = cGenNodes c0
         bindParents = cBindParents c0
@@ -239,12 +319,6 @@ translatableWeakenedNodes c0 =
             , isRigid (nodeRefKey (typeRef nid))
             ]
 
-        interiorByGen =
-            IntMap.fromList
-                [ (genNodeKey (gnId gen), structuralInterior nodes (gnSchemes gen))
-                | gen <- IntMap.elems (getGenNodeMap genNodes)
-                ]
-
         nonInterior =
             [ child
             | (gid, child) <- IntMapUtils.rigidTypeChildrenOfGen bindParents
@@ -255,4 +329,4 @@ translatableWeakenedNodes c0 =
 
         toKey = getNodeId
         inferred = IntSet.fromList (map toKey (schemeRoots ++ arrowNodes ++ tyConNodes ++ nonInterior))
-    in IntSet.union (cWeakenedVars c0) inferred
+    pure (IntSet.union (cWeakenedVars c0) inferred)

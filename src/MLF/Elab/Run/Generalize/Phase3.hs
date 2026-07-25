@@ -24,9 +24,11 @@ import MLF.Elab.Run.Generalize.Common
 import MLF.Elab.Run.Generalize.Types
     ( GeneralizeEnv(..)
     , InsertMode(..)
+    , NodeMapping(..)
     , Phase1Result(..)
     , Phase2Result(..)
     , Phase3Result(..)
+    , expansionConstructionParentsToIntMap
     )
 
 computeBindParentsBase :: GeneralizeEnv p -> Phase1Result -> Phase2Result -> Phase3Result
@@ -37,7 +39,11 @@ computeBindParentsBase env phase1 phase2 =
         applyRedirectsToRef = geApplyRedirectsToRef env
         instCopyNodes = geInstCopyNodes env
         instCopyMap = geInstCopyMap env
+        expansionConstructionParents =
+            expansionConstructionParentsToIntMap
+                (geExpansionConstructionPlacements env)
         genMerged = p2GenMerged phase2
+        NodeMapping { mapBaseToSolved = baseToSolved } = p2NodeMapping phase2
         bindParentsBase = p2BindParentsBase phase2
         bindParentsSolved = p2BindParentsSolved phase2
         debug msg = debugGaScope (geTraceConfig env) ("constraintForGeneralization: " ++ msg)
@@ -109,12 +115,45 @@ computeBindParentsBase env phase1 phase2 =
                 )
                 IntMap.empty
                 bindParentsBase
+        resolveConstructionParent parentRef =
+            case parentRef of
+                GenRef _ -> adoptRef parentRef
+                TypeRef parent ->
+                    case IntMap.lookup (getNodeId parent) baseToSolved of
+                        Just solvedParent -> adoptRef (typeRef solvedParent)
+                        Nothing -> adoptRef parentRef
+        bindParentsWithConstructionPlacements =
+            IntMap.foldlWithKey'
+                (\acc childKey0 (constructionParent, constructionFlag) ->
+                    let childRef = adoptRef (typeRef (NodeId childKey0))
+                        parentRef = resolveConstructionParent constructionParent
+                        valid = okRef childRef && okRef parentRef
+                            && nodeRefKey childRef /= nodeRefKey parentRef
+                            && isUpperRef parentRef childRef
+                    in if not valid
+                        then acc
+                        else
+                            debug
+                                ("bind-parent missing construction placement child=" ++ show childRef
+                                    ++ " parent=" ++ show parentRef
+                                )
+                                ( applyBindParent
+                                    allowBindEdge
+                                    SelfOrEmpty
+                                    childRef
+                                    parentRef
+                                    constructionFlag
+                                    acc
+                                )
+                )
+                bindParentsBase'
+                expansionConstructionParents
         bindParents' =
             IntMap.foldlWithKey'
                 (\acc childKey (parentRef, flag) ->
                     insertBindParentSolved acc childKey parentRef flag
                 )
-                bindParentsBase'
+                bindParentsWithConstructionPlacements
                 bindParentsSolved
         bindParentsWithCopies =
             IntMap.foldlWithKey'
@@ -130,6 +169,6 @@ computeBindParentsBase env phase1 phase2 =
                 bindParents'
                 instCopyMap
     in Phase3Result
-        { p3BindParentsBaseAdjusted = bindParentsBase'
+        { p3BindParentsBaseAdjusted = bindParentsWithConstructionPlacements
         , p3BindParentsWithCopies = bindParentsWithCopies
         }

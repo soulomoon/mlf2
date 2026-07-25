@@ -3,6 +3,9 @@
 module MLF.Elab.Reduce
   ( step,
     normalize,
+    reduceLeadingTypeInstantiationRedexes,
+    collectApplicationSpineThroughHeadTypeRedexes,
+    freeTypeVarRefsTerm,
     isValue,
   )
 where
@@ -15,7 +18,7 @@ import MLF.Elab.Types
 import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarRefsType, substTypeCaptureRef)
 import MLF.Types.Identity (IdDetails (..), primitiveRefSymbol)
 import MLF.Util.RecursionSchemes (cataMaybe, foldXmlfTerm, foldInstantiation)
 
@@ -46,14 +49,10 @@ step term = case term of
     | not (isValue f) -> (`EApp` a) <$> step f
     | not (isValue a || isNeutralValue a) -> EApp f <$> step a
     | otherwise ->
-        case f of
-          ELam resolved body ->
-            Just (substResolvedTermVar resolved a body)
-          ETyInst f' inst
-            | instConsumesForall inst,
-              not (termHasLeadingTyAbs f') ->
-                Just (EApp f' a)
-          _ -> Nothing
+      case f of
+        ELam resolved body ->
+          Just (substResolvedTermVar resolved a body)
+        _ -> Nothing
   ELet resolved sch rhs body
     | not (isValue rhs) -> (\rhs' -> ELet resolved sch rhs' body) <$> step rhs
     | termMentionsFreeResolvedVar resolved rhs ->
@@ -63,21 +62,13 @@ step term = case term of
     | otherwise -> Just (substResolvedTermVar resolved rhs body)
   ETyInst e inst
     | not (isValue e) ->
-        case step e of
-          Just e' -> Just (ETyInst e' inst)
-          Nothing
-            | instConsumesForall inst,
-              not (termHasLeadingTyAbs e) ->
-                Just e
-          Nothing -> Nothing
+      case step e of
+        Just e' -> Just (ETyInst e' inst)
+        Nothing -> Nothing
     | otherwise ->
-        case reduceInst e inst of
-          Just term' -> Just term'
-          Nothing
-            | instConsumesForall inst,
-              not (valueHasLeadingTyAbs e) ->
-                Just e
-          Nothing -> Nothing
+      case reduceInst e inst of
+        Just term' -> Just term'
+        Nothing -> Nothing
   ERoll ty body
     | not (isValue body) -> ERoll ty <$> step body
     | otherwise -> Nothing
@@ -88,10 +79,6 @@ step term = case term of
       instConsumesForall inst,
       termHasLeadingTyAbs e' ->
         Just (ETyInst (EUnroll e') inst)
-    | ETyInst e' inst <- e,
-      instConsumesForall inst,
-      not (termHasLeadingTyAbs e') ->
-        Just (EUnroll e')
     | not (isValue e) ->
         case step e of
           Just e' -> Just (EUnroll e')
@@ -132,6 +119,66 @@ normalize term = case step term of
   Nothing -> term
   Just term' -> normalize term'
 
+-- | Reduce only the quantifier-elimination computation at the head of an
+-- explicit type-instantiation spine.  In particular, this does not descend
+-- through type abstractions or evaluate value-level lets/applications.
+--
+-- Returning 'Nothing' for an unchanged term lets callers preserve their
+-- ordinary structural traversal when the head is not a type redex.
+reduceLeadingTypeInstantiationRedexes :: XmlfTerm -> Maybe XmlfTerm
+reduceLeadingTypeInstantiationRedexes term =
+  case go term of
+    (True, reduced) -> Just reduced
+    (False, _) -> Nothing
+  where
+    go current =
+      case current of
+        ETyInst inner inst ->
+          let (innerChanged, inner') = go inner
+              rebuilt = ETyInst inner' inst
+           in case inst of
+                -- Identity is a proof-only computation and can be erased
+                -- without evaluating its operand.  This matters after a
+                -- surrounding abstraction/elimination beta-redex substitutes
+                -- an abstract computation with InstId underneath a value
+                -- lambda.
+                InstId -> (True, inner')
+                _
+                  | isValue inner' ->
+                      -- This boundary is intentionally type-only: do not route
+                      -- through 'step', whose value-level beta rules may grow
+                      -- independently of xMLF type-instantiation reduction.
+                      case reduceInst inner' inst of
+                        Just reduced ->
+                          let (_, reduced') = go reduced
+                           in (True, reduced')
+                        Nothing -> (innerChanged, rebuilt)
+                  | otherwise -> (innerChanged, rebuilt)
+        _ -> (False, current)
+
+-- | Collect one value-application spine modulo explicit type beta reduction
+-- at its function head.  An elaborated partial application may be generalized
+-- and immediately instantiated before the remaining value arguments are
+-- applied:
+--
+-- @
+-- (\@a. f x y) [t] z
+-- @
+--
+-- The type redex does not end the value-application spine.  Reducing only that
+-- redex while carrying the already collected outer arguments recovers the
+-- semantic spine @(f, [x, y, z])@ without evaluating value-level terms.
+collectApplicationSpineThroughHeadTypeRedexes :: XmlfTerm -> (XmlfTerm, [XmlfTerm])
+collectApplicationSpineThroughHeadTypeRedexes = go []
+  where
+    go args current =
+      case current of
+        EApp fun arg -> go (arg : args) fun
+        _ ->
+          case reduceLeadingTypeInstantiationRedexes current of
+            Just reduced -> go args reduced
+            Nothing -> (current, args)
+
 {- Note [Recursive let reduction]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 For recursive bindings (where the bound variable v appears free in rhs),
@@ -165,9 +212,50 @@ reduceInst v inst = do
     alg node = case node of
       InstIdF -> Just (InstId, Just)
       InstSeqF (i1, _) (i2, _) ->
-        Just (InstSeq i1 i2, \term -> Just (ETyInst (ETyInst term i1) i2))
+        case (i1, i2) of
+          -- InstApp is definitionally @Bot ty ; N@.  Reduce that pair as one
+          -- positional type application instead of materializing the
+          -- intermediate forall bound.  In particular, a type-variable
+          -- argument is an opened Gamma identity; 'InstInside' deliberately
+          -- does not encode such a variable as a closed 'BoundType', so
+          -- splitting the pair would turn the following N into @Bottom@.
+          (InstInside (InstBot ty), InstElim) ->
+            Just
+              ( InstApp ty,
+                \term ->
+                  case project term of
+                    ETyAbsFRef ref mbBound body ->
+                      let directApplication binderComputation =
+                            let body' =
+                                  replaceAbstrInTermRef
+                                    ref
+                                    binderComputation
+                                    body
+                             in Just
+                                  (substTypeVarTermRef ref ty body')
+                       in case mbBound of
+                            Nothing ->
+                              directApplication (InstBot ty)
+                            Just bound
+                              | alphaEqType ty (tyToElab bound) ->
+                                  directApplication InstId
+                            _ -> Nothing
+                    _ -> Nothing
+              )
+          _ ->
+            Just (InstSeq i1 i2, \term -> Just (ETyInst (ETyInst term i1) i2))
       InstAppF ty ->
-        Just (InstApp ty, \term -> Just (ETyInst term (InstSeq (InstInside (InstBot ty)) InstElim)))
+        Just
+          ( InstApp ty,
+            \term ->
+              case project term of
+                ETyAbsFRef ref (Just bound) body
+                  | alphaEqType ty (tyToElab bound) ->
+                      let body' = replaceAbstrInTermRef ref InstId body
+                       in Just (substTypeVarTermRef ref ty body')
+                _ ->
+                  Just (ETyInst term (InstSeq (InstInside (InstBot ty)) InstElim))
+          )
       InstIntroF ->
         Just
           ( InstIntro,
@@ -335,10 +423,10 @@ freshTermNameFrom base used =
         (x : _) -> x
         [] -> base
 
-newtype TermVarKey = TermVarIdentity ResolvedVar
+type TermVarKey = ResolvedVar
 
 substResolvedTermVar :: ResolvedVar -> XmlfTerm -> XmlfTerm -> XmlfTerm
-substResolvedTermVar resolved = substTermVarWithKey (TermVarIdentity resolved)
+substResolvedTermVar = substTermVarWithKey
 
 substTermVarWithKey :: TermVarKey -> XmlfTerm -> XmlfTerm -> XmlfTerm
 substTermVarWithKey key s = goSub
@@ -346,13 +434,8 @@ substTermVarWithKey key s = goSub
     x = termVarKeyName key
     freeSVarKeys = freeResolvedTermIdentityKeys s
     replacementFreeNames = freeResolvedTermReferenceNames s
-    termVarKeyName target =
-      case target of
-        TermVarIdentity resolved -> resolvedVarReferenceName resolved
-    resolvedMatches target resolved =
-      case target of
-        TermVarIdentity expected ->
-          resolvedVarSameIdentity expected resolved
+    termVarKeyName = resolvedVarReferenceName
+    resolvedMatches = resolvedVarSameIdentity
     goSub = para alg
       where
         alg term = case term of
@@ -472,7 +555,10 @@ replaceAbstrInTermRef target replacement = para alg
       ETyAbsFRef ref mb body
         | typeBinderRefsSameIdentity ref target -> eTyAbsWithRef ref mb (fst body)
         | otherwise -> eTyAbsWithRef ref mb (snd body)
-      ETyInstF e inst -> ETyInst (snd e) (replaceAbstrInInstRef target replacement inst)
+      ETyInstF e inst ->
+        case replaceAbstrInInstRef target replacement inst of
+          InstId -> snd e
+          inst' -> ETyInst (snd e) inst'
       ERollF ty body -> ERoll ty (snd body)
       EUnrollF body -> EUnroll (snd body)
 

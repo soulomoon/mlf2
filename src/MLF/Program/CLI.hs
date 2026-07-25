@@ -40,7 +40,7 @@ import MLF.Frontend.Program.Package
     , trivialLocatedProgramPackage
     , trivialPackageId
     )
-import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackageIfImported)
 import MLF.Frontend.Program.Run
     ( programRunOutput
     , runLocatedProgramPackageOutputWithTiming
@@ -66,10 +66,11 @@ programCliUsage =
         , "A file input is loaded as a trivial local package source unit."
         , "A directory input is loaded as the primary local package root."
         , "--search-path appends ordered local package roots."
-        , "check-program prepends the built-in Prelude and reports OK on success."
-        , "run-program prepends the built-in Prelude and prints the pure result or IO stdout."
-        , "emit-backend prepends the built-in Prelude and prints LLVM IR."
-        , "emit-native prepends the built-in Prelude and prints LLVM IR with a native process entrypoint."
+        , "The built-in Prelude is supplied only when imported and not provided by the package."
+        , "check-program reports OK on success."
+        , "run-program prints the pure result or IO stdout."
+        , "emit-backend prints LLVM IR."
+        , "emit-native prints LLVM IR with a native process entrypoint."
         ]
 
 checkProgramArgs :: [String] -> IO (Either String String)
@@ -192,7 +193,12 @@ loadFilePackage path searchPaths = do
             pure (Left err)
         Right located
             | null searchPaths ->
-                pure (Right (withPreludeLocatedPackage (trivialLocatedProgramPackage located)))
+                pure
+                    ( Right
+                        ( withPreludeLocatedPackageIfImported
+                            (trivialLocatedProgramPackage located)
+                        )
+                    )
             | otherwise -> do
                 searchPackageResult <-
                     discoverLocatedProgramPackageFromSearchPath
@@ -201,7 +207,7 @@ loadFilePackage path searchPaths = do
                 pure $ do
                     searchPackage <- first renderProgramPackageDiscoveryError searchPackageResult
                     pure $
-                        withPreludeLocatedPackage
+                        withPreludeLocatedPackageIfImported
                             LocatedProgramPackage
                                 { locatedProgramPackageId = trivialPackageId
                                 , locatedProgramPackageSourceUnits =
@@ -215,7 +221,10 @@ loadRootPackage root searchPaths = do
         discoverLocatedProgramPackageFromSearchPath
             cliPackageId
             (PackageSearchPath (map PackageRoot (root : searchPaths)))
-    pure (withPreludeLocatedPackage <$> first renderProgramPackageDiscoveryError packageResult)
+    pure
+        ( withPreludeLocatedPackageIfImported
+            <$> first renderProgramPackageDiscoveryError packageResult
+        )
 
 readLocatedProgramFile :: FilePath -> IO (Either String LocatedProgram)
 readLocatedProgramFile path = do

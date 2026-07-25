@@ -289,7 +289,14 @@ buildLocalSymbols mod0 = do
   forM_ classDecls $ \classDecl ->
     liftResolve (ensureDistinctBy ProgramDuplicateMethod P.methodSigName (P.classDeclMethods classDecl))
   dataEntries <- forM dataDecls $ \decl -> do
-    dataIdentity <- freshSymbolIdentity SymbolType modName (P.dataDeclName decl) Nothing
+    generatedDataIdentity <- freshSymbolIdentity SymbolType modName (P.dataDeclName decl) Nothing
+    let dataIdentity =
+          case () of
+            _
+              | modName == "Prelude",
+                Just primitiveIdentity <- PrimitiveInventory.primitivePreludeTypeHeadIdentity (P.dataDeclName decl) ->
+                  primitiveIdentity
+              | otherwise -> generatedDataIdentity
     constructorEntries <-
       forM (P.dataDeclConstructors decl) $ \ctor -> do
         ctorIdentity <-
@@ -672,8 +679,8 @@ resolveDefDecl locals scope decl = do
         )
         (localValues locals)
   typeBinders <- freshTypeNameEnv (Set.toList (freeTypeNamesInDefDecl decl))
-  (ty, typeRefs) <- resolveConstrainedTypeWith typeBinders scope (P.defDeclType decl)
-  (expr, exprRefs) <- resolveExpr scope typeBinders Map.empty (P.defDeclExpr decl)
+  (ty, rhsTypeBinders, typeRefs) <- resolveDefConstrainedTypeWith typeBinders scope (P.defDeclType decl)
+  (expr, exprRefs) <- resolveExpr scope rhsTypeBinders Map.empty (P.defDeclExpr decl)
   pure
     ( P.DefDecl
         { P.defDeclName = defSymbol,
@@ -682,6 +689,40 @@ resolveDefDecl locals scope decl = do
         },
       typeRefs ++ exprRefs
     )
+
+-- | A producer annotation's leading forall binders scope over its right-hand side.
+-- Resolve that spine once and return the identity-bearing environment that the
+-- expression resolver must use.  Nested foralls remain local to their type;
+-- only the leading producer spine introduces term-level type abstractions.
+resolveDefConstrainedTypeWith :: TypeBinderEnv -> CandidateScope -> P.ConstrainedType -> LocalResolveM (P.ResolvedConstrainedType, TypeBinderEnv, [ResolvedReference])
+resolveDefConstrainedTypeWith typeBinders scope ty = do
+  (constraints, constraintRefs) <- mapAndRefsLocal (resolveConstraintWith typeBinders scope) (P.constrainedConstraints ty)
+  (body, rhsTypeBinders, bodyRefs) <- resolveLeadingProducerForallsWith typeBinders scope (P.constrainedBody ty)
+  pure
+    ( P.ConstrainedType
+        { P.constrainedConstraints = constraints,
+          P.constrainedBody = body
+        },
+      rhsTypeBinders,
+      constraintRefs ++ bodyRefs
+    )
+
+resolveLeadingProducerForallsWith :: TypeBinderEnv -> CandidateScope -> SrcType -> LocalResolveM (ResolvedSrcType, TypeBinderEnv, [ResolvedReference])
+resolveLeadingProducerForallsWith typeBinders scope = \case
+  STForall name mb body -> do
+    ref <- freshResolvedTypeBinderRef name
+    (mb', boundRefs) <-
+      case mb of
+        Nothing -> pure (Nothing, [])
+        Just bound -> do
+          (bound', refs) <- resolveTypeWith typeBinders scope (unSrcBound bound)
+          pure (Just (mkResolvedSrcBound bound'), refs)
+    let bodyTypeBinders = Map.insert name ref typeBinders
+    (body', rhsTypeBinders, bodyRefs) <- resolveLeadingProducerForallsWith bodyTypeBinders scope body
+    pure (RSTForall ref mb' body', rhsTypeBinders, boundRefs ++ bodyRefs)
+  ty -> do
+    (ty', refs) <- resolveTypeWith typeBinders scope ty
+    pure (ty', typeBinders, refs)
 
 resolveConstrainedTypeWith :: TypeBinderEnv -> CandidateScope -> P.ConstrainedType -> LocalResolveM (P.ResolvedConstrainedType, [ResolvedReference])
 resolveConstrainedTypeWith typeBinders scope ty = do
@@ -743,7 +784,12 @@ freeTypeNamesInInstanceDecl decl =
 freeTypeNamesInDefDecl :: P.DefDecl -> Set.Set String
 freeTypeNamesInDefDecl decl =
   freeTypeNamesInConstrainedType (P.defDeclType decl)
-    `Set.union` freeTypeNamesInExpr (P.defDeclExpr decl)
+    `Set.union` (freeTypeNamesInExpr (P.defDeclExpr decl) `Set.difference` leadingForallNames (P.constrainedBody (P.defDeclType decl)))
+
+leadingForallNames :: SrcType -> Set.Set String
+leadingForallNames = \case
+  STForall name _ body -> Set.insert name (leadingForallNames body)
+  _ -> Set.empty
 
 freeTypeNamesInConstrainedType :: P.ConstrainedType -> Set.Set String
 freeTypeNamesInConstrainedType ty =
@@ -766,7 +812,7 @@ freeTypeNamesInExpr expr =
       freeTypeNamesInExpr fun `Set.union` freeTypeNamesInExpr arg
     P.ELet _ mbTy rhs body ->
       maybe Set.empty freeVarsSrcType mbTy
-        `Set.union` freeTypeNamesInExpr rhs
+        `Set.union` (freeTypeNamesInExpr rhs `Set.difference` maybe Set.empty leadingForallNames mbTy)
         `Set.union` freeTypeNamesInExpr body
     P.EAnn inner ty ->
       freeTypeNamesInExpr inner `Set.union` freeVarsSrcType ty
@@ -909,11 +955,13 @@ resolveExpr scope typeBinders locals = \case
   P.ELet name mbTy rhs body -> do
     localRef <- freshLocalResolveRef name
     let locals' = Map.insert name localRef locals
-    (mbTy', typeRefs) <-
+    (mbTy', rhsTypeBinders, typeRefs) <-
       case mbTy of
-        Nothing -> pure (Nothing, [])
-        Just ty -> firstWithRefs Just <$> resolveTypeWith typeBinders scope ty
-    (rhs', rhsRefs) <- resolveExpr scope typeBinders locals' rhs
+        Nothing -> pure (Nothing, typeBinders, [])
+        Just ty -> do
+          (ty', binders, refs) <- resolveLeadingProducerForallsWith typeBinders scope ty
+          pure (Just ty', binders, refs)
+    (rhs', rhsRefs) <- resolveExpr scope rhsTypeBinders locals' rhs
     (body', bodyRefs) <- resolveExpr scope typeBinders locals' body
     pure (P.ELet localRef mbTy' rhs' body', typeRefs ++ rhsRefs ++ bodyRefs)
   P.EAnn expr ty -> do

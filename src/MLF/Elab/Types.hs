@@ -70,6 +70,13 @@ module MLF.Elab.Types (
     mkElabSchemeWithRefs,
     schemeBinderRefs,
     schemeBody,
+    SchemeClosureAuthority,
+    noSchemeClosureAuthority,
+    ambientSchemeClosureAuthority,
+    inheritedGammaSchemeClosureAuthority,
+    locallyClosedGammaSchemeClosureAuthority,
+    schemeClosureFreeRefs,
+    validateSchemeClosure,
     SchemeInfo(SchemeInfo, siScheme, siSubstRefs),
     TypeBinderIdentity,
     typeBinderIdentityFromNode,
@@ -87,7 +94,6 @@ module MLF.Elab.Types (
     renameTypeBinderRef,
     freshTypeBinderRef,
     sourceTypeBinderRefForName,
-    typeBinderRefFromIdentityOrFresh,
     sourceTypeBinderRefsFromIdentities,
     sourceTypeBinderRefOrFresh,
     sourceTypeBinderRefOrFreshInScope,
@@ -184,13 +190,12 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..), getNodeId)
+import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
 import MLF.Types.Identity (UniqueIdentity(..))
 import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
 import qualified MLF.XMLF.Pretty as XMLFPretty
-import qualified MLF.XMLF.Syntax as XMLF
 
 -- | Simple pretty-printing class for elaborated artifacts.
 class Pretty a where
@@ -201,61 +206,19 @@ class PrettyDisplay a where
     prettyDisplay :: a -> String
 
 instance Pretty ElabType where
-    pretty = XMLFPretty.prettyXmlfType . toXmlfType
+    pretty = XMLFPretty.prettyCheckedType
 
 instance Pretty ElabScheme where
     pretty = pretty . schemeToTypeLocal
 
 instance Pretty Instantiation where
-    pretty = XMLFPretty.prettyXmlfComp . toXmlfComp
+    pretty = XMLFPretty.prettyCheckedComp
 
 instance Pretty XmlfTerm where
     pretty = prettyTermCanonical
 
 prettyTermCanonical :: XmlfTerm -> String
 prettyTermCanonical = XMLFPretty.prettyXmlfTerm
-
-toXmlfType :: ElabType -> XMLF.XmlfType
-toXmlfType ty = case ty of
-    TVarRef ref -> XMLF.XTVar (typeBinderRefName ref)
-    TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
-    TConWithIdentity _ (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
-    TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
-    TBaseWithIdentity _ (BaseTy b) -> XMLF.XTBase b
-    TForallRef ref mb body ->
-        let bound = maybe XMLF.XTBottom toXmlfBound mb
-        in XMLF.XTForall (typeBinderRefName ref) bound (toXmlfType body)
-    TMuRef ref body -> XMLF.XTMu (typeBinderRefName ref) (toXmlfType body)
-    TBottom -> XMLF.XTBottom
-
-toXmlfBound :: BoundType -> XMLF.XmlfType
-toXmlfBound bound = case bound of
-    TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
-    TConWithIdentity _ (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
-    TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
-    TBaseWithIdentity _ (BaseTy b) -> XMLF.XTBase b
-    TForallRef ref mb body ->
-        let boundTy = maybe XMLF.XTBottom toXmlfBound mb
-        in XMLF.XTForall (typeBinderRefName ref) boundTy (toXmlfType body)
-    TMuRef ref body -> XMLF.XTMu (typeBinderRefName ref) (toXmlfType body)
-    TBottom -> XMLF.XTBottom
-
-toXmlfComp :: Instantiation -> XMLF.XmlfComp
-toXmlfComp inst = case inst of
-    InstId -> XMLF.XCId
-    InstApp ty -> compFromType ty
-    InstBot ty -> XMLF.XCBot (toXmlfType ty)
-    InstIntro -> XMLF.XCIntro
-    InstElim -> XMLF.XCElim
-    InstAbstrRef ref -> XMLF.XCHyp (typeBinderRefName ref)
-    InstUnderRef ref i -> XMLF.XCOuter (typeBinderRefName ref) (toXmlfComp i)
-    InstInside i -> XMLF.XCInner (toXmlfComp i)
-    InstSeq i1 i2 -> XMLF.XCSeq (toXmlfComp i1) (toXmlfComp i2)
-  where
-    compFromType ty =
-        XMLF.XCSeq
-            (XMLF.XCInner (XMLF.XCBot (toXmlfType ty)))
-            XMLF.XCElim
 
 data OccInfo = OccInfo
     { oiFreeVars :: Set.Set TypeBinderRef
@@ -453,29 +416,74 @@ mapBoundType f bound = case bound of
 
 schemeFromType :: ElabType -> ElabScheme
 schemeFromType ty =
-    let (binds0, body0) = splitForallRefs ty
-        binderRefs = map fst binds0
-        bodyFvRefs = freeTypeVarRefsType body0
-        externalFvs =
-            [ ref
-            | ref <- bodyFvRefs
-            , not (any (typeBinderRefsSameIdentity ref) binderRefs)
-            ]
-        unusedBinders =
-            [ ref
-            | (ref, _) <- binds0
-            , not (any (typeBinderRefsSameIdentity ref) bodyFvRefs)
-            ]
-        ty' =
-            if length externalFvs <= length unusedBinders && not (null externalFvs)
-                then
-                    foldl
-                        (\acc (fromRef, toRef) -> substTypeCaptureRef fromRef (TVarRef toRef) acc)
-                        ty
-                        (zip externalFvs unusedBinders)
-                else ty
-        (binds, body) = splitForallRefs ty'
+    let (binds, body) = splitForallRefs ty
     in mkElabSchemeWithRefs binds body
+
+-- | Exact binder identities that may remain free in an intermediate scheme.
+-- The constructor is deliberately private: publication sites must name why a
+-- ref is in scope instead of passing an unlabelled bag of apparent variables.
+-- Combining authorities preserves identity semantics and removes duplicate
+-- routes without consulting display names.
+newtype SchemeClosureAuthority = SchemeClosureAuthority [TypeBinderRef]
+
+instance Semigroup SchemeClosureAuthority where
+    SchemeClosureAuthority left <> SchemeClosureAuthority right =
+        SchemeClosureAuthority (foldr insertDistinct right left)
+      where
+        insertDistinct ref refs
+            | any (typeBinderRefsSameIdentity ref) refs = refs
+            | otherwise = ref : refs
+
+instance Monoid SchemeClosureAuthority where
+    mempty = SchemeClosureAuthority []
+
+-- | Authority for a scheme that must be closed outright, such as a completed
+-- expression-root scheme.
+noSchemeClosureAuthority :: SchemeClosureAuthority
+noSchemeClosureAuthority = mempty
+
+-- | Type binders already installed by the enclosing term constructor.
+ambientSchemeClosureAuthority :: [TypeBinderRef] -> SchemeClosureAuthority
+ambientSchemeClosureAuthority = SchemeClosureAuthority
+
+-- | Binder identities inherited from the enclosing paper Gamma while an
+-- inner generalization packet is being prepared.
+inheritedGammaSchemeClosureAuthority :: [TypeBinderRef] -> SchemeClosureAuthority
+inheritedGammaSchemeClosureAuthority = SchemeClosureAuthority
+
+-- | Binder identities whose exact abstraction is emitted by a certified
+-- nested constructor rather than by the current scheme.
+locallyClosedGammaSchemeClosureAuthority :: [TypeBinderRef] -> SchemeClosureAuthority
+locallyClosedGammaSchemeClosureAuthority = SchemeClosureAuthority
+
+-- | Free identities not justified by the scheme's own forall spine or by the
+-- explicitly supplied lexical authority. 'freeTypeVarRefsType' performs the
+-- own-binder subtraction by identity, including dependencies in bounds.
+schemeClosureFreeRefs :: SchemeClosureAuthority -> ElabScheme -> [TypeBinderRef]
+schemeClosureFreeRefs (SchemeClosureAuthority allowedRefs) scheme =
+    filter (not . isAllowed) (freeTypeVarRefsType (schemeToTypeLocal scheme))
+  where
+    isAllowed ref = any (typeBinderRefsSameIdentity ref) allowedRefs
+
+-- | Validate an authoritative scheme-publication boundary. This function
+-- never manufactures a binder for a residual ref: callers either present the
+-- lexical capability that owns it or reject the construction.
+validateSchemeClosure
+    :: String
+    -> SchemeClosureAuthority
+    -> ElabScheme
+    -> Either ElabError ElabScheme
+validateSchemeClosure role authority scheme =
+    case schemeClosureFreeRefs authority scheme of
+        [] -> Right scheme
+        unexpectedRefs ->
+            Left
+                ( ValidationFailed
+                    [ role ++ " publishes a scheme with unauthorized free type-binder identities"
+                    , "  unauthorized refs: " ++ show unexpectedRefs
+                    , "  scheme: " ++ show scheme
+                    ]
+                )
 
 splitForallRefs :: ElabType -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
 splitForallRefs = go

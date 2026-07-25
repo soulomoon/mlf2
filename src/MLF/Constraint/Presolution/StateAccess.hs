@@ -58,6 +58,7 @@ module MLF.Constraint.Presolution.StateAccess (
     bindingSnapshotInteriorOf,
     bindingSnapshotBoundFlexChildren,
     bindingSnapshotFindSchemeIntroducer,
+    bindingSnapshotNodeKind,
     bindingSnapshotPathToRoot,
 
     -- * Node lookups with canonicalization
@@ -314,6 +315,20 @@ bindingSnapshotLookupBindParent
 bindingSnapshotLookupBindParent snapshot ref0 = do
     refC <- requireSnapshotRef "bindingSnapshotLookupBindParent" snapshot ref0
     pure $ IntMap.lookup (nodeRefKey refC) (Binding.qbpBindParents (pbsQuotient snapshot))
+
+-- | Classify a node in the canonical quotient binding tree using the paper's
+-- root/instantiable/restricted/locked taxonomy.
+bindingSnapshotNodeKind
+    :: PresolutionBindingSnapshot p
+    -> NodeRef
+    -> PresolutionM p Binding.NodeKind
+bindingSnapshotNodeKind snapshot ref0 = do
+    refC <- requireSnapshotRef "bindingSnapshotNodeKind" snapshot ref0
+    let quotientConstraint =
+            (pbsConstraint snapshot)
+                { cBindParents = Binding.qbpBindParents (pbsQuotient snapshot)
+                }
+    liftBindingError (Binding.nodeKind quotientConstraint refC)
 
 bindingSnapshotPathToRoot
     :: PresolutionBindingSnapshot p

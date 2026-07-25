@@ -10,35 +10,13 @@ module MLF.Types.Unique
   )
 where
 
-newtype UniqueIdentity = UniqueIdentity
-  { uniqueIdentityValue :: Int
-  }
-  deriving (Eq, Ord, Show)
-
-uniqueIdentityStableName :: UniqueIdentity -> String
-uniqueIdentityStableName identity =
-  "$identity#" ++ show (uniqueIdentityValue identity)
-
-newtype IdentityGenerator = IdentityGenerator
-  { nextUniqueIdentity :: Int
-  }
-  deriving (Eq, Show)
-
-initialIdentityGenerator :: IdentityGenerator
-initialIdentityGenerator = IdentityGenerator 0
-
-identityGeneratorAfter :: [UniqueIdentity] -> IdentityGenerator
-identityGeneratorAfter identities =
-  IdentityGenerator (foldr (max . uniqueIdentityValue) (-1) identities + 1)
-
-advanceIdentityGeneratorPast :: UniqueIdentity -> IdentityGenerator -> IdentityGenerator
-advanceIdentityGeneratorPast (UniqueIdentity used) (IdentityGenerator next) =
-  IdentityGenerator (max next (used + 1))
-
-advanceIdentityGeneratorPastMany :: [UniqueIdentity] -> IdentityGenerator -> IdentityGenerator
-advanceIdentityGeneratorPastMany identities generator =
-  foldr advanceIdentityGeneratorPast generator identities
-
-freshIdentity :: IdentityGenerator -> (UniqueIdentity, IdentityGenerator)
-freshIdentity (IdentityGenerator next) =
-  (UniqueIdentity next, IdentityGenerator (next + 1))
+import MLF.Types.Unique.Internal
+    ( IdentityGenerator
+    , UniqueIdentity (..)
+    , advanceIdentityGeneratorPast
+    , advanceIdentityGeneratorPastMany
+    , freshIdentity
+    , identityGeneratorAfter
+    , initialIdentityGenerator
+    , uniqueIdentityStableName
+    )

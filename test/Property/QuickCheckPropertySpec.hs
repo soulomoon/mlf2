@@ -4,6 +4,7 @@
 
 module Property.QuickCheckPropertySpec (spec) where
 
+import IdentityTestSupport
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.Maybe (catMaybes)
@@ -27,15 +28,13 @@ import MLF.Constraint.Types.Graph
   )
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 -- Reification type operations
-import MLF.Reify.TypeOps (alphaEqType, alphaEqTypeMetadataLight, freeTypeVarsType, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
 -- Elaboration types
 import MLF.Types.Elab
   ( BoundType,
     ElabType,
     Ty (..),
     TypeBinderRef,
-    elabTypeIdentityComplete,
-    tBase,
     tForallWithRef,
     tMuWithRef,
     tVarWithRef,
@@ -47,6 +46,7 @@ import SpecUtil (bindParentsFromPairs, emptyConstraint, nodeMapFromList, rootedC
 import Test.Hspec
 import Test.QuickCheck
 import MLF.Constraint.Types.Phase (Phase(Raw))
+import qualified ElabTypeTestSupport as TestElab
 
 -- ============================================================================
 -- Generators
@@ -76,13 +76,13 @@ genElabType n
   | n <= 0 =
       oneof
         [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
-          tBase . BaseTy <$> elements ["int", "bool"],
+          TestElab.tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom
         ]
   | otherwise =
       oneof
         [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
-          tBase . BaseTy <$> elements ["int", "bool"],
+          TestElab.tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
           tForallWithRef
@@ -101,12 +101,12 @@ genBoundType :: Int -> Gen BoundType
 genBoundType n
   | n <= 0 =
       oneof
-        [ tBase . BaseTy <$> elements ["int", "bool"],
+        [ TestElab.tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom
         ]
   | otherwise =
       oneof
-        [ tBase . BaseTy <$> elements ["int", "bool"],
+        [ TestElab.tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
           tForallWithRef
@@ -228,10 +228,10 @@ genSameHeadTyNodePair =
         b1 <- genNodeId
         b2 <- genNodeId
         pure (TyForall (NodeId 100) b1, TyForall (NodeId 101) b2),
-      -- Both TyBase (same base)
+      -- Both TestTyBase (same base)
       do
         b <- elements [BaseTy "int", BaseTy "bool"]
-        pure (TyBase (NodeId 100) b, TyBase (NodeId 101) b),
+        pure (TestTyBase (NodeId 100) b, TestTyBase (NodeId 101) b),
       -- Both TyBottom
       pure (TyBottom (NodeId 100), TyBottom (NodeId 101)),
       -- Both TyMu
@@ -252,7 +252,7 @@ genDifferentHeadTyNodePair = do
   let nodes =
         [ TyArrow nid1 (NodeId 0) (NodeId 1),
           TyForall nid1 (NodeId 0),
-          TyBase nid1 (BaseTy "int"),
+          TestTyBase nid1 (BaseTy "int"),
           TyBottom nid1,
           TyMu nid1 (NodeId 0),
           TyVar {tnId = nid1, tnBound = Nothing}
@@ -265,7 +265,7 @@ genDifferentHeadTyNodePair = do
       nodes2 =
         [ TyArrow nid2 (NodeId 2) (NodeId 3),
           TyForall nid2 (NodeId 2),
-          TyBase nid2 (BaseTy "bool"),
+          TestTyBase nid2 (BaseTy "bool"),
           TyBottom nid2,
           TyMu nid2 (NodeId 2),
           TyVar {tnId = nid2, tnBound = Nothing}
@@ -301,21 +301,16 @@ reificationProperties = describe "Reification round-trip well-formedness" $ do
                 expected = Set.union (Set.delete v (freeTypeVarsType ty)) (freeTypeVarsType s)
              in fvResult `Set.isSubsetOf` expected
 
-  it "metadata-light alphaEqType is reflexive" $
+  it "alphaEqType is reflexive" $
     property $
       forAllShrink (sized genElabType) shrinkElabType $ \ty ->
-        alphaEqTypeMetadataLight ty ty === True
+        alphaEqType ty ty === True
 
-  it "metadata-light alphaEqType is symmetric" $
+  it "alphaEqType is symmetric" $
     property $
       forAllShrink (sized genElabType) shrinkElabType $ \ty1 ->
         forAllShrink (sized genElabType) shrinkElabType $ \ty2 ->
-          alphaEqTypeMetadataLight ty1 ty2 === alphaEqTypeMetadataLight ty2 ty1
-
-  it "production alphaEqType is reflexive for identity-complete types" $
-    property $
-      forAllShrink (sized genElabType) shrinkElabType $ \ty ->
-        elabTypeIdentityComplete ty ==> alphaEqType ty ty === True
+          alphaEqType ty1 ty2 === alphaEqType ty2 ty1
 
   it "substituting a variable not free in a type is identity" $
     property $

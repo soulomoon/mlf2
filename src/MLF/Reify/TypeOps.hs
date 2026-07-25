@@ -6,6 +6,7 @@
 module MLF.Reify.TypeOps
   ( splitForallsRefs,
     stripForallsType,
+    implicitForallClosureMatches,
     freeTypeVarRefsFrom,
     freeTypeVarsType,
     freeTypeVarAliasNamesType,
@@ -16,20 +17,21 @@ module MLF.Reify.TypeOps
     composeTypeHeadRef,
     freshNameLike,
     alphaEqType,
-    alphaEqTypeWith,
-    alphaEqTypeMetadataLight,
+    alphaEqTypePreservingStructuralBinders,
     churchMuEquivalent,
     churchAwareEqType,
+    churchRepresentationEqType,
     typeHeadMatches,
-    typeHeadMatchesMetadataLight,
     firstNonContractiveRecursiveType,
     matchTypeRefs,
+    matchChurchAwareTypeRefs,
     resolveBaseBoundForInstConstraint,
     resolveBaseBoundForInstSolved,
     resolveBoundBodyConstraint,
     inlineBaseBoundsType,
     inlineAliasBoundsWithBy,
     inlineAliasBoundsWithBySeen,
+    inlineAliasBoundsWithBySeenProtected,
   )
 where
 
@@ -45,9 +47,8 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Frontend.Symbol (SymbolIdentity)
-import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Elab
-import MLF.Types.Reference (ReferenceMode (..))
+import MLF.Types.Identity (typeBinderIdentityStructural)
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Names (freshNameLike)
 
@@ -65,6 +66,31 @@ splitForallsRefs = go
 
 stripForallsType :: Ty v -> ElabType
 stripForallsType = snd . splitForallsRefs
+
+-- | A free binder in a source-facing type is implicitly generalized by the
+-- graph pipeline.  Accept that closure only when the constructed forall spine
+-- carries exactly the same semantic binder identities.  This is deliberately
+-- stricter than ordinary alpha-equivalence: same-spelled free binders from
+-- different scopes remain incompatible.
+implicitForallClosureMatches :: ElabType -> ElabType -> Bool
+implicitForallClosureMatches expectedTy candidateTy =
+  null expectedForalls
+    && not (null candidateForalls)
+    && not (Set.null expectedFreeIdentities)
+    && all ((== Nothing) . snd) candidateForalls
+    && candidateBinderIdentities == expectedFreeIdentities
+    && alphaEqType candidateBody expectedTy
+  where
+    (expectedForalls, _) = splitForallsRefs expectedTy
+    (candidateForalls, candidateBody) = splitForallsRefs candidateTy
+    candidateBinderIdentities =
+      Set.fromList
+        [ typeBinderRefIdentity ref
+        | (ref, _) <- candidateForalls
+        ]
+    expectedFreeIdentities =
+      Set.fromList
+        (map typeBinderRefIdentity (freeTypeVarRefsType expectedTy))
 
 freeTypeVarsType :: Ty v -> Set.Set String
 freeTypeVarsType =
@@ -416,38 +442,26 @@ alphaEqRef envL envR left right =
         Just expectedLeft -> typeBinderRefsSameIdentity left expectedLeft
         Nothing -> typeBinderRefsSameIdentity left right
 
-typeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
 typeHeadMatches =
-  typeHeadRefMatchesWith IdentityOnly
-
-typeHeadMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadMatchesMetadataLight =
-  typeHeadRefMatchesWith MetadataLight
+  typeHeadRefMatches
 
 alphaEqType :: ElabType -> ElabType -> Bool
-alphaEqType =
-  alphaEqTypeWith IdentityOnly
-
-alphaEqTypeMetadataLight :: ElabType -> ElabType -> Bool
-alphaEqTypeMetadataLight =
-  alphaEqTypeWith MetadataLight
-
-alphaEqTypeWith :: ReferenceMode -> ElabType -> ElabType -> Bool
-alphaEqTypeWith mode = go [] []
+alphaEqType = go [] []
   where
-    headMatches = typeHeadRefMatchesWith mode
+    headMatches = typeHeadRefMatches
 
     go envL envR t1 t2 = case (t1, t2) of
       (TVarRef a, TVarRef b) ->
         alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
-      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        headMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 _ args1, TConWithIdentity identity2 _ args2) ->
+        headMatches identity1 identity2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2) ->
-        headMatches identity1 b1 identity2 b2
+      (TBaseWithIdentity identity1 _, TBaseWithIdentity identity2 _) ->
+        headMatches identity1 identity2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -474,12 +488,12 @@ alphaEqTypeWith mode = go [] []
     alphaEqBound envL envR b1 b2 = case (b1, b2) of
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
-      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        headMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 _ args1, TConWithIdentity identity2 _ args2) ->
+        headMatches identity1 identity2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TBaseWithIdentity identity1 b1', TBaseWithIdentity identity2 b2') ->
-        headMatches identity1 b1' identity2 b2'
+      (TBaseWithIdentity identity1 _, TBaseWithIdentity identity2 _) ->
+        headMatches identity1 identity2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -490,6 +504,150 @@ alphaEqTypeWith mode = go [] []
             envR' = (ref2, ref1) : envR
          in go envL' envR' body1 body2
       _ -> False
+
+-- | Alpha-equivalence at a construction boundary where structural data
+-- ownership is part of the endpoint certificate.  Ordinary graph/generated
+-- binders remain alpha-renamable, but a structural self/result binder may only
+-- align with the same structural owner and role.
+--
+-- Keep this stricter relation separate from 'alphaEqType': ordinary xMLF
+-- binders are still alpha-renamable, while construction sites can opt into the
+-- identity-preserving relation before emitting explicit type applications.
+alphaEqTypePreservingStructuralBinders :: ElabType -> ElabType -> Bool
+alphaEqTypePreservingStructuralBinders left right =
+  alphaEqType left right && structuralBindersAgree left right
+  where
+    structuralBindersAgree :: Ty v -> Ty v -> Bool
+    structuralBindersAgree leftTy rightTy =
+      case (leftTy, rightTy) of
+        (TVarRef {}, TVarRef {}) -> True
+        (TArrow leftDomain leftCodomain, TArrow rightDomain rightCodomain) ->
+          structuralBindersAgree leftDomain rightDomain
+            && structuralBindersAgree leftCodomain rightCodomain
+        (TConWithIdentity _ _ leftArgs, TConWithIdentity _ _ rightArgs) ->
+          allStructuralBindersAgree (toList leftArgs) (toList rightArgs)
+        (TVarAppRef _ leftArgs, TVarAppRef _ rightArgs) ->
+          allStructuralBindersAgree (toList leftArgs) (toList rightArgs)
+        (TBaseWithIdentity {}, TBaseWithIdentity {}) -> True
+        (TBottom, TBottom) -> True
+        (TForallRef leftRef leftBound leftBody, TForallRef rightRef rightBound rightBody) ->
+          structuralBinderIdentityAgrees leftRef rightRef
+            && maybeStructuralBindersAgree leftBound rightBound
+            && structuralBindersAgree leftBody rightBody
+        (TMuRef leftRef leftBody, TMuRef rightRef rightBody) ->
+          structuralBinderIdentityAgrees leftRef rightRef
+            && structuralBindersAgree leftBody rightBody
+        _ -> False
+
+    allStructuralBindersAgree leftTypes rightTypes =
+      length leftTypes == length rightTypes
+        && and
+          ( zipWith
+              structuralBindersAgree
+              leftTypes
+              rightTypes
+          )
+
+    maybeStructuralBindersAgree leftBound rightBound =
+      case (leftBound, rightBound) of
+        (Nothing, Nothing) -> True
+        (Just leftTy, Just rightTy) ->
+          structuralBindersAgree leftTy rightTy
+        _ -> False
+
+    structuralBinderIdentityAgrees leftRef rightRef =
+      case
+          ( typeBinderIdentityStructural (typeBinderRefIdentity leftRef),
+            typeBinderIdentityStructural (typeBinderRefIdentity rightRef)
+          )
+        of
+          (Nothing, Nothing) -> True
+          (Just leftIdentity, Just rightIdentity) ->
+            leftIdentity == rightIdentity
+          _ -> False
+
+stripChurchForallsType :: ElabType -> ([TypeBinderRef], ElabType)
+stripChurchForallsType ty =
+  case ty of
+    TForallRef ref Nothing body ->
+      let (refs, core) = stripChurchForallsType body
+       in (ref : refs, core)
+    _ -> ([], ty)
+
+churchSelfAliasVariants :: [TypeBinderRef] -> TypeBinderRef -> ElabType -> [ElabType]
+churchSelfAliasVariants quantRefs muRef core
+  | any (typeBinderRefsSameIdentity muRef) (freeTypeVarRefsType core) = [core]
+  | otherwise =
+      core
+        : [ substTypeSimpleRef alias (TVarRef muRef) core
+            | alias <- churchFreeRefsExcept quantRefs core
+          ]
+
+churchFreeRefsExcept :: [TypeBinderRef] -> ElabType -> [TypeBinderRef]
+churchFreeRefsExcept excluded ty =
+  [ ref
+    | ref <- freeTypeVarRefsType ty,
+      not (any (typeBinderRefsSameIdentity ref) excluded)
+  ]
+
+unionTypeBinderRefs :: [TypeBinderRef] -> [TypeBinderRef] -> [TypeBinderRef]
+unionTypeBinderRefs left right =
+  foldr insertRef right left
+  where
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
+churchNormalForms :: Ty v -> [([TypeBinderRef], Ty v)]
+churchNormalForms ty =
+  case ty of
+    TVarRef {} -> unchanged
+    TArrow domain codomain ->
+      [ (unionTypeBinderRefs domainRefs codomainRefs, TArrow domain' codomain')
+        | (domainRefs, domain') <- churchNormalForms domain,
+          (codomainRefs, codomain') <- churchNormalForms codomain
+      ]
+    TConWithIdentity identity con args ->
+      [ (unionMany (fmap fst normalizedArgs), TConWithIdentity identity con (fmap snd normalizedArgs))
+        | normalizedArgs <- traverse churchNormalForms args
+      ]
+    TVarAppRef ref args ->
+      [ (unionMany (fmap fst normalizedArgs), TVarAppRef ref (fmap snd normalizedArgs))
+        | normalizedArgs <- traverse churchNormalForms args
+      ]
+    TBaseWithIdentity {} -> unchanged
+    TBottom -> unchanged
+    TForallRef ref mbBound body ->
+      [ ( unionTypeBinderRefs boundRefs bodyRefs,
+          TForallRef ref mbBound' body'
+        )
+        | (boundRefs, mbBound') <- churchNormalMaybeBoundForms mbBound,
+          (bodyRefs, body') <- churchNormalForms body
+      ]
+    TMuRef ref body ->
+      let (localRefs, core) = stripChurchForallsType body
+       in [ ( matchableRefs,
+              TMuRef ref coreVariant
+            )
+            | (nestedRefs, core') <- churchNormalForms core,
+              let matchableRefs = unionTypeBinderRefs localRefs nestedRefs,
+              coreVariant <- churchSelfAliasVariants matchableRefs ref core'
+          ]
+  where
+    unchanged = [([], ty)]
+
+churchNormalMaybeBoundForms :: Maybe BoundType -> [([TypeBinderRef], Maybe BoundType)]
+churchNormalMaybeBoundForms mbBound =
+  case mbBound of
+    Nothing -> [([], Nothing)]
+    Just bound ->
+      [ (refs, Just bound')
+        | (refs, bound') <- churchNormalForms bound
+      ]
+
+unionMany :: Foldable f => f [TypeBinderRef] -> [TypeBinderRef]
+unionMany =
+  foldr unionTypeBinderRefs []
 
 {- Note [churchMuEquivalent]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -524,57 +682,24 @@ Church-encoding-specific comparison, intentionally kept out of alphaEqType.
 churchMuEquivalent :: ElabType -> ElabType -> Bool
 churchMuEquivalent t1 t2 =
   case (t1, t2) of
-    (TMuRef ref1 body1, TMuRef ref2 body2) ->
-      let (qs1, core1) = stripChurchForalls body1
-          (qs2, core2) = stripChurchForalls body2
-          -- All quantifier vars from both sides are matchable
-          allQs = unionRefs qs1 qs2
+    (TMuRef {}, TMuRef {}) ->
+      let forms1 = churchNormalForms t1
+          forms2 = churchNormalForms t2
        in or
-            [ tryMatch allQs (TMuRef ref1 c1) (TMuRef ref2 c2)
-              | c1 <- selfAliasVariants qs1 ref1 core1,
-                c2 <- selfAliasVariants qs2 ref2 core2
+            [ tryMatch
+                (unionTypeBinderRefs refs1 refs2)
+                normalized1
+                normalized2
+              | (refs1, normalized1) <- forms1,
+                (refs2, normalized2) <- forms2
             ]
     _ -> False
   where
-    -- Strip leading unbounded TForall from a μ body.
-    stripChurchForalls :: ElabType -> ([TypeBinderRef], ElabType)
-    stripChurchForalls ty = case ty of
-      TForallRef ref Nothing body ->
-        let (refs, core) = stripChurchForalls body
-         in (ref : refs, core)
-      _ -> ([], ty)
-
-    -- Generate candidate cores where a free-variable self-alias is replaced
-    -- by the actual μ binder name.
-    selfAliasVariants :: [TypeBinderRef] -> TypeBinderRef -> ElabType -> [ElabType]
-    selfAliasVariants quantRefs muRef core
-      | any (typeBinderRefsSameIdentity muRef) (freeTypeVarRefsType core) = [core]
-      | otherwise =
-          -- The mu binder doesn't appear in the body — some alias does.
-          -- Try each free var (that isn't a stripped quantifier) as the alias.
-          core
-            : [ substTypeSimpleRef alias (TVarRef muRef) core
-                | alias <- freeRefsExcept quantRefs core
-              ]
-
     tryMatch :: [TypeBinderRef] -> ElabType -> ElabType -> Bool
     tryMatch matchableVars lhs rhs =
       alphaEqType lhs rhs
         || isRight (matchTypeRefs matchableVars lhs rhs)
         || isRight (matchTypeRefs matchableVars rhs lhs)
-
-    unionRefs left right =
-      foldr insertRef right left
-
-    insertRef ref refs
-      | any (typeBinderRefsSameIdentity ref) refs = refs
-      | otherwise = ref : refs
-
-    freeRefsExcept excluded ty =
-      [ ref
-        | ref <- freeTypeVarRefsType ty,
-          not (any (typeBinderRefsSameIdentity ref) excluded)
-      ]
 
     isRight :: Either a b -> Bool
     isRight (Right _) = True
@@ -586,47 +711,36 @@ churchMuEquivalent t1 t2 =
 churchAwareEqType :: ElabType -> ElabType -> Bool
 churchAwareEqType = go [] []
   where
-    stripChurchForalls :: ElabType -> ([TypeBinderRef], ElabType)
-    stripChurchForalls ty = case ty of
-      TForallRef ref Nothing body ->
-        let (refs, core) = stripChurchForalls body
-         in (ref : refs, core)
-      _ -> ([], ty)
-
-    selfAliasVariants :: [TypeBinderRef] -> TypeBinderRef -> ElabType -> [ElabType]
-    selfAliasVariants quantRefs muRef core
-      | any (typeBinderRefsSameIdentity muRef) (freeTypeVarRefsType core) = [core]
-      | otherwise =
-          core
-            : [ substTypeSimpleRef alias (TVarRef muRef) core
-                | alias <- freeRefsExcept quantRefs core
-              ]
-
     tryMatch :: [TypeBinderRef] -> ElabType -> ElabType -> Bool
     tryMatch matchableVars lhs rhs =
       alphaEqType lhs rhs
         || isRight (matchTypeRefs matchableVars lhs rhs)
         || isRight (matchTypeRefs matchableVars rhs lhs)
 
-    freeRefsExcept excluded ty =
-      [ ref
-        | ref <- freeTypeVarRefsType ty,
-          not (any (typeBinderRefsSameIdentity ref) excluded)
-      ]
-
     churchMuMatchesCore :: ElabType -> ElabType -> Bool
     churchMuMatchesCore muTy@(TMuRef ref body) otherTy =
       let muTy' = tyToElab muTy
-          (quantVars, coreBody) = stripChurchForalls (tyToElab body)
-          (_, unfoldedCoreBody) = stripChurchForalls (substTypeSimpleRef ref muTy' (tyToElab body))
+          (quantVars, coreBody) = stripChurchForallsType (tyToElab body)
+          (_, unfoldedCoreBody) = stripChurchForallsType (substTypeSimpleRef ref muTy' (tyToElab body))
           candidateBodies =
-            selfAliasVariants quantVars ref coreBody
-              ++ selfAliasVariants quantVars ref unfoldedCoreBody
-          (_, otherCore) = stripChurchForalls otherTy
-       in or
-            [ tryMatch quantVars candidate otherTy || tryMatch quantVars candidate otherCore
-              | candidate <- candidateBodies
-            ]
+            churchSelfAliasVariants quantVars ref coreBody
+              ++ [ candidate
+                 | not (alphaEqType coreBody unfoldedCoreBody)
+                 , candidate <- churchSelfAliasVariants quantVars ref unfoldedCoreBody
+                 ]
+          (otherQuantVars, otherCore) = stripChurchForallsType otherTy
+          -- A leading forall in the unfolded Church body is representation
+          -- detail.  A forall wrapped around a complete recursive type is an
+          -- explicit xMLF boundary and still requires an InstElim/InstApp;
+          -- treating the latter as Church equality erases that computation.
+          explicitForallWrapsRecursiveType =
+            leadingForallsWrapRecursiveType otherTy
+       in not explicitForallWrapsRecursiveType
+            && or
+              [ tryMatch quantVars candidate otherTy
+                  || (not (null otherQuantVars) && tryMatch quantVars candidate otherCore)
+                | candidate <- candidateBodies
+              ]
     churchMuMatchesCore _ _ = False
 
     unfoldMuOnce :: Ty v -> Maybe ElabType
@@ -636,17 +750,24 @@ churchAwareEqType = go [] []
        in if alphaEqType unfolded muTy' then Nothing else Just unfolded
     unfoldMuOnce _ = Nothing
 
+    leadingForallsWrapRecursiveType ty =
+      let (refs, core) = stripChurchForallsType ty
+       in not (null refs)
+            && case core of
+              TMuRef {} -> True
+              _ -> False
+
     go envL envR t1 t2 = case (t1, t2) of
       (TVarRef a, TVarRef b) ->
         alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
-      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        typeHeadMatches identity1 c1 identity2 c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 _ args1, TConWithIdentity identity2 _ args2) ->
+        typeHeadMatches identity1 identity2 && eqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
-      (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2) ->
-        typeHeadMatches identity1 b1 identity2 b2
+      (TBaseWithIdentity identity1 _, TBaseWithIdentity identity2 _) ->
+        typeHeadMatches identity1 identity2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -658,11 +779,15 @@ churchAwareEqType = go [] []
          in go envL' envR' body1 body2
               || churchMuEquivalent t1 t2
       (TMuRef {}, _) ->
-        churchMuMatchesCore t1 t2
-          || maybe False (\unfolded -> go envL envR unfolded t2) (unfoldMuOnce t1)
+        not (leadingForallsWrapRecursiveType t2)
+          && ( churchMuMatchesCore t1 t2
+                 || maybe False (\unfolded -> go envL envR unfolded t2) (unfoldMuOnce t1)
+             )
       (_, TMuRef {}) ->
-        churchMuMatchesCore t2 t1
-          || maybe False (\unfolded -> go envL envR t1 unfolded) (unfoldMuOnce t2)
+        not (leadingForallsWrapRecursiveType t1)
+          && ( churchMuMatchesCore t2 t1
+                 || maybe False (\unfolded -> go envL envR t1 unfolded) (unfoldMuOnce t2)
+             )
       _ -> False
 
     eqArgs envL envR as bs = case (as, bs) of
@@ -681,12 +806,12 @@ churchAwareEqType = go [] []
     eqBound envL envR b1 b2 = case (b1, b2) of
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
-      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        typeHeadMatches identity1 c1 identity2 c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 _ args1, TConWithIdentity identity2 _ args2) ->
+        typeHeadMatches identity1 identity2 && eqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
-      (TBaseWithIdentity identity1 b1', TBaseWithIdentity identity2 b2') ->
-        typeHeadMatches identity1 b1' identity2 b2'
+      (TBaseWithIdentity identity1 _, TBaseWithIdentity identity2 _) ->
+        typeHeadMatches identity1 identity2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -709,12 +834,117 @@ churchAwareEqType = go [] []
     isRight (Right _) = True
     isRight _ = False
 
+-- | Equality for the one operational Church representation transition that
+-- construction may observe: one recursive body still owns its leading
+-- result forall while the other has instantiated that forall.  Two
+-- forall-preserving recursive bodies are ordinary source types and therefore
+-- remain alpha-strict; symmetrically normalizing both would turn unrelated
+-- result algebras into the same type.
+--
+-- Explicit foralls outside the recursive body are never representation
+-- detail.  The recursive cases below deliberately occur only at matching
+-- nested type positions.
+churchRepresentationEqType :: ElabType -> ElabType -> Bool
+churchRepresentationEqType = go [] []
+  where
+    go _envL _envR left right
+      | alphaEqType left right = True
+    go envL envR (TVarRef leftRef) (TVarRef rightRef) =
+      alphaEqRef envL envR leftRef rightRef
+    go envL envR
+      (TArrow leftDomain leftCodomain)
+      (TArrow rightDomain rightCodomain) =
+        go envL envR leftDomain rightDomain
+          && go envL envR leftCodomain rightCodomain
+    go envL envR
+      (TConWithIdentity leftIdentity _ leftArgs)
+      (TConWithIdentity rightIdentity _ rightArgs) =
+        typeHeadMatches leftIdentity rightIdentity
+          && pairwise (go envL envR) (toList leftArgs) (toList rightArgs)
+    go envL envR
+      (TVarAppRef leftRef leftArgs)
+      (TVarAppRef rightRef rightArgs) =
+        alphaEqRef envL envR leftRef rightRef
+          && pairwise (go envL envR) (toList leftArgs) (toList rightArgs)
+    go _envL _envR
+      (TBaseWithIdentity leftIdentity _)
+      (TBaseWithIdentity rightIdentity _) =
+        typeHeadMatches leftIdentity rightIdentity
+    go _envL _envR TBottom TBottom = True
+    go envL envR
+      (TForallRef leftRef leftBound leftBody)
+      (TForallRef rightRef rightBound rightBody) =
+        equivalentBounds envL envR leftBound rightBound
+          && go
+            ((leftRef, rightRef) : envL)
+            ((rightRef, leftRef) : envR)
+            leftBody
+            rightBody
+    go envL envR left@(TMuRef leftRef leftBody) right@(TMuRef rightRef rightBody) =
+      ( churchRepresentationTransition left right
+          && churchMuEquivalent left right
+      )
+        || go
+          ((leftRef, rightRef) : envL)
+          ((rightRef, leftRef) : envR)
+          leftBody
+          rightBody
+    go _envL _envR _left _right = False
+
+    pairwise relation left right =
+      length left == length right
+        && and (zipWith relation left right)
+
+    equivalentBounds _envL _envR Nothing Nothing = True
+    equivalentBounds envL envR (Just leftBound) (Just rightBound) =
+      go envL envR (tyToElab leftBound) (tyToElab rightBound)
+    equivalentBounds _envL _envR _leftBound _rightBound = False
+
+churchRepresentationTransition :: ElabType -> ElabType -> Bool
+churchRepresentationTransition
+  (TMuRef _ leftBody)
+  (TMuRef _ rightBody) =
+    leadingChurchResultForall leftBody
+      /= leadingChurchResultForall rightBody
+  where
+    leadingChurchResultForall body =
+      case body of
+        TForallRef _ Nothing _ -> True
+        _ -> False
+churchRepresentationTransition _ _ = False
+
 matchTypeRefs ::
   [TypeBinderRef] ->
   ElabType ->
   ElabType ->
   Either ElabError (Map.Map TypeBinderRef ElabType)
-matchTypeRefs binderRefs = goMatch [] Map.empty
+matchTypeRefs = matchTypeRefsWithChurchNormalForms False
+
+-- | Match a source-owned type pattern against a presolver presentation while
+-- retaining the substitution for the requested source binders.  Unlike
+-- 'matchTypeRefs', this matcher admits only the narrow Church-encoded mu
+-- normalization described in Note [churchMuEquivalent].  Every successful
+-- normal form must induce the same requested substitution; otherwise the
+-- identity quotient is rejected as ambiguous.
+--
+-- This is deliberately directional: @pattern@ owns @binderRefs@ and the
+-- returned types come from @target@.  In particular, an annotated Church
+-- binder can be mapped to the graph identity that represents it after the
+-- presolver instantiated an inner result forall.
+matchChurchAwareTypeRefs ::
+  [TypeBinderRef] ->
+  ElabType ->
+  ElabType ->
+  Either ElabError (Map.Map TypeBinderRef ElabType)
+matchChurchAwareTypeRefs = matchTypeRefsWithChurchNormalForms True
+
+matchTypeRefsWithChurchNormalForms ::
+  Bool ->
+  [TypeBinderRef] ->
+  ElabType ->
+  ElabType ->
+  Either ElabError (Map.Map TypeBinderRef ElabType)
+matchTypeRefsWithChurchNormalForms allowChurchNormalForms binderRefs = goMatch [] Map.empty
   where
     goMatch env subst tyP tyT = case (tyP, tyT) of
       (TVarRef ref, _)
@@ -722,7 +952,11 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
         case Map.lookup binder subst of
           Nothing -> Right (Map.insert binder tyT subst)
           Just ty0 ->
-            if alphaEqType ty0 tyT
+            if
+                alphaEqType ty0 tyT
+                  || ( allowChurchNormalForms
+                         && churchRepresentationEqType ty0 tyT
+                     )
               then Right subst
               else Left (InstantiationError "matchType: binder mismatch")
       (TVarRef ref, TVarRef ref')
@@ -730,8 +964,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
-      (TConWithIdentity identity0 c0 args0, TConWithIdentity identity1 c1 args1)
-        | typeHeadMatches identity0 c0 identity1 c1 ->
+      (TConWithIdentity identity0 _ args0, TConWithIdentity identity1 _ args1)
+        | typeHeadMatches identity0 identity1 ->
             matchArgs env subst (toList args0) (toList args1)
       (TVarAppRef ref argsP, _)
         | Just binder <- matchableRef ref ->
@@ -739,8 +973,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TVarAppRef ref args0, TVarAppRef ref' args1)
         | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
-      (TBaseWithIdentity identity0 b0, TBaseWithIdentity identity1 b1)
-        | typeHeadMatches identity0 b0 identity1 b1 -> Right subst
+      (TBaseWithIdentity identity0 _, TBaseWithIdentity identity1 _)
+        | typeHeadMatches identity0 identity1 -> Right subst
       (TBottom, TBottom) -> Right subst
       (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
@@ -749,7 +983,13 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
           _ -> Left (InstantiationError "matchType: forall bound mismatch")
         goMatch ((ref, ref') : env) subst1 b b'
       (TMuRef ref b, TMuRef ref' b') ->
-        goMatch ((ref, ref') : env) subst b b'
+        case goMatch ((ref, ref') : env) subst b b' of
+          Right matched -> Right matched
+          Left directFailure
+            | allowChurchNormalForms
+            , churchRepresentationTransition tyP tyT ->
+                matchChurchNormalForms subst tyP tyT directFailure
+            | otherwise -> Left directFailure
       _ -> Left (InstantiationError "matchType: structure mismatch")
 
     matchArgs env subst0 argsP argsT = case (argsP, argsT) of
@@ -789,6 +1029,59 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
     matchableRef ref =
       find (typeBinderRefsSameIdentity ref) binderRefs
 
+    matchChurchNormalForms subst patternMu targetMu directFailure =
+      case distinctSubstitutions candidates of
+        [] -> Left directFailure
+        [candidate] -> Right candidate
+        _ -> Left (InstantiationError "matchType: ambiguous Church-normal-form binder match")
+      where
+        candidates =
+          [ merged
+          | (localPatternRefs, patternForm) <- churchNormalForms patternMu
+          , (_, targetForm) <- churchNormalForms targetMu
+          , Right matched <-
+              [ matchTypeRefs
+                  (unionTypeBinderRefs binderRefs localPatternRefs)
+                  patternForm
+                  targetForm
+              ]
+          , Right merged <- [mergeRequestedSubstitution subst matched]
+          ]
+
+    mergeRequestedSubstitution =
+      Map.foldlWithKey' mergeOne . Right
+      where
+        mergeOne acc binder replacement
+          | not (any (typeBinderRefsSameIdentity binder) binderRefs) = acc
+          | otherwise = do
+              subst <- acc
+              case Map.lookup binder subst of
+                Nothing -> Right (Map.insert binder replacement subst)
+                Just existing
+                  | alphaEqType existing replacement
+                      || ( allowChurchNormalForms
+                             && churchRepresentationEqType
+                               existing
+                               replacement
+                         ) ->
+                      Right subst
+                  | otherwise -> Left (InstantiationError "matchType: Church binder mismatch")
+
+    distinctSubstitutions =
+      foldr insertDistinctSubstitution []
+
+    insertDistinctSubstitution subst substs
+      | any (substitutionsEquivalent subst) substs = substs
+      | otherwise = subst : substs
+
+    substitutionsEquivalent left right =
+      Map.size left == Map.size right
+        && all
+          (\(binder, replacement) ->
+            maybe False (alphaEqType replacement) (Map.lookup binder right)
+          )
+          (Map.toList left)
+
     unapplyTypeHead ty = case ty of
       TVarRef ref -> Just (TVarRef ref, [])
       TVarAppRef ref args -> Just (TVarRef ref, toList args)
@@ -807,8 +1100,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
-      (TConWithIdentity identity0 c0 args0, TConWithIdentity identity1 c1 args1)
-        | typeHeadMatches identity0 c0 identity1 c1 ->
+      (TConWithIdentity identity0 _ args0, TConWithIdentity identity1 _ args1)
+        | typeHeadMatches identity0 identity1 ->
             matchArgs env subst (toList args0) (toList args1)
       (TVarAppRef ref argsP, _)
         | Just binder <- matchableRef ref ->
@@ -816,8 +1109,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TVarAppRef ref args0, TVarAppRef ref' args1)
         | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
-      (TBaseWithIdentity identity0 b0, TBaseWithIdentity identity1 b1)
-        | typeHeadMatches identity0 b0 identity1 b1 -> Right subst
+      (TBaseWithIdentity identity0 _, TBaseWithIdentity identity1 _)
+        | typeHeadMatches identity0 identity1 -> Right subst
       (TBottom, TBottom) -> Right subst
       (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
@@ -915,7 +1208,7 @@ inlineBaseBoundsType constraint canonical = goType []
       | boundRefMember ref boundRefs = TVarRef ref
       | otherwise =
           case resolvedBaseBound ref of
-            Just (Left base) -> baseWithBuiltinIdentity base
+            Just (Left headRef) -> baseWithIdentity headRef
             Just (Right ()) -> TBottom
             Nothing -> TVarRef ref
 
@@ -924,23 +1217,23 @@ inlineBaseBoundsType constraint canonical = goType []
       | boundRefMember ref boundRefs = TVarAppRef ref args
       | otherwise =
           case resolvedBaseBound ref of
-            Just (Left base) -> conWithBuiltinIdentity base args
+            Just (Left headRef) -> conWithIdentity headRef args
             _ -> TVarAppRef ref args
 
-    resolvedBaseBound :: TypeBinderRef -> Maybe (Either BaseTy ())
+    resolvedBaseBound :: TypeBinderRef -> Maybe (Either (SymbolIdentity, BaseTy) ())
     resolvedBaseBound ref = do
       nid <- refNodeId ref
       baseN <- resolveBaseBoundForInstConstraint constraint canonical nid
       case NodeAccess.lookupNode constraint baseN of
-        Just TyBase {tnBase = b} -> Just (Left b)
+        Just TyBase {tnBaseIdentity = identity, tnBase = b} -> Just (Left (identity, b))
         Just TyBottom {} -> Just (Right ())
         _ -> Nothing
 
-    baseWithBuiltinIdentity base@(BaseTy name) =
-      TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
+    baseWithIdentity (identity, base) =
+      TBaseWithIdentity identity base
 
-    conWithBuiltinIdentity base@(BaseTy name) args =
-      TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base args
+    conWithIdentity (identity, base) args =
+      TConWithIdentity identity base args
 
     refNodeId :: TypeBinderRef -> Maybe NodeId
     refNodeId =
@@ -983,7 +1276,28 @@ inlineAliasBoundsWithBySeen ::
   ElabType ->
   ElabType
 inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBound =
-  goAlias IntSet.empty []
+  inlineAliasBoundsWithBySeenProtected
+    []
+    fallbackToBottom
+    canonical
+    nodes
+    lookupBound
+    reifyBound
+
+-- | Inline graph aliases while treating the supplied free references as
+-- ambient binders.  Exact construction endpoints use this to prevent a
+-- lexically captured graph identity from being replaced by its lower bound.
+inlineAliasBoundsWithBySeenProtected ::
+  [TypeBinderRef] ->
+  Bool ->
+  (NodeId -> NodeId) ->
+  NodeMap TyNode ->
+  (NodeId -> Maybe NodeId) ->
+  (IntSet.IntSet -> NodeId -> Either err ElabType) ->
+  ElabType ->
+  ElabType
+inlineAliasBoundsWithBySeenProtected protectedRefs fallbackToBottom canonical nodes lookupBound reifyBound =
+  goAlias IntSet.empty protectedRefs
   where
     goAlias seen boundRefs ty = case ty of
       TVarRef ref

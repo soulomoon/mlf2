@@ -16,7 +16,11 @@
 -- the public entry point unchanged.
 module MLF.Elab.Phi.Omega.Interpret
   ( phiWithSchemeOmega,
+    phiWithSchemeOmegaOccurrence,
   )
 where
 
-import MLF.Elab.Phi.Omega.Interpret.Internal (phiWithSchemeOmega)
+import MLF.Elab.Phi.Omega.Interpret.Internal
+  ( phiWithSchemeOmega,
+    phiWithSchemeOmegaOccurrence,
+  )

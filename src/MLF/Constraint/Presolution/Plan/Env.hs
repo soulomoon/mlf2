@@ -6,7 +6,6 @@
 module MLF.Constraint.Presolution.Plan.Env
   ( PresolutionEnv (..),
     mkGeneralizeEnv,
-    softenBindParents,
     lookupNodeInMap,
   )
 where
@@ -23,15 +22,14 @@ where
 
 'mkGeneralizeEnv' constructs a 'GeneralizeEnv p' for a single generalization
 scope by sanitizing the canonical map and projecting scope-local binding
-structure.  'softenBindParents' downgrades rigid bindings to flex when nodes
-are outside the generalization scope, ensuring the planner sees only
-scope-relevant rigidity.
+structure.  Reification-owned softening is applied later by
+"MLF.Reify.Named", so this environment preserves the canonical binding flags.
 -}
 
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Plan.Context
   ( GaBindParents (..),
+    GeneralizationRequirements,
     GeneralizeEnv (..),
   )
 import MLF.Constraint.Presolution.View (PresolutionView (..), sanitizedViewCanonicalMap)
@@ -48,6 +46,7 @@ data PresolutionEnv p = PresolutionEnv
     peCanonical :: NodeId -> NodeId,
     peBindParents :: BindParents,
     peBindParentsGa :: Maybe (GaBindParents p),
+    peRequirements :: GeneralizationRequirements,
     peScopeRoot :: NodeRef,
     peTargetNode :: NodeId,
     peTraceConfig :: TraceConfig
@@ -96,14 +95,3 @@ mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
             geCanonicalMap = canonicalMap,
             geDebugEnabled = tcGeneralize traceCfg
           }
-
-softenBindParents :: (NodeId -> NodeId) -> Constraint p -> BindParents -> BindParents
-softenBindParents canonical constraint =
-  let weakened = cWeakenedVars constraint
-      softenOne childKey (parent, flag) =
-        case (flag, nodeRefFromKey childKey) of
-          (BindRigid, TypeRef childN)
-            | IntSet.member (getNodeId (canonical childN)) weakened ->
-                (parent, BindFlex)
-          _ -> (parent, flag)
-   in IntMap.mapWithKey softenOne

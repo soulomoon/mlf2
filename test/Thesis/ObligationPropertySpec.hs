@@ -4,6 +4,8 @@
 
 module Thesis.ObligationPropertySpec (spec) where
 
+import IdentityTestSupport
+import qualified ElabTypeTestSupport as TestElab
 import Control.Monad (forM_)
 import Data.Either (isRight)
 import Data.IntMap.Strict qualified as IntMap
@@ -21,8 +23,9 @@ import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), Presol
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
     PresolutionState (..),
+    psEdgeTraces,
     decideMinimalExpansion,
-    fromListInterior,
+    sourceInteriorFromList,
     instantiateScheme,
     instantiateSchemeWithTrace,
     lookupCopy,
@@ -73,14 +76,24 @@ import Test.Hspec
 import Test.QuickCheck
 
 spec :: Spec
-spec = describe "Thesis obligation property evidence" $
-  forM_ obligations $ \obligation ->
-    it (obligationId obligation) $
-      property $
-        withMaxSuccess 100 $
-          forAll (chooseInt (3, 16)) $ \size ->
-            counterexample (obligationId obligation ++ " failed at size " ++ show size) $
-              obligationProperty obligation size
+spec = do
+  describe "Thesis obligation property evidence" $
+    forM_ obligations $ \obligation ->
+      it (obligationId obligation) $
+        property $
+          withMaxSuccess 100 $
+            forAll (chooseInt (3, 16)) $ \size ->
+              counterexample (obligationId obligation ++ " failed at size " ++ show size) $
+                obligationProperty obligation size
+
+  describe "Thesis fixed annotation evidence" $ do
+    forM_ (zip [1 :: Int ..] annotationErasureCases) $ \(caseIndex, expr) ->
+      it ("preserves annotation erasure case " ++ show caseIndex) $
+        expectElabAnnotationErasure expr
+    it "constructs a bounded annotation abstraction" $
+      expectElabBoundedAnnotationAbs
+    it "constructs the paper's annotated self-application" $
+      expectElabAnnotatedSelfApp
 
 data Obligation = Obligation
   { obligationId :: String,
@@ -330,13 +343,13 @@ propSolveArrow _size =
           emptyConstraint
             { cNodes =
                 nodeMapFromList
-                  [ (0, TyCon (NodeId 0) (BaseTy "Pair") (NodeId 1 :| [NodeId 4])),
+                  [ (0, TestTyCon (NodeId 0) (BaseTy "Pair") (NodeId 1 :| [NodeId 4])),
                     (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3)),
-                    (2, TyBase (NodeId 2) (BaseTy "Int")),
-                    (3, TyBase (NodeId 3) (BaseTy "Bool")),
+                    (2, TestTyBase (NodeId 2) (BaseTy "Int")),
+                    (3, TestTyBase (NodeId 3) (BaseTy "Bool")),
                     (4, TyArrow (NodeId 4) (NodeId 5) (NodeId 6)),
-                    (5, TyBase (NodeId 5) (BaseTy "Int")),
-                    (6, TyBase (NodeId 6) (BaseTy "Bool"))
+                    (5, TestTyBase (NodeId 5) (BaseTy "Int")),
+                    (6, TestTyBase (NodeId 6) (BaseTy "Bool"))
                   ],
               cBindParents =
                 bindParentsFromPairs
@@ -640,6 +653,202 @@ propElabLet :: Int -> Property
 propElabLet _size =
   elaboratesTo letIdAppExpr intTy
 
+-- Thesis Property 15.3.14, specialized to the eMLF annotation forms whose
+-- translation is introduced in §15.3.8.  Type abstractions, type computations,
+-- and explicit recursive-type evidence erase; the remaining value-term shape
+-- must be the original annotated source with its annotations removed.
+expectElabAnnotationErasure :: Surf.SurfaceExpr -> Expectation
+expectElabAnnotationErasure expr =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+    Right (term, _ty) ->
+      eraseXmlfTerm term `shouldBe` eraseSurfaceAnnotations expr
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+
+-- Thesis §§12.3.2 and 15.3.8: an annotation coercing the identity
+-- abstraction to forall (a >= sigma-id). a -> a is itself an identity term.
+-- Its xMLF construction therefore binds the flexible result before building
+-- the lambda; it must not retrofit an unrelated outer InstIntro afterwards.
+expectElabBoundedAnnotationAbs :: Expectation
+expectElabBoundedAnnotationAbs =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr boundedIdentityAnnotationExpr) of
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+    Right (term, ty) -> do
+      ty `shouldMatchType` boundedIdentityAnnotationType
+      case Elab.typeCheck term of
+        Left err -> expectationFailure (show err)
+        Right checkedTy -> checkedTy `shouldMatchType` boundedIdentityAnnotationType
+      expectBoundedIdentityAnnotationShape term
+
+-- Thesis §15.3.8: omega = lambda (g : sigma-id) . g g elaborates, up to
+-- identity computations, to
+--   Lambda (alpha >= sigma-id). lambda (g : sigma-id).
+--     (g[sigma-id] g)[alpha]
+-- and has the principal flexible result type
+--   forall (alpha >= sigma-id). sigma-id -> alpha.
+expectElabAnnotatedSelfApp :: Expectation
+expectElabAnnotatedSelfApp =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr annotatedSelfAppExpr) of
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+    Right (term, ty) -> do
+      ty `shouldMatchType` annotatedSelfAppType
+      case Elab.typeCheck term of
+        Left err -> expectationFailure (show err)
+        Right checkedTy -> checkedTy `shouldMatchType` annotatedSelfAppType
+      expectAnnotatedSelfAppShape term
+
+shouldMatchType :: Elab.ElabType -> Elab.ElabType -> Expectation
+shouldMatchType actual expected =
+  if TypeOps.alphaEqType actual expected
+    then pure ()
+    else expectationFailure (show actual ++ " /= " ++ show expected)
+
+data ErasedTerm
+  = ErasedVar String
+  | ErasedLit Surf.Lit
+  | ErasedLam String ErasedTerm
+  | ErasedApp ErasedTerm ErasedTerm
+  | ErasedLet String ErasedTerm ErasedTerm
+  deriving (Eq, Show)
+
+eraseSurfaceAnnotations :: Surf.SurfaceExpr -> ErasedTerm
+eraseSurfaceAnnotations expr =
+  case expr of
+    Surf.EVarNode reference -> ErasedVar (Surf.termReferenceName reference)
+    Surf.ELit lit -> ErasedLit lit
+    Surf.ELamNode reference body ->
+      ErasedLam (Surf.termReferenceName reference) (eraseSurfaceAnnotations body)
+    Surf.EApp fun arg -> ErasedApp (eraseSurfaceAnnotations fun) (eraseSurfaceAnnotations arg)
+    Surf.ELetNode reference rhs body ->
+      ErasedLet
+        (Surf.termReferenceName reference)
+        (eraseSurfaceAnnotations rhs)
+        (eraseSurfaceAnnotations body)
+    Surf.ELamAnnNode reference _ body ->
+      ErasedLam (Surf.termReferenceName reference) (eraseSurfaceAnnotations body)
+    Surf.EExactLamNode reference _ body ->
+      ErasedLam (Surf.termReferenceName reference) (eraseSurfaceAnnotations body)
+    Surf.EAnn inner _ -> eraseSurfaceAnnotations inner
+    Surf.EExactAnn inner _ _ -> eraseSurfaceAnnotations inner
+
+eraseXmlfTerm :: Elab.XmlfTerm -> ErasedTerm
+eraseXmlfTerm term =
+  case term of
+    Elab.EVarNode resolved -> ErasedVar (ElabTypes.resolvedVarReferenceName resolved)
+    Elab.ELit lit -> ErasedLit lit
+    Elab.ELam resolved body ->
+      ErasedLam (ElabTypes.resolvedVarReferenceName resolved) (eraseXmlfTerm body)
+    Elab.EApp fun arg -> ErasedApp (eraseXmlfTerm fun) (eraseXmlfTerm arg)
+    Elab.ELet resolved _ rhs body ->
+      ErasedLet
+        (ElabTypes.resolvedVarReferenceName resolved)
+        (eraseXmlfTerm rhs)
+        (eraseXmlfTerm body)
+    Elab.ETyAbsRef _ _ body -> eraseXmlfTerm body
+    Elab.ETyInst inner _ -> eraseXmlfTerm inner
+    Elab.ERoll _ body -> eraseXmlfTerm body
+    Elab.EUnroll body -> eraseXmlfTerm body
+
+annotationErasureCases :: [Surf.SurfaceExpr]
+annotationErasureCases =
+  [ Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int"),
+    Surf.EAnn (Surf.ELam "x" (Surf.EVar "x")) sigmaIdSource,
+    annotatedSelfAppExpr,
+    Surf.ELet
+      "id"
+      (Surf.EAnn (Surf.ELam "x" (Surf.EVar "x")) sigmaIdSource)
+      (Surf.EApp (Surf.EVar "id") (Surf.ELit (Surf.LInt 1))),
+    Surf.ELamAnn
+      "poly"
+      sigmaIdSource
+      ( Surf.ELet
+          "keepInt"
+          (Surf.EApp (Surf.EVar "poly") (Surf.ELit (Surf.LInt 1)))
+          (Surf.EApp (Surf.EVar "poly") (Surf.ELit (Surf.LBool True)))
+      )
+  ]
+
+sigmaIdSource :: Surf.SrcType
+sigmaIdSource =
+  Surf.STForall "a" Nothing (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
+
+boundedIdentityAnnotationExpr :: Surf.SurfaceExpr
+boundedIdentityAnnotationExpr =
+  Surf.EAnn
+    (Surf.ELam "x" (Surf.EVar "x"))
+    ( Surf.STForall
+        "a"
+        (Just (Surf.mkSrcBound sigmaIdSource))
+        (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
+    )
+
+boundedIdentityAnnotationType :: Elab.ElabType
+boundedIdentityAnnotationType =
+  testTForall
+    "a"
+    (Just (boundFromType polyIdTy))
+    (Elab.TArrow (testTVar "a") (testTVar "a"))
+
+expectBoundedIdentityAnnotationShape :: Elab.XmlfTerm -> Expectation
+expectBoundedIdentityAnnotationShape term =
+  case term of
+    Elab.ETyAbsRef resultRef (Just resultBound) (Elab.ELam binder (Elab.EVarNode occurrence)) -> do
+      ElabTypes.tyToElab resultBound `shouldMatchType` polyIdTy
+      expectIdentityLambdaAt resultRef binder occurrence
+    Elab.ETyAbsRef resultRef (Just resultBound)
+      ( Elab.ETyInst
+          (Elab.ETyAbsRef sourceRef Nothing (Elab.ELam binder (Elab.EVarNode occurrence)))
+          (Elab.InstApp (Elab.TVarRef instantiatedRef))
+        ) -> do
+        ElabTypes.tyToElab resultBound `shouldMatchType` polyIdTy
+        ElabTypes.typeBinderRefsSameIdentity resultRef instantiatedRef `shouldBe` True
+        expectIdentityLambdaAt sourceRef binder occurrence
+    _ -> expectationFailure ("expected direct bounded type abstraction, got " ++ show term)
+  where
+    expectIdentityLambdaAt expectedRef binder occurrence = do
+      case ElabTypes.resolvedVarType binder of
+        Elab.TVarRef binderRef ->
+          ElabTypes.typeBinderRefsSameIdentity expectedRef binderRef `shouldBe` True
+        _ -> expectationFailure "bounded annotation lambda does not use its quantified carrier"
+      ElabTypes.resolvedVarDetails occurrence
+        `shouldBe` ElabTypes.resolvedVarDetails binder
+      ElabTypes.resolvedVarType occurrence
+        `shouldMatchType` ElabTypes.resolvedVarType binder
+
+annotatedSelfAppExpr :: Surf.SurfaceExpr
+annotatedSelfAppExpr =
+  Surf.ELamAnn
+    "g"
+    sigmaIdSource
+    (Surf.EApp (Surf.EVar "g") (Surf.EVar "g"))
+
+annotatedSelfAppType :: Elab.ElabType
+annotatedSelfAppType =
+  testTForall
+    "result"
+    (Just (boundFromType polyIdTy))
+    (Elab.TArrow polyIdTy (testTVar "result"))
+
+expectAnnotatedSelfAppShape :: Elab.XmlfTerm -> Expectation
+expectAnnotatedSelfAppShape term =
+  case term of
+    Elab.ETyAbsRef resultRef (Just resultBound) (Elab.ELam binder body) ->
+      case body of
+        Elab.ETyInst
+          ( Elab.EApp
+              (Elab.ETyInst (Elab.EVarNode funVar) (Elab.InstApp funArgTy))
+              (Elab.EVarNode argVar)
+            )
+          (Elab.InstAbstrRef abstractedRef) -> do
+            ElabTypes.tyToElab resultBound `shouldMatchType` polyIdTy
+            funArgTy `shouldMatchType` polyIdTy
+            ElabTypes.typeBinderRefsSameIdentity resultRef abstractedRef `shouldBe` True
+            ElabTypes.resolvedVarDetails funVar
+              `shouldBe` ElabTypes.resolvedVarDetails binder
+            ElabTypes.resolvedVarDetails argVar
+              `shouldBe` ElabTypes.resolvedVarDetails binder
+        _ -> expectationFailure ("unexpected annotated self-application body: " ++ show body)
+    _ -> expectationFailure ("unexpected annotated self-application outer form: " ++ show term)
+
 propEnvLambda :: Int -> Property
 propEnvLambda _size =
   Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
@@ -822,7 +1031,7 @@ propCgenRoot _size =
       case lookupNodeIn (cNodes c) root of
         Just TyVar {tnBound = Just bound} ->
           conjoin
-            [ lookupNodeIn (cNodes c) bound === Just (TyBase bound (BaseTy "Int")),
+            [ lookupNodeIn (cNodes c) bound === Just (TestTyBase bound (BaseTy "Int")),
               Binding.checkBindingTree c === Right ()
             ]
         other -> counterexample (show other) False
@@ -851,14 +1060,15 @@ propExpDecide size =
                 unifications === []
               ]
           other -> counterexample (show other) False,
-      assertMinimalDecision "compose" cCompose expCompose targetForall2 $ \(expansion, unifications) ->
-        case expansion of
-          ExpCompose (ExpInstantiate args :| [ExpForall (ForallSpec [Nothing, Nothing] :| [])]) ->
-            conjoin
-              [ counterexample (show args) (length args === 1),
-                unifications === []
-              ]
-          other -> counterexample (show other) False,
+      assertMinimalDecision "compose-polytype" cCompose expCompose targetForall2 $ \(expansion, unifications) ->
+        conjoin
+          [ expansion
+              === ExpCompose
+                ( ExpInstantiate [targetArrowC]
+                    :| [ExpForall (ForallSpec [Nothing, Nothing] :| [])]
+                ),
+            unifications === []
+          ],
       assertMinimalDecision "forall-intro" cForallIntro expForallIntro targetForallIntro $ \(expansion, unifications) ->
         conjoin
           [ expansion === ExpForall (ForallSpec [Nothing, Nothing] :| []),
@@ -875,8 +1085,8 @@ propExpDecide size =
         emptyConstraint
           { cNodes =
               nodeMapFromList
-                [ (getNodeId bodyId, TyBase bodyId (BaseTy "Int")),
-                  (getNodeId targetId, TyBase targetId (BaseTy "Int")),
+                [ (getNodeId bodyId, TestTyBase bodyId (BaseTy "Int")),
+                  (getNodeId targetId, TestTyBase targetId (BaseTy "Int")),
                   (getNodeId expId, TyExp expId (ExpVarId base) bodyId)
                 ],
             cBindParents = bindParentsFromPairs [(bodyId, expId, BindFlex)]
@@ -897,8 +1107,8 @@ propExpDecide size =
                 [ (getNodeId srcVar, TyVar {tnId = srcVar, tnBound = Nothing}),
                   (getNodeId srcArrow, TyArrow srcArrow srcVar srcVar),
                   (getNodeId srcForall, TyForall srcForall srcArrow),
-                  (getNodeId targetDom, TyBase targetDom (BaseTy "Int")),
-                  (getNodeId targetCod, TyBase targetCod (BaseTy "Int")),
+                  (getNodeId targetDom, TestTyBase targetDom (BaseTy "Int")),
+                  (getNodeId targetCod, TestTyBase targetCod (BaseTy "Int")),
                   (getNodeId targetArrow, TyArrow targetArrow targetDom targetCod),
                   (getNodeId expInst, TyExp expInst (ExpVarId (base + 1)) srcForall)
                 ],
@@ -955,8 +1165,8 @@ propExpDecide size =
         emptyConstraint
           { cNodes =
               nodeMapFromList
-                [ (getNodeId srcDomF, TyBase srcDomF (BaseTy "Int")),
-                  (getNodeId srcCodF, TyBase srcCodF (BaseTy "Bool")),
+                [ (getNodeId srcDomF, TestTyBase srcDomF (BaseTy "Int")),
+                  (getNodeId srcCodF, TestTyBase srcCodF (BaseTy "Bool")),
                   (getNodeId srcArrowF, TyArrow srcArrowF srcDomF srcCodF),
                   (getNodeId targetDomF, TyVar {tnId = targetDomF, tnBound = Nothing}),
                   (getNodeId targetCodF, TyVar {tnId = targetCodF, tnBound = Nothing}),
@@ -1163,8 +1373,8 @@ propCopyInst size =
                         [ (getNodeId edgeSourceBinder, TyVar {tnId = edgeSourceBinder, tnBound = Nothing}),
                           (getNodeId edgeSourceArrow, TyArrow edgeSourceArrow edgeSourceBinder edgeSourceBinder),
                           (getNodeId edgeSourceForall, TyForall edgeSourceForall edgeSourceArrow),
-                          (getNodeId edgeTargetDom, TyBase edgeTargetDom (BaseTy "Int")),
-                          (getNodeId edgeTargetCod, TyBase edgeTargetCod (BaseTy "Int")),
+                          (getNodeId edgeTargetDom, TestTyBase edgeTargetDom (BaseTy "Int")),
+                          (getNodeId edgeTargetCod, TestTyBase edgeTargetCod (BaseTy "Int")),
                           (getNodeId edgeTargetArrow, TyArrow edgeTargetArrow edgeTargetDom edgeTargetCod),
                           (getNodeId edgeExp, TyExp edgeExp (ExpVarId (base + 28)) edgeSourceForall)
                         ],
@@ -1217,7 +1427,7 @@ propNormGraft size =
             { cNodes =
                 nodeMapFromList
                   [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
-                    (1, TyBase (NodeId 1) graftBase)
+                    (1, TestTyBase (NodeId 1) graftBase)
                   ],
               cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex)],
               cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 1)]
@@ -1226,7 +1436,9 @@ propNormGraft size =
    in conjoin
         [ cInstEdges normalized === [],
           cUnifyEdges normalized === [],
-          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) graftBase),
+          counterexample "normalization lost the identity provenance of the grafted edge" $
+            IntSet.member size (cGraftedEdges normalized),
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TestTyBase (NodeId 0) graftBase),
           Binding.checkBindingTree normalized === Right ()
         ]
 
@@ -1238,14 +1450,14 @@ propNormMerge size =
           { cNodes =
               nodeMapFromList
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
-                  (1, TyBase (NodeId 1) mergeBase)
+                  (1, TestTyBase (NodeId 1) mergeBase)
                 ],
             cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
           }
       normalized = normalizeRaw c
    in conjoin
         [ cUnifyEdges normalized === [],
-          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) mergeBase)
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TestTyBase (NodeId 0) mergeBase)
         ]
 
 propNormDrop :: Int -> Property
@@ -1273,7 +1485,7 @@ propNormFixpoint size =
               nodeMapFromList
                 [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
                   (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
-                  (2, TyBase (NodeId 2) fixpointBase)
+                  (2, TestTyBase (NodeId 2) fixpointBase)
                 ],
             cInstEdges =
               [ InstEdge (EdgeId size) (NodeId 0) (NodeId 1),
@@ -1285,8 +1497,8 @@ propNormFixpoint size =
         [ normalized === normalizeRaw normalized,
           cInstEdges normalized === [],
           cUnifyEdges normalized === [],
-          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) fixpointBase),
-          lookupNodeIn (cNodes normalized) (NodeId 1) === Just (TyBase (NodeId 1) fixpointBase)
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TestTyBase (NodeId 0) fixpointBase),
+          lookupNodeIn (cNodes normalized) (NodeId 1) === Just (TestTyBase (NodeId 1) fixpointBase)
         ]
 
 propSolveVarBase :: Int -> Property
@@ -1294,7 +1506,7 @@ propSolveVarBase _size =
   let c =
         rootedConstraintLocal
           emptyConstraint
-            { cNodes = nodeMapFromList [(0, TyCon (NodeId 0) (BaseTy "Box") (NodeId 1 :| [])), (1, TyVar (NodeId 1) Nothing), (2, TyBase (NodeId 2) (BaseTy "Int"))],
+            { cNodes = nodeMapFromList [(0, TestTyCon (NodeId 0) (BaseTy "Box") (NodeId 1 :| [])), (1, TyVar (NodeId 1) Nothing), (2, TestTyBase (NodeId 2) (BaseTy "Int"))],
               cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex), (NodeId 2, NodeId 0, BindFlex)],
               cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 2)]
             }
@@ -1370,7 +1582,7 @@ acyclicConstraint size =
           nodeMapFromList
             [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
               (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
-              (2, TyBase (NodeId 2) (BaseTy "Int"))
+              (2, TestTyBase (NodeId 2) (BaseTy "Int"))
             ],
         cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
       }
@@ -1452,9 +1664,9 @@ boundFromType ty =
   case ty of
     Elab.TVarRef ref -> error ("boundFromType: unexpected variable bound " ++ show ref)
     Elab.TArrow a b -> Elab.TArrow a b
-    Elab.TConWithIdentity _ c args -> Elab.tCon c args
+    Elab.TConWithIdentity _ c args -> TestElab.tCon c args
     Elab.TVarAppRef ref args -> Elab.TVarAppRef ref args
-    Elab.TBaseWithIdentity _ b -> Elab.tBase b
+    Elab.TBaseWithIdentity _ b -> TestElab.tBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForallRef ref mb body -> Elab.TForallRef ref mb body
     Elab.TMuRef ref body -> Elab.TMuRef ref body
@@ -1587,8 +1799,9 @@ nodeAliasTranslationFixture size =
     tr =
       EdgeTrace
         { etRoot = root,
+          etResultRoot = root,
           etBinderArgs = [],
-          etInterior = fromListInterior [root, binderA, forallB, binderB, bodyNode],
+          etInterior = sourceInteriorFromList [root, binderA, forallB, binderB, bodyNode],
           etReplayContract = ReplayContractNone,
           etBinderReplayMap = mempty,
           etReplayDomainBinders = [],
@@ -1727,7 +1940,7 @@ varTripleConstraint =
     emptyConstraint
       { cNodes =
           nodeMapFromList
-            [ (0, TyCon (NodeId 0) (BaseTy "Triple") (NodeId 1 :| [NodeId 2, NodeId 3])),
+            [ (0, TestTyCon (NodeId 0) (BaseTy "Triple") (NodeId 1 :| [NodeId 2, NodeId 3])),
               (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
               (2, TyVar {tnId = NodeId 2, tnBound = Nothing}),
               (3, TyVar {tnId = NodeId 3, tnBound = Nothing})
@@ -1761,7 +1974,7 @@ inertConstraint size =
             [ (0, TyArrow (NodeId 0) (NodeId 1) (NodeId 1)),
               (1, TyArrow (NodeId 1) (NodeId 2) (NodeId 3)),
               (2, TyArrow (NodeId 2) (NodeId 4) (NodeId 3)),
-              (3, TyBase (NodeId 3) (BaseTy ("Int" ++ show size))),
+              (3, TestTyBase (NodeId 3) (BaseTy ("Int" ++ show size))),
               (4, TyVar {tnId = NodeId 4, tnBound = Nothing})
             ],
         cBindParents =
@@ -1774,13 +1987,13 @@ inertConstraint size =
       }
 
 intTy :: Elab.ElabType
-intTy = Elab.tBase (BaseTy "Int")
+intTy = TestElab.tBase (BaseTy "Int")
 
 builtinIntTy :: Elab.ElabType
-builtinIntTy = ElabTypes.TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
+builtinIntTy = ElabTypes.TBaseWithIdentity (Builtins.builtinTypeIdentity "Int") (BaseTy "Int")
 
 boolTy :: Elab.ElabType
-boolTy = Elab.tBase (BaseTy "Bool")
+boolTy = TestElab.tBase (BaseTy "Bool")
 
 elabTypeRef :: Int -> String -> ElabTypes.TypeBinderRef
 elabTypeRef key name =

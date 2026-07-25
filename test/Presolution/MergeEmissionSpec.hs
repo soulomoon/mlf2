@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module Presolution.MergeEmissionSpec (spec) where
 
+import IdentityTestSupport
 import Test.Hspec
 import Data.List (findIndex)
 import qualified Data.IntMap.Strict as IntMap
@@ -12,17 +13,17 @@ import MLF.Constraint.Types.Witness (InstanceOp(..))
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionError(..)
     , PresolutionResult(..)
     )
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
+    , psEdgeTraces
+    , psEdgeWitnesses
     , lookupCopy
     , processInstEdge
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Presolution.Witness (OmegaNormalizeError(..))
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( bindParentsFromPairs
@@ -96,8 +97,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
                     Just ew -> do
                         let InstanceWitness ops = ewWitness ew
-                            hasMerge = any (\op -> case op of OpMerge{} -> True; _ -> False) ops
-                        hasMerge `shouldBe` True
+                        ops `shouldSatisfy` any (\op -> case op of OpMerge{} -> True; _ -> False)
 
                         -- Eliminated binder-metas are recorded persistently so
                         -- elaboration can ignore them when reifying quantifiers.
@@ -105,8 +105,16 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                             Nothing -> expectationFailure "Expected EdgeTrace for EdgeId 0" >> fail "missing EdgeTrace"
                             Just tr' -> pure tr'
 
-                        let eliminatedBinders =
-                                [ n | OpMerge n _ <- ops ] ++ [ n | OpRaiseMerge n _ <- ops ]
+                        let sourceBinders = IntSet.fromList (map getNodeId [a, b])
+                            eliminatedBinders =
+                                [ n
+                                | OpMerge n _ <- ops
+                                , IntSet.member (getNodeId n) sourceBinders
+                                ]
+                                    ++ [ n
+                                       | OpRaiseMerge n _ <- ops
+                                       , IntSet.member (getNodeId n) sourceBinders
+                                       ]
                             cmap = etCopyMap tr
                             c1 = psConstraint st1
 
@@ -117,7 +125,19 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                                 meta <- case lookupCopy bv cmap of
                                     Nothing -> expectationFailure ("Expected binder-meta in EdgeTrace.etCopyMap for " ++ show bv) >> fail "missing binder-meta"
                                     Just m -> pure m
-                                IntSet.member (getNodeId meta) (cEliminatedVars c1) `shouldBe` True
+                                if IntSet.member (getNodeId meta) (cEliminatedVars c1)
+                                    then pure ()
+                                    else
+                                        expectationFailure
+                                            ( "Expected copied binder meta "
+                                                ++ show meta
+                                                ++ " to be eliminated; ops="
+                                                ++ show ops
+                                                ++ ", copyMap="
+                                                ++ show cmap
+                                                ++ ", eliminated="
+                                                ++ show (cEliminatedVars c1)
+                                            )
                             )
                             eliminatedBinders
 
@@ -180,14 +200,14 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                         let InstanceWitness ops = ewWitness ew
                         ops `shouldSatisfy` any wants
 
-    it "R-RAISE-INVALID-11: fails normalization when escaped bounded-binder Raise is not transitively flex-bound" $ do
+    it "R-RAISE-INVALID-11: does not construct an escaped Raise without transitive flex authority" $ do
         -- TyExp s · (∀(b ⩾ x). b -> b) ≤ (y -> y)
         --
         -- Here `b` is bounded (non-⊥ bound `x`). During edge solving, the
-        -- instantiated binder-meta can escape toward outer `y`, which can emit
-        -- an `OpRaise` that is not transitively flex-bound to expansion root `r`.
-        -- Under the stricter Fig. 15.3.4 translatability guard, normalization must
-        -- fail fast with a witness-normalization error.
+        -- instantiated binder-meta can escape toward outer `y`.  That shape
+        -- used to emit an `OpRaise` and rely on normalization to reject it as
+        -- not transitively flex-bound to expansion root `r`.  Construction
+        -- now refuses to manufacture that operation without exact authority.
         let x = NodeId 0
             b = NodeId 1
             arrow1 = NodeId 2
@@ -223,22 +243,24 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
             acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
         case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
-            Left (WitnessNormalizationError (EdgeId eid) normErr) -> do
-                eid `shouldBe` 0
-                case normErr of
-                    NotTransitivelyFlexBound (OpRaise _) _ _ -> pure ()
-                    _ -> expectationFailure ("Expected NotTransitivelyFlexBound OpRaise, got: " ++ show normErr)
-            Left other ->
-                expectationFailure ("Expected WitnessNormalizationError, got: " ++ show other)
-            Right _ ->
-                expectationFailure "Expected computePresolution to fail with NotTransitivelyFlexBound"
+            Left err ->
+                expectationFailure ("Expected construction to avoid the invalid Raise, got: " ++ show err)
+            Right result ->
+                case IntMap.lookup 0 (prEdgeWitnesses result) of
+                    Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                    Just witness ->
+                        let InstanceWitness ops = ewWitness witness
+                        in ops `shouldNotSatisfy` elem (OpRaise b)
 
-    it "O15-TR-ROOT-RAISEMERGE R-RAISEMERGE-VALID-13: records RaiseMerge for a live binder when a lower-≺ binder in bs was already eliminated" $ do
+    it "does not resolve ambiguous aliases without frozen Raise authority" $ do
         -- TyExp s · (∀(a ⩾ b) (b ⩾ x). a -> b) ≤ (y -> y)
         --
         -- Base ω execution performs Merge(a, b), eliminating `a` before structural
         -- unification. Later, the aliased class {a,b} escapes to outer `y`.
-        -- Phase 2 must still record RaiseMerge using the live binder `b`.
+        -- Neither binder has a transitive flexible path to the expansion body
+        -- root.  Construction therefore rejects Raise authority before the
+        -- copied aliases become ambiguous; it must not query and guess a
+        -- source identity after the union.
         let x = NodeId 0
             a = NodeId 1
             b = NodeId 2
@@ -289,19 +311,20 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
 
         case runPresolutionM defaultTraceConfig st0 (processInstEdge edge) of
             Left err -> expectationFailure ("processInstEdge failed: " ++ show err)
-            Right (_, st1) -> do
-                ew <- case IntMap.lookup 0 (psEdgeWitnesses st1) of
-                    Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0" >> fail "missing EdgeWitness"
-                    Just ew0 -> pure ew0
-
-                let InstanceWitness ops = ewWitness ew
-
-                -- Base op proved `a` was eliminated before the structural escape.
-                ops `shouldSatisfy` elem (OpMerge a b)
-                -- Regression: RaiseMerge must still be emitted on live binder `b`.
-                ops `shouldSatisfy` elem (OpRaise b)
-                ops `shouldSatisfy` elem (OpMerge b y)
-                ops `shouldNotSatisfy` elem (OpMerge a y)
+            Right (_, st1) ->
+                case IntMap.lookup 0 (psEdgeWitnesses st1) of
+                    Nothing -> expectationFailure "Expected EdgeWitness for EdgeId 0"
+                    Just witness -> do
+                        let InstanceWitness ops = ewWitness witness
+                            isEscapedBinderOp op =
+                                case op of
+                                    OpRaise operated -> operated `elem` [a, b]
+                                    OpMerge operated other ->
+                                        operated `elem` [a, b] && other == y
+                                    OpRaiseMerge operated other ->
+                                        operated `elem` [a, b] && other == y
+                                    _ -> False
+                        ops `shouldNotSatisfy` any isEscapedBinderOp
 
     it "O15-TR-ROOT-WEAKEN R-WEAKEN-VALID-04: does not record Raise for unbounded binder metas (graft+weaken only)" $ do
         -- TyExp s · (∀b. b -> b) ≤ (y -> y)
@@ -465,7 +488,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     , (getNodeId arrow, TyArrow arrow a b)
                     , (getNodeId forallNode, TyForall forallNode arrow)
                     , (getNodeId expNode, TyExp expNode (ExpVarId 0) forallNode)
-                    , (getNodeId intNode, TyBase intNode (BaseTy "Int"))
+                    , (getNodeId intNode, TestTyBase intNode (BaseTy "Int"))
                     , (getNodeId targetArrow, TyArrow targetArrow intNode intNode)
                     ]
 

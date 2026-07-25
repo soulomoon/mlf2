@@ -76,10 +76,10 @@ prettyEmlfType = goType 0
          in (v : rest, body')
       _ -> ([], ty)
 
-prettyEmlfExpr :: Expr 'Surface (SrcTy n v) -> String
+prettyEmlfExpr :: Expr r 'Surface (SrcTy n v) -> String
 prettyEmlfExpr = goExpr 0
   where
-    goExpr :: Int -> Expr 'Surface (SrcTy n v) -> String
+    goExpr :: Int -> Expr r 'Surface (SrcTy n v) -> String
     goExpr p expr = case expr of
       EVarNode ref -> termReferenceName ref
       ELit l -> prettyLit l
@@ -91,6 +91,10 @@ prettyEmlfExpr = goExpr 0
         let v = termReferenceName ref
          in
         paren (p > 0) ("λ(" ++ v ++ " : " ++ prettyEmlfType ty ++ ") " ++ goExpr 0 body)
+      EExactLamNode ref ty body ->
+        let v = termReferenceName ref
+         in
+        paren (p > 0) ("λ(" ++ v ++ " : " ++ prettyEmlfType ty ++ ") " ++ goExpr 0 body)
       EApp f a ->
         paren (p > 1) (goExpr 1 f ++ " " ++ goArg a)
       ELetNode ref rhs body ->
@@ -99,12 +103,15 @@ prettyEmlfExpr = goExpr 0
         paren (p > 0) ("let " ++ v ++ " = " ++ goExpr 0 rhs ++ " in " ++ goExpr 0 body)
       EAnn e ty ->
         "(" ++ goExpr 0 e ++ " : " ++ prettyEmlfType ty ++ ")"
+      EExactAnn e ty _ ->
+        "(" ++ goExpr 0 e ++ " : " ++ prettyEmlfType ty ++ ")"
 
-    goArg :: Expr 'Surface (SrcTy n v) -> String
+    goArg :: Expr r 'Surface (SrcTy n v) -> String
     goArg expr = case expr of
       EVarNode {} -> goExpr 2 expr
       ELit {} -> goExpr 2 expr
       EAnn {} -> goExpr 2 expr
+      EExactAnn {} -> goExpr 2 expr
       _ -> "(" ++ goExpr 0 expr ++ ")"
 
     prettyLit :: Lit -> String

@@ -2,6 +2,7 @@
 module Research.P5ClearBoundarySpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -12,6 +13,7 @@ import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
+    , emptyExpansionConstructionPlacements
     )
 import MLF.Constraint.Presolution.TestSupport
     ( EdgeArtifacts(..)
@@ -34,7 +36,6 @@ import MLF.Elab.Pipeline
     ( applyRedirectsToAnn
     , canonicalizeAnn
     , renderPipelineError
-    , runPipelineElab
     , runPipelineElab
     )
 import MLF.Elab.Run.ResultType
@@ -575,7 +576,12 @@ sameWrapperNestedForallAliasFrameClearBoundaryFallbackType = do
             other ->
                 error
                     ("expected same-wrapper nested-forall alias-frame retained-child app shape, got " ++ show other)
-        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+        inputs =
+            wireSameLaneNestedForallRoot
+                inputs0
+                retainedRoot
+                retainedChild
+                (extractUniqueAnnotationRoot annCanon0)
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
 
 sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType :: IO ElabType
@@ -589,7 +595,12 @@ sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType = do
             other ->
                 error
                     ("expected same-wrapper nested-forall decuple alias retained-child app shape, got " ++ show other)
-        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+        inputs =
+            wireSameLaneNestedForallRoot
+                inputs0
+                retainedRoot
+                retainedChild
+                (extractUniqueAnnotationRoot annCanon0)
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
 
 fallbackType :: SurfaceExpr -> IO ElabType
@@ -603,19 +614,25 @@ fallbackType expr = do
             other ->
                 error
                     ("expected same-wrapper nested-forall retained-child app shape, got " ++ show other)
-        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+        inputs =
+            wireSameLaneNestedForallRoot
+                inputs0
+                retainedRoot
+                retainedChild
+                (extractUniqueAnnotationRoot annCanon0)
     requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
 
 extractInnerLetRhs :: AnnExpr -> AnnExpr
 extractInnerLetRhs ann0 = case ann0 of
-    ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+    ALet _ _ _ _ _ _ _ (ALetScope (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
     _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
 
 extractFirstApp :: AnnExpr -> AnnExpr
 extractFirstApp ann0 = case ann0 of
     AApp {} -> ann0
     AAnn inner _ _ -> extractFirstApp inner
-    ALam _ _ _ _ body _ -> extractFirstApp body
+    ALetScope inner _ _ -> extractFirstApp inner
+    ALam _ _ _ _ body _ _ -> extractFirstApp body
     ALet _ _ _ _ _ _ rhs body _ ->
         case extractFirstAppMaybe rhs of
             Just hit -> hit
@@ -629,7 +646,8 @@ extractFirstAppMaybe :: AnnExpr -> Maybe AnnExpr
 extractFirstAppMaybe ann0 = case ann0 of
     AApp {} -> Just ann0
     AAnn inner _ _ -> extractFirstAppMaybe inner
-    ALam _ _ _ _ body _ -> extractFirstAppMaybe body
+    ALetScope inner _ _ -> extractFirstAppMaybe inner
+    ALam _ _ _ _ body _ _ -> extractFirstAppMaybe body
     ALet _ _ _ _ _ _ rhs body _ ->
         case extractFirstAppMaybe rhs of
             Just hit -> Just hit
@@ -638,17 +656,55 @@ extractFirstAppMaybe ann0 = case ann0 of
 
 extractSelectedBody :: AnnExpr -> AnnExpr
 extractSelectedBody ann0 = case ann0 of
-    ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ _ body _) _ _) _ -> body
+    ALet _ _ _ _ _ _ _ (ALetScope (ALet _ _ _ _ _ _ _ body _) _ _) _ -> body
     _ -> error ("unexpected same-wrapper nested-forall wrapper shape: " ++ show ann0)
 
 extractSelectedBodyApp :: AnnExpr -> AnnExpr
 extractSelectedBodyApp ann0 =
     case extractSelectedBody ann0 of
-        AAnn inner _ _ -> inner
+        ALetScope inner _ _ -> inner
         other -> other
+
+extractUniqueAnnotationRoot :: AnnExpr -> NodeId
+extractUniqueAnnotationRoot ann0 =
+    case annotationRoots ann0 of
+        [annNode] -> annNode
+        other ->
+            error
+                ( "expected one recursive source annotation root, got "
+                    ++ show other
+                )
+  where
+    annotationRoots expr0 = case expr0 of
+        AResolvedVar {} -> []
+        ALit {} -> []
+        ALam _ _ _ _ body _ _ -> annotationRoots body
+        AApp fun arg _ _ _ -> annotationRoots fun ++ annotationRoots arg
+        ALet _ _ _ _ _ _ rhs body _ -> annotationRoots rhs ++ annotationRoots body
+        AAnn inner annNode _ -> annNode : annotationRoots inner
+        ALetScope inner _ _ -> annotationRoots inner
+        AUnfold inner _ _ -> annotationRoots inner
 
 wireSameLaneLocalRoot :: ResultTypeInputs 'Raw -> NodeId -> NodeId -> ResultTypeInputs 'Raw
 wireSameLaneLocalRoot inputs rootNid childNid =
+    wireSameLaneLocalRootWithAnnotation Nothing inputs rootNid childNid
+
+wireSameLaneNestedForallRoot
+    :: ResultTypeInputs 'Raw
+    -> NodeId
+    -> NodeId
+    -> NodeId
+    -> ResultTypeInputs 'Raw
+wireSameLaneNestedForallRoot inputs rootNid childNid annotationRoot =
+    wireSameLaneLocalRootWithAnnotation (Just annotationRoot) inputs rootNid childNid
+
+wireSameLaneLocalRootWithAnnotation
+    :: Maybe NodeId
+    -> ResultTypeInputs 'Raw
+    -> NodeId
+    -> NodeId
+    -> ResultTypeInputs 'Raw
+wireSameLaneLocalRootWithAnnotation mbAnnotationRoot inputs rootNid childNid =
     let setVarBound' nid newBound constraint =
             let tweak node = case node of
                     TyVar{ tnId = varId } | varId == nid ->
@@ -670,16 +726,87 @@ wireSameLaneLocalRoot inputs rootNid childNid =
                         IntMap.insert childKey (parentRef, BindFlex) (cBindParents constraint)
             in constraint { cBindParents = bindParents' }
         view0 = rtcPresolutionView inputs
-        retainedTarget =
-            case pvLookupVarBound view0 childNid of
-                Just boundNid -> boundNid
-                Nothing ->
-                    error ("expected retained child bound for " ++ show childNid)
+        rootC = pvCanonical view0 rootNid
+        childC = pvCanonical view0 childNid
+        firstRecursiveTarget visited nid
+            | IntSet.member (getNodeId nid) visited = Nothing
+            | otherwise =
+                let visited' = IntSet.insert (getNodeId nid) visited
+                in case pvLookupNode view0 nid of
+                    Just TyMu{} -> Just nid
+                    Just TyVar{ tnBound = Just boundNid } -> firstRecursiveTarget visited' boundNid
+                    Just TyForall{ tnBody = bodyNid } -> firstRecursiveTarget visited' bodyNid
+                    Just TyExp{ tnBody = bodyNid } -> firstRecursiveTarget visited' bodyNid
+                    Just TyArrow{ tnDom = domNid, tnCod = codNid } ->
+                        case firstRecursiveTarget visited' domNid of
+                            Just targetNid -> Just targetNid
+                            Nothing -> firstRecursiveTarget visited' codNid
+                    _ -> Nothing
+        occupiedNodeIds =
+            [ getNodeId nodeIdKey
+            | constraint <- [pvConstraint view0, pvCanonicalConstraint view0]
+            , (nodeIdKey, _node) <- toListNode (cNodes constraint)
+            ]
+                ++ IntMap.keys (pvCanonicalMap view0)
+                ++ map getNodeId (IntMap.elems (pvCanonicalMap view0))
+        freshNodeIds count =
+            let start = case occupiedNodeIds of
+                    [] -> 0
+                    nodeIds -> maximum nodeIds + 1
+            in fmap NodeId [start .. start + count - 1]
+        (retainedTarget, targetNodes, freshChildCandidates) =
+            case pvLookupVarBound view0 childC of
+                Just boundNid -> (boundNid, [], freshNodeIds 1)
+                Nothing -> case mbAnnotationRoot of
+                    Just annotationRoot ->
+                        case (firstRecursiveTarget IntSet.empty annotationRoot, freshNodeIds 2) of
+                            (Just recursiveTarget, [nestedTarget, freshChild]) ->
+                                ( nestedTarget
+                                , [TyForall{ tnId = nestedTarget, tnBody = recursiveTarget }]
+                                , [freshChild]
+                                )
+                            (Nothing, _) ->
+                                error
+                                    ( "expected recursive target below annotation root "
+                                        ++ show annotationRoot
+                                    )
+                            (_, other) ->
+                                error
+                                    ( "expected two fresh nested-forall nodes, got "
+                                        ++ show other
+                                    )
+                    Nothing ->
+                        error
+                            ( "expected retained child bound for "
+                                ++ show childC
+                            )
+        (retainedChildC, syntheticNodes) =
+            if childC == rootC
+                then case freshChildCandidates of
+                    [freshChild] ->
+                        ( freshChild
+                        , targetNodes ++ [TyVar{ tnId = freshChild, tnBound = Just retainedTarget }]
+                        )
+                    other ->
+                        error
+                            ( "expected one fresh retained-child node, got "
+                                ++ show other
+                            )
+                else (childC, targetNodes)
+        insertSynthetic constraint =
+            constraint
+                { cNodes =
+                    fromListNode
+                        ( toListNode (cNodes constraint)
+                            ++ [(tnId node, node) | node <- syntheticNodes]
+                        )
+                }
         rewrite =
-            setVarBound' rootNid retainedTarget
-                . setVarBound' childNid retainedTarget
-                . setTypeParent' childNid (Just (typeRef rootNid))
-                . setTypeParent' rootNid Nothing
+            insertSynthetic
+                . setVarBound' rootC retainedTarget
+                . setVarBound' retainedChildC retainedTarget
+                . setTypeParent' retainedChildC (Just (typeRef rootC))
+                . setTypeParent' rootC Nothing
         baseConstraint' = rewrite (pvConstraint view0)
         canonicalConstraint' = rewrite (pvCanonicalConstraint view0)
         view' =
@@ -743,6 +870,8 @@ resultTypeInputsForArtifacts
                 , gaBaseConstraint = c1
                 , gaBaseToSolved = baseToSolved
                 , gaSolvedToBase = solvedToBase
+                , gaRestoredSchemeRootTargets = IntMap.empty
+                , gaExpansionConstructionPlacements = emptyExpansionConstructionPlacements
                 }
         inputs =
             mkResultTypeInputs
@@ -751,6 +880,7 @@ resultTypeInputsForArtifacts
                     { eaEdgeExpansions = edgeExpansions
                     , eaEdgeWitnesses = edgeWitnesses
                     , eaEdgeTraces = edgeTraces
+                    , eaIdentityEdges = prIdentityEdges pres
                     }
                 (Finalize.presolutionViewFromSolved solvedClean)
                 bindParentsGa

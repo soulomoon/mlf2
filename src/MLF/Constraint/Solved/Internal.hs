@@ -107,6 +107,7 @@ data SolvedBackend p
     ebCanonicalWeakenedVars :: WeakenedVars,
     ebCanonicalAnnEdges :: IntSet,
     ebCanonicalLetEdges :: IntSet,
+    ebCanonicalGraftedEdges :: IntSet,
     ebCanonicalGenNodes :: GenNodeMap GenNode,
     ebEquivClasses :: IntMap [NodeId],
     ebOriginalConstraint :: Constraint p
@@ -131,6 +132,8 @@ constraintForSolvedBackend c =
       cWeakenedVars = cWeakenedVars c,
       cAnnEdges = cAnnEdges c,
       cLetEdges = cLetEdges c,
+      cGraftedEdges = cGraftedEdges c,
+      cGraftResultConstructions = cGraftResultConstructions c,
       cGenNodes = cGenNodes c
     }
 
@@ -160,6 +163,7 @@ fromConstraintAndUf c uf =
             ebCanonicalWeakenedVars = cWeakenedVars cRaw,
             ebCanonicalAnnEdges = cAnnEdges cRaw,
             ebCanonicalLetEdges = cLetEdges cRaw,
+            ebCanonicalGraftedEdges = cGraftedEdges cRaw,
             ebCanonicalGenNodes = cGenNodes cRaw,
             ebEquivClasses = equivClasses,
             ebOriginalConstraint = cRaw
@@ -213,6 +217,7 @@ fromPreRewriteStateStrict uf preRewrite = do
           ebCanonicalWeakenedVars = cWeakenedVars canonicalC,
           ebCanonicalAnnEdges = cAnnEdges canonicalC,
           ebCanonicalLetEdges = cLetEdges canonicalC,
+          ebCanonicalGraftedEdges = cGraftedEdges canonicalC,
           ebCanonicalGenNodes = cGenNodes canonicalC,
           ebEquivClasses = equivClasses,
           ebOriginalConstraint = preRewriteRaw
@@ -242,7 +247,9 @@ canonicalConstraintFromBackend
       ebCanonicalWeakenedVars = weakenedVars0,
       ebCanonicalAnnEdges = annEdges,
       ebCanonicalLetEdges = letEdges,
-      ebCanonicalGenNodes = genNodes0
+      ebCanonicalGraftedEdges = graftedEdges,
+      ebCanonicalGenNodes = genNodes0,
+      ebOriginalConstraint = originalConstraint0
     } =
     Constraint
       { cNodes = nodes,
@@ -254,6 +261,9 @@ canonicalConstraintFromBackend
         cWeakenedVars = weakenedVars0,
         cAnnEdges = annEdges,
         cLetEdges = letEdges,
+        cGraftedEdges = graftedEdges,
+        cGraftResultConstructions =
+          cGraftResultConstructions originalConstraint0,
         cGenNodes = genNodes0
       }
 
@@ -269,6 +279,7 @@ setCanonicalConstraint c eb =
       ebCanonicalWeakenedVars = cWeakenedVars c,
       ebCanonicalAnnEdges = cAnnEdges c,
       ebCanonicalLetEdges = cLetEdges c,
+      ebCanonicalGraftedEdges = cGraftedEdges c,
       ebCanonicalGenNodes = cGenNodes c
     }
 

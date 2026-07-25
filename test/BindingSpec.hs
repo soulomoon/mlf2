@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module BindingSpec (spec) where
 
+import IdentityTestSupport
 import Control.Monad (foldM, forM, forM_)
 import Data.List (isInfixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -144,7 +145,7 @@ genOrderKeyDag n
     genLeaf nid =
         elements
             [ TyVar { tnId = nid, tnBound = Nothing }
-            , TyBase { tnId = nid, tnBase = BaseTy "Int" }
+            , TestTyBase nid (BaseTy "Int")
             , TyBottom { tnId = nid }
             ]
 
@@ -270,7 +271,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                                 [ (0, TyForall (NodeId 0) (NodeId 4))
                                 , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
                                 , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
-                                , (3, TyBase (NodeId 3) (BaseTy "Int"))
+                                , (3, TestTyBase (NodeId 3) (BaseTy "Int"))
                                 , (4, TyArrow (NodeId 4) (NodeId 1) (NodeId 5))
                                 , (5, TyArrow (NodeId 5) (NodeId 2) (NodeId 3))
                                 ]
@@ -503,6 +504,38 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
             -- not “under rigid” solely because their own edge is rigid).
             isUnderRigidBinder c (typeRef (NodeId 1)) `shouldBe` Right False
             isUnderRigidBinder c (typeRef (NodeId 2)) `shouldBe` Right True
+
+        it "allows Raise on a nested restricted node" $ do
+            let restricted = NodeId 2
+                c =
+                    rootedConstraint emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (0, TyForall (NodeId 0) (NodeId 1))
+                                , (1, TyForall (NodeId 1) restricted)
+                                , (2, TyVar restricted Nothing)
+                                ]
+                        , cBindParents =
+                            bindParentsFromPairs
+                                [ (NodeId 1, NodeId 0, BindRigid)
+                                , (restricted, NodeId 1, BindRigid)
+                                ]
+                        }
+
+            nodeKind c (typeRef restricted) `shouldBe` Right NodeRestricted
+            case GraphOps.applyRaiseStep (TypeRefTag restricted) c of
+                Left err -> expectationFailure ("restricted Raise failed: " ++ show err)
+                Right (c', op) -> do
+                    op `shouldBe` Just (OpRaise restricted)
+                    lookupBindParent c' (typeRef restricted)
+                        `shouldBe` Just (typeRef (NodeId 0), BindRigid)
+
+            case BindingAdjustment.raiseToParentWithCount (TypeRefTag restricted) (genRef (GenNodeId 0)) c of
+                Left err -> expectationFailure ("restricted Raise-to-parent failed: " ++ show err)
+                Right (c', trace) -> do
+                    trace `shouldBe` [restricted, restricted]
+                    lookupBindParent c' (typeRef restricted)
+                        `shouldBe` Just (genRef (GenNodeId 0), BindRigid)
 
     describe "Interior computation" $ do
         it "interiorOf returns all nodes bound to root" $ do
@@ -739,7 +772,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                     emptyConstraint
                         { cNodes =
                             nodeMapFromList
-                                [ (getNodeId ioRoot, TyCon ioRoot (BaseTy "IO") (arg :| []))
+                                [ (getNodeId ioRoot, TestTyCon ioRoot (BaseTy "IO") (arg :| []))
                                 , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
                                 ]
                         , cBindParents =
@@ -772,7 +805,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                                 [ (getNodeId outerRoot, TyArrow outerRoot outerVar innerRoot)
                                 , (getNodeId innerRoot, TyArrow innerRoot outerVar unitTy)
                                 , (getNodeId outerVar, TyVar { tnId = outerVar, tnBound = Nothing })
-                                , (getNodeId unitTy, TyBase unitTy (BaseTy "Unit"))
+                                , (getNodeId unitTy, TestTyBase unitTy (BaseTy "Unit"))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -807,7 +840,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                                 [ (getNodeId root, TyArrow root alias result)
                                 , (getNodeId alias, TyVar { tnId = alias, tnBound = Just bound })
                                 , (getNodeId bound, TyVar { tnId = bound, tnBound = Nothing })
-                                , (getNodeId result, TyBase result (BaseTy "Unit"))
+                                , (getNodeId result, TestTyBase result (BaseTy "Unit"))
                                 ]
                         , cBindParents =
                             IntMap.fromList
@@ -1156,6 +1189,47 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                         ]
             canonicalizeBindParentsUnder canonical c `shouldBe` Right expected
             checkBindingTreeUnder canonical c `shouldBe` Right ()
+
+        it "retains every raw alias assignment in the quotient context" $ do
+            let child = NodeId 0
+                alias = NodeId 1
+                owner0 = GenNodeId 0
+                owner1 = GenNodeId 1
+                c =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (0, TyVar child Nothing)
+                                , (1, TyVar alias Nothing)
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef child), (genRef owner0, BindFlex))
+                                , (nodeRefKey (typeRef alias), (genRef owner1, BindRigid))
+                                , (nodeRefKey (genRef owner1), (genRef owner0, BindFlex))
+                                ]
+                        , cGenNodes =
+                            GenNodeMap $
+                                IntMap.fromList
+                                    [ (getGenNodeId owner0, GenNode owner0 [child])
+                                    , (getGenNodeId owner1, GenNode owner1 [alias])
+                                    ]
+                        }
+                canonical nid
+                    | nid == alias = child
+                    | otherwise = nid
+
+            case quotientBindParentsContextUnder canonical c of
+                Left err -> expectationFailure ("quotient construction failed: " ++ show err)
+                Right quotient ->
+                    IntMap.findWithDefault
+                        []
+                        (nodeRefKey (typeRef child))
+                        (qbpRawParentAssignments quotient)
+                        `shouldMatchList`
+                            [ (genRef owner0, BindFlex)
+                            , (genRef owner1, BindRigid)
+                            ]
 
         -- **Feature: paper_general_raise_plan, Property: validation detects all parent-child mismatches**
         -- **Validates: Requirements 2.1, 7.1**

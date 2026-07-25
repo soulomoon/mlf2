@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -16,19 +17,25 @@ module MLF.Constraint.Presolution.EdgeUnify.State (
     clearEdgeUnifyStructureCache,
     emptyEdgeUnifyStats,
     initEdgeUnifyState,
+    initEdgeUnifyStateWithCopyMap,
     initEdgeUnifyStateWithStats,
     mkOmegaExecEnv,
     applyPendingWeaken,
     deleteInteriorKey,
     insertInteriorKey,
     isEliminated,
+    isScheduledUnboundedBinderMetaRoot,
     mergeBinderMetaRoots,
     nullInteriorNodes,
     preferBinderMetaRoot,
     recordEliminate,
     recordEdgeUnifyStat,
     recordEdgeUnifyStatN,
+    recordCurrentInteriorRaises,
     recordRaisesFromTrace,
+    sourceWitnessNode,
+    sourceWitnessNodeFor,
+    sourceWitnessNodeIgnoringAmbiguity,
     structurePairSeenOrInsert,
     unifyWithLockedFallback
 ) where
@@ -39,7 +46,7 @@ import Control.Monad.State
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Word (Word64)
 
 import qualified MLF.Binding.Tree as Binding
@@ -47,6 +54,8 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Base (
     CopyMap,
+    EdgeSourceInterior(..),
+    EdgeTrace(..),
     InteriorNodes(..),
     InteriorSet,
     PendingWeakenOwner(..),
@@ -56,19 +65,26 @@ import MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
-    mergeUnionFindState,
-    setBindParentState
+    psEdgeTraces,
+    psEdgeWitnesses,
+    WeakenReplayCertificate,
+    certifyAppliedNonRootWeakenReplay,
+    certifyEliminatedNonRootWeakenReplay,
+    getCopyMapping,
+    setBindParentState,
+    weakenReplayCertificateSource
     )
 import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Presolution.Ops as Ops
 import qualified MLF.Constraint.Presolution.Unify as PresolutionUnify
 import MLF.Constraint.Presolution.StateAccess (
     PresolutionBindingSnapshot(..),
-    bindingSnapshotLookupBindParent,
+    bindingSnapshotNodeKind,
     bindingSnapshotPathToRoot,
     getBindingSnapshot,
     getConstraintAndCanonical,
     )
+import MLF.Constraint.Presolution.Witness (EdgeWitnessOp(..), edgeWitnessInstanceOp)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import qualified MLF.Util.Order as Order
@@ -125,14 +141,26 @@ data EdgeUnifyState = EdgeUnifyState
     { eusInteriorRoots :: InteriorNodes
     , eusBindersByRoot :: IntMap IntSet.IntSet
     , eusInteriorByRoot :: IntMap InteriorNodes
+    , eusSourceInterior :: EdgeSourceInterior
+    , eusLockedSourceNodes :: IntSet.IntSet
+    , eusSourceRaiseAuthorityNodes :: IntSet.IntSet
+    , eusSourceEdgeRoot :: NodeId
     , eusEdgeRoot :: NodeId
+    , eusTerminalRootTransition :: Bool
+    , eusRootRaiseMergeRecorded :: Bool
+    , eusTerminalTransitionSources :: IntSet.IntSet
     , eusInheritedPendingWeakens :: IntSet.IntSet
     , eusEliminatedBinders :: IntSet.IntSet
     , eusBinderMeta :: IntMap NodeId
+    , eusOriginallyBoundBinders :: IntSet.IntSet
+    , eusScheduledWeakenMetas :: IntSet.IntSet
     , eusBinderMetaRoots :: IntSet.IntSet
     , eusOrderKeys :: Maybe (IntMap Order.OrderKey)
     , eusPendingWeakenOwner :: PendingWeakenOwner
-    , eusOps :: [InstanceOp]
+    , eusOps :: [EdgeWitnessOp]
+    , eusCopyMap :: CopyMap
+    , eusCopySourcesByRawDestination :: IntMap IntSet.IntSet
+    , eusSourceNodeKeys :: IntSet.IntSet
     , eusRootCache :: IntMap NodeId
     , eusStructurePairs :: IntMap IntSet.IntSet
     , eusCollectStats :: !Bool
@@ -142,6 +170,85 @@ data EdgeUnifyState = EdgeUnifyState
     }
 
 type EdgeUnifyM p = StateT EdgeUnifyState (PresolutionM p)
+
+-- | Recover the unique frozen construction source for a live node class.
+-- Exact copy provenance is authoritative; live source aliases are considered
+-- only when no copied source reaches the class.
+sourceWitnessNode :: NodeId -> EdgeUnifyM p (Maybe NodeId)
+sourceWitnessNode = sourceWitnessNodeFor "external query"
+
+sourceWitnessNodeFor :: String -> NodeId -> EdgeUnifyM p (Maybe NodeId)
+sourceWitnessNodeFor owner = sourceWitnessNodeWithAmbiguity owner False
+
+sourceWitnessNodeIgnoringAmbiguity
+    :: String
+    -> NodeId
+    -> EdgeUnifyM p (Maybe NodeId)
+sourceWitnessNodeIgnoringAmbiguity owner =
+    sourceWitnessNodeWithAmbiguity owner True
+
+sourceWitnessNodeWithAmbiguity
+    :: String
+    -> Bool
+    -> NodeId
+    -> EdgeUnifyM p (Maybe NodeId)
+sourceWitnessNodeWithAmbiguity owner ignoreAmbiguity node = do
+    nodeRoot <- findRootM node
+    rawSources <- gets eusCopySourcesByRawDestination
+    sourceNodeKeys <- gets eusSourceNodeKeys
+    copyCandidates <-
+        foldM
+            (collectCopySources nodeRoot)
+            IntSet.empty
+            (IntMap.toList rawSources)
+    case uniqueSource "copy" nodeRoot copyCandidates of
+        Left _ | ignoreAmbiguity -> pure Nothing
+        Left err -> throwPresolutionErrorM err
+        Right (Just source) -> pure (Just source)
+        Right Nothing ->
+            if IntSet.member (getNodeId node) sourceNodeKeys
+                then pure (Just node)
+                else do
+                    aliasCandidates <-
+                        foldM
+                            (collectSourceAliases nodeRoot)
+                            IntSet.empty
+                            (IntSet.toList sourceNodeKeys)
+                    case uniqueSource "source-class" nodeRoot aliasCandidates of
+                        Left _ | ignoreAmbiguity -> pure Nothing
+                        Left err -> throwPresolutionErrorM err
+                        Right source -> pure source
+  where
+    collectCopySources nodeRoot candidates (rawDestinationKey, rawSourceKeys) = do
+        destinationRoot <- findRootM (NodeId rawDestinationKey)
+        if destinationRoot /= nodeRoot
+            then pure candidates
+            else pure (IntSet.union candidates rawSourceKeys)
+
+    collectSourceAliases nodeRoot candidates rawSourceKey = do
+        sourceRoot <- findRootM (NodeId rawSourceKey)
+        pure $
+            if sourceRoot /= nodeRoot
+                then candidates
+                else IntSet.insert rawSourceKey candidates
+
+    uniqueSource label nodeRoot candidates =
+        case map NodeId (IntSet.toList candidates) of
+            [] -> Right Nothing
+            [source] -> Right (Just source)
+            sourceCandidates ->
+                Left
+                    ( InternalError
+                        ( "ambiguous construction-time "
+                            ++ label
+                            ++ " source for "
+                            ++ show nodeRoot
+                            ++ ": "
+                            ++ show sourceCandidates
+                            ++ " while resolving "
+                            ++ owner
+                        )
+                    )
 
 insertInteriorKey :: Int -> InteriorNodes -> InteriorNodes
 insertInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.insert k s)
@@ -217,7 +324,7 @@ class MonadPresolution m => MonadEdgeUnify m where
     getEdgeRoot :: m NodeId
     getBinderMeta :: m (IntMap NodeId)
     getOrderKeys :: m (Maybe (IntMap Order.OrderKey))
-    recordInstanceOp :: InstanceOp -> m ()
+    recordInstanceOp :: EdgeWitnessOp -> m ()
     liftPresolution :: PresolutionM (PresolutionPhaseOf m) a -> m a
     findRootM :: NodeId -> m NodeId
     unifyAcyclicRawWithRaiseTracePreferM :: Maybe NodeId -> NodeId -> NodeId -> m [NodeId]
@@ -277,7 +384,9 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
         case mb of
             Nothing -> do
                 nidRoot <- findRootM nid
-                lift $ Ops.setCanonicalVarBound nidRoot Nothing
+                raiseTrace <-
+                    lift $ Ops.setCanonicalVarBoundForEdgeWithRaiseTrace nidRoot Nothing
+                recordCurrentInteriorRaises raiseTrace
                 clearEdgeUnifyStructureCache
             Just bnd -> do
                 nidRoot <- findRootM nid
@@ -285,9 +394,17 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
                 if nidRoot == bndRoot
                     then pure ()
                     else do
-                        lift $ Ops.setCanonicalVarBound nidRoot (Just bndRoot)
+                        raiseTrace <-
+                            lift $
+                                Ops.setCanonicalVarBoundForEdgeWithRaiseTrace
+                                    nidRoot
+                                    (Just bndRoot)
+                        recordCurrentInteriorRaises raiseTrace
                         clearEdgeUnifyStructureCache
     dropVarBindM nid = do
+        -- Elimination is keyed by the copied binder's own identity, not its
+        -- current UF representative.  `Ops.dropVarBind` records that exact
+        -- identity, so an aliased exterior representative remains live.
         lift $ Ops.dropVarBind nid
         clearEdgeUnifyStructureCache
     throwPresolutionErrorM err = lift $ throwError err
@@ -317,11 +434,17 @@ mkOmegaExecEnv copyMap =
         , OmegaExec.omegaSetVarBound = \meta mb -> setVarBoundM meta mb
         , OmegaExec.omegaDropVarBind = \meta -> dropVarBindM meta
         , OmegaExec.omegaUnifyNoMerge = unifyAcyclicEdgeNoMerge
-        , OmegaExec.omegaRecordEliminate = recordEliminate
+        , OmegaExec.omegaRecordEliminate = markEliminated
         , OmegaExec.omegaIsEliminated = isEliminated
         , OmegaExec.omegaEliminatedBinders = do
             elims <- gets eusEliminatedBinders
             pure (map NodeId (IntSet.toList elims))
+        , OmegaExec.omegaRegisterWeakenMeta = \meta ->
+            modify' $ \st ->
+                st
+                    { eusScheduledWeakenMetas =
+                        IntSet.insert (getNodeId meta) (eusScheduledWeakenMetas st)
+                    }
         , OmegaExec.omegaWeakenMeta = \meta -> queuePendingWeakenM meta
         }
   where
@@ -348,14 +471,140 @@ queuePendingWeakenWithOwner owner nid =
 
 applyPendingWeaken :: NodeId -> PresolutionM p ()
 applyPendingWeaken nid0 = do
-    retriable <- applyAtTarget nid0
-    when retriable $ do
-        (_c0, canonical) <- getConstraintAndCanonical
-        let nidCanon = canonical nid0
-        when (nidCanon /= nid0) $ do
-            _ <- applyAtTarget nidCanon
-            pure ()
+    (c0, canonical) <- getConstraintAndCanonical
+    stBeforeDecision <- get
+    -- The edge witness eliminates an aliased source binder.  Physical
+    -- weakening is needed only while its copied meta remains its own class;
+    -- weakening the live exterior representative would destroy polymorphism.
+    if canonical nid0 == nid0
+        then do
+            changed <- applyAtTarget nid0
+            when changed $ do
+                c1 <- getConstraint
+                let certificates =
+                        mapMaybe
+                            (certifyAppliedCandidate c0 c1 canonical)
+                            (weakenCandidates stBeforeDecision nid0)
+                recordCertificates certificates
+        else do
+            let certificates =
+                    mapMaybe
+                        (certifyEliminatedCandidate c0 canonical)
+                        (weakenCandidates stBeforeDecision nid0)
+            recordCertificates certificates
   where
+    weakenCandidates
+        :: PresolutionState p
+        -> NodeId
+        -> [(Int, NodeId, NodeId, Bool, Bool)]
+    weakenCandidates st target =
+        [ ( edgeKey
+          , source
+          , etResultRoot trace
+          , mergedBeforeWeaken
+          , graftedBeforeWeaken
+          )
+        | (edgeKey, trace) <- IntMap.toList (psEdgeTraces st)
+        , Just witness <- [IntMap.lookup edgeKey (psEdgeWitnesses st)]
+        , (source, mergedBeforeWeaken, graftedBeforeWeaken) <-
+            weakenSources (getInstanceOps (ewWitness witness))
+        , Just copied <- [lookupCopy source (etCopyMap trace)]
+        , copied == target
+        ]
+
+    weakenSources :: [InstanceOp] -> [(NodeId, Bool, Bool)]
+    weakenSources = go IntSet.empty IntSet.empty
+      where
+        go _ _ [] = []
+        go merged grafted (op : rest) =
+            case op of
+                OpGraft _ target ->
+                    go
+                        merged
+                        (IntSet.insert (getNodeId target) grafted)
+                        rest
+                OpMerge operated _ ->
+                    go
+                        (IntSet.insert (getNodeId operated) merged)
+                        grafted
+                        rest
+                OpWeaken source ->
+                    ( source
+                    , IntSet.member (getNodeId source) merged
+                    , IntSet.member (getNodeId source) grafted
+                    ) : go merged grafted rest
+                _ -> go merged grafted rest
+
+    certifyAppliedCandidate
+        :: Constraint p
+        -> Constraint p
+        -> (NodeId -> NodeId)
+        -> (Int, NodeId, NodeId, Bool, Bool)
+        -> Maybe (Int, WeakenReplayCertificate)
+    certifyAppliedCandidate before after canonical (edgeKey, source, root, _merged, grafted)
+        | grafted = Nothing
+        | otherwise =
+            fmap
+                (\certificate -> (edgeKey, certificate))
+                ( certifyAppliedNonRootWeakenReplay
+                    before
+                    after
+                    canonical
+                    source
+                    nid0
+                    root
+                )
+
+    certifyEliminatedCandidate
+        :: Constraint p
+        -> (NodeId -> NodeId)
+        -> (Int, NodeId, NodeId, Bool, Bool)
+        -> Maybe (Int, WeakenReplayCertificate)
+    certifyEliminatedCandidate constraint canonical (edgeKey, source, root, merged, grafted)
+        | not merged || grafted = Nothing
+        | otherwise =
+            fmap
+                (\certificate -> (edgeKey, certificate))
+                ( certifyEliminatedNonRootWeakenReplay
+                    constraint
+                    constraint
+                    canonical
+                    source
+                    nid0
+                    root
+                )
+
+    recordCertificates :: [(Int, WeakenReplayCertificate)] -> PresolutionM p ()
+    recordCertificates certificates = do
+        existing <- gets psWeakenReplayCertificates
+        updated <- foldM insertCertificate existing certificates
+        modify' $ \st -> st {psWeakenReplayCertificates = updated}
+
+    insertCertificate
+        :: IntMap (IntMap WeakenReplayCertificate)
+        -> (Int, WeakenReplayCertificate)
+        -> PresolutionM p (IntMap (IntMap WeakenReplayCertificate))
+    insertCertificate allCertificates (edgeKey, certificate) =
+        let sourceKey = getNodeId (weakenReplayCertificateSource certificate)
+            edgeCertificates =
+                IntMap.findWithDefault IntMap.empty edgeKey allCertificates
+        in case IntMap.lookup sourceKey edgeCertificates of
+            Nothing ->
+                pure $
+                    IntMap.insert
+                        edgeKey
+                        (IntMap.insert sourceKey certificate edgeCertificates)
+                        allCertificates
+            Just previous
+                | previous == certificate -> pure allCertificates
+                | otherwise ->
+                    throwError $
+                        InternalError $
+                            "conflicting construction-time Weaken replay certificates for edge "
+                                ++ show (EdgeId edgeKey)
+                                ++ ", source "
+                                ++ show (NodeId sourceKey)
+
     applyAtTarget :: NodeId -> PresolutionM p Bool
     applyAtTarget target = do
         c0 <- getConstraint
@@ -379,7 +628,7 @@ applyPendingWeaken nid0 = do
                                         (cWeakenedVars c1)
                                 }
                         }
-                pure False
+                pure True
 
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
 -- witness ops. This is used to *execute* base `Merge` operations (already
@@ -439,6 +688,23 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                 , eusBinderMetaRoots = metaRoots'
                 }
 
+transitivelyFlexBoundTo :: Constraint p -> NodeId -> NodeId -> Bool
+transitivelyFlexBoundTo constraint sourceRoot = go IntSet.empty
+  where
+    go visited source
+        | source == sourceRoot = True
+        | IntSet.member (getNodeId source) visited = False
+        | otherwise =
+            case Binding.lookupBindParent constraint (typeRef source) of
+                Just (TypeRef parent, BindFlex) ->
+                    go (IntSet.insert (getNodeId source) visited) parent
+                _ -> False
+
+hasStandaloneRaiseAuthority :: Constraint p -> NodeId -> NodeId -> Bool
+hasStandaloneRaiseAuthority constraint sourceRoot source =
+    source /= sourceRoot
+        && transitivelyFlexBoundTo constraint sourceRoot source
+
 initEdgeUnifyState
     :: [(NodeId, NodeId)]
     -> InteriorSet
@@ -446,7 +712,30 @@ initEdgeUnifyState
     -> PendingWeakenOwner
     -> PresolutionM p EdgeUnifyState
 initEdgeUnifyState =
-    initEdgeUnifyStateWithStats False
+    initEdgeUnifyStateWithStatsAndCopyMap
+        False
+        mempty
+        IntSet.empty
+        Nothing
+
+initEdgeUnifyStateWithCopyMap
+    :: CopyMap
+    -> IntSet.IntSet
+    -> NodeId
+    -> EdgeSourceInterior
+    -> IntSet.IntSet
+    -> IntSet.IntSet
+    -> [(NodeId, NodeId)]
+    -> InteriorSet
+    -> NodeId
+    -> PendingWeakenOwner
+    -> PresolutionM p EdgeUnifyState
+initEdgeUnifyStateWithCopyMap copyMap sourceNodeKeys sourceRoot sourceInterior lockedSourceNodes sourceRaiseAuthorityNodes =
+    initEdgeUnifyStateWithStatsAndCopyMap
+        False
+        copyMap
+        sourceNodeKeys
+        (Just (sourceRoot, sourceInterior, lockedSourceNodes, sourceRaiseAuthorityNodes))
 
 initEdgeUnifyStateWithStats
     :: Bool
@@ -456,6 +745,27 @@ initEdgeUnifyStateWithStats
     -> PendingWeakenOwner
     -> PresolutionM p EdgeUnifyState
 initEdgeUnifyStateWithStats collectStats binderArgs interior edgeRoot pendingOwner = do
+    initEdgeUnifyStateWithStatsAndCopyMap
+        collectStats
+        mempty
+        IntSet.empty
+        Nothing
+        binderArgs
+        interior
+        edgeRoot
+        pendingOwner
+
+initEdgeUnifyStateWithStatsAndCopyMap
+    :: Bool
+    -> CopyMap
+    -> IntSet.IntSet
+    -> Maybe (NodeId, EdgeSourceInterior, IntSet.IntSet, IntSet.IntSet)
+    -> [(NodeId, NodeId)]
+    -> InteriorSet
+    -> NodeId
+    -> PendingWeakenOwner
+    -> PresolutionM p EdgeUnifyState
+initEdgeUnifyStateWithStatsAndCopyMap collectStats copyMap sourceNodeKeys mbSourceDomain binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
     uf <- gets psUnionFind
     let interiorRootEntries = [(i, UnionFind.frWith uf (NodeId i)) | i <- IntSet.toList interior]
@@ -477,6 +787,47 @@ initEdgeUnifyStateWithStats collectStats binderArgs interior edgeRoot pendingOwn
                 | (i, r) <- interiorRootEntries
                 ]
     constraint <- getConstraint
+    let effectiveSourceNodeKeys =
+            if IntSet.null sourceNodeKeys
+                then
+                    IntSet.fromList
+                        [ getNodeId (tnId node)
+                        | node <- NodeAccess.allNodes constraint
+                        ]
+                else sourceNodeKeys
+    let originallyBoundBinders =
+            IntSet.fromList
+                [ getNodeId binder
+                | (binder, _meta) <- binderArgs
+                , Just TyVar{tnBound = Just _} <- [NodeAccess.lookupNode constraint binder]
+                ]
+    let frozenSourceInterior =
+            case mbSourceDomain of
+                Just (_sourceRoot, sourceInterior, _lockedSourceNodes, _sourceRaiseAuthorityNodes) -> sourceInterior
+                Nothing -> EdgeSourceInterior (InteriorNodes interior)
+        EdgeSourceInterior (InteriorNodes frozenSourceKeys) =
+            frozenSourceInterior
+        lockedSourceNodes =
+            case mbSourceDomain of
+                Just (_sourceRoot, _sourceInterior, lockedNodes, _sourceRaiseAuthorityNodes) -> lockedNodes
+                Nothing ->
+                    IntSet.filter
+                        ( \sourceKey ->
+                            Binding.nodeKind constraint (typeRef (NodeId sourceKey))
+                                == Right Binding.NodeLocked
+                        )
+                        frozenSourceKeys
+        sourceRootForAuthority =
+            case mbSourceDomain of
+                Just (sourceRoot, _sourceInterior, _lockedSourceNodes, _sourceRaiseAuthorityNodes) -> sourceRoot
+                Nothing -> edgeRoot
+        sourceRaiseAuthorityNodes =
+            case mbSourceDomain of
+                Just (_sourceRoot, _sourceInterior, _lockedSourceNodes, authorityNodes) -> authorityNodes
+                Nothing ->
+                    IntSet.filter
+                        (hasStandaloneRaiseAuthority constraint sourceRootForAuthority . NodeId)
+                        frozenSourceKeys
     let interiorRootRef =
             case Binding.lookupBindParent constraint (typeRef edgeRoot) of
                 Just (parent, _) -> parent
@@ -505,14 +856,36 @@ initEdgeUnifyStateWithStats collectStats binderArgs interior edgeRoot pendingOwn
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot
         , eusInteriorByRoot = interiorByRoot
+        , eusSourceInterior = frozenSourceInterior
+        , eusLockedSourceNodes = lockedSourceNodes
+        , eusSourceRaiseAuthorityNodes = sourceRaiseAuthorityNodes
+        , eusSourceEdgeRoot =
+            case mbSourceDomain of
+                Just (sourceRoot, _sourceInterior, _lockedSourceNodes, _sourceRaiseAuthorityNodes) -> sourceRoot
+                Nothing -> edgeRoot
         , eusEdgeRoot = edgeRoot
+        , eusTerminalRootTransition = False
+        , eusRootRaiseMergeRecorded = False
+        , eusTerminalTransitionSources = IntSet.empty
         , eusInheritedPendingWeakens = inheritedPendingWeakens
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
+        , eusOriginallyBoundBinders = originallyBoundBinders
+        , eusScheduledWeakenMetas = IntSet.empty
         , eusBinderMetaRoots = binderMetaRoots
         , eusOrderKeys = keys
         , eusPendingWeakenOwner = pendingOwner
         , eusOps = []
+        , eusCopyMap = copyMap
+        , eusCopySourcesByRawDestination =
+            IntMap.fromListWith
+                IntSet.union
+                [ ( getNodeId destination
+                  , IntSet.singleton sourceKey
+                  )
+                | (sourceKey, destination) <- IntMap.toList (getCopyMapping copyMap)
+                ]
+        , eusSourceNodeKeys = effectiveSourceNodeKeys
         , eusRootCache = IntMap.empty
         , eusStructurePairs = IntMap.empty
         , eusCollectStats = collectStats
@@ -553,48 +926,23 @@ unifyWithLockedFallback prefer left right = do
     clearEdgeUnifyRootCache
     pure raiseTrace
   where
-    forceUnionWithoutRaise :: EdgeUnifyM p [NodeId]
-    forceUnionWithoutRaise = do
-        clearEdgeUnifyRootCache
-        rootLeft <- findRootM left
-        rootRight <- findRootM right
-        when (rootLeft /= rootRight) $ do
-            let (fromRoot, toRoot) =
-                    case prefer of
-                        Just p
-                            | p == rootLeft -> (rootRight, rootLeft)
-                            | p == rootRight -> (rootLeft, rootRight)
-                        _ -> (rootLeft, rootRight)
-            liftPresolution $
-                modify' (mergeUnionFindState fromRoot toRoot)
-            clearEdgeUnifyRootCache
-        pure []
-
-    retryAfterFlush :: EdgeUnifyM p [NodeId]
-    retryAfterFlush = do
+    retryAfterFlush lockedErr = do
         recovered <- flushInheritedPendingWeakensOnce
         if recovered
             then
                 clearEdgeUnifyRootCache >>
                 unifyAcyclicRawWithRaiseTracePreferM prefer left right
-                    `catchError` \retryErr ->
-                        case retryErr of
-                            BindingTreeError OperationOnLockedNode{} ->
-                                clearEdgeUnifyRootCache >> forceUnionWithoutRaise
-                            _ -> throwPresolutionErrorM retryErr
-            else forceUnionWithoutRaise
+            else throwPresolutionErrorM lockedErr
 
-    trySwap :: EdgeUnifyM p [NodeId]
     trySwap =
         clearEdgeUnifyRootCache >>
         unifyAcyclicRawWithRaiseTracePreferM prefer right left
             `catchError` \swapErr ->
                 case swapErr of
                     BindingTreeError OperationOnLockedNode{} ->
-                        clearEdgeUnifyRootCache >> retryAfterFlush
+                        clearEdgeUnifyRootCache >> retryAfterFlush swapErr
                     _ -> throwPresolutionErrorM swapErr
 
-    handleLocked :: PresolutionError -> EdgeUnifyM p [NodeId]
     handleLocked err =
         case err of
             BindingTreeError OperationOnLockedNode{} ->
@@ -603,12 +951,48 @@ unifyWithLockedFallback prefer left right = do
 
 recordEliminate :: NodeId -> EdgeUnifyM p ()
 recordEliminate bv = do
-    dropVarBindM bv
+    binderMeta <- requireBinderMeta bv
+    dropVarBindM binderMeta
+    markEliminated bv
+
+markEliminated :: NodeId -> EdgeUnifyM p ()
+markEliminated bv =
     modify' $ \st ->
         st { eusEliminatedBinders = IntSet.insert (getNodeId bv) (eusEliminatedBinders st) }
 
+requireBinderMeta :: NodeId -> EdgeUnifyM p NodeId
+requireBinderMeta binder = do
+    binderMeta <- gets eusBinderMeta
+    case IntMap.lookup (getNodeId binder) binderMeta of
+        Just meta -> pure meta
+        Nothing ->
+            throwPresolutionErrorM
+                (InternalError ("requireBinderMeta: missing copy for binder " ++ show binder))
+
 isEliminated :: NodeId -> EdgeUnifyM p Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
+
+-- | Whether this UF root belongs to an originally-unbounded copied binder
+-- whose witness schedules @Weaken@.
+--
+-- Such a binder already carries its instantiation argument as a grafted lower
+-- bound.  Its relation to an exterior variable must therefore be preserved as
+-- a bound relation, not collapsed into UF equality.
+isScheduledUnboundedBinderMetaRoot :: NodeId -> EdgeUnifyM p Bool
+isScheduledUnboundedBinderMetaRoot root = do
+    st <- get
+    matches <-
+        mapM
+            ( \(binderKey, meta) -> do
+                metaRoot <- findRootM meta
+                pure
+                    ( metaRoot == root
+                        && IntSet.notMember binderKey (eusOriginallyBoundBinders st)
+                        && IntSet.member (getNodeId meta) (eusScheduledWeakenMetas st)
+                    )
+            )
+            (IntMap.toList (eusBinderMeta st))
+    pure (or matches)
 
 recordRaisesFromTrace :: InteriorNodes -> [NodeId] -> EdgeUnifyM p ()
 recordRaisesFromTrace interiorNodes raiseTrace = do
@@ -625,10 +1009,64 @@ recordRaisesFromTrace interiorNodes raiseTrace = do
             raiseTrace
     when (not (null candidates)) $ do
         snapshot <- lift getBindingSnapshot
+        sourceInterior <- gets (getEdgeSourceInterior . eusSourceInterior)
+        -- Suppress an operation already constructed by an earlier authority,
+        -- but preserve multiplicity inside this raise trace: each repeated
+        -- node denotes one paper Raise step.
+        preexistingOperatedSources <-
+            gets $
+                IntSet.fromList
+                    . mapMaybe (operatedSource . edgeWitnessInstanceOp)
+                    . eusOps
         forM_ (reverse candidates) $ \nid -> do
             isLocked <- lift $ checkNodeLockedInSnapshot snapshot nid
-            when (not isLocked) $
-                recordInstanceOp (OpRaise nid)
+            when (not isLocked) $ do
+                mbSource <-
+                    sourceWitnessNodeIgnoringAmbiguity
+                        "binding-parent Raise trace"
+                        nid
+                forM_ mbSource $ \source ->
+                    when (memberInterior source sourceInterior) $ do
+                        sourceLocked <-
+                            gets
+                                ( IntSet.member (getNodeId source)
+                                    . eusLockedSourceNodes
+                                )
+                        sourceHasRaiseAuthority <-
+                            gets
+                                ( IntSet.member (getNodeId source)
+                                    . eusSourceRaiseAuthorityNodes
+                                )
+                        let alreadyConstructed =
+                                IntSet.member
+                                    (getNodeId source)
+                                    preexistingOperatedSources
+                        when
+                            ( not sourceLocked
+                                && sourceHasRaiseAuthority
+                                && not alreadyConstructed
+                            ) $
+                            recordInstanceOp (SourceEdgeWitnessOp (OpRaise source))
+  where
+    operatedSource op =
+        case op of
+            OpRaise operated -> Just (getNodeId operated)
+            OpRaiseMerge operated _ -> Just (getNodeId operated)
+            OpMerge operated _ -> Just (getNodeId operated)
+            _ -> Nothing
+
+-- | Record construction-time bound-frontier Raises against the complete
+-- edge-local interior.  Unlike a UF merge, a bound update has no pair of root
+-- buckets whose interiors can be selected more narrowly.
+recordCurrentInteriorRaises :: [NodeId] -> EdgeUnifyM p ()
+recordCurrentInteriorRaises raiseTrace = do
+    interiorByRoot <- gets eusInteriorByRoot
+    let interior = mconcat (IntMap.elems interiorByRoot)
+        outside = filter (not . (`memberInterior` interior)) raiseTrace
+    when (not (null outside)) $ do
+        edgeRoot <- gets eusEdgeRoot
+        throwPresolutionErrorM (EdgeBoundRaiseOutsideInterior edgeRoot outside)
+    recordRaisesFromTrace interior raiseTrace
 
 preferBinderMetaRoot :: NodeId -> NodeId -> EdgeUnifyM p (Maybe NodeId)
 preferBinderMetaRoot root1 root2 = do
@@ -642,29 +1080,9 @@ preferBinderMetaRoot root1 root2 = do
         _ -> Nothing
 
 checkNodeLockedInSnapshot :: PresolutionBindingSnapshot p -> NodeId -> PresolutionM p Bool
-checkNodeLockedInSnapshot snapshot nid =
-    goSelf IntSet.empty (typeRef nid)
-  where
-    goSelf visited ref
-        | IntSet.member (nodeRefKey ref) visited = pure False
-        | otherwise = do
-            mbSelf <- bindingSnapshotLookupBindParent snapshot ref
-            case mbSelf of
-                Nothing -> pure False
-                Just (TypeRef parent, _flag) ->
-                    goStrict (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
-                Just (GenRef _, _flag) -> pure False
-
-    goStrict visited ref
-        | IntSet.member (nodeRefKey ref) visited = pure False
-        | otherwise = do
-            mbParent <- bindingSnapshotLookupBindParent snapshot ref
-            case mbParent of
-                Nothing -> pure False
-                Just (_, BindRigid) -> pure True
-                Just (TypeRef parent, BindFlex) ->
-                    goStrict (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
-                Just (GenRef _, BindFlex) -> pure False
+checkNodeLockedInSnapshot snapshot nid = do
+    kind <- bindingSnapshotNodeKind snapshot (typeRef nid)
+    pure (kind == Binding.NodeLocked)
 
 isBoundAboveInBindingTree :: NodeId -> NodeId -> PresolutionM p Bool
 isBoundAboveInBindingTree edgeRoot ext = do

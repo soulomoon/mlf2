@@ -13,6 +13,7 @@
 -- 'phiWithSchemeOmega' from this module.
 module MLF.Elab.Phi.Omega.Interpret.Internal
   ( phiWithSchemeOmega,
+    phiWithSchemeOmegaOccurrence,
   )
 where
 
@@ -56,17 +57,29 @@ import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
-import MLF.Constraint.Presolution.Base (InteriorNodes (..))
+import MLF.Constraint.Presolution.Base
+  ( EdgeSourceInterior (..),
+    InteriorNodes (..),
+    rootRaiseMergeTraceAuthority,
+    rootWeakenRaiseMergeTraceAuthority,
+  )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution ()
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType)
+import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
+import MLF.Elab.Phi.Computation
+  ( OccurrenceComputation,
+    composeOccurrenceComputation,
+    mkEdgeTranslation,
+    mkQuantifierReordering,
+    occurrenceComputationInstantiation,
+  )
 import MLF.Elab.Phi.Omega.Domain
   ( OmegaContext (..),
     isBinderNode,
     isTraceBinderSource,
-    isTyVarNode,
     lookupBinderIndex,
     mkOmegaDomainEnv,
     resolveNonRootGraftBinder,
@@ -93,6 +106,8 @@ import MLF.Elab.Phi.VSpine
 import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
+import MLF.Reify.Bound (reifyBoundWithRefsOnConstraint)
+import MLF.Reify.Type (reifyTypeWithRefsNoFallbackOnConstraint)
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarRefsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, splitForallsRefs, substTypeCaptureRef)
 import MLF.Util.Graph (topoSortBy)
 import qualified MLF.Util.Order as Order
@@ -116,7 +131,26 @@ phiWithSchemeOmega ::
   -- | omega ops
   [InstanceOp] ->
   Either ElabError Instantiation
-phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
+phiWithSchemeOmega ctx namedSet si introCount omegaOps =
+  occurrenceComputationInstantiation
+    <$> phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps
+
+-- | Construct the paper-shaped occurrence computation @phi_R;T(e)@.
+--
+-- The reordering and edge-local parts are validated independently before the
+-- strict identity-bearing seam between them is composed.  This is the
+-- authoritative production entry point; 'phiWithSchemeOmega' is only the
+-- legacy instantiation projection.
+phiWithSchemeOmegaOccurrence ::
+  OmegaContext p ->
+  IntSet.IntSet ->
+  SchemeInfo ->
+  -- | forall intro count (O phase)
+  Int ->
+  -- | omega ops
+  [InstanceOp] ->
+  Either ElabError OccurrenceComputation
+phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
   where
     presolutionView = ocPresolutionView ctx
 
@@ -164,8 +198,17 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     traceBinderSources :: IntSet.IntSet
     traceBinderSources = ocTraceBinderSources ctx
 
+    replaySpineSources :: IntSet.IntSet
+    replaySpineSources = ocReplaySpineSources ctx
+
     traceBinderReplayMap :: IntMap.IntMap NodeId
     traceBinderReplayMap = ocTraceBinderReplayMap ctx
+
+    producerReplayBinderKeys :: IntSet.IntSet
+    producerReplayBinderKeys =
+      case mTrace of
+        Just tr -> IntSet.fromList (map getNodeId (etReplayDomainBinders tr))
+        Nothing -> IntSet.empty
 
     edgeRoot :: NodeId
     edgeRoot = ocEdgeRoot ctx
@@ -213,6 +256,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     isTraceBinderSource' :: NodeId -> Bool
     isTraceBinderSource' = isTraceBinderSource domainEnv
 
+    isReplaySpineSource :: NodeId -> Bool
+    isReplaySpineSource source =
+      IntSet.member (getNodeId source) replaySpineSources
+
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize (ocTraceConfig ctx)
 
@@ -221,7 +268,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       case mTrace of
         Nothing -> IntSet.empty
         Just tr ->
-          let InteriorNodes s0 = etInterior tr
+          let EdgeSourceInterior (InteriorNodes s0) = etInterior tr
               remapKey k =
                 let nidC = canonicalNode (NodeId k)
                     keyC = getNodeId nidC
@@ -232,6 +279,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                           Just nid -> getNodeId (canonicalNode nid)
                       _ -> keyC
            in IntSet.fromList (map remapKey (IntSet.toList s0))
+
+    rootRaiseMergeTraceProof :: NodeId -> NodeId -> Bool
+    rootRaiseMergeTraceProof operated other =
+      maybe False (rootRaiseMergeTraceAuthority operated other) mTrace
 
     orderRoot :: NodeId
     -- Paper root `r` for Phi/Sigma is the expansion root (TyExp body), not the TyExp
@@ -331,7 +382,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     isSchemeBinder :: NodeId -> Bool
     isSchemeBinder nid =
       IntSet.member (getNodeId nid) schemeBinderKeys
-        && isTyVarNode domainEnv nid
+
+    isProducerReplayBinder :: NodeId -> Bool
+    isProducerReplayBinder nid =
+      IntSet.member (getNodeId nid) producerReplayBinderKeys
 
     substForTypes :: IntMap.IntMap TypeBinderRef
     substForTypes =
@@ -339,31 +393,103 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         Just si' -> schemeInfoBinderRefSubst si'
         Nothing -> IntMap.empty
 
+    schemeRefForTraceBinder :: NodeId -> Maybe TypeBinderRef
+    schemeRefForTraceBinder binder =
+      let exactKey = getNodeId binder
+          replayRef = do
+            replayBinder <- IntMap.lookup exactKey traceBinderReplayMap
+            IntMap.lookup (getNodeId replayBinder) substForTypes
+       in replayRef
+            <|> IntMap.lookup exactKey substForTypes
+            <|> IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
+
+    sourceBinderBound :: NodeId -> Either ElabError ElabType
+    sourceBinderBound binder =
+      case ocGaParents ctx of
+        Just ga ->
+          case NodeAccess.lookupNode (gaBaseConstraint ga) binder of
+            Just TyVar {tnBound = Just _} ->
+              -- Reify from the binder, not directly from its bound node.  The
+              -- bound node may be the body below a TyForall wrapper; starting
+              -- at the binder lets bound reification recover that wrapper.
+              reifyBoundWithRefsOnConstraint (gaBaseConstraint ga) IntMap.empty binder
+            _ -> sourceBinderBoundFromSolved binder
+        Nothing -> sourceBinderBoundFromSolved binder
+
+    sourceBinderBoundFromSolved :: NodeId -> Either ElabError ElabType
+    sourceBinderBoundFromSolved binder =
+      case NodeAccess.lookupNode constraint binder of
+        Just TyVar {tnBound = Just _} -> reifyBoundWithRefsAt IntMap.empty binder
+        _ -> Left (PhiInvariantError ("trace binder has no explicit source bound: " ++ show binder))
+
+    -- OpRaise is classified in the witness's frozen source domain.  The
+    -- finalized graph may already mark its replay representative rigid as the
+    -- result of executing this very operation; consulting that state would
+    -- erase the non-identity Raise computation after construction.  Tests
+    -- without preserved source provenance retain the legacy final-view seam.
+    sourceRaiseBindParent sourceNode finalNode =
+      case ocGaParents ctx of
+        Just ga ->
+          NodeAccess.lookupBindParent
+            (gaBaseConstraint ga)
+            (typeRef sourceNode)
+        Nothing -> lookupBindParent (typeRef finalNode)
+
+    sourceWeakenedOperationType :: NodeId -> Either ElabError ElabType
+    sourceWeakenedOperationType operated =
+      case ocGaParents ctx of
+        Just ga
+          | Just node <- NodeAccess.lookupNode (gaBaseConstraint ga) operated ->
+              operationTypeOn (gaBaseConstraint ga) node
+        _ ->
+          case NodeAccess.lookupNode constraint operated of
+            Just node -> operationTypeOn constraint node
+            Nothing ->
+              Left
+                ( PhiInvariantError
+                    ("Weaken/RaiseMerge operated source is absent: " ++ show operated)
+                )
+      where
+        operationTypeOn sourceConstraint node =
+          case node of
+            TyVar {tnBound = Just _} ->
+              reifyBoundWithRefsOnConstraint sourceConstraint IntMap.empty operated
+            TyVar {tnBound = Nothing} -> Right TBottom
+            _ ->
+              reifyTypeWithRefsNoFallbackOnConstraint
+                sourceConstraint
+                IntMap.empty
+                operated
+
     traceArgMap :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     traceArgMap namedSet' =
       case (mTrace, mSchemeInfo) of
         (Just tr, Just si') ->
           let subst = schemeInfoBinderRefSubst si'
-              refFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
-              reifyArg arg =
+              reifyArg binder arg =
                 let argC = canonicalNode arg
                     direct = reifyTypeWithNamedSetRefsNoFallbackAt subst namedSet' argC
                     viaBound = case lookupVarBound argC of
                       Just bnd -> reifyBoundWithRefsAt subst bnd
                       Nothing -> direct
-                 in case (direct, viaBound) of
-                      (Right tyDirect, Right tyBound)
+                    viaSourceBound = sourceBinderBound binder
+                 in case (direct, viaBound, viaSourceBound) of
+                      (Right tyDirect, _, Right tySourceBound)
+                        | TVarRef {} <- tyDirect,
+                          not (containsBottomTy tySourceBound) -> Right tySourceBound
+                      (Right tyDirect, Right tyBound, _)
                         | containsForallType tyDirect -> Right tyDirect
                         | containsBottomTy tyDirect && not (containsBottomTy tyBound) -> Right tyBound
                         | otherwise -> Right tyDirect
-                      (Right tyDirect, Left _) -> Right tyDirect
-                      (Left _, Right tyBound) -> Right tyBound
-                      (Left err, Left _) -> Left err
+                      (Right tyDirect, Left _, _) -> Right tyDirect
+                      (Left _, Right tyBound, _) -> Right tyBound
+                      (Left _, Left _, Right tySourceBound) -> Right tySourceBound
+                      (Left err, Left _, Left _) -> Left err
               entries =
                 [ (typeArgKeyForRef ref, ty)
                   | (binder, arg) <- etBinderArgs tr,
-                    Just ref <- [refFor binder],
-                    Right ty <- [reifyArg arg]
+                    Just ref <- [schemeRefForTraceBinder binder],
+                    Right ty <- [reifyArg binder arg]
                 ]
            in Map.fromList entries
         _ -> Map.empty
@@ -399,7 +525,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     _binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
     _binderArgType namedSet' binder = do
-      ref <- IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
+      ref <- schemeRefForTraceBinder binder
       Map.lookup (typeArgKeyForRef ref) (inferredArgMap namedSet')
 
     substRefForTypeRef :: TypeBinderRef -> Maybe TypeBinderRef
@@ -410,9 +536,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     reifyTypeArg :: IntSet.IntSet -> Maybe NodeId -> NodeId -> Either ElabError ElabType
     reifyTypeArg namedSet' mbBinder arg = do
       let argC = canonicalNode arg
-      ty <- case lookupVarBound argC of
-        Just bnd -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' bnd
-        Nothing -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' argC
+      ty <-
+        case IntMap.lookup (getNodeId arg) (ocFrozenEndpointTypes ctx) of
+          Just exactEndpoint -> pure exactEndpoint
+          Nothing ->
+            case lookupVarBound argC of
+              Just bnd -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' bnd
+              Nothing -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' argC
       let inferredSingleton =
             case Map.toList (inferredArgMapFromTarget namedSet') of
               [(_name, inferredTy)] -> Just inferredTy
@@ -438,7 +568,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
           rescuedTy =
             case (mbBinder, chosenTy) of
               (Just binder, TBottom) ->
-                case IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes of
+                case schemeRefForTraceBinder binder of
                   Just binderRef -> TVarRef binderRef
                   Nothing -> chosenTy
               _ -> chosenTy
@@ -538,7 +668,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     -- Thesis treats quantifier introduction (O) and witness replay (Ω) as
     -- separate phases. The intro count drives O as a prefix of InstIntro
     -- steps, then the omega ops are replayed via `go`.
-    phiWithScheme :: Either ElabError Instantiation
+    phiWithScheme :: Either ElabError OccurrenceComputation
     phiWithScheme = do
       let ty0 = schemeToType (siScheme si)
           subst = schemeInfoBinderRefSubst si
@@ -553,7 +683,25 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       -- Phase Ω: replay witness operations on the intro-extended type.
       let vs2 = mkVSpine ty2 ids2
       phiOmega <- go binderKeys namedSet vs2 [] omegaOps lookupBinder
-      pure (normalizeInst (instMany [sigma, phiIntro, phiOmega]))
+      ty3 <- applyInst "applyOmega" ty2 phiOmega
+      let edgeInst = normalizeInst (instMany [phiIntro, phiOmega])
+      reordering <-
+        computationToElab
+          "quantifier reordering"
+          (mkQuantifierReordering ty0 sigma ty1)
+      edgeTranslation <-
+        computationToElab
+          "edge translation"
+          (mkEdgeTranslation ty1 edgeInst ty3)
+      computationToElab
+        "occurrence composition"
+        (composeOccurrenceComputation reordering edgeTranslation)
+
+    computationToElab :: Show err => String -> Either err a -> Either ElabError a
+    computationToElab label =
+      either
+        (Left . PhiInvariantError . (("invalid " ++ label ++ ": ") ++) . show)
+        Right
 
     -- \| Apply n quantifier introductions, prepending Nothing to ids each time.
     applyIntros :: Int -> ElabType -> [Maybe NodeId] -> Either ElabError (ElabType, [Maybe NodeId])
@@ -688,9 +836,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     -- which matters for operations like Merge that reference outer binders.
     nodeExists :: NodeId -> Bool
     nodeExists nid =
-      case lookupNodePV (canonicalNode nid) of
-        Just _ -> True
-        Nothing -> False
+      (isSchemeBinder nid && isProducerReplayBinder nid)
+        || case lookupNodePV (canonicalNode nid) of
+          Just _ -> True
+          Nothing -> False
 
     go ::
       IntSet.IntSet ->
@@ -702,15 +851,41 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       Either ElabError Instantiation
     go binderKeys namedSet' vs accum ops lookupBinder = case ops of
       [] -> Right (foldl' composeInst InstId (collapseAdjacentPairs (reverse accum)))
-      (OpGraft arg bv : rest) -> do
-        bvReplay <- resolveTraceBinderTarget' True "OpGraft" bv
-        let bvC = canonicalNode bvReplay
+      (OpGraft _arg binder : OpWeaken weakened : rest@(OpRaiseMerge operated exterior : _))
+        | binder == weakened,
+          weakened == operated,
+          operated == orderRoot,
+          isTraceBinderSource' binder,
+          not (isReplaySpineSource binder),
+          maybe
+            False
+            (rootWeakenRaiseMergeTraceAuthority operated exterior)
+            mTrace ->
+            -- The grafted root has already been inlined into S'(r), but its
+            -- adjacent Weaken is also the frozen rigid-root certificate for
+            -- the terminal RaiseMerge.  Drop only the inlined Graft and keep
+            -- the authority pair intact; the following branch consumes it as
+            -- identity.  Dropping both operations would turn a proved rigid
+            -- replay into an unauthorized bare root RaiseMerge.
+            go binderKeys namedSet' vs accum (OpWeaken weakened : rest) lookupBinder
+      (OpGraft _arg binder : OpWeaken weakened : rest)
+        | binder == weakened,
+          isTraceBinderSource' binder,
+          not (isReplaySpineSource binder) ->
+            -- The frozen expansion records every operation-authority binder,
+            -- but the finalized producer VSpine contains only binders that
+            -- remain quantified.  A Graft/Weaken pair for an omitted source
+            -- binder has already been inlined into S'(r); replaying it would
+            -- manufacture a quantifier that the producer type does not own.
+            go binderKeys namedSet' vs accum rest lookupBinder
+      (OpGraft arg bv : rest) ->
+        let sourceC = canonicalNode bv
             rootC = canonicalNode orderRoot
-        if bvC == rootC
+         in if sourceC == rootC
           then do
             if vSpineNull vs
               then do
-                argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
+                argTy <- reifyTypeArg namedSet' Nothing arg
                 let inst =
                       if vsBody vs == BodyBottom
                         then InstBot argTy
@@ -718,11 +893,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     vs' = if vsBody vs == BodyBottom then vs {vsBody = BodyNonBottom} else vs
                 go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
               else do
-                argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
+                argTy <- reifyTypeArg namedSet' Nothing arg
                 let inst = InstApp argTy
                     vs' = vsDeleteAt 0 vs
                 go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
-          else
+          else do
+            bvReplay <- resolveTraceBinderTarget' True "OpGraft" bv
+            let bvC = canonicalNode bvReplay
             if not (isBinderNode' binderKeys bvReplay)
               then
                 Left $
@@ -745,7 +922,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     mbBound <- vSpineBoundAt vs i
                     if mbBound /= Just TBottom && mbBound /= Nothing
                       then do
-                        argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
+                        argTy <- reifyTypeArg namedSet' Nothing arg
                         let boundTy = maybe TBottom tyToElab mbBound
                         if alphaEqType argTy boundTy
                           then -- Bounded-match: bound already equals graft arg, so
@@ -767,19 +944,34 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                     ]
                       else do
                         i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
-                        argTy <- reifyTypeArg namedSet' (Just bvResolved) (canonicalNode arg)
+                        argTy <- reifyTypeArg namedSet' (Just bvResolved) arg
                         prefix <- prefixBinderRefs vs i'
                         let inst = underContext prefix (InstInside (InstBot argTy))
                             newBound = either (const Nothing) Just (elabToBound argTy)
                             vs' = vsUpdateBound i' newBound vs
                         go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
-      (OpWeaken bv : rest) -> do
-        bvReplay <- resolveTraceBinderTarget' False "OpWeaken" bv
-        let bvC = canonicalNode bvReplay
+      (OpWeaken weakened : OpRaiseMerge operated exterior : rest)
+        | weakened == operated,
+          operated == orderRoot ->
+            if maybe
+                False
+                (rootWeakenRaiseMergeTraceAuthority operated exterior)
+                mTrace
+              then go binderKeys namedSet' vs accum rest lookupBinder
+              else
+                Left $
+                  PhiTranslatabilityError
+                    [ "root Weaken/RaiseMerge lacks exact rigid replay authority",
+                      "  operated root: " ++ show operated,
+                      "  exterior target: " ++ show exterior
+                    ]
+      (OpWeaken bv : rest) ->
+        let sourceC = canonicalNode bv
             rootC = canonicalNode orderRoot
-        if bvC == rootC
+         in if sourceC == rootC
           then go binderKeys namedSet' vs accum rest lookupBinder
           else do
+            bvReplay <- resolveTraceBinderTarget' False "OpWeaken" bv
             -- Strict replay invariant: non-root OpWeaken must resolve to a
             -- binder in the current replay spine and emit InstElim; otherwise
             -- translation fails fast.
@@ -793,7 +985,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       (OpRaise n : rest) -> do
         nReplay <- resolveTraceBinderTarget' False "OpRaise" n
         let nSource = n
-            nAdopt = canonicalNode nReplay
+            replayIsSchemeBinder =
+              isSchemeBinder nReplay && isProducerReplayBinder nReplay
+            nAdopt = if replayIsSchemeBinder then nReplay else canonicalNode nReplay
         if not (nodeExists nAdopt)
           then
             if IntSet.member (getNodeId nSource) traceBinderSources
@@ -816,7 +1010,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                         "replay target: " ++ show nReplay
                       ]
           else do
-            let nOrig = canonicalNode nAdopt
+            let nOrig = if replayIsSchemeBinder then nAdopt else canonicalNode nAdopt
             case debugPhi
               ( "OpRaise: nSource="
                   ++ show nSource
@@ -848,7 +1042,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 Just TyExp {tnBody = body} -> pure (canonicalNode body)
                 _ -> pure nC
             let shouldRigidSkip =
-                  case lookupBindParent (typeRef nC) of
+                  case sourceRaiseBindParent nSource nC of
                     Just (_, BindRigid) -> True
                     _ -> False
             if shouldRigidSkip
@@ -867,6 +1061,19 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                   nOrig
                   nC
                   nContextTarget
+      (OpMerge eliminated retained : rest)
+        | isTraceBinderSource' eliminated,
+          not (isReplaySpineSource eliminated),
+          isReplaySpineSource retained ->
+            -- The normalized Merge orientation is also the retained-source
+            -- certificate used to build the producer VSpine.  Its first
+            -- operand has already disappeared from that type tree, while the
+            -- second operand is the surviving quantifier.  Requiring the
+            -- eliminated replay target to be a VSpine binder would recreate
+            -- a quantifier that S(r) no longer contains; the merge is already
+            -- reflected in S(r), and subsequent operations still act on the
+            -- retained binder explicitly.
+            go binderKeys namedSet' vs accum rest lookupBinder
       (OpMerge n m : rest) -> do
         nReplay <- resolveTraceBinderTarget' True "OpMerge(n)" n
         mReplay <- resolveTraceBinderTarget' True "OpMerge(m)" m
@@ -891,70 +1098,107 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                           "  canonical: " ++ show (canonicalNode nReplay)
                         ]
                   else
-                    if not (isBinderNode' binderKeys mReplay)
+                    if nReplay == mReplay
+                      then go binderKeys namedSet' vs accum rest lookupBinder
+                      else do
+                        mRef <- mergeOtherBinderRef binderKeys vs m mReplay lookupBinder
+                        let hAbs = InstSeq (InstInside (instAbstrWithRef mRef)) InstElim
+                        (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
+                        go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+      (OpRaiseMerge n _ : OpWeaken weakened : rest)
+        | weakened == n,
+          n /= orderRoot -> do
+            nReplay <- resolveTraceBinderTarget' True "OpRaiseMerge/Weaken" n
+            if isRigidNode nReplay
+              then go binderKeys namedSet' vs accum rest lookupBinder
+              else do
+                if not (isBinderNode' binderKeys nReplay)
+                  then
+                    -- No quantifier for n exists in S(r), so its terminal
+                    -- rigidification is already inlined regardless of the
+                    -- source graph node constructor.
+                    go binderKeys namedSet' vs accum rest lookupBinder
+                  else do
+                    -- Lemma 15.3.11: the bounds of n and the exterior merge
+                    -- target are syntactically equal.  Figure 15.3.4's
+                    -- following Weaken therefore instantiates n with that
+                    -- exact bound; emit the resulting application directly
+                    -- while n is still in the replay spine.
+                    boundTy <- sourceWeakenedOperationType n
+                    (inst, vs') <-
+                      atBinderWith
+                        False
+                        binderKeys
+                        vs
+                        nReplay
+                        (pure (InstApp boundTy))
+                    go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
+      (OpRaiseMerge n m : rest) -> do
+        if n == orderRoot
+          then
+            if rootRaiseMergeTraceProof n m
+              then do
+                -- Figure 15.3.4 translates RaiseMerge(r,m) directly to
+                -- alpha_m-triangle.  A prepared Gamma substitution is the
+                -- authority for the outward identity of that Hyp; retain the
+                -- source-domain witness identity only when no such authority
+                -- is present.
+                let mName = fromMaybe ("t" ++ show (getNodeId m)) (lookupBinder m)
+                    sourceMRef =
+                      typeBinderRefFromIdentity
+                        (typeBinderIdentityFromNode m)
+                        mName
+                    mRef = fromMaybe sourceMRef (schemeRefForTraceBinder m)
+                let vs' = VSpine [] BodyNonBottom
+                go binderKeys namedSet' vs' (instAbstrWithRef mRef : accum) rest lookupBinder
+              else
+                Left $
+                  PhiTranslatabilityError
+                    [ "OpRaiseMerge: root operation lacks exact source-interior trace authority",
+                      "  operated root: " ++ show n,
+                      "  exterior target: " ++ show m,
+                      "  trace: " ++ show mTrace
+                    ]
+          else do
+            nReplay <- resolveTraceBinderTarget' True "OpRaiseMerge(n)" n
+            mReplay <- resolveTraceBinderTarget' True "OpRaiseMerge(m)" m
+            -- Paper Fig. 15.3.4: rigid-node identity is conditioned on the operated node n.
+            if isRigidNode nReplay
+              then go binderKeys namedSet' vs accum rest lookupBinder
+              else
+                if isRigidNode mReplay
+                  then
+                    Left $
+                    PhiTranslatabilityError
+                      [ "OpRaiseMerge: rigid endpoint appears only on non-operated node",
+                        "  operated node n: " ++ show n,
+                        "  other endpoint m: " ++ show m,
+                        "  replay n: " ++ show nReplay,
+                        "  replay m: " ++ show mReplay,
+                        "  binding parent n: " ++ show (lookupBindParent (typeRef nReplay)),
+                        "  binding parent m: " ++ show (lookupBindParent (typeRef mReplay)),
+                        "  remaining operations: " ++ show rest,
+                        "  trace: " ++ show mTrace
+                      ]
+                  else
+                    if not (isBinderNode' binderKeys nReplay)
                       then
                         Left $
                           PhiTranslatabilityError
-                            [ "OpMerge: second target is non-binder node",
-                              "  target node: " ++ show m,
-                              "  canonical: " ++ show (canonicalNode mReplay)
+                            [ "OpRaiseMerge: first target is non-binder node",
+                              "  target node: " ++ show n,
+                              "  canonical: " ++ show (canonicalNode nReplay),
+                              "  trace: " ++ show mTrace
                             ]
-                      else
-                        if nReplay == mReplay
-                          then go binderKeys namedSet' vs accum rest lookupBinder
-                          else do
-                            mRef <- binderRefFor binderKeys vs mReplay lookupBinder
+                      else do
+                        case lookupBinderIndex' binderKeys (vSpineIds vs) nReplay of
+                          Nothing ->
+                            Left (PhiTranslatabilityError ["OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"])
+                          Just _ -> do
+                            mRef <- mergeOtherBinderRef binderKeys vs m mReplay lookupBinder
                             let hAbs = InstSeq (InstInside (instAbstrWithRef mRef)) InstElim
                             (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
                             go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
-      (OpRaiseMerge n m : rest) -> do
-        nReplay <- resolveTraceBinderTarget' True "OpRaiseMerge(n)" n
-        mReplay <- resolveTraceBinderTarget' True "OpRaiseMerge(m)" m
-        -- Paper Fig. 15.3.4: rigid-node identity is conditioned on the operated node n.
-        if isRigidNode nReplay
-          then go binderKeys namedSet' vs accum rest lookupBinder
-          else
-            if isRigidNode mReplay
-              then
-                Left $
-                  PhiTranslatabilityError
-                    [ "OpRaiseMerge: rigid endpoint appears only on non-operated node",
-                      "  operated node n: " ++ show n,
-                      "  other endpoint m: " ++ show m
-                    ]
-              else
-                if not (isBinderNode' binderKeys nReplay)
-                  then
-                    Left $
-                      PhiTranslatabilityError
-                        [ "OpRaiseMerge: first target is non-binder node",
-                          "  target node: " ++ show n,
-                          "  canonical: " ++ show (canonicalNode nReplay)
-                        ]
-                  else
-                    if not (isBinderNode' binderKeys mReplay)
-                      then
-                        Left $
-                          PhiTranslatabilityError
-                            [ "OpRaiseMerge: second target is non-binder node",
-                              "  target node: " ++ show m,
-                              "  canonical: " ++ show (canonicalNode mReplay)
-                            ]
-                      else do
-                        if nReplay == orderRoot
-                          then do
-                            mRef <- binderRefFor binderKeys vs mReplay lookupBinder
-                            let vs' = VSpine [] BodyNonBottom
-                            go binderKeys namedSet' vs' (instAbstrWithRef mRef : accum) rest lookupBinder
-                          else do
-                            case lookupBinderIndex' binderKeys (vSpineIds vs) nReplay of
-                              Nothing ->
-                                Left (PhiTranslatabilityError ["OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"])
-                              Just _ -> do
-                                mRef <- binderRefFor binderKeys vs mReplay lookupBinder
-                                let hAbs = InstSeq (InstInside (instAbstrWithRef mRef)) InstElim
-                                (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
-                                go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
     continueRaise ::
       IntSet.IntSet ->
@@ -1236,6 +1480,27 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         Nothing ->
           let name = fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid)
            in Right (typeBinderRefFromIdentity (typeBinderIdentityFromNode nid) name)
+
+    -- Figure 15.3.4 abstracts over alpha_n' for Merge/RaiseMerge.  n' belongs
+    -- to the edge's frozen source domain and need not be a quantifier in the
+    -- expansion's current spine.  The validated witness is the construction-
+    -- time certificate for that identity: source TyVars can disappear from the
+    -- finalized graph after the very merge represented by this operation.
+    mergeOtherBinderRef ::
+      IntSet.IntSet ->
+      VSpine ->
+      NodeId ->
+      NodeId ->
+      (NodeId -> Maybe String) ->
+      Either ElabError TypeBinderRef
+    mergeOtherBinderRef binderKeys vs source replay lookupBinder
+      | isBinderNode' binderKeys replay =
+          binderRefFor binderKeys vs replay lookupBinder
+      | Just ref <- schemeRefForTraceBinder source = Right ref
+      | Just ref <- schemeRefForTraceBinder replay = Right ref
+      | otherwise =
+          let name = fromMaybe ("t" ++ show (getNodeId source)) (lookupBinder source)
+           in Right (typeBinderRefFromIdentity (typeBinderIdentityFromNode source) name)
 
     atBinderWith ::
       Bool ->

@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 module NormalizeSpec (spec) where
 
+import IdentityTestSupport
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty(..))
@@ -40,7 +41,7 @@ spec = describe "Phase 2 — Normalization" $ do
             let nodes = nodeMapFromList
                     [ (0, TyVar { tnId = NodeId 0, tnBound = Nothing })
                     , (1, TyVar { tnId = NodeId 1, tnBound = Nothing })
-                    , (2, TyBase (NodeId 2) (BaseTy "Int"))
+                    , (2, TestTyBase (NodeId 2) (BaseTy "Int"))
                     ]
                 instEdges =
                     [ InstEdge (EdgeId 0) (NodeId 0) (NodeId 0)  -- reflexive, drop
@@ -80,8 +81,8 @@ spec = describe "Phase 2 — Normalization" $ do
     describe "Grafting" $ do
         it "grafts arrow structure onto variable" $ do
             -- α ≤ (Int → Bool) should graft arrow structure onto α
-            let domNode = TyBase (NodeId 1) (BaseTy "Int")
-                codNode = TyBase (NodeId 2) (BaseTy "Bool")
+            let domNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                codNode = TestTyBase (NodeId 2) (BaseTy "Bool")
                 arrowNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                 varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
@@ -97,9 +98,152 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Check that nodes count increased (fresh arrow + 2 fresh vars)
             nodeMapSize (cNodes result) `shouldSatisfy` (> 4)
 
+        it "records the exact result constructed for a bounded arrow source" $ do
+            let sourceId = NodeId 0
+                sourceDomainId = NodeId 1
+                sourceCodomainId = NodeId 2
+                sourceArrowId = NodeId 3
+                targetDomainId = NodeId 4
+                targetCodomainId = NodeId 5
+                targetArrowId = NodeId 6
+                edgeId = EdgeId 9
+                constraint =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (0, TyVar sourceId (Just sourceArrowId))
+                                , (1, TyVar sourceDomainId Nothing)
+                                , (2, TyVar sourceCodomainId Nothing)
+                                , (3, TyArrow sourceArrowId sourceDomainId sourceCodomainId)
+                                , (4, TyVar targetDomainId Nothing)
+                                , (5, TyVar targetCodomainId Nothing)
+                                , (6, TyArrow targetArrowId targetDomainId targetCodomainId)
+                                ]
+                        , cInstEdges =
+                            [InstEdge edgeId sourceId targetArrowId]
+                        }
+                result = normalizeRaw constraint
+
+            case
+                IntMap.lookup
+                    (getEdgeId edgeId)
+                    (cGraftResultConstructions result)
+              of
+                Nothing ->
+                    expectationFailure
+                        "expected exact arrow-result construction provenance"
+                Just construction -> do
+                    grcEdgeId construction `shouldBe` edgeId
+                    grcSourceRoot construction `shouldBe` sourceId
+                    grcSourceBoundRoot construction
+                        `shouldBe` Just sourceArrowId
+                    grcSourceResultRoot construction
+                        `shouldBe` Just sourceCodomainId
+                    grcTargetRoot construction `shouldBe` targetArrowId
+                    grcTargetDomain construction `shouldBe` targetDomainId
+                    grcTargetCodomain construction `shouldBe` targetCodomainId
+                    grcConstructionDomain construction
+                        `shouldNotBe` targetDomainId
+                    grcConstructionCodomain construction
+                        `shouldNotBe` targetCodomainId
+                    case
+                        lookupNodeMaybe
+                            (cNodes result)
+                            (grcConstructionCodomain construction)
+                      of
+                        Nothing ->
+                            expectationFailure
+                                "constructed result node was not retained"
+                        Just _ -> pure ()
+
+        it "keeps a forall-bounded variable below an arrow for presolution" $ do
+            -- The source boundary denotes forall(a). a, not a fresh bottom
+            -- node.  Grafting it to the arrow would create the impossible
+            -- equality forall(a). a = (x -> y) before expansion can
+            -- instantiate the source scheme.
+            let binderId = NodeId 0
+                forallId = NodeId 1
+                boundaryId = NodeId 2
+                targetDomId = NodeId 3
+                targetCodId = NodeId 4
+                targetArrowId = NodeId 5
+                edgeId = EdgeId 0
+                nodes =
+                    nodeMapFromList
+                        [ (0, TyVar {tnId = binderId, tnBound = Nothing})
+                        , (1, TyForall forallId binderId)
+                        , (2, TyVar {tnId = boundaryId, tnBound = Just forallId})
+                        , (3, TyVar {tnId = targetDomId, tnBound = Nothing})
+                        , (4, TyVar {tnId = targetCodId, tnBound = Nothing})
+                        , (5, TyArrow targetArrowId targetDomId targetCodId)
+                        ]
+                constraint =
+                    emptyConstraint
+                        { cNodes = nodes
+                        , cBindParents =
+                            IntMap.singleton
+                                (nodeRefKey (typeRef binderId))
+                                (typeRef forallId, BindFlex)
+                        , cInstEdges = [InstEdge edgeId boundaryId targetArrowId]
+                        }
+                result = normalizeRaw constraint
+
+            cUnifyEdges result `shouldBe` []
+            IntSet.member (getEdgeId edgeId) (cGraftedEdges result) `shouldBe` False
+            case cInstEdges result of
+                [InstEdge actualEdgeId wrappedLeft actualRight] -> do
+                    actualEdgeId `shouldBe` edgeId
+                    actualRight `shouldBe` targetArrowId
+                    lookupNodeMaybe (cNodes result) boundaryId
+                        `shouldBe` Just (TyVar {tnId = boundaryId, tnBound = Just forallId})
+                    case lookupNodeMaybe (cNodes result) wrappedLeft of
+                        Just TyExp {tnBody = body} -> body `shouldBe` boundaryId
+                        other -> expectationFailure ("expected residual TyExp wrapper, got " ++ show other)
+                other -> expectationFailure ("expected one residual inst edge, got " ++ show other)
+
+        it "follows variable bounds when preserving a forall-bounded source" $ do
+            let binderId = NodeId 0
+                forallId = NodeId 1
+                aliasId = NodeId 2
+                boundaryId = NodeId 3
+                targetDomId = NodeId 4
+                targetCodId = NodeId 5
+                targetArrowId = NodeId 6
+                edgeId = EdgeId 0
+                constraint =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (0, TyVar {tnId = binderId, tnBound = Nothing})
+                                , (1, TyForall forallId binderId)
+                                , (2, TyVar {tnId = aliasId, tnBound = Just forallId})
+                                , (3, TyVar {tnId = boundaryId, tnBound = Just aliasId})
+                                , (4, TyVar {tnId = targetDomId, tnBound = Nothing})
+                                , (5, TyVar {tnId = targetCodId, tnBound = Nothing})
+                                , (6, TyArrow targetArrowId targetDomId targetCodId)
+                                ]
+                        , cBindParents =
+                            IntMap.singleton
+                                (nodeRefKey (typeRef binderId))
+                                (typeRef forallId, BindFlex)
+                        , cInstEdges = [InstEdge edgeId boundaryId targetArrowId]
+                        }
+                result = normalizeRaw constraint
+
+            cUnifyEdges result `shouldBe` []
+            IntSet.member (getEdgeId edgeId) (cGraftedEdges result) `shouldBe` False
+            case cInstEdges result of
+                [InstEdge actualEdgeId wrappedLeft actualRight] -> do
+                    actualEdgeId `shouldBe` edgeId
+                    actualRight `shouldBe` targetArrowId
+                    case lookupNodeMaybe (cNodes result) wrappedLeft of
+                        Just TyExp {tnBody = body} -> body `shouldBe` boundaryId
+                        other -> expectationFailure ("expected residual TyExp wrapper, got " ++ show other)
+                other -> expectationFailure ("expected one residual inst edge, got " ++ show other)
+
         it "grafts base type onto variable" $ do
             -- α ≤ Int should unify α with Int
-            let baseNode = TyBase (NodeId 1) (BaseTy "Int")
+            let baseNode = TestTyBase (NodeId 1) (BaseTy "Int")
                 varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
@@ -114,7 +258,7 @@ spec = describe "Phase 2 — Normalization" $ do
         it "rejects grafting when RHS arrow contains the LHS variable (occurs-check)" $ do
             -- α ≤ (α → Int) should be a type error and left for later phases
             let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                baseNode = TyBase (NodeId 2) (BaseTy "Int")
+                baseNode = TestTyBase (NodeId 2) (BaseTy "Int")
                 arrowNode = TyArrow (NodeId 1) (NodeId 0) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
@@ -135,7 +279,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 forallNode = TyForall (NodeId 1) (NodeId 0)
                 -- We need a TyArrow to trigger the check in grafting, as Forall/Exp are filtered out
                 -- So: α ≤ (Int → (∀(β). α))
-                intNode = TyBase (NodeId 2) (BaseTy "Int")
+                intNode = TestTyBase (NodeId 2) (BaseTy "Int")
                 arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                 constraint = emptyConstraint
@@ -150,7 +294,7 @@ spec = describe "Phase 2 — Normalization" $ do
              -- α ≤ (Int → (s · α))
              let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                  expNode = TyExp (NodeId 1) (ExpVarId 0) (NodeId 0)
-                 intNode = TyBase (NodeId 2) (BaseTy "Int")
+                 intNode = TestTyBase (NodeId 2) (BaseTy "Int")
                  arrowNode = TyArrow (NodeId 3) (NodeId 2) (NodeId 1)
                  edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
                  constraint = emptyConstraint
@@ -166,8 +310,8 @@ spec = describe "Phase 2 — Normalization" $ do
             let dom1 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 cod1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 arr1 = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
-                dom2 = TyBase (NodeId 3) (BaseTy "Int")
-                cod2 = TyBase (NodeId 4) (BaseTy "Bool")
+                dom2 = TestTyBase (NodeId 3) (BaseTy "Int")
+                cod2 = TestTyBase (NodeId 4) (BaseTy "Bool")
                 arr2 = TyArrow (NodeId 5) (NodeId 3) (NodeId 4)
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 5)
                 constraint = emptyConstraint
@@ -184,8 +328,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "keeps Base ≤ Base (same type) as satisfied" $ do
             -- Int ≤ Int is trivially satisfied
-            let node1 = TyBase (NodeId 0) (BaseTy "Int")
-                node2 = TyBase (NodeId 1) (BaseTy "Int")
+            let node1 = TestTyBase (NodeId 0) (BaseTy "Int")
+                node2 = TestTyBase (NodeId 1) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList [(0, node1), (1, node2)]
@@ -198,8 +342,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "keeps Base ≤ Base (different types) as type error" $ do
             -- Int ≤ Bool is a type error
-            let node1 = TyBase (NodeId 0) (BaseTy "Int")
-                node2 = TyBase (NodeId 1) (BaseTy "Bool")
+            let node1 = TestTyBase (NodeId 0) (BaseTy "Int")
+                node2 = TestTyBase (NodeId 1) (BaseTy "Bool")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList [(0, node1), (1, node2)]
@@ -214,7 +358,7 @@ spec = describe "Phase 2 — Normalization" $ do
             let dom = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 cod = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
-                base = TyBase (NodeId 3) (BaseTy "Int")
+                base = TestTyBase (NodeId 3) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
@@ -226,7 +370,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "keeps Base ≤ Arrow as type error" $ do
             -- Int ≤ (α → β) is a type error
-            let base = TyBase (NodeId 0) (BaseTy "Int")
+            let base = TestTyBase (NodeId 0) (BaseTy "Int")
                 dom = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 cod = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 arr = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
@@ -309,8 +453,8 @@ spec = describe "Phase 2 — Normalization" $ do
             it "unifies variable with arrow (var points to arrow)" $ do
                 -- α = (Int → Bool)
                 let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    domNode = TyBase (NodeId 1) (BaseTy "Int")
-                    codNode = TyBase (NodeId 2) (BaseTy "Bool")
+                    domNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                    codNode = TestTyBase (NodeId 2) (BaseTy "Bool")
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     edge = UnifyEdge (NodeId 0) (NodeId 3)
                     constraint = emptyConstraint
@@ -324,8 +468,8 @@ spec = describe "Phase 2 — Normalization" $ do
             it "unifies arrow with variable (same as var = arrow)" $ do
                 -- (Int → Bool) = α: symmetric case
                 let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    domNode = TyBase (NodeId 1) (BaseTy "Int")
-                    codNode = TyBase (NodeId 2) (BaseTy "Bool")
+                    domNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                    codNode = TestTyBase (NodeId 2) (BaseTy "Bool")
                     arrNode = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     edge = UnifyEdge (NodeId 3) (NodeId 0)  -- Arrow on left
                     constraint = emptyConstraint
@@ -339,7 +483,7 @@ spec = describe "Phase 2 — Normalization" $ do
             it "unifies variable with base type" $ do
                 -- α = Int
                 let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    baseNode = TyBase (NodeId 1) (BaseTy "Int")
+                    baseNode = TestTyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
@@ -351,7 +495,7 @@ spec = describe "Phase 2 — Normalization" $ do
             it "unifies base type with variable (symmetric)" $ do
                 -- Int = α
                 let varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    baseNode = TyBase (NodeId 1) (BaseTy "Int")
+                    baseNode = TestTyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 1) (NodeId 0)  -- Base on left
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
@@ -388,8 +532,8 @@ spec = describe "Phase 2 — Normalization" $ do
                     gamma = TyVar { tnId = NodeId 2, tnBound = Nothing }
                     inner1 = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
                     outer1 = TyArrow (NodeId 4) (NodeId 0) (NodeId 3)
-                    intNode = TyBase (NodeId 5) (BaseTy "Int")
-                    boolNode = TyBase (NodeId 6) (BaseTy "Bool")
+                    intNode = TestTyBase (NodeId 5) (BaseTy "Int")
+                    boolNode = TestTyBase (NodeId 6) (BaseTy "Bool")
                     delta = TyVar { tnId = NodeId 7, tnBound = Nothing }
                     inner2 = TyArrow (NodeId 8) (NodeId 6) (NodeId 7)
                     outer2 = TyArrow (NodeId 9) (NodeId 5) (NodeId 8)
@@ -409,8 +553,8 @@ spec = describe "Phase 2 — Normalization" $ do
         describe "Base = Base" $ do
             it "succeeds when base types are identical" $ do
                 -- Int = Int
-                let node1 = TyBase (NodeId 0) (BaseTy "Int")
-                    node2 = TyBase (NodeId 1) (BaseTy "Int")
+                let node1 = TestTyBase (NodeId 0) (BaseTy "Int")
+                    node2 = TestTyBase (NodeId 1) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, node1), (1, node2)]
@@ -421,8 +565,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
             it "reports error for incompatible base types" $ do
                 -- Int = Bool: type error
-                let node1 = TyBase (NodeId 0) (BaseTy "Int")
-                    node2 = TyBase (NodeId 1) (BaseTy "Bool")
+                let node1 = TestTyBase (NodeId 0) (BaseTy "Int")
+                    node2 = TestTyBase (NodeId 1) (BaseTy "Bool")
                     edge = UnifyEdge (NodeId 0) (NodeId 1)
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, node1), (1, node2)]
@@ -529,7 +673,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 let dom = TyVar { tnId = NodeId 0, tnBound = Nothing }
                     cod = TyVar { tnId = NodeId 1, tnBound = Nothing }
                     arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
-                    base = TyBase (NodeId 3) (BaseTy "Int")
+                    base = TestTyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 2) (NodeId 3)
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
@@ -543,7 +687,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 let dom = TyVar { tnId = NodeId 0, tnBound = Nothing }
                     cod = TyVar { tnId = NodeId 1, tnBound = Nothing }
                     arr = TyArrow (NodeId 2) (NodeId 0) (NodeId 1)
-                    base = TyBase (NodeId 3) (BaseTy "Int")
+                    base = TestTyBase (NodeId 3) (BaseTy "Int")
                     edge = UnifyEdge (NodeId 3) (NodeId 2)  -- Base on left
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
@@ -558,7 +702,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 -- α = β, β = Int: after normalization, both point to Int
                 let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
                     beta = TyVar { tnId = NodeId 1, tnBound = Nothing }
-                    intNode = TyBase (NodeId 2) (BaseTy "Int")
+                    intNode = TestTyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, alpha), (1, beta), (2, intNode)]
@@ -570,8 +714,8 @@ spec = describe "Phase 2 — Normalization" $ do
             it "handles multiple unifications of same variable" $ do
                 -- α = Int, α = Int: redundant but valid
                 let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    int1 = TyBase (NodeId 1) (BaseTy "Int")
-                    int2 = TyBase (NodeId 2) (BaseTy "Int")
+                    int1 = TestTyBase (NodeId 1) (BaseTy "Int")
+                    int2 = TestTyBase (NodeId 2) (BaseTy "Int")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, alpha), (1, int1), (2, int2)]
@@ -583,8 +727,8 @@ spec = describe "Phase 2 — Normalization" $ do
             it "detects error in chained unifications" $ do
                 -- α = Int, α = Bool: type error discovered via chain
                 let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                    intNode = TyBase (NodeId 1) (BaseTy "Int")
-                    boolNode = TyBase (NodeId 2) (BaseTy "Bool")
+                    intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                    boolNode = TestTyBase (NodeId 2) (BaseTy "Bool")
                     edges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 0) (NodeId 2)]
                     constraint = emptyConstraint
                         { cNodes = nodeMapFromList [(0, alpha), (1, intNode), (2, boolNode)]
@@ -605,11 +749,11 @@ spec = describe "Phase 2 — Normalization" $ do
                     result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
-    describe "TyCon grafting and decomposition" $ do
-        it "grafts TyCon structure onto variable (Var ≤ TyCon)" $ do
-            -- α ≤ List Int should graft TyCon structure onto α
-            let intNode = TyBase (NodeId 1) (BaseTy "Int")
-                listNode = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 1))
+    describe "TestTyCon grafting and decomposition" $ do
+        it "grafts TestTyCon structure onto variable (Var ≤ TyCon)" $ do
+            -- α ≤ List Int should graft TestTyCon structure onto α
+            let intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                listNode = TestTyCon (NodeId 2) (BaseTy "List") (pure (NodeId 1))
                 varNode = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 2)
                 constraint = emptyConstraint
@@ -620,16 +764,16 @@ spec = describe "Phase 2 — Normalization" $ do
                 result = normalizeRaw constraint
             -- The inst edge should be consumed (grafted)
             cInstEdges result `shouldBe` []
-            -- New TyCon node should exist that unifies with α
+            -- New TestTyCon node should exist that unifies with α
             -- Check that nodes count increased (fresh vars for args)
             nodeMapSize (cNodes result) `shouldSatisfy` (> 3)
 
-        it "decomposes TyCon ≤ TyCon into arg unifications (same head)" $ do
+        it "decomposes TestTyCon ≤ TestTyCon into arg unifications (same head)" $ do
             -- List α ≤ List Int should decompose to α = Int
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
-                list2 = TyCon (NodeId 3) (BaseTy "List") (pure (NodeId 1))
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                list1 = TestTyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                list2 = TestTyCon (NodeId 3) (BaseTy "List") (pure (NodeId 1))
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -637,16 +781,16 @@ spec = describe "Phase 2 — Normalization" $ do
                     , cInstEdges = [edge]
                     }
                 result = normalizeRaw constraint
-            -- TyCon ≤ TyCon becomes α = Int, all merged
+            -- TestTyCon ≤ TestTyCon becomes α = Int, all merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
 
-        it "keeps TyCon ≤ TyCon as type error when heads differ" $ do
+        it "keeps TestTyCon ≤ TestTyCon as type error when heads differ" $ do
             -- List α ≤ Maybe Int is a type error
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
-                maybe2 = TyCon (NodeId 3) (BaseTy "Maybe") (pure (NodeId 1))
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                list1 = TestTyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                maybe2 = TestTyCon (NodeId 3) (BaseTy "Maybe") (pure (NodeId 1))
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 3)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -657,12 +801,12 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Type error: different constructors, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
-        it "keeps TyCon ≤ Arrow as type error" $ do
+        it "keeps TestTyCon ≤ Arrow as type error" $ do
             -- List α ≤ (Int → Bool) is a type error
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                boolNode = TyBase (NodeId 2) (BaseTy "Bool")
-                list1 = TyCon (NodeId 3) (BaseTy "List") (pure (NodeId 0))
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                boolNode = TestTyBase (NodeId 2) (BaseTy "Bool")
+                list1 = TestTyCon (NodeId 3) (BaseTy "List") (pure (NodeId 0))
                 arr = TyArrow (NodeId 4) (NodeId 1) (NodeId 2)
                 edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 4)
                 constraint = emptyConstraint
@@ -671,16 +815,16 @@ spec = describe "Phase 2 — Normalization" $ do
                     , cInstEdges = [edge]
                     }
                 result = normalizeRaw constraint
-            -- Type error: TyCon vs Arrow, edge is kept
+            -- Type error: TestTyCon vs Arrow, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
-        it "keeps Arrow ≤ TyCon as type error" $ do
+        it "keeps Arrow ≤ TestTyCon as type error" $ do
             -- (Int → Bool) ≤ List α is a type error
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                boolNode = TyBase (NodeId 2) (BaseTy "Bool")
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                boolNode = TestTyBase (NodeId 2) (BaseTy "Bool")
                 arr = TyArrow (NodeId 3) (NodeId 1) (NodeId 2)
-                list1 = TyCon (NodeId 4) (BaseTy "List") (pure (NodeId 0))
+                list1 = TestTyCon (NodeId 4) (BaseTy "List") (pure (NodeId 0))
                 edge = InstEdge (EdgeId 0) (NodeId 3) (NodeId 4)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -691,11 +835,11 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Type error: Arrow vs TyCon, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
-        it "keeps TyCon ≤ Base as type error" $ do
+        it "keeps TestTyCon ≤ Base as type error" $ do
             -- List α ≤ Int is a type error
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                list1 = TestTyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
                 edge = InstEdge (EdgeId 0) (NodeId 2) (NodeId 1)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -703,14 +847,14 @@ spec = describe "Phase 2 — Normalization" $ do
                     , cInstEdges = [edge]
                     }
                 result = normalizeRaw constraint
-            -- Type error: TyCon vs Base, edge is kept
+            -- Type error: TestTyCon vs Base, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
-        it "keeps Base ≤ TyCon as type error" $ do
+        it "keeps Base ≤ TestTyCon as type error" $ do
             -- Int ≤ List α is a type error
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                intNode = TyBase (NodeId 1) (BaseTy "Int")
-                list1 = TyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
+                intNode = TestTyBase (NodeId 1) (BaseTy "Int")
+                list1 = TestTyCon (NodeId 2) (BaseTy "List") (pure (NodeId 0))
                 edge = InstEdge (EdgeId 0) (NodeId 1) (NodeId 2)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -721,14 +865,14 @@ spec = describe "Phase 2 — Normalization" $ do
             -- Type error: Base vs TyCon, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
-        it "decomposes multi-arg TyCon ≤ TyCon" $ do
+        it "decomposes multi-arg TestTyCon ≤ TyCon" $ do
             -- Either α β ≤ Either Int Bool should decompose to α = Int, β = Bool
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 beta = TyVar { tnId = NodeId 1, tnBound = Nothing }
-                intNode = TyBase (NodeId 2) (BaseTy "Int")
-                boolNode = TyBase (NodeId 3) (BaseTy "Bool")
-                either1 = TyCon (NodeId 4) (BaseTy "Either") (NodeId 0 :| [NodeId 1])
-                either2 = TyCon (NodeId 5) (BaseTy "Either") (NodeId 2 :| [NodeId 3])
+                intNode = TestTyBase (NodeId 2) (BaseTy "Int")
+                boolNode = TestTyBase (NodeId 3) (BaseTy "Bool")
+                either1 = TestTyCon (NodeId 4) (BaseTy "Either") (NodeId 0 :| [NodeId 1])
+                either2 = TestTyCon (NodeId 5) (BaseTy "Either") (NodeId 2 :| [NodeId 3])
                 edge = InstEdge (EdgeId 0) (NodeId 4) (NodeId 5)
                 constraint = emptyConstraint
                     { cNodes = nodeMapFromList
@@ -757,7 +901,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 other -> expectationFailure ("expected one residual edge, got " ++ show other)
 
         it "wraps residual type-error edges too" $ do
-            let base = TyBase (NodeId 0) (BaseTy "Int")
+            let base = TestTyBase (NodeId 0) (BaseTy "Int")
                 dom = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 cod = TyVar { tnId = NodeId 3, tnBound = Nothing }
                 arr = TyArrow (NodeId 1) (NodeId 2) (NodeId 3)
@@ -792,8 +936,8 @@ spec = describe "Phase 2 — Normalization" $ do
     describe "Thesis obligations" $ do
         it "O07-UNIF-CORE" $ do
             -- Fig 7.3.x Unif: normalize processes unify edges
-            let n0 = TyBase (NodeId 0) (BaseTy "Int")
-                n1 = TyBase (NodeId 1) (BaseTy "Int")
+            let n0 = TestTyBase (NodeId 0) (BaseTy "Int")
+                n1 = TestTyBase (NodeId 1) (BaseTy "Int")
                 c = emptyConstraint
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
@@ -803,8 +947,8 @@ spec = describe "Phase 2 — Normalization" $ do
 
         it "O11-UNIFY-STRUCT" $ do
             -- Structural unify on constraints: normalize merges structurally equal nodes
-            let n0 = TyBase (NodeId 0) (BaseTy "Bool")
-                n1 = TyBase (NodeId 1) (BaseTy "Bool")
+            let n0 = TestTyBase (NodeId 0) (BaseTy "Bool")
+                n1 = TestTyBase (NodeId 1) (BaseTy "Bool")
                 c = emptyConstraint
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
@@ -815,7 +959,7 @@ spec = describe "Phase 2 — Normalization" $ do
         it "O12-NORM-GRAFT" $ do
             -- Graft inst edges: normalize converts var≤base inst edges to unify edges
             let var = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                base = TyBase (NodeId 1) (BaseTy "Int")
+                base = TestTyBase (NodeId 1) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 c = emptyConstraint
                     { cNodes = nodeMapFromList [(0, var), (1, base)]
@@ -849,7 +993,7 @@ spec = describe "Phase 2 — Normalization" $ do
         it "O12-NORM-FIXPOINT" $ do
             -- Normalize to fixed point: applying normalize twice yields same result
             let n0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                n1 = TyBase (NodeId 1) (BaseTy "Int")
+                n1 = TestTyBase (NodeId 1) (BaseTy "Int")
                 edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
                 c = emptyConstraint
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]

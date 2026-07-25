@@ -1,28 +1,32 @@
 module MLF.Frontend.Program.Prelude
-  ( preludeSource,
+  ( preludeSourcePath,
+    preludeSource,
     preludeProgram,
     preludeLocatedProgram,
     withPreludePackage,
     withPreludeLocatedPackage,
-    withPrelude,
-    withPreludeLocated,
+    withPreludeLocatedPackageIfImported,
   )
 where
 
 import MLF.Frontend.Parse.Program (parseLocatedProgramWithFile)
 import MLF.Frontend.Program.Package
-    ( LocatedProgramPackage
+    ( LocatedProgramPackage (..)
+    , LocatedProgramSourceUnit
+        ( locatedProgramSourceUnitModules
+        )
     , ProgramPackage
-    , locatedProgramPackageProgram
-    , locatedProgramSourceUnitFromLocated
     , prependLocatedProgramSourceUnit
     , prependProgramSourceUnit
-    , programPackageProgram
-    , programSourceUnitFromProgram
-    , trivialLocatedProgramPackage
-    , trivialProgramPackage
+    )
+import MLF.Frontend.Program.Package.Internal
+    ( builtinPreludeLocatedProgramSourceUnit
+    , builtinPreludeProgramSourceUnit
     )
 import qualified MLF.Frontend.Syntax.Program as P
+
+preludeSourcePath :: FilePath
+preludeSourcePath = "<mlfp-prelude>"
 
 preludeSource :: String
 preludeSource =
@@ -151,7 +155,7 @@ preludeSource =
 
 preludeLocatedProgram :: P.LocatedProgram
 preludeLocatedProgram =
-  case parseLocatedProgramWithFile "<mlfp-prelude>" preludeSource of
+  case parseLocatedProgramWithFile preludeSourcePath preludeSource of
     Right program -> program
     Left err -> error ("internal Prelude failed to parse: " ++ show err)
 
@@ -160,16 +164,28 @@ preludeProgram = P.locatedProgram preludeLocatedProgram
 
 withPreludePackage :: ProgramPackage -> ProgramPackage
 withPreludePackage =
-  prependProgramSourceUnit (programSourceUnitFromProgram preludeProgram)
+  prependProgramSourceUnit (builtinPreludeProgramSourceUnit preludeSourcePath preludeProgram)
 
 withPreludeLocatedPackage :: LocatedProgramPackage -> LocatedProgramPackage
 withPreludeLocatedPackage =
-  prependLocatedProgramSourceUnit (locatedProgramSourceUnitFromLocated preludeLocatedProgram)
+  prependLocatedProgramSourceUnit (builtinPreludeLocatedProgramSourceUnit preludeLocatedProgram)
 
-withPrelude :: P.Program -> P.Program
-withPrelude program =
-  programPackageProgram (withPreludePackage (trivialProgramPackage program))
-
-withPreludeLocated :: P.LocatedProgram -> P.LocatedProgram
-withPreludeLocated program =
-  locatedProgramPackageProgram (withPreludeLocatedPackage (trivialLocatedProgramPackage program))
+-- Package-loading owners use this constructor so the package shape follows
+-- source imports: inject the builtin Prelude exactly when it is required and
+-- no package source unit already provides a Prelude module.
+withPreludeLocatedPackageIfImported ::
+  LocatedProgramPackage ->
+  LocatedProgramPackage
+withPreludeLocatedPackageIfImported package
+  | any importsPrelude modules0
+      && not (any ((== "Prelude") . P.moduleName) modules0) =
+      withPreludeLocatedPackage package
+  | otherwise =
+      package
+  where
+    modules0 =
+      concatMap
+        locatedProgramSourceUnitModules
+        (locatedProgramPackageSourceUnits package)
+    importsPrelude =
+      any ((== "Prelude") . P.importModuleName) . P.moduleImports

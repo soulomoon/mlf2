@@ -2,6 +2,7 @@
 
 module ConstraintGenSpec (spec) where
 
+import IdentityTestSupport
 import Control.Monad (filterM, forM, forM_, when)
 import Data.List (nub)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -12,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, nodeKind, NodeKind(..))
+import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, lookupBindParent, nodeKind, NodeKind(..))
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
@@ -20,15 +21,33 @@ import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Frontend.ConstraintGen
     ( AnnExpr (..)
+    , InstantiationSite (..)
+    , InstantiationTargetTopology (..)
     , ExternalBinding (..)
     , ExternalBindingMode (..)
     , externalBindingIdentityFromDetails
     , generateConstraintsCore
     , generateConstraintsCoreWithExternalBindings
+    , generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+    , generateResolvedConstraintsCore
+    , generateResolvedConstraintsCoreWithExternalBindings
     )
+import MLF.Elab.Run.Annotation (mapAnnNodes)
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.API hiding (lookupNode)
 import MLF.Pipeline (ConstraintError(..), ConstraintResult(..), defaultTraceConfig, inferConstraintGraph)
-import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), UniqueIdentity (..), idDetailsSameIdentity, localRefFromIdentity)
+import MLF.Types.Identity
+    ( IdDetails (..)
+    , LocalIdentity (..)
+    , StructuralTypeBinderRole (..)
+    , TypeBinderIdentity
+    , UniqueIdentity (..)
+    , idDetailsSameIdentity
+    , initialIdentityGenerator
+    , localRefFromIdentity
+    , typeBinderIdentityFromStructural
+    , typeBinderIdentityFromUnique
+    )
 import SpecUtil
     ( expectRight
     , lookupNode
@@ -45,6 +64,12 @@ inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError (Constraint
 inferConstraintGraphDefault expr =
     inferConstraintGraph Set.empty (unsafeNormalizeExpr expr)
 
+inferConstraintGraphWithTypeHeads :: [String] -> SurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)
+inferConstraintGraphWithTypeHeads names expr =
+    inferConstraintGraph
+        (Set.fromList (map testTypeIdentity names))
+        (unsafeNormalizeExpr expr)
+
 localDetails :: Int -> String -> IdDetails
 localDetails unique name =
     LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity unique)) name)
@@ -54,13 +79,183 @@ monomorphicExternalBinding details =
     ExternalBinding
         { externalBindingType = STBase "Int"
         , externalBindingMode = ExternalBindingMonomorphic
-        , externalBindingIdentity = Just (externalBindingIdentityFromDetails details)
+        , externalBindingIdentity = externalBindingIdentityFromDetails details
         , externalBindingTypeHeadIdentities = Map.empty
         , externalBindingTypeBinderIdentities = Map.empty
         }
 
+expectSourceBinderIdentityNodes :: TypeBinderIdentity -> (TyNode -> Bool) -> ConstraintResult p -> Expectation
+expectSourceBinderIdentityNodes expected isOwner result = do
+    let identities = crSourceTypeBinderIdentities result
+        nodes = cNodes (crConstraint result)
+        identityNodes =
+            [ node
+            | (key, identity) <- IntMap.toList identities
+            , identity == expected
+            , Just node <- [lookupNodeMaybe nodes (NodeId key)]
+            ]
+    IntMap.null identities `shouldBe` False
+    Set.fromList (IntMap.elems identities) `shouldBe` Set.singleton expected
+    identityNodes `shouldSatisfy` any isLexicalBinder
+    identityNodes `shouldSatisfy` any isOwner
+    forM_ identityNodes $ \node ->
+        if isLexicalBinder node || isOwner node
+            then pure ()
+            else expectationFailure ("Expected source identity on a lexical binder or its owner, saw " ++ show node)
+  where
+    isLexicalBinder TyVar {} = True
+    isLexicalBinder _ = False
+
+isForallOwner :: TyNode -> Bool
+isForallOwner TyForall {} = True
+isForallOwner _ = False
+
+isMuOwner :: TyNode -> Bool
+isMuOwner TyMu {} = True
+isMuOwner _ = False
+
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
+    describe "Source binder identities" $ do
+        it "records a known semantic identity on bound forall nodes" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991850)
+                expr =
+                    EAnn
+                        (ELam "x" (EVar "x"))
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+            expectRight
+                ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                    initialIdentityGenerator
+                    Set.empty
+                    Map.empty
+                    (Map.singleton "a" identity)
+                    Map.empty
+                    (unsafeNormalizeExpr expr)
+                )
+                (expectSourceBinderIdentityNodes identity isForallOwner)
+
+        it "records a known semantic identity on bound structural mu nodes" $ do
+            let identity =
+                    typeBinderIdentityFromStructural
+                        (UniqueIdentity 991851)
+                        StructuralSelfBinder
+                expr =
+                    EAnn
+                        (ELam "x" (EVar "x"))
+                        (STMu "self" (STArrow (STVar "self") (STVar "self")))
+            expectRight
+                ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                    initialIdentityGenerator
+                    Set.empty
+                    Map.empty
+                    (Map.singleton "self" identity)
+                    Map.empty
+                    (unsafeNormalizeExpr expr)
+                )
+                (expectSourceBinderIdentityNodes identity isMuOwner)
+
+        it "records a bare annotated lambda parameter as the resolved source binder" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991852)
+                expr = ELamAnn "x" (STVar "a") (EVar "x")
+            result <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "a" identity)
+                        Map.empty
+                        (unsafeNormalizeExpr expr)
+                    )
+            case crAnnotated result of
+                ALam _ _ paramNode _ _ _ _ ->
+                    IntMap.lookup (getNodeId paramNode) (crSourceTypeBinderIdentities result)
+                        `shouldBe` Just identity
+                other -> expectationFailure ("Expected annotated lambda, saw " ++ show other)
+
+        it "propagates a source binder identity to polymorphic occurrence expansions" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991853)
+                annotation =
+                    STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+                expr =
+                    ELet
+                        "id"
+                        (EAnn (ELam "x" (EVar "x")) annotation)
+                        (EVar "id")
+            result <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "a" identity)
+                        Map.empty
+                        (unsafeNormalizeExpr expr)
+                    )
+            occurrenceNode <-
+                case crAnnotated result of
+                    ALet _ _ _ _ _ _ _ (ALetScope (AResolvedVar _ "id" nid) _ _) _ ->
+                        pure nid
+                    other ->
+                        expectationFailure ("Expected a polymorphic let occurrence, saw " ++ show other)
+                            >> fail "missing polymorphic occurrence"
+            case lookupNodeMaybe (cNodes (crConstraint result)) occurrenceNode of
+                Just TyExp {} -> pure ()
+                other -> expectationFailure ("Expected a TyExp occurrence, saw " ++ show other)
+            IntMap.lookup
+                (getNodeId occurrenceNode)
+                (crSourceTypeBinderIdentities result)
+                `shouldBe` Just identity
+
+        it "records an external scheme's own binders without hiding inherited free binder identities" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991854)
+                inheritedIdentity =
+                    typeBinderIdentityFromUnique (UniqueIdentity 991856)
+                details = localDetails 991855 "externalId"
+                externalBinding =
+                    ExternalBinding
+                        { externalBindingType =
+                            STForall
+                                "a"
+                                Nothing
+                                (STArrow (STVar "a") (STVar "ambient"))
+                        , externalBindingMode = ExternalBindingScheme
+                        , externalBindingIdentity =
+                            externalBindingIdentityFromDetails details
+                        , externalBindingTypeHeadIdentities = Map.empty
+                        , externalBindingTypeBinderIdentities =
+                            Map.singleton "a" identity
+                        }
+            scopedResult <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "ambient" inheritedIdentity)
+                        (Map.singleton "externalId" externalBinding)
+                        (unsafeNormalizeExpr (EVar "externalId"))
+                    )
+            let identities =
+                    crSourceTypeBinderIdentities scopedResult
+                nodes = cNodes (crConstraint scopedResult)
+                identityNodes expected =
+                    [ node
+                    | (key, actual) <- IntMap.toList identities
+                    , actual == expected
+                    , Just node <- [lookupNodeMaybe nodes (NodeId key)]
+                    ]
+            Set.fromList (IntMap.elems identities)
+                `shouldBe` Set.fromList [identity, inheritedIdentity]
+            identityNodes identity `shouldSatisfy` any isForallOwner
+            identityNodes inheritedIdentity
+                `shouldSatisfy` any
+                    ( \node ->
+                        case node of
+                            TyVar {} -> True
+                            _ -> False
+                    )
+
     describe "Literals" $ do
         it "creates a single base node for integer literals" $ do
             let expr = ELit (LInt 42)
@@ -81,7 +276,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "records polymorphic base symbols in the constraint" $ do
             let expr = ELit (LInt 1)
-                polySyms = Set.fromList [BaseTy "Int"]
+                polySyms = Set.fromList [testTypeIdentity "Int"]
             expectRight (inferConstraintGraph polySyms expr) $ \result -> do
                 cPolySyms (crConstraint result) `shouldBe` polySyms
 
@@ -132,19 +327,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     Just TyVar{} -> pure ()
                     other -> expectationFailure $ "Root is not the trivial scheme var: " ++ show other
                 case bodyAnn of
-                    AAnn (AResolvedVar _ "x" useNode) annNode edgeId -> do
+                    ALetScope (AResolvedVar _ "x" useNode) annNode edgeId -> do
                         annNode `shouldBe` resNode
+                        IntSet.member (getEdgeId edgeId) (cLetEdges constraint) `shouldBe` True
+                        IntSet.member (getEdgeId edgeId) (cAnnEdges constraint) `shouldBe` False
                         case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
                             other -> expectationFailure $ "Expected TyExp use of let-bound x, saw " ++ show other
                         let matchingEdges =
                                 [ (instLeft edge, instRight edge)
                                 | edge@(InstEdge eid _ _) <- cInstEdges constraint
-                                , eid == edgeId
+                                , IntSet.member (getEdgeId eid) (cLetEdges constraint)
                                 ]
                         matchingEdges `shouldBe` [(useNode, resNode)]
+                        IntSet.intersection (cAnnEdges constraint) (cLetEdges constraint)
+                            `shouldBe` IntSet.empty
                     other ->
-                        expectationFailure $ "Expected let body annotation to be AAnn, saw " ++ show other
+                        expectationFailure $ "Expected let-scope body annotation, saw " ++ show other
 
         -- Shadowing should behave like lexical scope: a nested let reuses the
         -- same variable name but its reference must point at the innermost binding.
@@ -161,7 +360,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 (innerSchemeRoot, innerBodyAnn) <- case crAnnotated result of
-                    ALet _ _ _ _ _ _ _ (AAnn innerAnn _ _) _ ->
+                    ALet _ _ _ _ _ _ _ (ALetScope innerAnn _ _) _ ->
                         case innerAnn of
                             ALet _ _ _ schemeRoot' _ _ _ bodyAnn' _ ->
                                 pure (schemeRoot', bodyAnn')
@@ -169,7 +368,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 expectationFailure ("Expected nested ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                     other -> expectationFailure ("Expected nested ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 case innerBodyAnn of
-                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
+                    ALetScope (AResolvedVar _ "x" useNode) _ _ -> do
                         case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` innerSchemeRoot
                             other -> expectationFailure $ "Expected TyExp for inner x, saw " ++ show other
@@ -190,9 +389,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     EResolvedLam outerDetails "same" $
                         EResolvedLam innerDetails "same" $
                             EResolvedVar outerDetails "$stale_outer_display"
-            expectRight (generateConstraintsCore Set.empty expr) $ \result ->
+            expectRight (generateResolvedConstraintsCore Set.empty expr) $ \result ->
                 case crAnnotated result of
-                    ALam _ (Just outerBinder) outerNode _ (ALam _ (Just innerBinder) _ _ (AResolvedVar occurrenceDetails displayName occurrenceNode) _) _ -> do
+                    ALam _ outerBinder outerNode _ (ALam _ innerBinder _ _ (AResolvedVar occurrenceDetails displayName occurrenceNode) _ _) _ _ -> do
                         outerBinder `shouldBe` outerDetails
                         innerBinder `shouldBe` innerDetails
                         occurrenceDetails `shouldBe` outerDetails
@@ -206,7 +405,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 missingDetails = localDetails 91004 "same"
                 expr =
                     EResolvedLam binderDetails "same" (EResolvedVar missingDetails "same")
-            generateConstraintsCore Set.empty expr `shouldBe` Left (UnknownVariable "same")
+            generateResolvedConstraintsCore Set.empty expr `shouldBe` Left (UnknownVariable "same")
 
         it "keeps an identity-bearing let local instead of rematerializing a same-named external" $ do
             let binderDetails = localDetails 91007 "$runtime_local"
@@ -219,10 +418,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         (ELit (LInt 1))
                         (EResolvedVar binderDetails "$stale_local_display")
             expectRight
-                (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "same" externalBinding) expr)
+                (generateResolvedConstraintsCoreWithExternalBindings Set.empty (Map.singleton "same" externalBinding) expr)
                 $ \result ->
                     case crAnnotated result of
-                        ALet _ (Just actualBinder) _ schemeRoot _ _ _ (AAnn (AResolvedVar occurrenceDetails "$stale_local_display" occurrenceNode) _ _) _ -> do
+                        ALet _ actualBinder _ schemeRoot _ _ _ (ALetScope (AResolvedVar occurrenceDetails "$stale_local_display" occurrenceNode) _ _) _ -> do
                             actualBinder `shouldBe` binderDetails
                             occurrenceDetails `shouldBe` binderDetails
                             case lookupNodeMaybe (cNodes (crConstraint result)) occurrenceNode of
@@ -246,26 +445,118 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 externalBinding = monomorphicExternalBinding details
                 expr = EResolvedVar details "$stale_external_display"
             expectRight
-                (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "$runtime_external" externalBinding) expr)
+                (generateResolvedConstraintsCoreWithExternalBindings Set.empty (Map.singleton "$runtime_external" externalBinding) expr)
                 $ \result ->
                     case crAnnotated result of
                         AResolvedVar occurrenceDetails "$stale_external_display" _ ->
                             occurrenceDetails `shouldBe` details
                         other -> expectationFailure ("expected identity-bearing external occurrence, saw " ++ show other)
 
+        it "materializes a monomorphic external's authoritative source type" $ do
+            let details = localDetails 91009 "$runtime_external"
+                externalBinding = monomorphicExternalBinding details
+                expr = EResolvedVar details "$stale_external_display"
+            expectRight
+                (generateResolvedConstraintsCoreWithExternalBindings Set.empty (Map.singleton "$runtime_external" externalBinding) expr)
+                $ \result ->
+                    case crAnnotated result of
+                        AResolvedVar occurrenceDetails "$stale_external_display" occurrenceNode -> do
+                            occurrenceDetails `shouldBe` details
+                            case lookupNodeMaybe (cNodes (crConstraint result)) occurrenceNode of
+                                Just TyVar{tnBound = Just sourceNode} ->
+                                    case lookupNodeMaybe (cNodes (crConstraint result)) sourceNode of
+                                        Just TyBase{tnBase = BaseTy "Int"} -> pure ()
+                                        other -> expectationFailure ("expected exact Int source node, saw " ++ show other)
+                                other -> expectationFailure ("expected exact monomorphic wrapper, saw " ++ show other)
+                        other -> expectationFailure ("expected identity-bearing external occurrence, saw " ++ show other)
+
     describe "Applications" $ do
+        it "maps only prepared instantiation endpoints" $ do
+            let edgeId = EdgeId 17
+                allocatedSource = NodeId 101
+                allocatedTarget = NodeId 102
+                allocatedDomain = NodeId 103
+                allocatedCodomain = NodeId 104
+                site =
+                    InstantiationSite
+                        { instantiationSiteEdgeId = edgeId
+                        , instantiationSiteAllocatedSource = allocatedSource
+                        , instantiationSiteAllocatedTarget = allocatedTarget
+                        , instantiationSiteSource = allocatedSource
+                        , instantiationSiteTarget = allocatedTarget
+                        , instantiationSiteTargetTopology =
+                            ArrowInstantiationTarget
+                                { instantiationArrowAllocatedDomain = allocatedDomain
+                                , instantiationArrowAllocatedCodomain = allocatedCodomain
+                                , instantiationArrowDomain = allocatedDomain
+                                , instantiationArrowCodomain = allocatedCodomain
+                                }
+                        }
+                mappedAnn =
+                    mapAnnNodes
+                        (\(NodeId nodeKey) -> NodeId (nodeKey + 1000))
+                        (AApp (ALit (LInt 0) (NodeId 105)) (ALit (LInt 1) (NodeId 106)) site site (NodeId 107))
+            case mappedAnn of
+                AApp _ _ mapped _ _ -> do
+                    instantiationSiteEdgeId mapped `shouldBe` edgeId
+                    instantiationSiteAllocatedSource mapped `shouldBe` allocatedSource
+                    instantiationSiteAllocatedTarget mapped `shouldBe` allocatedTarget
+                    instantiationSiteSource mapped `shouldBe` NodeId 1101
+                    instantiationSiteTarget mapped `shouldBe` NodeId 1102
+                    instantiationSiteTargetTopology mapped
+                        `shouldBe` ArrowInstantiationTarget
+                            { instantiationArrowAllocatedDomain = allocatedDomain
+                            , instantiationArrowAllocatedCodomain = allocatedCodomain
+                            , instantiationArrowDomain = NodeId 1103
+                            , instantiationArrowCodomain = NodeId 1104
+                            }
+                other -> expectationFailure ("expected mapped application, saw " ++ show other)
+
         it "emits instantiation edges for both function and argument" $ do
             let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 1))
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     instEdges = cInstEdges constraint
-                length instEdges `shouldBe` 2
+                length instEdges `shouldBe` 3
+                forM_ instEdges $ \edge ->
+                    case lookupBindParent constraint (typeRef (instRight edge)) of
+                        Just (GenRef _, _) -> pure ()
+                        parent ->
+                            expectationFailure
+                                ( "The destination of an instantiation edge must be bound on a gen node, saw "
+                                    ++ show parent
+                                )
                 case crAnnotated result of
-                    AApp _ _ funEid argEid _ -> do
+                    AApp (ALam _ _ _ _ _ bodyEid _) _ funSite argSite appResult -> do
+                        let funEid = instantiationSiteEdgeId funSite
+                            argEid = instantiationSiteEdgeId argSite
                         funEid `shouldNotBe` argEid
+                        bodyEid `shouldNotBe` funEid
+                        bodyEid `shouldNotBe` argEid
                         let edgeIds = [eid | InstEdge eid _ _ <- instEdges]
                         edgeIds `shouldSatisfy` elem funEid
                         edgeIds `shouldSatisfy` elem argEid
+                        edgeIds `shouldSatisfy` elem bodyEid
+                        let edgeFor eid = [edge | edge@(InstEdge eid' _ _) <- instEdges, eid' == eid]
+                        case (edgeFor funEid, edgeFor argEid) of
+                            ([funEdge], [argEdge]) -> do
+                                instantiationSiteAllocatedSource funSite `shouldBe` instLeft funEdge
+                                instantiationSiteAllocatedTarget funSite `shouldBe` instRight funEdge
+                                instantiationSiteSource funSite `shouldBe` instLeft funEdge
+                                instantiationSiteTarget funSite `shouldBe` instRight funEdge
+                                instantiationSiteAllocatedSource argSite `shouldBe` instLeft argEdge
+                                instantiationSiteAllocatedTarget argSite `shouldBe` instRight argEdge
+                                instantiationSiteSource argSite `shouldBe` instLeft argEdge
+                                instantiationSiteTarget argSite `shouldBe` instRight argEdge
+                                case instantiationSiteTargetTopology funSite of
+                                    ArrowInstantiationTarget domain0 codomain0 domain codomain -> do
+                                        domain0 `shouldBe` instRight argEdge
+                                        domain `shouldBe` instRight argEdge
+                                        codomain0 `shouldBe` appResult
+                                        codomain `shouldBe` appResult
+                                    topology -> expectationFailure ("Expected retained arrow topology, saw " ++ show topology)
+                                instantiationSiteTargetTopology argSite `shouldBe` AtomicInstantiationTarget
+                            edges -> expectationFailure ("Expected exact application edges, saw " ++ show edges)
                     other ->
                         expectationFailure $ "Expected application annotation, saw " ++ show other
 
@@ -275,34 +566,30 @@ spec = describe "Phase 1 — Constraint generation" $ do
             --   λ(x : τ) a  ≜  λ(x) let x = (x : τ) in a  ≜  λ(x) let x = cτ x in a
             --
             -- So Phase 1 should see an ordinary lambda whose body is a let-binding
-            -- with a coercion application as the RHS. The coercion creates a type
-            -- variable with the annotated type as its bound.
+            -- with a coercion application as the RHS. The coercion constructs
+            -- direct rigid and flexible copies of the annotated type.
             let ann = STBase "Int"
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ (Just lamDetails) lamParam _ bodyAnn _ ->
+                    ALam _ lamDetails lamParam _ bodyAnn _ _ ->
                         case bodyAnn of
-                            ALet "x" (Just mediatorDetails) _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
-                                mediatorDetails `shouldSatisfy` idDetailsSameIdentity lamDetails
+                            ALet "x" mediatorDetails _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                                mediatorDetails `shouldNotSatisfy` idDetailsSameIdentity lamDetails
                                 schemeNode <- lookupNode nodes schemeRoot
-                                -- With coercion-based desugaring, the scheme root is a type
-                                -- variable (the coercion's codomain), not the base type directly
                                 case schemeNode of
-                                    TyVar { tnBound = Just boundId } -> do
-                                        boundNode <- lookupNode nodes boundId
-                                        case boundNode of
-                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                            other -> expectationFailure $ "Expected Int bound, saw " ++ show other
-                                    other -> expectationFailure $ "Expected TyVar with bound, saw " ++ show other
+                                    TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
+                                    other -> expectationFailure $ "Expected direct Int codomain, saw " ++ show other
                                 case rhsAnn of
-                                    AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    AAnn (AResolvedVar rhsDetails "x" rhsUse) _ _ -> do
+                                        rhsDetails `shouldSatisfy` idDetailsSameIdentity lamDetails
+                                        rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AResolvedVar bodyDetails "x" useNode) _ _ -> do
-                                        bodyDetails `shouldSatisfy` idDetailsSameIdentity lamDetails
+                                    ALetScope (AResolvedVar bodyDetails "x" useNode) _ _ -> do
+                                        bodyDetails `shouldSatisfy` idDetailsSameIdentity mediatorDetails
                                         useTy <- lookupNode nodes useNode
                                         case useTy of
                                             TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
@@ -321,12 +608,17 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 schemeRoot <- case crAnnotated result of
                     ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
-                body <- lookupNode nodes schemeRoot
-                -- Expect a scheme root Arrow with shared dom/cod.
-                case body of
-                    TyArrow { tnDom = domId, tnCod = codId } -> do
-                        domId `shouldBe` codId
-                    other -> expectationFailure $ "Expected Arrow scheme root, saw " ++ show other
+                -- Figure 8.2.3's Eq-Var case is represented directly: the
+                -- flexible codomain is a copy of the source forall graph.
+                annotation <- lookupNode nodes schemeRoot
+                case annotation of
+                    TyForall {tnBody = bodyId} -> do
+                        body <- lookupNode nodes bodyId
+                        case body of
+                            TyArrow {tnDom = domId, tnCod = codId} ->
+                                domId `shouldBe` codId
+                            other -> expectationFailure $ "Expected Arrow forall body, saw " ++ show other
+                    other -> expectationFailure $ "Expected explicit source forall, saw " ++ show other
 
         it "respects term annotations" $ do
             -- (1 : Int)
@@ -334,13 +626,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                case lookupNodeMaybe nodes (crRoot result) of
-                    Just TyVar { tnBound = Just bnd } -> do
-                        bndNode <- lookupNode nodes bnd
-                        case bndNode of
-                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                            other -> expectationFailure $ "Expected Int bound, saw " ++ show other
-                    other -> expectationFailure $ "Expected Int node, saw " ++ show other
+                rootNode <- lookupNode nodes (crRoot result)
+                case rootNode of
+                    TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
+                    other -> expectationFailure $ "Expected direct Int codomain, saw " ++ show other
 
         it "respects bounded quantification in term annotations (coercion)" $ do
             -- let f = (λx. x : ∀(a ⩾ Int). a -> a) in f
@@ -353,25 +642,24 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 schemeRoot <- case crAnnotated result of
                     ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
-                body <- lookupNode nodes schemeRoot
-                -- Expect a scheme root Arrow with bounded dom.
-                case body of
-                    TyArrow { tnDom = domId } -> do
-                        -- domId is 'a'. Its bound is recorded on the TyVar node.
-                        domNode <- lookupNode nodes domId
-                        case domNode of
-                            TyVar{ tnBound = mb } -> do
-                                case mb of
-                                    Just boundId -> do
-                                        rhs <- lookupNode nodes boundId
-                                        case rhs of
-                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                            other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                    Nothing ->
-                                        expectationFailure "Expected bound for variable, saw Nothing"
-                            other ->
-                                expectationFailure $ "Expected TyVar { tnId = for, tnBound = Nothing } domain, saw " ++ show other
-                    other -> expectationFailure $ "Expected Arrow scheme root, saw " ++ show other
+                annotation <- lookupNode nodes schemeRoot
+                bodyId <- case annotation of
+                    TyForall {tnBody = sourceBody} -> pure sourceBody
+                    other -> expectationFailure ("Expected explicit source forall, saw " ++ show other) >> fail "missing source forall"
+                body <- lookupNode nodes bodyId
+                domId <- case body of
+                    TyArrow {tnDom = dom, tnCod = cod} -> do
+                        dom `shouldBe` cod
+                        pure dom
+                    other -> expectationFailure ("Expected Arrow forall body, saw " ++ show other) >> fail "missing arrow"
+                domNode <- lookupNode nodes domId
+                boundId <- case domNode of
+                    TyVar {tnBound = Just bound} -> pure bound
+                    other -> expectationFailure ("Expected bounded forall binder, saw " ++ show other) >> fail "missing binder bound"
+                rhs <- lookupNode nodes boundId
+                case rhs of
+                    TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
+                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
 
         it "respects instance bounds in annotated lambda parameters (coercion)" $ do
             -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding with a coercion term.
@@ -382,28 +670,30 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ _ lamParam _ bodyAnn _ ->
+                    ALam _ _ lamParam _ bodyAnn _ _ ->
                         case bodyAnn of
                             ALet "x" _ _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
                                 case rhsAnn of
                                     AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
+                                    ALetScope (AResolvedVar _ "x" useNode) _ _ -> do
                                         case lookupNodeMaybe nodes useNode of
                                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
                                             other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
                                     other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
-                                annVar <- lookupNode nodes schemeRoot
-                                case annVar of
-                                    TyVar { tnBound = Just boundId } -> do
-                                        rhs <- lookupNode nodes boundId
-                                        case rhs of
-                                            TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                            other -> expectationFailure $ "Expected bound Int, saw " ++ show other
-                                    TyVar { tnBound = Nothing } ->
-                                        expectationFailure "Expected bound for variable, saw Nothing"
-                                    other -> expectationFailure $ "Expected TyVar scheme root node, saw " ++ show other
+                                annotation <- lookupNode nodes schemeRoot
+                                binderId <- case annotation of
+                                    TyForall {tnBody = sourceBinder} -> pure sourceBinder
+                                    other -> expectationFailure ("Expected explicit source forall, saw " ++ show other) >> fail "missing source forall"
+                                binder <- lookupNode nodes binderId
+                                boundId <- case binder of
+                                    TyVar {tnBound = Just bound} -> pure bound
+                                    other -> expectationFailure ("Expected bounded forall binder, saw " ++ show other) >> fail "missing binder bound"
+                                rhs <- lookupNode nodes boundId
+                                case rhs of
+                                    TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
+                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
                             other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
@@ -429,24 +719,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ _ lamParam _ bodyAnn _ ->
+                    ALam _ _ lamParam _ bodyAnn _ _ ->
                         case bodyAnn of
                             ALet "x" _ _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
                                 case rhsAnn of
                                     AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
+                                    ALetScope (AResolvedVar _ "x" useNode) _ _ -> do
                                         useTy <- lookupNode nodes useNode
                                         case useTy of
                                             TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
                                             other -> expectationFailure $ "Expected TyExp use of let-bound x, saw " ++ show other
                                     other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
-                                annNode' <- lookupNode nodes schemeRoot
-                                case annNode' of
-                                    -- Bottom is internalized as a fresh TyVar.
-                                    TyVar {} -> pure ()
-                                    other -> expectationFailure $ "Expected TyVar scheme root for Bottom, saw " ++ show other
+                                schemeNode <- lookupNode nodes schemeRoot
+                                case schemeNode of
+                                    TyVar {tnBound = Nothing} -> pure ()
+                                    other -> expectationFailure $ "Expected direct Bottom codomain, saw " ++ show other
                             other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
@@ -462,27 +751,27 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 case crAnnotated result of
                     ALet _ _ _ _ _ _ _ bodyAnn _ ->
                         case bodyAnn of
-                            AAnn innerAnn _ _ ->
-                                case innerAnn of
-                                    AAnn _ _ edgeId ->
-                                        case [edge | edge@(InstEdge eid _ _) <- cInstEdges constraint, eid == edgeId] of
-                                            [InstEdge _ left _] -> do
-                                                leftNode <- lookupNode nodes left
-                                                case leftNode of
-                                                    TyExp { tnBody = bodyId } -> do
-                                                        bodyNode <- lookupNode nodes bodyId
-                                                        case bodyNode of
-                                                            TyExp {} ->
-                                                                expectationFailure "Expected a single TyExp between the annotation edge and scheme root"
-                                                            _ -> pure ()
-                                                    other ->
-                                                        expectationFailure $ "Expected annotation edge left to be TyExp, saw " ++ show other
+                            ALetScope (AAnn _ _ edgeId) _ letEdgeId -> do
+                                IntSet.member (getEdgeId edgeId) (cAnnEdges constraint) `shouldBe` True
+                                IntSet.member (getEdgeId edgeId) (cLetEdges constraint) `shouldBe` False
+                                IntSet.member (getEdgeId letEdgeId) (cLetEdges constraint) `shouldBe` True
+                                IntSet.member (getEdgeId letEdgeId) (cAnnEdges constraint) `shouldBe` False
+                                case [edge | edge@(InstEdge eid _ _) <- cInstEdges constraint, eid == edgeId] of
+                                    [InstEdge _ left _] -> do
+                                        leftNode <- lookupNode nodes left
+                                        case leftNode of
+                                            TyExp { tnBody = bodyId } -> do
+                                                bodyNode <- lookupNode nodes bodyId
+                                                case bodyNode of
+                                                    TyExp {} ->
+                                                        expectationFailure "Expected a single TyExp between the annotation edge and scheme root"
+                                                    _ -> pure ()
                                             other ->
-                                                expectationFailure $ "Expected 1 annotation inst edge, saw " ++ show other
+                                                expectationFailure $ "Expected annotation edge left to be TyExp, saw " ++ show other
                                     other ->
-                                        expectationFailure $ "Expected inner annotation to be AAnn, saw " ++ show other
+                                        expectationFailure $ "Expected 1 annotation inst edge, saw " ++ show other
                             other ->
-                                expectationFailure $ "Expected let body annotation to be AAnn, saw " ++ show other
+                                expectationFailure $ "Expected source annotation inside let-scope metadata, saw " ++ show other
                     other ->
                         expectationFailure $ "Expected ALet annotation, saw " ++ show other
 
@@ -511,43 +800,97 @@ spec = describe "Phase 1 — Constraint generation" $ do
                              ALit (LInt 1) _ -> pure ()
                              _ -> expectationFailure "RHS annotation mismatch"
                          case bodyAnn of
-                             AAnn (AResolvedVar _ "x" _) _ _ -> pure ()
+                             ALetScope (AResolvedVar _ "x" _) _ _ -> pure ()
                              _ -> expectationFailure "Body annotation mismatch"
                      _ -> expectationFailure "Expected ALet annotation"
 
+        it "records an annotated RHS scheme owner separately from its lexical Gamma" $ do
+            let expr =
+                    ELet "x"
+                        (EAnn (ELit (LInt 1)) (STBase "Int"))
+                        (EVar "x")
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let constraint = crConstraint result
+                    genNodes = getGenNodeMap (cGenNodes constraint)
+                case crAnnotated result of
+                    ALet _ _ schemeGen schemeRoot _ rhsGen (AAnn _ annNode _) _ _ -> do
+                        annNode `shouldBe` schemeRoot
+                        schemeGen `shouldNotBe` rhsGen
+                        lookupBindParent constraint (typeRef schemeRoot)
+                            `shouldBe` Just (genRef schemeGen, BindFlex)
+                        case IntMap.lookup (getGenNodeId schemeGen) genNodes of
+                            Just gen -> gnSchemes gen `shouldBe` [schemeRoot]
+                            Nothing -> expectationFailure "Missing annotation-owned scheme gen"
+                        lookupBindParent constraint (genRef schemeGen)
+                            `shouldBe` Just (genRef rhsGen, BindFlex)
+                    other ->
+                        expectationFailure
+                            ("Expected annotated let with distinct scheme and lexical owners, saw " ++ show other)
+
     describe "Lambda nodes" $ do
-        -- A λx.x term yields a single parameter node whose identifier appears in
-        -- both the domain and codomain of the arrow node, reflecting the shared
-        -- variable in the graphic type.
-        it "builds a shared parameter node when translating lambdas" $ do
+        it "constructs the paper lambda-body edge to a fresh codomain" $ do
             let expr = ELam "x" (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
-                let nodes = nodeMapElems (cNodes (crConstraint result))
-                    arrowNodes = [n | n@TyArrow {} <- nodes]
-                    varNodes = [n | n@TyVar {} <- nodes]
-                    expNodes = [n | n@TyExp {} <- nodes]
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                case crAnnotated result of
+                    ALam _ _ paramNode scopeRoot bodyAnn bodyEid lambdaNode -> do
+                        bodyNode <- case bodyAnn of
+                            AResolvedVar _ "x" nid -> pure nid
+                            other -> expectationFailure ("Expected lambda-bound body occurrence, saw " ++ show other) >> fail "missing body node"
+                        bodyNode `shouldBe` paramNode
+                        bodyEdge <- case [edge | edge@(InstEdge eid _ _) <- cInstEdges constraint, eid == bodyEid] of
+                            [edge] -> pure edge
+                            other -> expectationFailure ("Expected one lambda body edge, saw " ++ show other) >> fail "missing body edge"
+                        arrowNode <- case lookupNodeMaybe nodes lambdaNode of
+                            Just TyVar {tnBound = Just arrowId} -> lookupNode nodes arrowId
+                            other -> expectationFailure ("Expected lambda result bounded by an arrow, saw " ++ show other) >> fail "missing arrow"
+                        case arrowNode of
+                            TyArrow {tnDom = domainNode, tnCod = codomainNode} -> do
+                                domainNode `shouldBe` paramNode
+                                codomainNode `shouldNotBe` bodyNode
+                                instLeft bodyEdge `shouldBe` bodyNode
+                                instRight bodyEdge `shouldBe` codomainNode
+                                lookupBindParent constraint (typeRef codomainNode)
+                                    `shouldBe` Just (genRef scopeRoot, BindFlex)
+                            other -> expectationFailure ("Expected lambda arrow, saw " ++ show other)
+                        IntSet.member (getEdgeId bodyEid) (cAnnEdges constraint) `shouldBe` False
+                        IntSet.member (getEdgeId bodyEid) (cLetEdges constraint) `shouldBe` False
+                        [node | node@TyExp {} <- nodeMapElems nodes] `shouldBe` []
+                    other -> expectationFailure ("Expected ALam annotation, saw " ++ show other)
 
-                -- Monomorphic bindings (lambda parameters) do not introduce `TyExp`.
-                case (arrowNodes, expNodes) of
-                    ([TyArrow { tnId = arrowId, tnDom = dom, tnCod = cod }], []) -> do
-                        dom `shouldBe` cod
-                        let hasParam =
-                                any
-                                    (\n -> case n of
-                                        TyVar{ tnId = nid } -> nid == dom
-                                        _ -> False)
-                                    varNodes
-                            hasRoot =
-                                any
-                                    (\n -> case n of
-                                        TyVar{ tnBound = Just bnd } -> bnd == arrowId
-                                        _ -> False)
-                                    varNodes
-                        if hasParam && hasRoot
-                            then pure ()
-                            else expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes, length expNodes)
-                    _ ->
-                        expectationFailure $ "Unexpected lambda nodes: " ++ show (length arrowNodes, length varNodes, length expNodes)
+        it "constructs the same body edge for compiler-owned exact lambdas" $ do
+            let evidenceDetails =
+                    EvidenceId
+                        (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991852)) "$evidence")
+                reference = ResolvedTermReference evidenceDetails "$evidence"
+                expr = EExactLamNode reference (STBase "Int") (EVarNode reference)
+            expectRight (generateResolvedConstraintsCore Set.empty expr) $ \result -> do
+                let constraint = crConstraint result
+                    nodes = cNodes constraint
+                case crAnnotated result of
+                    ALam _ details paramNode scopeRoot (AResolvedVar occurrenceDetails _ bodyNode) bodyEid lambdaNode -> do
+                        details `shouldBe` evidenceDetails
+                        occurrenceDetails `shouldBe` evidenceDetails
+                        bodyNode `shouldBe` paramNode
+                        bodyEdge <- case [edge | edge@(InstEdge eid _ _) <- cInstEdges constraint, eid == bodyEid] of
+                            [edge] -> pure edge
+                            other -> expectationFailure ("Expected one exact-lambda body edge, saw " ++ show other) >> fail "missing exact body edge"
+                        arrowNode <- case lookupNodeMaybe nodes lambdaNode of
+                            Just TyVar {tnBound = Just arrowId} -> lookupNode nodes arrowId
+                            other -> expectationFailure ("Expected exact lambda result bounded by an arrow, saw " ++ show other) >> fail "missing exact arrow"
+                        case arrowNode of
+                            TyArrow {tnDom = domainNode, tnCod = codomainNode} -> do
+                                domainNode `shouldBe` paramNode
+                                codomainNode `shouldNotBe` bodyNode
+                                instLeft bodyEdge `shouldBe` bodyNode
+                                instRight bodyEdge `shouldBe` codomainNode
+                                lookupBindParent constraint (typeRef codomainNode)
+                                    `shouldBe` Just (genRef scopeRoot, BindFlex)
+                            other -> expectationFailure ("Expected exact lambda arrow, saw " ++ show other)
+                        IntSet.member (getEdgeId bodyEid) (cAnnEdges constraint) `shouldBe` False
+                        IntSet.member (getEdgeId bodyEid) (cLetEdges constraint) `shouldBe` False
+                    other -> expectationFailure ("Expected exact ALam annotation, saw " ++ show other)
 
     describe "Applications" $ do
         -- Verify that application translation produces a single instantiation edge
@@ -563,19 +906,23 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
-                (funEid, argEid, appResult) <- case crAnnotated result of
-                    ALet _ _ _ _ _ _ _ bodyAnn _ ->
+                (lambdaBodyEid, funEid, argEid, appResult) <- case crAnnotated result of
+                    ALet _ _ _ _ _ _ rhsAnn bodyAnn _ -> do
+                        bodyEid <- case rhsAnn of
+                            ALam _ _ _ _ _ eid _ -> pure eid
+                            other -> expectationFailure ("Expected lambda let RHS, saw " ++ show other) >> fail "no lambda body edge"
                         case bodyAnn of
-                            AAnn (AApp _ _ funEid' argEid' resNode) _ _ ->
-                                pure (funEid', argEid', resNode)
+                            ALetScope (AApp _ _ funEid' argEid' resNode) _ _ ->
+                                pure (bodyEid, funEid', argEid', resNode)
                             other -> expectationFailure ("Expected AApp in let body, saw " ++ show other) >> fail "no app"
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no let"
                 let lookupEdge eid =
                         case [edge | edge@(InstEdge eid' _ _) <- insts, eid' == eid] of
                             [edge] -> pure edge
                             other -> expectationFailure ("Expected inst edge " ++ show eid ++ ", saw " ++ show other) >> fail "missing edge"
-                funEdge <- lookupEdge funEid
-                argEdge <- lookupEdge argEid
+                funEdge <- lookupEdge (instantiationSiteEdgeId funEid)
+                argEdge <- lookupEdge (instantiationSiteEdgeId argEid)
+                lambdaBodyEdge <- lookupEdge lambdaBodyEid
                 lhs <- lookupNode nodes (instLeft funEdge)
                 case lhs of
                     -- The usage of 'f' creates a TyExp wrapping the RHS scheme root.
@@ -586,13 +933,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                 arrow <- lookupNode nodes arrowId
                                 case arrow of
                                     TyArrow { tnDom = domId, tnCod = codId } -> do
-                                        domNode <- lookupNode nodes domId
-                                        codNode <- lookupNode nodes codId
-                                        case (domNode, codNode) of
-                                            (TyVar { tnId = domVar }, TyVar { tnId = codVar }) ->
-                                                domVar `shouldBe` codVar
-                                            other ->
-                                                expectationFailure $ "Lambda arrow points to unexpected nodes: " ++ show other
+                                        instLeft lambdaBodyEdge `shouldBe` domId
+                                        instRight lambdaBodyEdge `shouldBe` codId
+                                        domId `shouldNotBe` codId
+                                        lookupNode nodes domId >>= (`shouldSatisfy` isVarNode)
+                                        lookupNode nodes codId >>= (`shouldSatisfy` isVarNode)
                                     other -> expectationFailure $ "Expansion body is not a lambda arrow: " ++ show other
                             other -> expectationFailure $ "Expansion body is not a lambda root var: " ++ show other
                     other -> expectationFailure $ "Instantiation left-hand side is not an expansion: " ++ show other
@@ -617,15 +962,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
-                case cInstEdges constraint of
-                    [edge0, edge1] -> do
-                        let (funEdge, _argEdge) =
-                                case lookupNodeMaybe nodes (instLeft edge0) of
-                                    Just TyVar{ tnBound = Just boundId } ->
-                                        case lookupNodeMaybe nodes boundId of
-                                            Just TyArrow{} -> (edge0, edge1)
-                                            _ -> (edge1, edge0)
-                                    _ -> (edge1, edge0)
+                case crAnnotated result of
+                    AApp (ALam _ _ _ _ _ bodyEid _) _ funSite argSite _ -> do
+                        let lookupEdge eid =
+                                case [edge | edge@(InstEdge eid' _ _) <- cInstEdges constraint, eid' == eid] of
+                                    [edge] -> pure edge
+                                    other -> expectationFailure ("Expected edge " ++ show eid ++ ", saw " ++ show other) >> fail "missing edge"
+                        funEdge <- lookupEdge (instantiationSiteEdgeId funSite)
+                        _argEdge <- lookupEdge (instantiationSiteEdgeId argSite)
+                        _bodyEdge <- lookupEdge bodyEid
                         lhs <- lookupNode nodes (instLeft funEdge)
                         case lhs of
                             TyVar { tnBound = Just boundId } -> do
@@ -634,7 +979,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                     TyArrow {} -> pure ()
                                     other -> expectationFailure $ "Instantiation left-hand side is not an arrow: " ++ show other
                             other -> expectationFailure $ "Instantiation left-hand side is not a lambda root var: " ++ show other
-                    other -> expectationFailure $ "Expected two instantiation edges, saw " ++ show (length other)
+                        length (cInstEdges constraint) `shouldBe` 3
+                    other -> expectationFailure $ "Expected applied lambda annotation, saw " ++ show other
 
         -- Even when an immediately applied lambda uses its argument multiple
         -- times (here via (\f -> let tmp = f 1 in f True) (\x -> x)), the
@@ -701,16 +1047,24 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 case crAnnotated result of
                     ALet _ _ _ _ _ _ _ bodyAnn resNode ->
                         case bodyAnn of
-                            AAnn (ALit (LInt 0) litNode) annNode edgeId -> do
+                            ALetScope (ALit (LInt 0) litNode) annNode edgeId -> do
                                 annNode `shouldBe` resNode
-                                case [edge | edge@(InstEdge eid _ _) <- cInstEdges constraint, eid == edgeId] of
+                                IntSet.member (getEdgeId edgeId) (cLetEdges constraint) `shouldBe` True
+                                IntSet.member (getEdgeId edgeId) (cAnnEdges constraint) `shouldBe` False
+                                case
+                                    [ edge
+                                    | edge@(InstEdge eid _ _) <- cInstEdges constraint
+                                    , IntSet.member (getEdgeId eid) (cLetEdges constraint)
+                                    ] of
                                     [InstEdge _ left right] -> do
                                         left `shouldBe` litNode
-                                        right `shouldBe` annNode
+                                        right `shouldBe` resNode
                                     other ->
                                         expectationFailure $ "Expected 1 let-expression inst edge, saw " ++ show other
+                                IntSet.intersection (cAnnEdges constraint) (cLetEdges constraint)
+                                    `shouldBe` IntSet.empty
                             other ->
-                                expectationFailure $ "Expected let body annotation to be AAnn, saw " ++ show other
+                                expectationFailure $ "Expected let-scope literal body, saw " ++ show other
                     other ->
                         expectationFailure $ "Expected ALet annotation, saw " ++ show other
 
@@ -722,7 +1076,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 (schemeGen, paramId) <- case crAnnotated result of
                     ALet _ _ schemeGen _ _ _ rhsAnn _ _ ->
                         case rhsAnn of
-                            ALam _ _ param _ _ _ -> pure (schemeGen, param)
+                            ALam _ _ param _ _ _ _ -> pure (schemeGen, param)
                             other -> expectationFailure ("Expected lambda RHS, saw " ++ show other) >> fail "no param"
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeGen"
                 case IntMap.lookup (nodeRefKey (typeRef paramId)) bindParents of
@@ -752,7 +1106,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     Just (parent, _) -> parent `shouldBe` genRef innerGen
                     Nothing -> expectationFailure "Missing binding parent for inner let RHS"
 
-        it "binds explicit forall variables under a gen node" $ do
+        it "binds explicit forall variables under the direct forall owner" $ do
             let ann = STForall "a" Nothing (STBase "Int")
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -773,10 +1127,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 schemeGen <- case schemeGens of
                     [gid] -> pure gid
                     _ -> expectationFailure ("Expected single scheme gen, saw " ++ show schemeGens) >> pure (error "unreachable")
+                forallNode <- lookupNode nodes annNode
+                case forallNode of
+                    TyForall {} -> pure ()
+                    other -> expectationFailure ("Expected direct source forall root, saw " ++ show other)
                 let boundChildren =
                         [ nid
                         | (childKey, (parent, _)) <- IntMap.toList bindParents
-                        , parent == genRef schemeGen
+                        , parent == typeRef annNode
                         , TypeRef nid <- [nodeRefFromKey childKey]
                         ]
                 binderVars <- filterM (\nid -> do
@@ -786,6 +1144,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         _ -> False
                     ) boundChildren
                 binderVars `shouldSatisfy` (not . null)
+                lookupBindParent constraint (typeRef annNode)
+                    `shouldBe` Just (genRef schemeGen, BindFlex)
 
         it "produces a valid binding tree" $ do
             let expr =
@@ -813,7 +1173,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ELet "f"
                         (EAnn (ELam "x" (EVar "x")) ann)
                         (EVar "f")
-            result <- requireRight (inferConstraintGraphDefault expr)
+            result <- requireRight (inferConstraintGraphWithTypeHeads ["Either", "List", "Maybe"] expr)
             checkBindingTree (crConstraint result) `shouldBe` Right ()
 
         it "nested forall coercion paths preserve valid binding tree" $ do
@@ -822,7 +1182,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             result <- requireRight (inferConstraintGraphDefault expr)
             checkBindingTree (crConstraint result) `shouldBe` Right ()
 
-        it "elimination rewrite removes eliminated binders from Q(n)" $ do
+        it "keeps retained bounded-scheme wrappers out of the elimination domain" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -836,7 +1196,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 expr =
                     ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
 
-            pres <- requireRight (runToPresolutionDefault Set.empty expr)
+            pres <-
+                requireRight
+                    (runToPresolutionDefault Set.empty expr)
             solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres))
             solved <- requireRight (fromSolveOutput solveOut)
             let cSolved = originalConstraint solved
@@ -852,7 +1214,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
             qn <- fmap concat $ forM schemeGens $ \gid ->
                 requireRight (boundFlexChildren cSolved (genRef gid))
             let qnIds = IntSet.fromList (map getNodeId qn)
-            eliminated `shouldSatisfy` (not . IntSet.null)
+            -- The lower-bounded nested scheme root is retained as structure by
+            -- chi_e, not consumed as an active instantiation binder.  A true
+            -- active-binder elimination is covered by MergeEmissionSpec.
+            eliminated `shouldBe` IntSet.empty
             IntSet.intersection eliminated qnIds `shouldBe` IntSet.empty
 
     describe "Expansion nodes" $ do
@@ -921,7 +1286,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                             Just TyExp{} -> True
                             _ -> False
                     funEdges = filter isTyExpLeft insts
-                length insts `shouldBe` 9
+                -- Six application edges, three let-scope edges, and the
+                -- lambda RHS's Figure 15.3.5 body edge.
+                length insts `shouldBe` 10
                 length funEdges `shouldBe` 3
                 length (nub (map instLeft funEdges)) `shouldBe` 3 -- Each usage has fresh TyExp
 
@@ -935,48 +1302,51 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 length (nub bodyIds) `shouldBe` 1
 
     describe "Higher-order structure" $ do
-        it "creates nested arrow nodes and one instantiation for higher-order lambdas" $ do
+        it "creates application and lambda-body edges for higher-order lambdas" $ do
             let expr = ELam "x" (ELam "y" (EApp (EVar "x") (EVar "y")))
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     nodes = nodeMapElems (cNodes constraint)
                     arrowNodes = [n | n@TyArrow {} <- nodes]
                 length arrowNodes `shouldSatisfy` (>= 2)
-                cInstEdges constraint `shouldSatisfy` ((== 2) . length)
+                -- Two application edges plus one body edge for each lambda.
+                cInstEdges constraint `shouldSatisfy` ((== 4) . length)
 
     describe "Coercion semantics (thesis-exact)" $ do
         -- US-004: Regression tests for thesis-exact coercion behavior
         -- These tests lock in the rigid domain / flexible codomain semantics
         -- described in papers/these-finale-english.txt §12.3.2.2, §15.3.8
 
-        it "coercion domain nodes are restricted but not locked" $ do
-            -- (1 : Int) - the domain copy should be restricted (rigid binding edge)
-            -- but not locked (no rigid ancestor)
+        it "coercion edge destinations are restricted bounded proxies but not locked" $ do
+            -- (1 : Int) - the edge destination should be a restricted proxy
+            -- bounded by the direct rigid domain copy, with no rigid ancestor.
             let ann = STBase "Int"
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                     insts = cInstEdges constraint
-                -- Find the annotation edge (the one with domain as right side)
                 case insts of
-                    [InstEdge _ _ domainNode] -> do
-                        -- Domain node should be restricted (rigid binding edge)
-                        -- but not locked (no rigid ancestor)
-                        kind <- case nodeKind constraint (typeRef domainNode) of
+                    [InstEdge _ _ destinationNode] -> do
+                        domainNode <-
+                            case lookupNodeMaybe (cNodes constraint) destinationNode of
+                                Just TyVar {tnBound = Just domain} -> pure domain
+                                other -> expectationFailure ("Expected bounded annotation destination, saw " ++ show other) >> fail "missing annotation domain"
+                        case lookupNodeMaybe (cNodes constraint) domainNode of
+                            Just TyBase {tnBase = BaseTy "Int"} -> pure ()
+                            other -> expectationFailure ("Expected direct rigid Int domain, saw " ++ show other)
+                        kind <- case nodeKind constraint (typeRef destinationNode) of
                             Right k -> pure k
                             Left err -> expectationFailure (show err) >> pure NodeRoot
                         kind `shouldBe` NodeRestricted
-                        -- "Locked" means flex edge but rigid ancestor; ensure there is
-                        -- no strict rigid ancestor on the binding path.
-                        underRigid <- case isUnderRigidBinder constraint (typeRef domainNode) of
+                        underRigid <- case isUnderRigidBinder constraint (typeRef destinationNode) of
                             Right b -> pure b
                             Left err -> expectationFailure (show err) >> pure True
                         underRigid `shouldBe` False
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
 
-        it "EAnn returns the codomain copy (not domain)" $ do
+        it "constructs direct rigid/flexible copies behind an edge-only destination proxy" $ do
             -- (1 : Int) - the result type should be the codomain copy
-            -- which is distinct from the domain node on the inst edge
+            -- which is distinct from the edge-only destination and its domain
             let ann = STBase "Int"
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -984,25 +1354,263 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     insts = cInstEdges constraint
                     root = crRoot result
                 case insts of
-                    [InstEdge _ _ domainNode] -> do
-                        -- The root (annotation result) should NOT be the domain node
-                        -- It should be the codomain copy
-                        root `shouldNotBe` domainNode
-                        -- Both should be TyVar nodes bound to Int
+                    [InstEdge _ _ destinationNode] -> do
+                        root `shouldNotBe` destinationNode
                         let nodes = cNodes constraint
                         rootNode <- lookupNode nodes root
-                        domNode <- lookupNode nodes domainNode
-                        case (rootNode, domNode) of
-                            (TyVar { tnBound = Just rootBnd }, TyVar { tnBound = Just domBnd }) -> do
-                                rootBndNode <- lookupNode nodes rootBnd
-                                domBndNode <- lookupNode nodes domBnd
-                                case (rootBndNode, domBndNode) of
-                                    (TyBase { tnBase = BaseTy n1 }, TyBase { tnBase = BaseTy n2 }) -> do
-                                        n1 `shouldBe` "Int"
-                                        n2 `shouldBe` "Int"
-                                    other -> expectationFailure $ "Expected Int bases, saw " ++ show other
-                            other -> expectationFailure $ "Expected TyVar nodes, saw " ++ show other
+                        domainNode <-
+                            case lookupNodeMaybe nodes destinationNode of
+                                Just TyVar {tnBound = Just domain} -> pure domain
+                                other -> expectationFailure ("Expected bounded annotation destination, saw " ++ show other) >> fail "missing annotation domain"
+                        destinationNode `shouldNotBe` domainNode
+                        domain <- lookupNode nodes domainNode
+                        case (rootNode, domain) of
+                            (TyBase {tnBase = BaseTy codomainName}, TyBase {tnBase = BaseTy domainName}) -> do
+                                codomainName `shouldBe` "Int"
+                                domainName `shouldBe` "Int"
+                            other -> expectationFailure $ "Expected direct Int copies, saw " ++ show other
+                        nodeKind constraint (typeRef root)
+                            `shouldBe` Right NodeInstantiable
+                        nodeKind constraint (typeRef destinationNode)
+                            `shouldBe` Right NodeRestricted
+                        crAnnSourceTypes result
+                            `shouldBe` IntMap.singleton (getNodeId root) ann
+                        case crAnnotated result of
+                            AAnn _ annNode _ -> annNode `shouldBe` root
+                            other -> expectationFailure ("Expected direct source annotation result, saw " ++ show other)
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
+
+        it "compiler exact annotations construct one direct producer target without a kappa codomain" $ do
+            let ann = STBase "Int"
+                exactTy = RSTBase (Builtins.builtinTypeSymbol "Int")
+                body = ELit (LInt 1)
+            sourceResult <- requireRight (inferConstraintGraphDefault (EAnn body ann))
+            exactResult <- requireRight (inferConstraintGraphDefault (EExactAnn body ann exactTy))
+            let exactConstraint = crConstraint exactResult
+                sourceConstraint = crConstraint sourceResult
+                exactRoot = crRoot exactResult
+                exactGens = IntMap.elems (getGenNodeMap (cGenNodes exactConstraint))
+                sourceGens = IntMap.elems (getGenNodeMap (cGenNodes sourceConstraint))
+            -- Compiler authority stays in the enclosing RHS scope.  Only the
+            -- source kappa form allocates an annotation child gen.
+            length exactGens `shouldBe` 1
+            length sourceGens `shouldBe` 2
+            exactGen <- case exactGens of
+                [gen] -> pure (gnId gen)
+                other -> expectationFailure ("Expected one exact RHS gen, saw " ++ show other) >> fail "missing exact gen"
+            case lookupNodeMaybe (cNodes exactConstraint) exactRoot of
+                Just TyBase {tnBase = BaseTy "Int"} -> pure ()
+                other -> expectationFailure ("Expected direct exact Int target, saw " ++ show other)
+            case cInstEdges exactConstraint of
+                [InstEdge eid source target] -> do
+                    target `shouldNotBe` exactRoot
+                    case lookupNodeMaybe (cNodes exactConstraint) target of
+                        Just TyVar {tnBound = Just targetBody} -> targetBody `shouldBe` exactRoot
+                        other -> expectationFailure ("Expected bounded exact edge destination, saw " ++ show other)
+                    lookupBindParent exactConstraint (typeRef source)
+                        `shouldBe` Just (genRef exactGen, BindFlex)
+                    lookupBindParent exactConstraint (typeRef target)
+                        `shouldBe` Just (genRef exactGen, BindRigid)
+                    IntSet.member (getEdgeId eid) (cAnnEdges exactConstraint)
+                        `shouldBe` False
+                other -> expectationFailure ("Expected one exact authority edge, saw " ++ show other)
+            [node | node@TyForall {} <- nodeMapElems (cNodes exactConstraint)] `shouldBe` []
+            crAnnSourceTypes exactResult
+                `shouldBe` IntMap.singleton (getNodeId exactRoot) ann
+            nodeMapSize (cNodes exactConstraint)
+                `shouldSatisfy` (< nodeMapSize (cNodes sourceConstraint))
+            case lookupNodeMaybe (cNodes sourceConstraint) (crRoot sourceResult) of
+                Just TyBase {tnBase = BaseTy "Int"} -> pure ()
+                other -> expectationFailure ("Expected direct source kappa codomain, saw " ++ show other)
+            case cInstEdges sourceConstraint of
+                [InstEdge eid _ _] ->
+                    IntSet.member (getEdgeId eid) (cAnnEdges sourceConstraint)
+                        `shouldBe` True
+                other -> expectationFailure ("Expected one source annotation edge, saw " ++ show other)
+            case crAnnotated exactResult of
+                AExactAnn {} -> pure ()
+                other -> expectationFailure ("Expected compiler annotation authority, saw " ++ show other)
+            case crAnnotated sourceResult of
+                AExactAnn {} -> expectationFailure "Source EAnn acquired compiler annotation authority"
+                AAnn {} -> pure ()
+                other -> expectationFailure ("Expected source annotation, saw " ++ show other)
+
+        it "compiler exact root variables use a rigid proxy without stealing the shared identity binder" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991852)
+                binderRef = resolvedTypeBinderRefFromIdentity binderIdentity "a"
+                ann = STVar "a"
+                exactTy = RSTVar binderRef
+                body = ELit (LInt 1)
+            exactResult <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "a" binderIdentity)
+                        Map.empty
+                        (unsafeNormalizeExpr (EExactAnn body ann exactTy))
+                    )
+            let constraint = crConstraint exactResult
+                nodes = cNodes constraint
+                resultProxy = crRoot exactResult
+                gens = IntMap.elems (getGenNodeMap (cGenNodes constraint))
+            rootGen <- case gens of
+                [gen] -> do
+                    gnSchemes gen `shouldBe` [resultProxy]
+                    pure (gnId gen)
+                other -> expectationFailure ("Expected one exact RHS gen, saw " ++ show other) >> fail "missing exact gen"
+            shared <- case lookupNodeMaybe nodes resultProxy of
+                Just TyVar {tnBound = Just identityNode} -> pure identityNode
+                other -> expectationFailure ("Expected rigid exact result proxy, saw " ++ show other) >> fail "missing exact result proxy"
+            shared `shouldNotBe` resultProxy
+            lookupBindParent constraint (typeRef resultProxy)
+                `shouldBe` Just (genRef rootGen, BindRigid)
+            lookupBindParent constraint (typeRef shared)
+                `shouldBe` Just (genRef rootGen, BindRigid)
+            IntMap.lookup (getNodeId shared) (crSourceTypeBinderIdentities exactResult)
+                `shouldBe` Just binderIdentity
+            IntMap.toList (crSourceTypeBinderIdentities exactResult)
+                `shouldBe` [(getNodeId shared, binderIdentity)]
+            case cInstEdges constraint of
+                [InstEdge eid _ target] -> do
+                    target `shouldNotBe` resultProxy
+                    case lookupNodeMaybe nodes target of
+                        Just TyVar {tnBound = Just targetBody} -> targetBody `shouldBe` resultProxy
+                        other -> expectationFailure ("Expected edge-only exact proxy, saw " ++ show other)
+                    lookupBindParent constraint (typeRef target)
+                        `shouldBe` Just (genRef rootGen, BindRigid)
+                    IntSet.member (getEdgeId eid) (cAnnEdges constraint) `shouldBe` False
+                other -> expectationFailure ("Expected one exact variable edge, saw " ++ show other)
+            case crAnnotated exactResult of
+                AExactAnn _ _ annNode _ -> annNode `shouldBe` resultProxy
+                other -> expectationFailure ("Expected exact variable authority, saw " ++ show other)
+
+        it "keeps a nested exact root variable's shared identity at the definition owner" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991853)
+                binderRef = resolvedTypeBinderRefFromIdentity binderIdentity "a"
+                ann = STVar "a"
+                exactTy = RSTVar binderRef
+                expr =
+                    ELet "exact"
+                        (EExactAnn (ELit (LInt 1)) ann exactTy)
+                        (EVar "exact")
+            exactResult <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "a" binderIdentity)
+                        Map.empty
+                        (unsafeNormalizeExpr expr)
+                    )
+            let constraint = crConstraint exactResult
+                nodes = cNodes constraint
+                bindParents = cBindParents constraint
+                genNodes = getGenNodeMap (cGenNodes constraint)
+            (schemeGen, proxy) <-
+                case crAnnotated exactResult of
+                    ALet _ _ schemeGen0 schemeRoot _ rhsGen (AExactAnn _ _ annNode _) _ _ -> do
+                        rhsGen `shouldBe` schemeGen0
+                        annNode `shouldBe` schemeRoot
+                        pure (schemeGen0, schemeRoot)
+                    other -> expectationFailure ("Expected nested exact let authority, saw " ++ show other) >> fail "missing nested exact let"
+            shared <-
+                case lookupNodeMaybe nodes proxy of
+                    Just TyVar {tnBound = Just identityNode} -> pure identityNode
+                    other -> expectationFailure ("Expected nested exact proxy, saw " ++ show other) >> fail "missing nested exact proxy"
+            rootGen <-
+                case
+                    [ gnId gen
+                    | gen <- IntMap.elems genNodes
+                    , IntMap.notMember (nodeRefKey (genRef (gnId gen))) bindParents
+                    ] of
+                    [rootGen0] -> pure rootGen0
+                    roots -> expectationFailure ("Expected one definition root gen, saw " ++ show roots) >> fail "missing definition root gen"
+            rootGen `shouldNotBe` schemeGen
+            case IntMap.lookup (getGenNodeId schemeGen) genNodes of
+                Just gen -> gnSchemes gen `shouldBe` [proxy]
+                Nothing -> expectationFailure "Missing nested exact scheme gen"
+            case lookupBindParent constraint (typeRef proxy) of
+                Just (parent, _) -> parent `shouldBe` genRef schemeGen
+                Nothing -> expectationFailure "Missing nested exact proxy owner"
+            lookupBindParent constraint (typeRef shared)
+                `shouldBe` Just (genRef rootGen, BindRigid)
+            IntMap.toList (crSourceTypeBinderIdentities exactResult)
+                `shouldBe` [(getNodeId shared, binderIdentity)]
+            checkBindingTree constraint `shouldBe` Right ()
+
+        it "compiler exact annotations preserve a bounded-forall producer identity exactly once" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991851)
+                binderRef = resolvedTypeBinderRefFromIdentity binderIdentity "a"
+                ann =
+                    STForall
+                        "a"
+                        (Just (mkSrcBound (STBase "Int")))
+                        (STArrow (STVar "a") (STVar "a"))
+                exactTy =
+                    RSTForall
+                        binderRef
+                        (Just (ResolvedSrcBound (RSTBase (Builtins.builtinTypeSymbol "Int"))))
+                        (RSTArrow (RSTVar binderRef) (RSTVar binderRef))
+                body = ELam "x" (EVar "x")
+            exactResult <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "a" binderIdentity)
+                        Map.empty
+                        (unsafeNormalizeExpr (EExactAnn body ann exactTy))
+                    )
+            let nodes = cNodes (crConstraint exactResult)
+                root = crRoot exactResult
+                forallNodes = [node | node@TyForall {} <- nodeMapElems nodes]
+                gens = IntMap.elems (getGenNodeMap (cGenNodes (crConstraint exactResult)))
+            rootGen <- case gens of
+                [gen] -> pure (gnId gen)
+                other -> expectationFailure ("Expected one exact forall RHS gen, saw " ++ show other) >> fail "missing exact forall gen"
+            length forallNodes `shouldBe` 1
+            bodyNode <- case lookupNodeMaybe nodes root of
+                Just TyForall {tnBody = bodyId} -> pure bodyId
+                other -> expectationFailure ("Expected one exact forall target, saw " ++ show other) >> fail "missing exact forall"
+            arrowNode <- lookupNode nodes bodyNode
+            binderNode <- case arrowNode of
+                TyArrow {tnDom = dom, tnCod = cod} -> do
+                    dom `shouldBe` cod
+                    pure dom
+                other -> expectationFailure ("Expected exact forall arrow body, saw " ++ show other) >> fail "missing exact arrow"
+            case lookupNodeMaybe nodes binderNode of
+                Just TyVar {tnBound = Just boundId} ->
+                    case lookupNodeMaybe nodes boundId of
+                        Just TyBase {tnBase = BaseTy "Int"} -> pure ()
+                        other -> expectationFailure ("Expected exact Int lower bound, saw " ++ show other)
+                other -> expectationFailure ("Expected bounded exact binder, saw " ++ show other)
+            IntMap.lookup (getNodeId binderNode) (crSourceTypeBinderIdentities exactResult)
+                `shouldBe` Just binderIdentity
+            (lambdaBodyEid, exactEid) <-
+                case crAnnotated exactResult of
+                    AExactAnn (ALam _ _ _ _ _ bodyEid _) _ _ annotationEid ->
+                        pure (bodyEid, annotationEid)
+                    other -> expectationFailure ("Expected exact annotation around lambda, saw " ++ show other) >> fail "missing exact edges"
+            let lookupEdge eid =
+                    case [edge | edge@(InstEdge eid' _ _) <- cInstEdges (crConstraint exactResult), eid' == eid] of
+                        [edge] -> pure edge
+                        other -> expectationFailure ("Expected edge " ++ show eid ++ ", saw " ++ show other) >> fail "missing exact edge"
+            lambdaBodyEdge <- lookupEdge lambdaBodyEid
+            exactEdge <- lookupEdge exactEid
+            instRight exactEdge `shouldNotBe` root
+            case lookupNodeMaybe nodes (instRight exactEdge) of
+                Just TyVar {tnBound = Just targetBody} -> targetBody `shouldBe` root
+                other -> expectationFailure ("Expected bounded exact edge destination, saw " ++ show other)
+            lookupBindParent (crConstraint exactResult) (typeRef (instLeft exactEdge))
+                `shouldBe` Just (genRef rootGen, BindFlex)
+            lookupBindParent (crConstraint exactResult) (typeRef (instRight exactEdge))
+                `shouldBe` Just (genRef rootGen, BindRigid)
+            lookupBindParent (crConstraint exactResult) (typeRef (instRight lambdaBodyEdge))
+                `shouldBe` Just (genRef rootGen, BindFlex)
 
         it "existential type variables are shared between domain and codomain" $ do
             -- (1 : a) where 'a' is free - the free var should be shared
@@ -1014,18 +1622,21 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     insts = cInstEdges constraint
                     root = crRoot result
                 case insts of
-                    [InstEdge _ _ domainNode] -> do
-                        -- For a free type variable, domain and codomain should
-                        -- share the same node (existential sharing)
-                        root `shouldBe` domainNode
+                    [InstEdge _ _ destinationNode] -> do
+                        -- The direct domain and codomain still share the free
+                        -- existential, while the edge owns a distinct target.
+                        destinationNode `shouldNotBe` root
+                        case lookupNodeMaybe (cNodes constraint) destinationNode of
+                            Just TyVar {tnBound = Just domainNode} -> domainNode `shouldBe` root
+                            other -> expectationFailure ("Expected bounded annotation destination, saw " ++ show other)
                     other -> expectationFailure $ "Expected 1 inst edge, saw " ++ show (length other)
 
     describe "Constructor types (STCon)" $ do
-        it "internalizes STCon annotations into TyCon nodes" $ do
-            -- (1 : List Int) - should create a TyCon node with head "List" and one arg
+        it "internalizes STCon annotations into TestTyCon nodes" $ do
+            -- (1 : List Int) - should create a TestTyCon node with head "List" and one arg
             let ann = STCon "List" (STBase "Int" :| [])
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+            expectRight (inferConstraintGraphWithTypeHeads ["List"] expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                     tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
                 length tyConNodes `shouldBe` 2  -- domain + codomain copies
@@ -1033,13 +1644,13 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     (TyCon { tnCon = BaseTy name, tnArgs = args }:_) -> do
                         name `shouldBe` "List"
                         length args `shouldBe` 1
-                    _ -> expectationFailure "Expected TyCon nodes"
+                    _ -> expectationFailure "Expected TestTyCon nodes"
 
         it "internalizes nested STCon annotations" $ do
-            -- (1 : Either Int Bool) - should create a TyCon node with two args
+            -- (1 : Either Int Bool) - should create a TestTyCon node with two args
             let ann = STCon "Either" (STBase "Int" :| [STBase "Bool"])
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+            expectRight (inferConstraintGraphWithTypeHeads ["Either"] expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                     tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
                 length tyConNodes `shouldBe` 2  -- domain + codomain copies
@@ -1047,26 +1658,22 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     (TyCon { tnCon = BaseTy name, tnArgs = args }:_) -> do
                         name `shouldBe` "Either"
                         length args `shouldBe` 2
-                    _ -> expectationFailure "Expected TyCon nodes"
+                    _ -> expectationFailure "Expected TestTyCon nodes"
 
-        it "TyCon args are correctly structured" $ do
+        it "TestTyCon args are correctly structured" $ do
             -- (1 : List Int) - the arg should be an Int base type
             let ann = STCon "List" (STBase "Int" :| [])
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+            expectRight (inferConstraintGraphWithTypeHeads ["List"] expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                     tyConNodes = [n | n@TyCon{} <- nodeMapElems nodes]
                 case tyConNodes of
                     (TyCon { tnArgs = (argId :| _) }:_) -> do
                         argNode <- lookupNode nodes argId
                         case argNode of
-                            TyVar { tnBound = Just boundId } -> do
-                                boundNode <- lookupNode nodes boundId
-                                case boundNode of
-                                    TyBase { tnBase = BaseTy name } -> name `shouldBe` "Int"
-                                    other -> expectationFailure $ "Expected Int base, saw " ++ show other
-                            other -> expectationFailure $ "Expected TyVar arg, saw " ++ show other
-                    _ -> expectationFailure "Expected TyCon nodes"
+                            TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
+                            other -> expectationFailure $ "Expected direct Int argument copy, saw " ++ show other
+                    _ -> expectationFailure "Expected TestTyCon nodes"
 
     describe "Typed coercion error regressions" $ do
         it "bare ECoerceConst rejects with typed UnexpectedBareCoercionConst (not InternalConstraintError string)" $ do
@@ -1083,7 +1690,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         (STCon "List" (STBase "Int" :| []))
                         (STCon "List" (STBase "Int" :| [STBase "Bool"]))
                 expr = EAnn (ELit (LInt 1)) ann
-            case inferConstraintGraphDefault expr of
+            case inferConstraintGraphWithTypeHeads ["List"] expr of
                 Left (TypeConstructorArityMismatch _ _ _) -> pure ()
                 Left (InternalConstraintError msg) ->
                     expectationFailure $ "unexpected internal path: " ++ msg
@@ -1098,7 +1705,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 -- Create a type that uses List with different arities
                 ann = STArrow ann1 ann2
                 expr = EAnn (ELit (LInt 1)) ann
-            case inferConstraintGraphDefault expr of
+            case inferConstraintGraphWithTypeHeads ["List"] expr of
                 Left (TypeConstructorArityMismatch (BaseTy name) expected actual) -> do
                     name `shouldBe` "List"
                     expected `shouldBe` 1
@@ -1135,7 +1742,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- constraint generation catches it via ForallBoundMentionsBinder.
             let ann = STForall "a" (Just (mkSrcBound (STCon "List" (STVar "a" :| [])))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
-            case inferConstraintGraphDefault expr of
+            case inferConstraintGraphWithTypeHeads ["List"] expr of
                 Left (ForallBoundMentionsBinder name) -> name `shouldBe` "a"
                 Left other -> expectationFailure $ "Expected ForallBoundMentionsBinder, saw " ++ show other
                 Right _ -> expectationFailure "Expected ForallBoundMentionsBinder error"
@@ -1217,28 +1824,33 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
 
-                -- The scheme root should be a TyArrow (the lambda's type), not a
-                -- TyForall (which would indicate declared-scheme behavior)
-                schemeNode <- lookupNode nodes schemeRoot
-                case schemeNode of
-                    TyArrow { tnDom = domId, tnCod = codId } -> do
-                        -- The identity function has shared domain/codomain
+                -- The RHS remains an ordinary term coercion. Figure 8.2.3's
+                -- Eq-Var case represents its flexible codomain directly as a
+                -- copy of the source annotation's forall graph.
+                annotation <- lookupNode nodes schemeRoot
+                bodyId <- case annotation of
+                    TyForall {tnBody = sourceBody} -> pure sourceBody
+                    other -> expectationFailure ("Expected source annotation forall, saw " ++ show other) >> fail "missing source forall"
+                body <- lookupNode nodes bodyId
+                case body of
+                    TyArrow {tnDom = domId, tnCod = codId} ->
                         domId `shouldBe` codId
-                    other ->
-                        expectationFailure $
-                            "Expected TyArrow scheme root (inferred type), saw " ++ show other ++
-                            ". This may indicate declared-scheme semantics are still present."
+                    other -> expectationFailure $ "Expected identity Arrow body, saw " ++ show other
 
-                -- There should be no TyForall nodes in the constraint (no declared scheme)
-                let forallNodes = [n | n@TyForall{} <- nodeMapElems nodes]
-                forallNodes `shouldBe` []
+                -- The annotated RHS itself owns the annotation edge; there is
+                -- no separate declared-scheme path at the let boundary.
+                case crAnnotated result of
+                    ALet _ _ _ _ _ _ (AAnn _ rhsNode rhsEdge) _ _ -> do
+                        rhsNode `shouldBe` schemeRoot
+                        IntSet.member (getEdgeId rhsEdge) (cAnnEdges constraint) `shouldBe` True
+                    other -> expectationFailure $ "Expected term-coercion RHS, saw " ++ show other
 
                 -- The use of 'id' in the body should have a TyExp node (normal let-polymorphism)
                 -- not a direct link to a TyForall scheme
                 case crAnnotated result of
                     ALet _ _ _ _ _ _ _ bodyAnn _ ->
                         case bodyAnn of
-                            AAnn (AResolvedVar _ "id" useNode) _ _ -> do
+                            ALetScope (AResolvedVar _ "id" useNode) _ _ -> do
                                 useTy <- lookupNode nodes useNode
                                 case useTy of
                                     TyExp {} -> pure () -- Normal let-polymorphic use

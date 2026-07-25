@@ -38,11 +38,17 @@ import Data.List.NonEmpty (NonEmpty)
 
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 
--- | Reference to a bound used in forall introductions.
+-- | Construction recipe for a bound used in forall introductions.
 --
--- BoundBinder uses a binder index so bounds can be remapped to fresh binders.
+-- 'BoundBinder' uses a binder index so direct binder bounds can be remapped to
+-- the destination binders.  'BoundProjection' records the source forall that
+-- owns a non-trivial bound graph: materialization must copy that projection
+-- under the destination binder and substitute the source binders, rather than
+-- publishing a cross-scope reference to the source graph.  'BoundNode' is
+-- reserved for an already scope-stable external node.
 data BoundRef
     = BoundNode NodeId
+    | BoundProjection NodeId NodeId
     | BoundBinder Int
     deriving (Eq, Show)
 

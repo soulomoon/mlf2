@@ -2,6 +2,7 @@
 
 module Phi.WitnessDomainSpec (spec) where
 
+import IdentityTestSupport
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -24,7 +25,7 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Presolution.TestSupport
     ( CopyMapping(..)
-    , InteriorNodes(..)
+    , sourceInteriorFromSet
     , copiedNodes
     )
 import MLF.Constraint.Types.Phase (Phase(Raw))
@@ -70,8 +71,9 @@ mkTrace :: [(Int, Int)] -> [(Int, Int)] -> EdgeTrace
 mkTrace binderArgs copyPairs =
     EdgeTrace
         { etRoot = NodeId 0
+        , etResultRoot = NodeId 0
         , etBinderArgs = [(NodeId b, NodeId a) | (b, a) <- binderArgs]
-        , etInterior = InteriorNodes IntSet.empty
+        , etInterior = sourceInteriorFromSet IntSet.empty
         , etBinderReplayMap = mempty
         , etReplayDomainBinders = []
         , etCopyMap = CopyMapping (IntMap.fromList [(k, NodeId v) | (k, v) <- copyPairs])
@@ -112,7 +114,7 @@ spec = describe "WitnessDomain" $ do
                 c = emptyConstraint
                     { cNodes = nodeMapFromList
                         [ (getNodeId binder, TyVar { tnId = binder, tnBound = Nothing })
-                        , (getNodeId alias, TyBase alias (BaseTy "Bool"))
+                        , (getNodeId alias, TestTyBase alias (BaseTy "Bool"))
                         ]
                     }
                 solved = SolvedTest.mkTestSolved c (IntMap.fromList [(getNodeId binder, alias)])
@@ -264,7 +266,7 @@ spec = describe "WitnessDomain" $ do
                         , (11, TyVar { tnId = NodeId 11, tnBound = Nothing })
                         , (2, TyForall { tnId = b2, tnBody = NodeId 12 })
                         , (12, TyVar { tnId = NodeId 12, tnBound = Nothing })
-                        , (31, TyBase alias (BaseTy "Bool"))
+                        , (31, TestTyBase alias (BaseTy "Bool"))
                         ]
                     }
                 solved = SolvedTest.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])
@@ -284,7 +286,7 @@ spec = describe "WitnessDomain" $ do
                         , (11, TyVar { tnId = NodeId 11, tnBound = Nothing })
                         , (2, TyForall { tnId = b2, tnBody = NodeId 12 })
                         , (12, TyVar { tnId = NodeId 12, tnBound = Nothing })
-                        , (31, TyBase alias (BaseTy "Bool"))
+                        , (31, TestTyBase alias (BaseTy "Bool"))
                         ]
                     }
                 solved = SolvedTest.mkTestSolved c (IntMap.fromList [(1, alias), (2, alias)])

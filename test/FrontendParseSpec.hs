@@ -1,5 +1,6 @@
 module FrontendParseSpec (spec) where
 
+import qualified ElabTypeTestSupport as TestElab
 import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
@@ -20,7 +21,7 @@ import MLF.API
     , renderEmlfParseError
     , renderNormParseError
     )
-import MLF.Pipeline (BaseTy (..), renderPipelineError, runPipelineElab, tBase)
+import MLF.Pipeline (BaseTy (..), renderPipelineError, runPipelineElab)
 
 spec :: Spec
 spec = describe "Frontend eMLF parser" $ do
@@ -222,7 +223,7 @@ spec = describe "Frontend eMLF parser" $ do
                         Left err ->
                             expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
                         Right (_term, ty) ->
-                            ty `shouldBe` tBase (BaseTy "Int")
+                            ty `shouldBe` TestElab.tBase (BaseTy "Int")
 
     describe "API exports" $ do
         it "exports staged SrcTy aliases for raw and normalized paths" $ do
