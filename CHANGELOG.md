@@ -62,6 +62,13 @@
   Compiler-generated class evidence parameters now use a separate exact core
   lambda, so their metadata-owned types do not acquire the source coercion's
   flexible codomain.
+  The source coercion constructor now returns a role-labelled rigid-domain /
+  flexible-codomain pair instead of an order-sensitive tuple. Annotation
+  elaboration also relies on the preserving computation reconstructed from the
+  checked producer type and no longer repairs an `InstBot` payload by replacing
+  its bound after witness translation. The corresponding thesis obligation now
+  checks mixed existential/universal κ structure, including shared existential
+  nodes and independently copied universal binders.
 - Made local class evidence construction specialize the complete
   evidence-method head before applying method-local evidence. Nullary uses
   take their specialization from the expected result; non-nullary calls infer

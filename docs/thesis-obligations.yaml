@@ -1464,13 +1464,14 @@ obligations:
   section: 8.2
   figure_or_definition: Figure 8.2.3
   thesis_rule_label: G(σ) syntactic to graphic
-  judgment_or_equation: internalizeCoercionCopy translates syntactic types to graphic form
+  judgment_or_equation: internalizeCoercionType constructs the rigid-domain/flexible-codomain graphic copies of κ with shared existentials
   code_anchors:
+  - src/MLF/Frontend/ConstraintGen/Translate.hs#internalizeCoercionType
   - src/MLF/Frontend/ConstraintGen/Translate.hs#internalizeCoercionCopy
   test_anchor:
     matcher: O08-SYN-TO-GRAPH
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
+    rationale: QuickCheck constructs mixed existential/universal annotations and checks distinct rigid/flexible copies, shared existential nodes, duplicated universal binders, source authority, and binding-tree validity.
     kind: quickcheck
     min_success: 100
   status: anchored

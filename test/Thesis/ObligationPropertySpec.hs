@@ -989,11 +989,96 @@ propBindMono _size =
     Left err -> counterexample err False
 
 propSynToGraph :: Int -> Property
-propSynToGraph _size =
-  case runConstraintDefault Set.empty (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) of
-    Right ConstraintResult {crConstraint = c, crRoot = root} ->
-      conjoin [counterexample (show root) (isJust (lookupNodeIn (cNodes c) root)), Binding.checkBindingTree c === Right ()]
-    Left err -> counterexample err False
+propSynToGraph size =
+  let existentialName = "existential-" ++ show size
+      universalName = "universal-" ++ show size
+      annotation =
+        Surf.STArrow
+          (Surf.STVar existentialName)
+          ( Surf.STForall
+              universalName
+              Nothing
+              (Surf.STArrow (Surf.STVar existentialName) (Surf.STVar universalName))
+          )
+      expression = Surf.EAnn (Surf.ELit (Surf.LInt 1)) annotation
+   in case runConstraintDefault Set.empty expression of
+        Right result@ConstraintResult {crConstraint = c, crRoot = codomainRoot} ->
+          case cInstEdges c of
+            [InstEdge _ _ destination] ->
+              case lookupNodeIn (cNodes c) destination of
+                Just TyVar {tnBound = Just domainRoot} ->
+                  case
+                      ( annotationCopyShape (cNodes c) domainRoot,
+                        annotationCopyShape (cNodes c) codomainRoot
+                      )
+                    of
+                      (Right (domainExistential, domainForall, domainUniversal), Right (codomainExistential, codomainForall, codomainUniversal)) ->
+                        conjoin
+                          [ counterexample "coercion domain and codomain roots were shared" $
+                              domainRoot /= codomainRoot,
+                            counterexample "existential annotation node was duplicated" $
+                              domainExistential == codomainExistential,
+                            counterexample "universal forall owner was shared" $
+                              domainForall /= codomainForall,
+                            counterexample "universal binder was shared" $
+                              domainUniversal /= codomainUniversal,
+                            Binding.nodeKind c (typeRef domainRoot)
+                              === Right Binding.NodeRestricted,
+                            Binding.nodeKind c (typeRef codomainRoot)
+                              === Right Binding.NodeInstantiable,
+                            counterexample "annotation source authority was not recorded at the codomain" $
+                              IntMap.member
+                                (getNodeId codomainRoot)
+                                (crAnnSourceTypes result),
+                            Binding.checkBindingTree c === Right ()
+                          ]
+                      (domainShape, codomainShape) ->
+                        counterexample
+                          ( "unexpected coercion copies: domain="
+                              ++ show domainShape
+                              ++ ", codomain="
+                              ++ show codomainShape
+                          )
+                          False
+                other ->
+                  counterexample
+                    ("annotation edge destination did not retain its rigid domain: " ++ show other)
+                    False
+            edges ->
+              counterexample
+                ("expected one annotation edge, saw " ++ show edges)
+                False
+        Left err -> counterexample err False
+
+annotationCopyShape :: NodeMap TyNode -> NodeId -> Either String (NodeId, NodeId, NodeId)
+annotationCopyShape nodes root =
+  case lookupNodeIn nodes root of
+    Just TyArrow {tnDom = outerExistential, tnCod = forallNode} ->
+      case lookupNodeIn nodes forallNode of
+        Just TyForall {tnBody = forallBody} ->
+          case lookupNodeIn nodes forallBody of
+            Just TyArrow {tnDom = innerExistential, tnCod = universal}
+              | outerExistential == innerExistential ->
+                  case
+                      ( lookupNodeIn nodes outerExistential,
+                        lookupNodeIn nodes universal
+                      )
+                    of
+                      (Just TyVar {}, Just TyVar {tnBound = Nothing}) ->
+                        Right (outerExistential, forallNode, universal)
+                      other ->
+                        Left
+                          ( "existential/universal leaves were not variables: "
+                              ++ show other
+                          )
+              | otherwise ->
+                  Left
+                    ( "free existential was not shared within one copy: "
+                        ++ show (outerExistential, innerExistential)
+                    )
+            other -> Left ("forall body was not an arrow: " ++ show other)
+        other -> Left ("copy codomain was not a forall: " ++ show other)
+    other -> Left ("copy root was not an arrow: " ++ show other)
 
 propReifyInline :: Int -> Property
 propReifyInline _size =

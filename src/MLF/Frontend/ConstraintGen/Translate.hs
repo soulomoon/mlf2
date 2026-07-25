@@ -668,8 +668,13 @@ buildCoerce :: Env -> GenNodeId -> NormSrcType -> ResolvedNormCoreExpr -> Constr
 buildCoerce env scopeRoot annTy annotatedExpr = do
   (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
   annGen <- allocChildGenUnder scopeRoot
-  (domainNode, codomainNode) <-
-    withScopedRebind (genRef annGen) snd (internalizeCoercionType annGen annTy)
+  copies <-
+    withScopedRebind
+      (genRef annGen)
+      coercionFlexibleCodomain
+      (internalizeCoercionType annGen annTy)
+  let domainNode = coercionRigidDomain copies
+      codomainNode = coercionFlexibleCodomain copies
   -- The scoped rebind discovers every disconnected annotation component as a
   -- provisional scheme root.  Only the flexible codomain is exported by the
   -- coercion; recording that fact now prevents a later enclosing-let rebind
@@ -1026,9 +1031,20 @@ type TyEnv = Map VarName NodeId
 
 type SharedEnv = Map VarName NodeId
 
+-- | The two graphic copies owned by a source annotation.
+--
+-- Naming the roles prevents the annotation result and its edge-only domain
+-- constraint from being selected positionally.  In particular, callers can
+-- only export 'coercionFlexibleCodomain'; the rigid domain remains authority
+-- for the annotation edge.
+data CoercionTypeCopies = CoercionTypeCopies
+  { coercionRigidDomain :: NodeId,
+    coercionFlexibleCodomain :: NodeId
+  }
+
 -- | Internalize a coercion type κ as a rigid domain and flexible codomain,
 -- sharing existential (free) variables across both copies.
-internalizeCoercionType :: GenNodeId -> NormSrcType -> ConstraintM (NodeId, NodeId)
+internalizeCoercionType :: GenNodeId -> NormSrcType -> ConstraintM CoercionTypeCopies
 internalizeCoercionType coerceGen ty = do
   (domainNode, shared1) <-
     internalizeCoercionCopy BindRigid False coerceGen coerceGen Map.empty Map.empty ty
@@ -1036,7 +1052,11 @@ internalizeCoercionType coerceGen ty = do
     internalizeCoercionCopy BindFlex False coerceGen coerceGen Map.empty shared1 ty
   setBindParentOverride (typeRef domainNode) (genRef coerceGen) BindRigid
   setBindParentOverride (typeRef codomainNode) (genRef coerceGen) BindFlex
-  pure (domainNode, codomainNode)
+  pure
+    CoercionTypeCopies
+      { coercionRigidDomain = domainNode,
+        coercionFlexibleCodomain = codomainNode
+      }
 
 -- | Internalize constructor arguments left-to-right while threading
 -- coercion-copy sharing.

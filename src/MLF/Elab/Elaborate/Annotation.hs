@@ -2255,13 +2255,9 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                           ]
                       )
           _ -> pure edgeInst
-  let mExpectedBound =
-        case schemeBinderRefs expectedSourceScheme of
-          (_, Just bnd) : _ -> Just (tyToElab bnd)
-          _ -> Nothing
-      preservesForalls =
+  let preservesForalls =
         not (null (schemeBinderRefs expectedSourceScheme))
-      instAdjusted0 =
+      instAdjusted =
         case sourceTermConstruction of
           Just (_, closedInst) -> normalizeInst closedInst
           Nothing ->
@@ -2276,11 +2272,6 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                   -- erasing all eliminations would apply that argument to the
                   -- prefix bound instead of to the remaining binder.
                   else normalizeInst inst
-      instAdjusted =
-        case (mExpectedBound, instAdjusted0) of
-          (Just expectedBound, InstInside (InstBot _)) ->
-            InstInside (InstBot expectedBound)
-          _ -> instAdjusted0
   exprClosed0 <-
     case sourceTermConstruction of
       Just (closed, _) -> pure closed

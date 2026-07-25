@@ -1,3 +1,19 @@
+## 2026-07-25 - Annotation coercion construction audit
+
+- Source annotation construction now returns a role-labelled coercion pair:
+  the rigid domain is edge authority and the flexible codomain is the exported
+  result. This removes positional tuple selection from the κ construction
+  boundary.
+- Annotation elaboration no longer rewrites an `InstInside (InstBot ...)`
+  payload with the expected bound after witness translation. The existing
+  preserving-coercion construction from the checked source type is sufficient,
+  and the 123-test annotation slice remains green without that repair.
+- `O08-SYN-TO-GRAPH` now exercises a mixed existential/universal annotation
+  instead of only checking that an `Int` node exists. Its 100 QuickCheck cases
+  require the existential node to be shared, universal binders to be copied,
+  domain/codomain roles to be restricted/instantiable, source authority to
+  remain on the codomain, and the binding tree to stay valid.
+
 ## 2026-07-25 - Construction-Gamma ownership and runtime-cache closeout
 
 - Lambda-body projection now produces a checked source-to-construction
