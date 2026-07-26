@@ -402,9 +402,10 @@ claims:
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#mkPhiReplayCertificate
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
+        - src/MLF/Elab/Elaborate/Annotation.hs#validateElaborationEdgeAuthority
     deviations: []
     status: defended
-    notes: "Phi and Omega consume an opaque edge-keyed witness/trace replay certificate; missing traces and mismatched witness edge identities are unconstructible at the production translation boundary."
+    notes: "Phi and Omega consume an opaque edge-keyed witness/trace replay certificate built from one producer-owned EdgeArtifacts aggregate; Phase 6 validators and consumers cannot independently compose witness and trace maps, while missing traces and mismatched witness edge identities remain unconstructible at the production translation boundary."
 
   - id: CLM-SIGMA-REORDER
     type: definition

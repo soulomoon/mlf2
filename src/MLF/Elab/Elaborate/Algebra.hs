@@ -50,7 +50,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base
-  ( EdgeArtifacts (..),
+  ( EdgeArtifacts,
   )
 import MLF.Constraint.Presolution.Plan.Requirements
   ( AmbientGammaAuthority (..),
@@ -87,6 +87,10 @@ import MLF.Constraint.Types.Witness
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     AnnotationBoundaryRole (..),
+    acEdgeExpansions,
+    acEdgeTraces,
+    acEdgeWitnesses,
+    acIdentityEdges,
     annBinderKey,
     annExprReferenceKey,
     desugaredAnnLambdaInfo,
@@ -9459,13 +9463,7 @@ elabAlg algebraContext layer =
                     (Just construction, Just _) ->
                       Just (macResultType construction)
                     _ -> Nothing
-                lambdaEdgeArtifacts =
-                  EdgeArtifacts
-                    { eaEdgeWitnesses = acEdgeWitnesses annotationContext,
-                      eaEdgeTraces = acEdgeTraces annotationContext,
-                      eaEdgeExpansions = acEdgeExpansions annotationContext,
-                      eaIdentityEdges = acIdentityEdges annotationContext
-                    }
+                lambdaEdgeArtifacts = acEdgeArtifacts annotationContext
                 preparedPacketBodyExpectedEndpoint packet =
                   selectExpectedTermEndpoint
                     (scopedTypesAgree scopeContext)
@@ -12081,13 +12079,7 @@ elabAlg algebraContext layer =
             }
     AAppF (fAnn, fOut) (aAnn, aOut) funSite argSite appNodeId ->
       let f env = do
-            let applicationEdgeArtifacts =
-                  EdgeArtifacts
-                    { eaEdgeWitnesses = acEdgeWitnesses annotationContext,
-                      eaEdgeTraces = acEdgeTraces annotationContext,
-                      eaEdgeExpansions = acEdgeExpansions annotationContext,
-                      eaIdentityEdges = acIdentityEdges annotationContext
-                    }
+            let applicationEdgeArtifacts = acEdgeArtifacts annotationContext
                 applicationActiveConsumerAuthority =
                   envActiveSubtermConstruction env
                     >>= subtermGeneralizationConsumerAuthority
@@ -15040,13 +15032,7 @@ elabAlg algebraContext layer =
               rhsAnn
               bodyAnn
               trivialRoot
-          letEdgeArtifacts =
-            EdgeArtifacts
-              { eaEdgeWitnesses = acEdgeWitnesses annotationContext,
-                eaEdgeTraces = acEdgeTraces annotationContext,
-                eaEdgeExpansions = acEdgeExpansions annotationContext,
-                eaIdentityEdges = acIdentityEdges annotationContext
-              }
+          letEdgeArtifacts = acEdgeArtifacts annotationContext
           prepareLetConstructionGamma env = do
             letBoundary <- directLetBoundaryEdge bodyAnn
             letScope <-

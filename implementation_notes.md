@@ -1,3 +1,23 @@
+## 2026-07-26 - Aggregate-owned Phi replay authority
+
+- `mkPhiReplayCertificate` now accepts one `EdgeArtifacts` aggregate instead
+  of independently supplied witness and trace maps. This preserves the
+  producer's per-edge packet boundary through Phase 6 and removes the API state
+  in which a caller could select a witness from one presolution and a trace
+  from another.
+- `AnnotationContext` stores that aggregate directly. Annotation,
+  lambda/application/unfold authority validation, ordinary occurrence replay,
+  and result-type replay all construct the same opaque certificate; checked
+  witness and trace projections come back from the certificate rather than
+  parallel ad hoc validation.
+- Focused validation passes Phase 6 (322 examples), Phi alignment (11
+  examples, including annotated `g g`), the nine fixed annotation cases, and
+  all 107 thesis-obligation properties at 100 generated cases each. The
+  thesis-claims checker, warning-free `cabal build all -j1`, and the full
+  3703-example serial suite also pass. This closes the cross-map composition
+  seam; it does not turn executable evidence into a mechanized proof of
+  Chapter 15.
+
 ## 2026-07-26 - Construction-closed Phi replay certificates
 
 - Production Φ entry points no longer accept an `EdgeWitness` beside a

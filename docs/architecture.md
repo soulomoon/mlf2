@@ -676,9 +676,12 @@ semantics that are not represented elsewhere just as explicitly.”
   `etCopyMap` keys live in one source-ID domain; canonical IDs are derived at
   lookup sites rather than globally rewriting trace provenance.
 - Φ/Ω cannot consume a witness and trace independently. The opaque
-  `PhiReplayCertificate` fetches and pairs them at the elaboration boundary
-  through one producer-owned edge key, then checks that the witness's embedded
-  edge identity agrees. It does not rederive packet association from `ewRoot`,
+  `PhiReplayCertificate` accepts one producer-owned `EdgeArtifacts` aggregate,
+  fetches and pairs the witness and trace through its shared edge key, then
+  checks that the witness's embedded edge identity agrees. `AnnotationContext`,
+  annotation/result-type validation, and occurrence translation carry that
+  same aggregate rather than reconstructing or independently selecting its
+  maps. The certificate does not rederive packet association from `ewRoot`,
   `etRoot`, or `etResultRoot`: replay/finalization can leave those IDs in
   distinct source, destination, and construction presentations. Production Φ
   entry points and `OmegaContext` require this paired authority; only the

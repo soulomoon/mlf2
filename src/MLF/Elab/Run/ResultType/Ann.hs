@@ -52,8 +52,6 @@ import MLF.Elab.Run.ResultType.Util
     )
 import MLF.Elab.Run.ResultType.Types
     ( ResultTypeInputs(..)
-    , rtcEdgeTraces
-    , rtcEdgeWitnesses
     )
 import qualified MLF.Elab.Run.ResultType.View as View
 
@@ -76,8 +74,6 @@ computeResultTypeFromAnnWithView
 computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
     let presolutionViewForGen = View.rtvPresolutionViewOverlay view
         canonical = rtcCanonical ctx
-        edgeWitnesses = rtcEdgeWitnesses ctx
-        edgeTraces = rtcEdgeTraces ctx
         bindParentsGa = rtcBindParentsGa ctx
         planBuilder = rtcPlanBuilder ctx
         c1 = rtcBaseConstraint ctx
@@ -91,8 +87,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
     replay <-
         mkPhiReplayCertificate
             eid
-            edgeWitnesses
-            edgeTraces
+            (rtcEdgeArtifacts ctx)
     let targetC = View.rtvSchemeBodyTarget view rootC
         scopeRootNodePre0 = annNode innerPre
         scopeRootNodePre =

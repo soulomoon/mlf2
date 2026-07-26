@@ -16,6 +16,8 @@ module MLF.Elab.Phi (
     -- * Construction-closed replay authority
     PhiReplayCertificate,
     mkPhiReplayCertificate,
+    phiReplayTrace,
+    phiReplayWitness,
     -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
     phiFromEdgeWitnessWithTraceReadModel,
@@ -31,6 +33,8 @@ import MLF.Elab.Phi.Translate
     , PhiOccurrenceRole(..)
     , PhiReplayCertificate
     , mkPhiReplayCertificate
+    , phiReplayTrace
+    , phiReplayWitness
     , phiFromEdgeWitnessWithTrace
     , phiFromEdgeWitnessWithTraceReadModel
     , phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints

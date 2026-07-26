@@ -37,6 +37,8 @@ module MLF.Elab.Phi.Translate (
     -- * Construction-closed replay authority
     PhiReplayCertificate,
     mkPhiReplayCertificate,
+    phiReplayTrace,
+    phiReplayWitness,
     -- * Translation entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
     phiFromEdgeWitnessWithTraceReadModel,
@@ -79,7 +81,15 @@ import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Reify.TypeOps (freeTypeVarRefsType)
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
-import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeSourceInterior(..), InteriorNodes(..), copiedNodes)
+import MLF.Constraint.Presolution.Base
+    ( CopyMapping(..)
+    , EdgeArtifacts
+    , EdgeSourceInterior(..)
+    , InteriorNodes(..)
+    , copiedNodes
+    , eaEdgeTraces
+    , eaEdgeWitnesses
+    )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Computation
     ( OccurrenceComputation
@@ -131,8 +141,10 @@ data PhiReplayCertificate = PhiReplayCertificate
     deriving (Eq, Show)
 
 -- | Select and pair the proof artifacts emitted for one edge.  Both artifacts
--- are fetched from their producer-owned maps with the same edge key, and the
--- witness's embedded edge identity must agree with that key.
+-- are fetched from the same producer-owned 'EdgeArtifacts' value with the
+-- same edge key, and the witness's embedded edge identity must agree with that
+-- key.  Accepting the aggregate rather than two maps prevents a Phase 6 caller
+-- from composing a witness and trace from different presolution packets.
 --
 -- Root IDs are deliberately not used to rediscover this association:
 -- 'ewRoot', 'etRoot', and 'etResultRoot' can inhabit different source,
@@ -140,10 +152,9 @@ data PhiReplayCertificate = PhiReplayCertificate
 -- edge-keyed packet committed by presolution is the construction authority.
 mkPhiReplayCertificate
     :: EdgeId
-    -> IntMap.IntMap EdgeWitness
-    -> IntMap.IntMap EdgeTrace
+    -> EdgeArtifacts
     -> Either ElabError PhiReplayCertificate
-mkPhiReplayCertificate expectedEdge witnesses traces = do
+mkPhiReplayCertificate expectedEdge edgeArtifacts = do
     witness <-
         case IntMap.lookup edgeKey witnesses of
             Nothing ->
@@ -177,6 +188,16 @@ mkPhiReplayCertificate expectedEdge witnesses traces = do
                     }
   where
     edgeKey = getEdgeId expectedEdge
+    witnesses = eaEdgeWitnesses edgeArtifacts
+    traces = eaEdgeTraces edgeArtifacts
+
+-- | Read the frozen source-graph trace certified for this replay packet.
+phiReplayTrace :: PhiReplayCertificate -> EdgeTrace
+phiReplayTrace = prcTrace
+
+-- | Read the normalized derivation witness certified for this replay packet.
+phiReplayWitness :: PhiReplayCertificate -> EdgeWitness
+phiReplayWitness = prcWitness
 
 data PhiOuterShape
     = PhiArrowShape

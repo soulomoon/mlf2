@@ -219,8 +219,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                   replay <-
                     mkPhiReplayCertificate
                       funEid
-                      edgeWitnesses
-                      edgeTraces
+                      (rtcEdgeArtifacts ctx)
                   phiFromEdgeWitnessWithTraceReadModel
                     traceCfg
                     generalizeAtWith

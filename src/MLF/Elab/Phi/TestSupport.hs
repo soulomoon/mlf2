@@ -113,8 +113,14 @@ phiFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaPar
     replay <-
         Translate.mkPhiReplayCertificate
             (ewEdgeId witness)
-            (IntMap.singleton (getEdgeId (ewEdgeId witness)) witness)
-            (IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo)
+            EdgeArtifacts
+                { eaEdgeExpansions = IntMap.empty
+                , eaEdgeWitnesses =
+                    IntMap.singleton (getEdgeId (ewEdgeId witness)) witness
+                , eaEdgeTraces =
+                    IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo
+                , eaIdentityEdges = IntSet.empty
+                }
     Translate.phiFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
@@ -140,8 +146,14 @@ phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionVi
     replay <-
         Translate.mkPhiReplayCertificate
             (ewEdgeId witness)
-            (IntMap.singleton (getEdgeId (ewEdgeId witness)) witness)
-            (IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo)
+            EdgeArtifacts
+                { eaEdgeExpansions = IntMap.empty
+                , eaEdgeWitnesses =
+                    IntMap.singleton (getEdgeId (ewEdgeId witness)) witness
+                , eaEdgeTraces =
+                    IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo
+                , eaIdentityEdges = IntSet.empty
+                }
     Translate.phiOccurrenceFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
@@ -229,9 +241,6 @@ reifyInstWithSourceScheme traceCfg planBuilder presolutionView gaParents edgeArt
                 , acSourceBinderRefs = IntMap.empty
                 , acDirectSourceBinderKeys = IntSet.empty
                 , acSubtermGeneralizations = Map.empty
-                , acEdgeWitnesses = eaEdgeWitnesses edgeArtifacts
-                , acEdgeTraces = eaEdgeTraces edgeArtifacts
-                , acEdgeExpansions = eaEdgeExpansions edgeArtifacts
-                , acIdentityEdges = eaIdentityEdges edgeArtifacts
+                , acEdgeArtifacts = edgeArtifacts
                 }
     reifyInstFromSourceScheme annotationContext namedSet sourceScheme ann edgeId

@@ -4,6 +4,10 @@
 
 module MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
+    acEdgeWitnesses,
+    acEdgeTraces,
+    acEdgeExpansions,
+    acIdentityEdges,
     AnnotationBoundaryRole (..),
     closeTermForAnnotation,
     stripUnusedTopTyAbs,
@@ -59,7 +63,7 @@ import MLF.Constraint.Types.Graph
     genRef,
   )
 import MLF.Constraint.Types.Phase (Phase)
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion (..), InstanceOp (..), ReplayContract (..), ewEdgeId, ewForallIntros, ewLeft, ewRight, ewWitness, getInstanceOps)
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion (..), InstanceOp (..), ReplayContract (..), ewForallIntros, ewLeft, ewRight, ewWitness, getInstanceOps)
 import MLF.Elab.Elaborate.Scope
   ( GeneralizeAtWith,
     ScopeContext (..),
@@ -104,6 +108,8 @@ import MLF.Elab.Elaborate.Annotation.Construction
 import MLF.Elab.Phi
   ( PhiEndpointShapeAuthority,
     mkPhiReplayCertificate,
+    phiReplayTrace,
+    phiReplayWitness,
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints,
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor,
   )
@@ -218,11 +224,20 @@ data AnnotationContext (p :: Phase) = AnnotationContext
     acSourceBinderRefs :: IntMap.IntMap TypeBinderRef,
     acDirectSourceBinderKeys :: IntSet.IntSet,
     acSubtermGeneralizations :: SubtermGeneralizations,
-    acEdgeWitnesses :: IntMap.IntMap EdgeWitness,
-    acEdgeTraces :: IntMap.IntMap EdgeTrace,
-    acEdgeExpansions :: IntMap.IntMap Expansion,
-    acIdentityEdges :: IntSet.IntSet
+    acEdgeArtifacts :: EdgeArtifacts
   }
+
+acEdgeWitnesses :: AnnotationContext p -> IntMap.IntMap EdgeWitness
+acEdgeWitnesses = eaEdgeWitnesses . acEdgeArtifacts
+
+acEdgeTraces :: AnnotationContext p -> IntMap.IntMap EdgeTrace
+acEdgeTraces = eaEdgeTraces . acEdgeArtifacts
+
+acEdgeExpansions :: AnnotationContext p -> IntMap.IntMap Expansion
+acEdgeExpansions = eaEdgeExpansions . acEdgeArtifacts
+
+acIdentityEdges :: AnnotationContext p -> IntSet.IntSet
+acIdentityEdges = eaIdentityEdges . acEdgeArtifacts
 
 -- | Source-annotation authority belongs to the coercion occurrence, not its
 -- result graph node.  Distinct annotations may solve to one canonical node but
@@ -243,13 +258,13 @@ annotationExpectedTypeForEdge annotationContext edgeId =
 -- presolution.
 validateAnnotationEdgeAuthority ::
   IntMap.IntMap ElabType ->
-  IntMap.IntMap EdgeWitness ->
-  IntMap.IntMap EdgeTrace ->
-  IntMap.IntMap Expansion ->
+  EdgeArtifacts ->
   AnnExpr ->
   Either ElabError ()
-validateAnnotationEdgeAuthority sourceTypes witnesses traces expansions = go
+validateAnnotationEdgeAuthority sourceTypes edgeArtifacts = go
   where
+    expansions = eaEdgeExpansions edgeArtifacts
+
     go ann =
       case ann of
         AResolvedVar {} -> Right ()
@@ -259,8 +274,7 @@ validateAnnotationEdgeAuthority sourceTypes witnesses traces expansions = go
         ALet _ _ _ _ _ _ rhs body _ -> go rhs >> go body
         AAnn inner _ eid -> do
           requireSourceType eid
-          requireArtifact "witness" witnesses eid
-          requireArtifact "trace" traces eid
+          _ <- mkPhiReplayCertificate eid edgeArtifacts
           requireArtifact "expansion" expansions eid
           go inner
         ALetScope inner _ _ -> go inner
@@ -290,14 +304,14 @@ validateAnnotationEdgeAuthority sourceTypes witnesses traces expansions = go
 validateElaborationEdgeAuthority ::
   (NodeId -> NodeId) ->
   IntMap.IntMap ElabType ->
-  IntMap.IntMap EdgeWitness ->
-  IntMap.IntMap EdgeTrace ->
-  IntMap.IntMap Expansion ->
-  IntSet.IntSet ->
+  EdgeArtifacts ->
   AnnExpr ->
   Either ElabError ()
-validateElaborationEdgeAuthority canonical sourceTypes witnesses traces expansions identityEdges = go
+validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
   where
+    expansions = eaEdgeExpansions edgeArtifacts
+    identityEdges = eaIdentityEdges edgeArtifacts
+
     go ann =
       case ann of
         AResolvedVar {} -> Right ()
@@ -313,38 +327,28 @@ validateElaborationEdgeAuthority canonical sourceTypes witnesses traces expansio
         ALet _ _ _ _ _ _ rhs body _ -> go rhs >> go body
         AAnn inner _ eid -> do
           requireSourceType eid
-          requireReplay "annotation" eid
+          _ <- requireReplay "annotation" eid
           go inner
         ALetScope inner _ eid -> do
           requireIdentity "let scope" eid
           go inner
         AUnfold inner _ eid -> do
-          requireReplay "unfold" eid
+          _ <- requireReplay "unfold" eid
           go inner
 
     requireReplayOrIdentity label eid@(EdgeId edgeKey)
       | IntSet.member edgeKey identityEdges = Right ()
-      | otherwise = requireReplay label eid
+      | otherwise = do
+          _ <- requireReplay label eid
+          Right ()
 
     requireApplicationSite label site =
       let eid@(EdgeId edgeKey) = instantiationSiteEdgeId site
        in if IntSet.member edgeKey identityEdges
             then Right ()
             else do
-              requireReplay label eid
-              witness <-
-                case IntMap.lookup edgeKey witnesses of
-                  Just value -> Right value
-                  Nothing ->
-                    Left
-                      (ValidationFailed ["missing edge witness for " ++ label ++ " " ++ show eid])
-              if ewEdgeId witness == eid
-                then Right ()
-                else
-                  Left
-                    ( ValidationFailed
-                        [ label ++ " witness edge id does not match its artifact key: " ++ show eid]
-                    )
+              replay <- requireReplay label eid
+              let witness = phiReplayWitness replay
               if canonical (ewLeft witness) == canonical (instantiationSiteSource site)
                 then Right ()
                 else
@@ -361,9 +365,9 @@ validateElaborationEdgeAuthority canonical sourceTypes witnesses traces expansio
                     )
 
     requireReplay label eid = do
-      requireArtifact label "witness" witnesses eid
-      requireArtifact label "trace" traces eid
+      replay <- mkPhiReplayCertificate eid edgeArtifacts
       requireArtifact label "expansion" expansions eid
+      Right replay
 
     requireIdentity label eid@(EdgeId edgeKey)
       | IntSet.member edgeKey identityEdges = Right ()
@@ -683,13 +687,7 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
             gaConstructionRouteNodes
               (scCanonical scopeContext)
               (scGaParents scopeContext)
-          edgeArtifacts =
-            EdgeArtifacts
-              { eaEdgeExpansions = acEdgeExpansions annotationContext,
-                eaEdgeWitnesses = acEdgeWitnesses annotationContext,
-                eaEdgeTraces = acEdgeTraces annotationContext,
-                eaIdentityEdges = acIdentityEdges annotationContext
-              }
+          edgeArtifacts = acEdgeArtifacts annotationContext
       generalizedResultRequest <-
         sourceLambdaGeneralizedResultRouteRequest
           (scGaParents scopeContext)
@@ -3093,15 +3091,11 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
         | exactIdentityEdge edgeWitness -> Right InstId
         | rigidRootTransitionEdge edgeWitness -> Right InstId
         | otherwise -> do
-        traceInfo <-
-          case IntMap.lookup eid edgeTraces of
-            Nothing -> Left (MissingEdgeTrace (EdgeId eid))
-            Just trace -> Right trace
         replay <-
           mkPhiReplayCertificate
             (EdgeId eid)
-            edgeWitnesses
-            edgeTraces
+            (acEdgeArtifacts annotationContext)
+        let traceInfo = phiReplayTrace replay
         mSchemeInfoRaw <-
           case sourceAuthority of
             Just sourceScheme -> pure (Just sourceScheme)

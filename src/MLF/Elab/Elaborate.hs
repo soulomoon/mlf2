@@ -17,11 +17,10 @@ import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
-import MLF.Constraint.Presolution (EdgeTrace, PresolutionView (..))
-import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
+import MLF.Constraint.Presolution (PresolutionView (..))
+import MLF.Constraint.Presolution.Base (EdgeArtifacts)
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Constraint.Types.Phase (Phase)
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Elaborate.Algebra
   ( AlgebraContext (..),
     ElaboratedTerm (..),
@@ -83,18 +82,6 @@ data ElabEnv (p :: Phase) = ElabEnv
     eeInitialTermEnv :: Env
   }
 
-eeEdgeWitnesses :: ElabEnv p -> IntMap.IntMap EdgeWitness
-eeEdgeWitnesses = eaEdgeWitnesses . eeEdgeArtifacts
-
-eeEdgeTraces :: ElabEnv p -> IntMap.IntMap EdgeTrace
-eeEdgeTraces = eaEdgeTraces . eeEdgeArtifacts
-
-eeEdgeExpansions :: ElabEnv p -> IntMap.IntMap Expansion
-eeEdgeExpansions = eaEdgeExpansions . eeEdgeArtifacts
-
-eeIdentityEdges :: ElabEnv p -> IntSet.IntSet
-eeIdentityEdges = eaIdentityEdges . eeEdgeArtifacts
-
 elaborateWithEnv ::
   ElabConfig p ->
   ElabEnv p ->
@@ -118,10 +105,7 @@ validateElaborationWithEnv elabEnv ann = do
   validateElaborationEdgeAuthority
     (eeCanonical elabEnv)
     (eeAnnotationExpectedTypesByEdge elabEnv)
-    (eeEdgeWitnesses elabEnv)
-    (eeEdgeTraces elabEnv)
-    (eeEdgeExpansions elabEnv)
-    (eeIdentityEdges elabEnv)
+    (eeEdgeArtifacts elabEnv)
     ann
 
 elaborateWithEnvReadModel ::
@@ -147,10 +131,7 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
   validateElaborationEdgeAuthority
     canonical
     (eeAnnotationExpectedTypesByEdge elabEnv)
-    (eeEdgeWitnesses elabEnv)
-    (eeEdgeTraces elabEnv)
-    (eeEdgeExpansions elabEnv)
-    (eeIdentityEdges elabEnv)
+    (eeEdgeArtifacts elabEnv)
     ann
   let namedSet = ermNamedNodes readModel
       inlineBoundVarsContext =
@@ -179,10 +160,7 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
             acSourceBinderRefs = eeSourceBinderRefs elabEnv,
             acDirectSourceBinderKeys = eeDirectSourceBinderKeys elabEnv,
             acSubtermGeneralizations = subtermGeneralizations,
-            acEdgeWitnesses = eeEdgeWitnesses elabEnv,
-            acEdgeTraces = eeEdgeTraces elabEnv,
-            acEdgeExpansions = eeEdgeExpansions elabEnv,
-            acIdentityEdges = eeIdentityEdges elabEnv
+            acEdgeArtifacts = eeEdgeArtifacts elabEnv
           }
       algebraContext =
         AlgebraContext
