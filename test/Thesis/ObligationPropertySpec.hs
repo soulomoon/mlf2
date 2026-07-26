@@ -1,17 +1,19 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Thesis.ObligationPropertySpec (spec) where
 
 import IdentityTestSupport
 import qualified ElabTypeTestSupport as TestElab
-import Control.Monad (forM_)
+import Control.Monad (foldM, forM_)
 import Data.Either (isRight)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
@@ -53,10 +55,22 @@ import ElabTermTestSupport (generatedResolvedLocal, mkTestDeferredVar, mkTestLoc
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
 import MLF.Elab.Types qualified as ElabTypes
-import MLF.Frontend.ConstraintGen (ConstraintResult (..))
+import MLF.Frontend.ConstraintGen
+  ( ConstraintError,
+    ConstraintResult (..),
+    generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply,
+  )
 import MLF.Frontend.Program.Builtins qualified as Builtins
 import MLF.Frontend.Syntax qualified as Surf
 import MLF.Reify.TypeOps qualified as TypeOps
+import MLF.Types.Identity
+  ( StructuralTypeBinderRole (StructuralSelfBinder),
+    TypeBinderIdentity,
+    UniqueIdentity (..),
+    initialIdentityGenerator,
+    typeBinderIdentityFromStructural,
+    typeBinderIdentityFromUnique,
+  )
 import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
 import SpecUtil
   ( PipelineArtifacts (..),
@@ -1068,95 +1082,1110 @@ propBindMono _size =
 
 propSynToGraph :: Int -> Property
 propSynToGraph size =
-  let existentialName = "existential-" ++ show size
-      universalName = "universal-" ++ show size
-      annotation =
-        Surf.STArrow
-          (Surf.STVar existentialName)
-          ( Surf.STForall
-              universalName
-              Nothing
-              (Surf.STArrow (Surf.STVar existentialName) (Surf.STVar universalName))
-          )
-      expression = Surf.EAnn (Surf.ELit (Surf.LInt 1)) annotation
-   in case runConstraintDefault Set.empty expression of
+  forAll (genMixedAnnotation size) $ \annotation ->
+    counterexample ("generated annotation: " ++ show annotation) $
+      conjoin
+        [ checkSynToGraph annotation,
+          checkSynToGraph
+            (Surf.STVar ("bare-existential-" ++ show size)),
+          checkSynToGraph graphNormalizedEqVarAnnotation
+        ]
+
+graphNormalizedEqVarAnnotation :: Surf.SrcType
+graphNormalizedEqVarAnnotation =
+  Surf.STForall
+    "graph-root-a"
+    (Just (Surf.mkSrcBound (Surf.STBase "Int")))
+    (Surf.STForall "graph-root-unused" Nothing (Surf.STVar "graph-root-a"))
+
+data AnnotationBinderKind
+  = AnnotationForallBinder
+  | AnnotationMuBinder
+  deriving (Eq, Show)
+
+data CoercionCopyEvidence = CoercionCopyEvidence
+  { coercionEvidenceFreeNodes :: Map.Map String NodeId,
+    coercionEvidenceDomainOwned :: IntSet.IntSet,
+    coercionEvidenceCodomainOwned :: IntSet.IntSet
+  }
+  deriving (Eq, Show)
+
+emptyCoercionCopyEvidence :: CoercionCopyEvidence
+emptyCoercionCopyEvidence =
+  CoercionCopyEvidence
+    { coercionEvidenceFreeNodes = Map.empty,
+      coercionEvidenceDomainOwned = IntSet.empty,
+      coercionEvidenceCodomainOwned = IntSet.empty
+    }
+
+checkSynToGraph :: Surf.SrcType -> Property
+checkSynToGraph annotation =
+  let binderIdentities = annotationBinderIdentities annotation
+   in case runAnnotationConstraint binderIdentities annotation of
         Right result@ConstraintResult {crConstraint = c, crRoot = codomainRoot} ->
           case cInstEdges c of
             [InstEdge _ _ destination] ->
               case lookupNodeIn (cNodes c) destination of
                 Just TyVar {tnBound = Just domainRoot} ->
-                  case
-                      ( annotationCopyShape (cNodes c) domainRoot,
-                        annotationCopyShape (cNodes c) codomainRoot
-                      )
-                    of
-                      (Right (domainExistential, domainForall, domainUniversal), Right (codomainExistential, codomainForall, codomainUniversal)) ->
-                        conjoin
-                          [ counterexample "coercion domain and codomain roots were shared" $
-                              domainRoot /= codomainRoot,
-                            counterexample "existential annotation node was duplicated" $
-                              domainExistential == codomainExistential,
-                            counterexample "universal forall owner was shared" $
-                              domainForall /= codomainForall,
-                            counterexample "universal binder was shared" $
-                              domainUniversal /= codomainUniversal,
-                            Binding.nodeKind c (typeRef domainRoot)
-                              === Right Binding.NodeRestricted,
-                            Binding.nodeKind c (typeRef codomainRoot)
-                              === Right Binding.NodeInstantiable,
-                            counterexample "annotation source authority was not recorded at the codomain" $
-                              IntMap.member
-                                (getNodeId codomainRoot)
-                                (crAnnSourceTypes result),
-                            Binding.checkBindingTree c === Right ()
-                          ]
-                      (domainShape, codomainShape) ->
-                        counterexample
-                          ( "unexpected coercion copies: domain="
-                              ++ show domainShape
-                              ++ ", codomain="
-                              ++ show codomainShape
-                          )
-                          False
+                  conjoin
+                    [ case
+                        validateAnnotationCopies
+                          binderIdentities
+                          result
+                          annotation
+                          domainRoot
+                          codomainRoot
+                      of
+                        Right () -> property True
+                        Left err -> counterexample err False,
+                      counterexample
+                        "annotation source authority was not recorded at the codomain"
+                        ( IntMap.member
+                            (getNodeId codomainRoot)
+                            (crAnnSourceTypes result)
+                        ),
+                      Binding.checkBindingTree c === Right ()
+                    ]
                 other ->
                   counterexample
-                    ("annotation edge destination did not retain its rigid domain: " ++ show other)
+                    ("annotation edge destination did not retain its domain: " ++ show other)
                     False
             edges ->
               counterexample
                 ("expected one annotation edge, saw " ++ show edges)
                 False
-        Left err -> counterexample err False
+        Left err -> counterexample (show err) False
 
-annotationCopyShape :: NodeMap TyNode -> NodeId -> Either String (NodeId, NodeId, NodeId)
-annotationCopyShape nodes root =
-  case lookupNodeIn nodes root of
-    Just TyArrow {tnDom = outerExistential, tnCod = forallNode} ->
-      case lookupNodeIn nodes forallNode of
-        Just TyForall {tnBody = forallBody} ->
-          case lookupNodeIn nodes forallBody of
-            Just TyArrow {tnDom = innerExistential, tnCod = universal}
-              | outerExistential == innerExistential ->
-                  case
-                      ( lookupNodeIn nodes outerExistential,
-                        lookupNodeIn nodes universal
-                      )
-                    of
-                      (Just TyVar {}, Just TyVar {tnBound = Nothing}) ->
-                        Right (outerExistential, forallNode, universal)
-                      other ->
-                        Left
-                          ( "existential/universal leaves were not variables: "
-                              ++ show other
+runAnnotationConstraint ::
+  Map.Map String TypeBinderIdentity ->
+  Surf.SrcType ->
+  Either ConstraintError (ConstraintResult 'Raw)
+runAnnotationConstraint binderIdentities annotation =
+  generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+    initialIdentityGenerator
+    Set.empty
+    (Builtins.builtinSourceTypeHeadIdentities annotation)
+    binderIdentities
+    Map.empty
+    ( unsafeNormalizeExpr
+        (Surf.EAnn (Surf.ELit (Surf.LInt 1)) annotation)
+    )
+
+annotationBinderIdentities :: Surf.SrcType -> Map.Map String TypeBinderIdentity
+annotationBinderIdentities annotation =
+  Map.fromList
+    [ (name, binderIdentity index binderKind)
+      | (index, (name, binderKind)) <-
+          zip [0 :: Int ..] (annotationBinders annotation)
+    ]
+  where
+    binderIdentity index binderKind =
+      let unique = UniqueIdentity (991900000 + index)
+       in case binderKind of
+            AnnotationForallBinder ->
+              typeBinderIdentityFromUnique unique
+            AnnotationMuBinder ->
+              typeBinderIdentityFromStructural unique StructuralSelfBinder
+
+annotationBinders :: Surf.SrcTy n v -> [(String, AnnotationBinderKind)]
+annotationBinders sourceType =
+  case sourceType of
+    Surf.STVar _ -> []
+    Surf.STArrow dom cod ->
+      annotationBinders dom ++ annotationBinders cod
+    Surf.STBase _ -> []
+    Surf.STCon _ args ->
+      foldMap annotationBinders args
+    Surf.STVarApp _ args ->
+      foldMap annotationBinders args
+    Surf.STTyLam name body ->
+      (name, AnnotationForallBinder) : annotationBinders body
+    Surf.STTyApp fun arg ->
+      annotationBinders fun ++ annotationBinders arg
+    Surf.STForall name mbBound body ->
+      (name, AnnotationForallBinder)
+        : maybe [] (annotationBinders . Surf.unSrcBound) mbBound
+          ++ annotationBinders body
+    Surf.STMu name body ->
+      (name, AnnotationMuBinder) : annotationBinders body
+    Surf.STBottom -> []
+
+annotationGraphicFreeVars :: Surf.SrcTy n v -> Set.Set String
+annotationGraphicFreeVars sourceType =
+  case sourceType of
+    Surf.STVar name -> Set.singleton name
+    Surf.STArrow dom cod ->
+      annotationGraphicFreeVars dom <> annotationGraphicFreeVars cod
+    Surf.STBase _ -> Set.empty
+    Surf.STCon _ args ->
+      foldMap annotationGraphicFreeVars args
+    Surf.STVarApp name args ->
+      Set.insert name (foldMap annotationGraphicFreeVars args)
+    Surf.STTyLam name body ->
+      Set.delete name (annotationGraphicFreeVars body)
+    Surf.STTyApp fun arg ->
+      annotationGraphicFreeVars fun <> annotationGraphicFreeVars arg
+    Surf.STForall name mbBound body ->
+      let bodyFree = annotationGraphicFreeVars body
+       in if Set.member name bodyFree
+            then
+              Set.delete name bodyFree
+                <> maybe
+                  Set.empty
+                  (annotationGraphicFreeVars . Surf.unSrcBound)
+                  mbBound
+            else bodyFree
+    Surf.STMu name body ->
+      Set.delete name (annotationGraphicFreeVars body)
+    Surf.STBottom -> Set.empty
+
+annotationGraphicRootVariable :: Surf.SrcTy n v -> Maybe String
+annotationGraphicRootVariable sourceType =
+  case sourceType of
+    Surf.STVar name -> Just name
+    Surf.STForall name mbBound body ->
+      let bodyRoot = annotationGraphicRootVariable body
+       in if bodyRoot == Just name
+            then
+              mbBound
+                >>= annotationGraphicRootVariable . Surf.unSrcBound
+            else
+              if Set.notMember name (annotationGraphicFreeVars body)
+                then bodyRoot
+                else Nothing
+    _ -> Nothing
+
+genMixedAnnotation :: Int -> Gen Surf.SrcType
+genMixedAnnotation requestedSize = do
+  salt <- chooseInt (0, 1000000)
+  let existential = annotationName "existential" salt [0]
+      constructorHead = annotationName "constructor" salt [0]
+      boundExistential = annotationName "bound-existential" salt [0]
+      universal = annotationName "forall" salt [0]
+      recursive = annotationName "mu" salt [0]
+      freeNames = [existential, constructorHead, boundExistential]
+      structuralBound =
+        Surf.STArrow
+          (Surf.STVar boundExistential)
+          (Surf.STBase "Bool")
+      seed =
+        Surf.STForall
+          universal
+          (Just (Surf.mkSrcBound structuralBound))
+          ( Surf.STArrow
+              (Surf.STCon "List" (Surf.STVar existential :| []))
+              ( Surf.STArrow
+                  ( Surf.STVarApp
+                      constructorHead
+                      (Surf.STVar existential :| [Surf.STBase "Int"])
+                  )
+                  ( Surf.STMu
+                      recursive
+                      ( Surf.STArrow
+                          (Surf.STVar recursive)
+                          ( Surf.STArrow
+                              (Surf.STVar universal)
+                              Surf.STBottom
                           )
-              | otherwise ->
-                  Left
-                    ( "free existential was not shared within one copy: "
-                        ++ show (outerExistential, innerExistential)
+                      )
+                  )
+              )
+          )
+      depth = max 1 (min 4 (requestedSize `div` 4))
+  growAnnotation freeNames [] salt [1] depth seed
+
+annotationName :: String -> Int -> [Int] -> String
+annotationName prefix salt path =
+  prefix
+    ++ "-"
+    ++ show salt
+    ++ concatMap (("-" ++) . show) path
+
+growAnnotation ::
+  [String] ->
+  [String] ->
+  Int ->
+  [Int] ->
+  Int ->
+  Surf.SrcType ->
+  Gen Surf.SrcType
+growAnnotation freeNames boundNames salt path depth seedType
+  | depth <= 0 = pure seedType
+  | otherwise =
+      frequency
+        [ (2, pure seedType),
+          (4, do
+              sibling <-
+                genAnnotation
+                  freeNames
+                  boundNames
+                  salt
+                  (0 : path)
+                  (depth - 1)
+              wrapped <-
+                elements
+                  [ Surf.STArrow seedType sibling,
+                    Surf.STArrow sibling seedType
+                  ]
+              growAnnotation
+                freeNames
+                boundNames
+                salt
+                (1 : path)
+                (depth - 1)
+                wrapped
+          ),
+          (2,
+            growAnnotation
+              freeNames
+              boundNames
+              salt
+              (2 : path)
+              (depth - 1)
+              (Surf.STCon "List" (seedType :| []))
+          ),
+          (2, do
+              headName <- elements (freeNames ++ boundNames)
+              sibling <-
+                genAnnotation
+                  freeNames
+                  boundNames
+                  salt
+                  (3 : path)
+                  (depth - 1)
+              growAnnotation
+                freeNames
+                boundNames
+                salt
+                (4 : path)
+                (depth - 1)
+                (Surf.STVarApp headName (seedType :| [sibling]))
+          ),
+          (3, do
+              let binder = annotationName "forall" salt (5 : path)
+              mbBound <-
+                frequency
+                  [ (2, pure Nothing),
+                    (1,
+                      Just . Surf.mkSrcBound
+                        <$> genStructuralAnnotation
+                          freeNames
+                          boundNames
+                          salt
+                          (6 : path)
+                          (depth - 1)
                     )
-            other -> Left ("forall body was not an arrow: " ++ show other)
-        other -> Left ("copy codomain was not a forall: " ++ show other)
-    other -> Left ("copy root was not an arrow: " ++ show other)
+                  ]
+              growAnnotation
+                freeNames
+                boundNames
+                salt
+                (7 : path)
+                (depth - 1)
+                ( Surf.STForall
+                    binder
+                    mbBound
+                    (Surf.STArrow seedType (Surf.STVar binder))
+                )
+          ),
+          (2,
+            let binder = annotationName "mu" salt (8 : path)
+             in growAnnotation
+                  freeNames
+                  boundNames
+                  salt
+                  (9 : path)
+                  (depth - 1)
+                  ( Surf.STMu
+                      binder
+                      (Surf.STArrow (Surf.STVar binder) seedType)
+                  )
+          )
+        ]
+
+genAnnotation ::
+  [String] ->
+  [String] ->
+  Int ->
+  [Int] ->
+  Int ->
+  Gen Surf.SrcType
+genAnnotation freeNames boundNames salt path depth
+  | depth <= 0 =
+      genAnnotationLeaf freeNames boundNames
+  | otherwise =
+      frequency
+        [ (4, genAnnotationLeaf freeNames boundNames),
+          (5,
+            Surf.STArrow
+              <$> recurse 0
+              <*> recurse 1
+          ),
+          (2,
+            (\arg -> Surf.STCon "List" (arg :| []))
+              <$> recurse 2
+          ),
+          (2, do
+              headName <- elements (freeNames ++ boundNames)
+              firstArg <- recurse 3
+              restArgs <-
+                frequency
+                  [ (2, pure []),
+                    (1, (: []) <$> recurse 4)
+                  ]
+              pure (Surf.STVarApp headName (firstArg :| restArgs))
+          ),
+          (3, do
+              let binder = annotationName "forall" salt (5 : path)
+              mbBound <-
+                frequency
+                  [ (2, pure Nothing),
+                    (1,
+                      Just . Surf.mkSrcBound
+                        <$> genStructuralAnnotation
+                          freeNames
+                          boundNames
+                          salt
+                          (6 : path)
+                          (depth - 1)
+                    )
+                  ]
+              body <-
+                genAnnotation
+                  freeNames
+                  (binder : boundNames)
+                  salt
+                  (7 : path)
+                  (depth - 1)
+              pure (Surf.STForall binder mbBound body)
+          ),
+          (2, do
+              let binder = annotationName "mu" salt (8 : path)
+              body <-
+                genAnnotation
+                  freeNames
+                  (binder : boundNames)
+                  salt
+                  (9 : path)
+                  (depth - 1)
+              pure (Surf.STMu binder body)
+          )
+        ]
+  where
+    recurse tag =
+      genAnnotation
+        freeNames
+        boundNames
+        salt
+        (tag : path)
+        (depth - 1)
+
+genAnnotationLeaf :: [String] -> [String] -> Gen Surf.SrcType
+genAnnotationLeaf freeNames boundNames =
+  frequency
+    [ (4, Surf.STVar <$> elements (freeNames ++ boundNames)),
+      (3, Surf.STBase <$> elements ["Int", "Bool", "String"]),
+      (1, pure Surf.STBottom)
+    ]
+
+genStructuralAnnotation ::
+  [String] ->
+  [String] ->
+  Int ->
+  [Int] ->
+  Int ->
+  Gen Surf.SrcType
+genStructuralAnnotation freeNames boundNames salt path depth
+  | depth <= 0 =
+      frequency
+        [ (3, Surf.STBase <$> elements ["Int", "Bool", "String"]),
+          (2,
+            (\arg -> Surf.STCon "List" (arg :| []))
+              <$> genAnnotationLeaf freeNames boundNames
+          ),
+          (1, pure Surf.STBottom)
+        ]
+  | otherwise =
+      frequency
+        [ (3, Surf.STBase <$> elements ["Int", "Bool", "String"]),
+          (4,
+            Surf.STArrow
+              <$> recurse 0
+              <*> recurse 1
+          ),
+          (2,
+            (\arg -> Surf.STCon "List" (arg :| []))
+              <$> recurse 2
+          ),
+          (2, do
+              headName <- elements (freeNames ++ boundNames)
+              firstArg <- recurse 3
+              pure (Surf.STVarApp headName (firstArg :| []))
+          ),
+          (2, do
+              let binder = annotationName "forall" salt (4 : path)
+              body <-
+                genAnnotation
+                  freeNames
+                  (binder : boundNames)
+                  salt
+                  (5 : path)
+                  (depth - 1)
+              pure (Surf.STForall binder Nothing body)
+          ),
+          (1, do
+              let binder = annotationName "mu" salt (6 : path)
+              body <-
+                genAnnotation
+                  freeNames
+                  (binder : boundNames)
+                  salt
+                  (7 : path)
+                  (depth - 1)
+              pure (Surf.STMu binder body)
+          ),
+          (1, pure Surf.STBottom)
+        ]
+  where
+    recurse tag =
+      genAnnotation
+        freeNames
+        boundNames
+        salt
+        (tag : path)
+        (depth - 1)
+
+validateAnnotationCopies ::
+  Map.Map String TypeBinderIdentity ->
+  ConstraintResult 'Raw ->
+  Surf.SrcType ->
+  NodeId ->
+  NodeId ->
+  Either String ()
+validateAnnotationCopies binderIdentities result annotation domainRoot codomainRoot = do
+  evidence <-
+    go Map.empty Map.empty annotation domainRoot codomainRoot
+  let domainOwned = coercionEvidenceDomainOwned evidence
+      codomainOwned = coercionEvidenceCodomainOwned evidence
+  if IntSet.member (getNodeId domainRoot) domainOwned
+    then
+      expectNodeKind
+        "rigid domain root"
+        domainRoot
+        Binding.NodeRestricted
+    else Right ()
+  if IntSet.member (getNodeId codomainRoot) codomainOwned
+    then
+      expectNodeKind
+        "flexible codomain root"
+        codomainRoot
+        Binding.NodeInstantiable
+    else Right ()
+  requireEvidence
+    (IntSet.null (IntSet.intersection domainOwned codomainOwned))
+    ( "copy-owned nodes were shared between domain and codomain: "
+        ++ show (IntSet.toList (IntSet.intersection domainOwned codomainOwned))
+    )
+  forM_ (Map.toList (coercionEvidenceFreeNodes evidence)) $ \(name, node) -> do
+    requireEvidence
+      (not (IntSet.member (getNodeId node) domainOwned))
+      ("free node was owned by the rigid copy: " ++ name)
+    requireEvidence
+      (not (IntSet.member (getNodeId node) codomainOwned))
+      ("free node was owned by the flexible copy: " ++ name)
+    expectNodeKind
+      ("shared existential " ++ name)
+      node
+      Binding.NodeInstantiable
+  case Binding.checkBindingTree constraint of
+    Right () -> Right ()
+    Left err ->
+      Left
+        ( "invalid binding tree: "
+            ++ show err
+            ++ bindingErrorContext err
+        )
+  where
+    constraint = crConstraint result
+    nodes = cNodes constraint
+
+    bindingErrorContext (ParentNotUpper (TypeRef child) (TypeRef parent)) =
+      "; child="
+        ++ show (nodeContext child)
+        ++ "; parent="
+        ++ show (nodeContext parent)
+    bindingErrorContext _ = ""
+
+    nodeContext node =
+      ( lookupNodeIn nodes node,
+        IntMap.lookup
+          (nodeRefKey (typeRef node))
+          (cBindParents constraint),
+        [ parent
+          | (parent, parentNode) <- toListNode nodes,
+            node `elem` structuralChildrenWithBounds parentNode
+        ]
+      )
+
+    go ::
+      Map.Map String NodeId ->
+      Map.Map String NodeId ->
+      Surf.SrcTy n v ->
+      NodeId ->
+      NodeId ->
+      Either String CoercionCopyEvidence
+    go domainEnv codomainEnv sourceType domainNode codomainNode =
+      case sourceType of
+        Surf.STVar name ->
+          validateVariable
+            domainEnv
+            codomainEnv
+            name
+            domainNode
+            codomainNode
+        Surf.STArrow sourceDomain sourceCodomain ->
+          case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyArrow {tnDom = domainDom, tnCod = domainCod},
+                Just TyArrow {tnDom = codomainDom, tnCod = codomainCod}
+                ) -> do
+                  rootEvidence <-
+                    ownedNodeEvidence "arrow" domainNode codomainNode
+                  domEvidence <-
+                    go
+                      domainEnv
+                      codomainEnv
+                      sourceDomain
+                      domainDom
+                      codomainDom
+                  codEvidence <-
+                    go
+                      domainEnv
+                      codomainEnv
+                      sourceCodomain
+                      domainCod
+                      codomainCod
+                  mergeEvidenceList [rootEvidence, domEvidence, codEvidence]
+              pair ->
+                Left ("arrow copies did not match source shape: " ++ show pair)
+        Surf.STBase expectedName ->
+          case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyBase {tnBase = BaseTy domainName},
+                Just TyBase {tnBase = BaseTy codomainName}
+                )
+                  | domainName == expectedName
+                      && codomainName == expectedName ->
+                      ownedNodeEvidence "base" domainNode codomainNode
+              pair ->
+                Left
+                  ( "base copies did not match "
+                      ++ expectedName
+                      ++ ": "
+                      ++ show pair
+                  )
+        Surf.STCon expectedName sourceArgs ->
+          case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyCon {tnCon = BaseTy domainName, tnArgs = domainArgs},
+                Just TyCon {tnCon = BaseTy codomainName, tnArgs = codomainArgs}
+                )
+                  | domainName == expectedName
+                      && codomainName == expectedName -> do
+                      rootEvidence <-
+                        ownedNodeEvidence "constructor" domainNode codomainNode
+                      argsEvidence <-
+                        validateChildren
+                          domainEnv
+                          codomainEnv
+                          (NE.toList sourceArgs)
+                          (NE.toList domainArgs)
+                          (NE.toList codomainArgs)
+                      mergeEvidence rootEvidence argsEvidence
+              pair ->
+                Left
+                  ( "constructor copies did not match "
+                      ++ expectedName
+                      ++ ": "
+                      ++ show pair
+                  )
+        Surf.STVarApp headName sourceArgs ->
+          case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyVarApp {tnVarHead = domainHead, tnArgs = domainArgs},
+                Just TyVarApp {tnVarHead = codomainHead, tnArgs = codomainArgs}
+                ) -> do
+                  rootEvidence <-
+                    ownedNodeEvidence
+                      "variable-headed application"
+                      domainNode
+                      codomainNode
+                  headEvidence <-
+                    validateVariable
+                      domainEnv
+                      codomainEnv
+                      headName
+                      domainHead
+                      codomainHead
+                  argsEvidence <-
+                    validateChildren
+                      domainEnv
+                      codomainEnv
+                      (NE.toList sourceArgs)
+                      (NE.toList domainArgs)
+                      (NE.toList codomainArgs)
+                  mergeEvidenceList
+                    [rootEvidence, headEvidence, argsEvidence]
+              pair ->
+                Left
+                  ( "variable-headed application copies did not match source shape: "
+                      ++ show pair
+                  )
+        Surf.STTyLam {} ->
+          Left "residual type lambda reached the O08 graph oracle"
+        Surf.STTyApp {} ->
+          Left "residual type application reached the O08 graph oracle"
+        Surf.STForall name mbSourceBound sourceBody
+          | annotationGraphicRootVariable sourceBody == Just name ->
+              case mbSourceBound of
+                Nothing ->
+                  go
+                    domainEnv
+                    codomainEnv
+                    Surf.STBottom
+                    domainNode
+                    codomainNode
+                Just sourceBound ->
+                  go
+                    domainEnv
+                    codomainEnv
+                    (Surf.unSrcBound sourceBound)
+                    domainNode
+                    codomainNode
+          | Set.notMember name (annotationGraphicFreeVars sourceBody) ->
+              go
+                domainEnv
+                codomainEnv
+                sourceBody
+                domainNode
+                codomainNode
+          | otherwise ->
+            case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyForall {tnBody = domainBody},
+                Just TyForall {tnBody = codomainBody}
+                ) -> do
+                  identity <-
+                    case Map.lookup name binderIdentities of
+                      Just found -> Right found
+                      Nothing ->
+                        Left
+                          ("missing generated identity for forall binder " ++ name)
+                  domainBinder <-
+                    findLexicalBinder
+                      identity
+                      domainNode
+                      BindRigid
+                  codomainBinder <-
+                    findLexicalBinder
+                      identity
+                      codomainNode
+                      BindFlex
+                  ownerEvidence <-
+                    ownedNodeEvidence "forall owner" domainNode codomainNode
+                  binderEvidence <-
+                    ownedNodeEvidence
+                      ("forall binder " ++ name)
+                      domainBinder
+                      codomainBinder
+                  boundEvidence <-
+                    validateBound
+                      domainEnv
+                      codomainEnv
+                      mbSourceBound
+                      domainBinder
+                      codomainBinder
+                  bodyEvidence <-
+                    go
+                      (Map.insert name domainBinder domainEnv)
+                      (Map.insert name codomainBinder codomainEnv)
+                      sourceBody
+                      domainBody
+                      codomainBody
+                  mergeEvidenceList
+                    [ ownerEvidence,
+                      binderEvidence,
+                      boundEvidence,
+                      bodyEvidence
+                    ]
+              pair ->
+                Left
+                  ("forall copies did not match source shape: " ++ show pair)
+        Surf.STMu name sourceBody ->
+          case
+            ( lookupNodeIn nodes domainNode,
+              lookupNodeIn nodes codomainNode
+            )
+          of
+              ( Just TyMu {tnBody = domainBody},
+                Just TyMu {tnBody = codomainBody}
+                ) -> do
+                  identity <-
+                    case Map.lookup name binderIdentities of
+                      Just found -> Right found
+                      Nothing ->
+                        Left
+                          ("missing generated identity for mu binder " ++ name)
+                  ownerEvidence <-
+                    ownedNodeEvidence "mu owner" domainNode codomainNode
+                  expectSourceIdentity "domain mu owner" identity domainNode
+                  expectSourceIdentity "codomain mu owner" identity codomainNode
+                  if Set.member name (annotationGraphicFreeVars sourceBody)
+                    then do
+                      domainBinder <-
+                        findLexicalBinder
+                          identity
+                          domainNode
+                          BindRigid
+                      codomainBinder <-
+                        findLexicalBinder
+                          identity
+                          codomainNode
+                          BindFlex
+                      binderEvidence <-
+                        ownedNodeEvidence
+                          ("mu binder " ++ name)
+                          domainBinder
+                          codomainBinder
+                      bodyEvidence <-
+                        go
+                          (Map.insert name domainBinder domainEnv)
+                          (Map.insert name codomainBinder codomainEnv)
+                          sourceBody
+                          domainBody
+                          codomainBody
+                      mergeEvidenceList
+                        [ownerEvidence, binderEvidence, bodyEvidence]
+                    else do
+                      domainBinder <-
+                        findGenOwnedLexicalBinder identity BindRigid
+                      codomainBinder <-
+                        findGenOwnedLexicalBinder identity BindFlex
+                      binderEvidence <-
+                        ownedNodeEvidence
+                          ("vacuous mu binder " ++ name)
+                          domainBinder
+                          codomainBinder
+                      bodyEvidence <-
+                        go
+                          domainEnv
+                          codomainEnv
+                          sourceBody
+                          domainBody
+                          codomainBody
+                      mergeEvidenceList
+                        [ownerEvidence, binderEvidence, bodyEvidence]
+              pair ->
+                Left ("mu copies did not match source shape: " ++ show pair)
+        Surf.STBottom ->
+          case
+              ( lookupNodeIn nodes domainNode,
+                lookupNodeIn nodes codomainNode
+              )
+            of
+              ( Just TyVar {tnBound = Nothing},
+                Just TyVar {tnBound = Nothing}
+                ) ->
+                  ownedNodeEvidence "bottom" domainNode codomainNode
+              pair ->
+                Left ("bottom copies did not match source shape: " ++ show pair)
+
+    validateChildren ::
+      forall n.
+      Map.Map String NodeId ->
+      Map.Map String NodeId ->
+      [Surf.SrcTy n 'Surf.TopVarAllowed] ->
+      [NodeId] ->
+      [NodeId] ->
+      Either String CoercionCopyEvidence
+    validateChildren domainEnv codomainEnv sourceChildren domainChildren codomainChildren = do
+      requireEvidence
+        ( length sourceChildren == length domainChildren
+            && length sourceChildren == length codomainChildren
+        )
+        ( "copy child arity mismatch: "
+            ++ show
+              ( length sourceChildren,
+                length domainChildren,
+                length codomainChildren
+              )
+        )
+      mergeEvidenceList
+        =<< sequence
+          [ go
+              domainEnv
+              codomainEnv
+              sourceChild
+              domainChild
+              codomainChild
+            | (sourceChild, domainChild, codomainChild) <-
+                zip3 sourceChildren domainChildren codomainChildren
+          ]
+
+    validateVariable domainEnv codomainEnv name domainNode codomainNode =
+      case (Map.lookup name domainEnv, Map.lookup name codomainEnv) of
+        (Just expectedDomain, Just expectedCodomain) -> do
+          requireEvidence
+            (domainNode == expectedDomain)
+            ( "domain occurrence of "
+                ++ name
+                ++ " did not use its lexical binder: "
+                ++ show (domainNode, expectedDomain)
+            )
+          requireEvidence
+            (codomainNode == expectedCodomain)
+            ( "codomain occurrence of "
+                ++ name
+                ++ " did not use its lexical binder: "
+                ++ show (codomainNode, expectedCodomain)
+            )
+          requireTyVar name domainNode
+          requireTyVar name codomainNode
+          Right emptyCoercionCopyEvidence
+        (Nothing, Nothing) -> do
+          requireEvidence
+            (domainNode == codomainNode)
+            ( "free annotation variable was not shared: "
+                ++ name
+                ++ " -> "
+                ++ show (domainNode, codomainNode)
+            )
+          case lookupNodeIn nodes domainNode of
+            Just TyVar {tnBound = Nothing} ->
+              Right
+                emptyCoercionCopyEvidence
+                  { coercionEvidenceFreeNodes =
+                      Map.singleton name domainNode
+                  }
+            other ->
+              Left
+                ( "free annotation variable was not an unbounded TyVar: "
+                    ++ name
+                    ++ " -> "
+                    ++ show other
+                )
+        pair ->
+          Left
+            ( "source binder environment disagreed between copies for "
+                ++ name
+                ++ ": "
+                ++ show pair
+            )
+
+    validateBound ::
+      forall n.
+      Map.Map String NodeId ->
+      Map.Map String NodeId ->
+      Maybe (Surf.SrcBound n) ->
+      NodeId ->
+      NodeId ->
+      Either String CoercionCopyEvidence
+    validateBound domainEnv codomainEnv mbSourceBound domainBinder codomainBinder =
+      case
+          ( mbSourceBound,
+            lookupNodeIn nodes domainBinder,
+            lookupNodeIn nodes codomainBinder
+          )
+        of
+          (Nothing, Just TyVar {tnBound = Nothing}, Just TyVar {tnBound = Nothing}) ->
+            Right emptyCoercionCopyEvidence
+          ( Just sourceBound,
+            Just TyVar {tnBound = Just domainBound},
+            Just TyVar {tnBound = Just codomainBound}
+            ) ->
+              go
+                domainEnv
+                codomainEnv
+                (Surf.unSrcBound sourceBound)
+                domainBound
+                codomainBound
+          triple ->
+            Left
+              ( "forall bound copies did not match source presence: "
+                  ++ show triple
+              )
+
+    requireTyVar name node =
+      case lookupNodeIn nodes node of
+        Just TyVar {} -> Right ()
+        other ->
+          Left
+            ( "occurrence of "
+                ++ name
+                ++ " was not a TyVar: "
+                ++ show other
+            )
+
+    findLexicalBinder identity owner expectedFlag =
+      case
+          [ NodeId key
+            | (key, nodeIdentity) <-
+                IntMap.toList (crSourceTypeBinderIdentities result),
+              nodeIdentity == identity,
+              Just TyVar {} <- [lookupNodeIn nodes (NodeId key)],
+              IntMap.lookup
+                (nodeRefKey (typeRef (NodeId key)))
+                (cBindParents constraint)
+                == Just (typeRef owner, expectedFlag)
+          ]
+        of
+          [binder] -> Right binder
+          candidates ->
+            Left
+              ( "expected exactly one lexical binder under "
+                  ++ show owner
+                  ++ ", saw "
+                  ++ show candidates
+              )
+
+    expectSourceIdentity description identity node =
+      requireEvidence
+        ( IntMap.lookup
+            (getNodeId node)
+            (crSourceTypeBinderIdentities result)
+            == Just identity
+        )
+        (description ++ " did not retain its semantic source identity")
+
+    findGenOwnedLexicalBinder identity expectedFlag =
+      case
+          [ NodeId key
+            | (key, nodeIdentity) <-
+                IntMap.toList (crSourceTypeBinderIdentities result),
+              nodeIdentity == identity,
+              Just TyVar {} <- [lookupNodeIn nodes (NodeId key)],
+              Just (GenRef _, actualFlag) <-
+                [ IntMap.lookup
+                    (nodeRefKey (typeRef (NodeId key)))
+                    (cBindParents constraint)
+                ],
+              actualFlag == expectedFlag
+          ]
+        of
+          [binder] -> Right binder
+          candidates ->
+            Left
+              ( "expected one gen-owned vacuous mu binder with flag "
+                  ++ show expectedFlag
+                  ++ ", saw "
+                  ++ show candidates
+              )
+
+    ownedNodeEvidence description domainNode codomainNode = do
+      requireEvidence
+        (domainNode /= codomainNode)
+        (description ++ " was shared between coercion copies: " ++ show domainNode)
+      expectDomainNodeKind description domainNode
+      expectNodeKind description codomainNode Binding.NodeInstantiable
+      Right
+        emptyCoercionCopyEvidence
+          { coercionEvidenceDomainOwned =
+              IntSet.singleton (getNodeId domainNode),
+            coercionEvidenceCodomainOwned =
+              IntSet.singleton (getNodeId codomainNode)
+          }
+
+    expectDomainNodeKind description node =
+      case Binding.nodeKind constraint (typeRef node) of
+        Right Binding.NodeRestricted -> Right ()
+        Right Binding.NodeLocked -> Right ()
+        Right actual ->
+          Left
+            ( description
+                ++ " remained instantiable in the rigid domain: "
+                ++ show actual
+            )
+        Left err ->
+          Left
+            ( description
+                ++ " had no valid node kind: "
+                ++ show err
+            )
+
+    expectNodeKind description node expected =
+      case Binding.nodeKind constraint (typeRef node) of
+        Right actual
+          | actual == expected -> Right ()
+          | otherwise ->
+              Left
+                ( description
+                    ++ " had node kind "
+                    ++ show actual
+                    ++ ", expected "
+                    ++ show expected
+                )
+        Left err ->
+          Left
+            ( description
+                ++ " had no valid node kind: "
+                ++ show err
+            )
+
+mergeEvidenceList ::
+  [CoercionCopyEvidence] ->
+  Either String CoercionCopyEvidence
+mergeEvidenceList =
+  foldM mergeEvidence emptyCoercionCopyEvidence
+
+mergeEvidence ::
+  CoercionCopyEvidence ->
+  CoercionCopyEvidence ->
+  Either String CoercionCopyEvidence
+mergeEvidence left right = do
+  let leftFree = coercionEvidenceFreeNodes left
+      rightFree = coercionEvidenceFreeNodes right
+      conflicts =
+        [ (name, leftNode, rightNode)
+          | (name, leftNode) <- Map.toList leftFree,
+            Just rightNode <- [Map.lookup name rightFree],
+            leftNode /= rightNode
+        ]
+  requireEvidence
+    (null conflicts)
+    ("free annotation variable occurrences were not shared: " ++ show conflicts)
+  Right
+    CoercionCopyEvidence
+      { coercionEvidenceFreeNodes = Map.union leftFree rightFree,
+        coercionEvidenceDomainOwned =
+          IntSet.union
+            (coercionEvidenceDomainOwned left)
+            (coercionEvidenceDomainOwned right),
+        coercionEvidenceCodomainOwned =
+          IntSet.union
+            (coercionEvidenceCodomainOwned left)
+            (coercionEvidenceCodomainOwned right)
+      }
+
+requireEvidence :: Bool -> String -> Either String ()
+requireEvidence condition message =
+  if condition
+    then Right ()
+    else Left message
 
 propReifyInline :: Int -> Property
 propReifyInline _size =

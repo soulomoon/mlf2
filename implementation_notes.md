@@ -1,3 +1,38 @@
+## 2026-07-26 - Structurally generated G(sigma) and unreachable-binder elimination
+
+- `internalizeCoercionType` binds only roots owned by a coercion copy. A bare
+  shared variable keeps its existing owner, so an annotation-local existential
+  remains flexible while an ambient Gamma binder remains restricted under the
+  enclosing definition instead of being captured by the annotation gen.
+- Constraint generation now implements Figure 8.2.3's construction cases
+  before allocation: an unused `forall` returns its translated body directly,
+  and any body whose translated graph is rooted at its binder returns
+  `G(sigma)`. This includes graph-normalized Eq-Var forms such as
+  `forall (a >= Int). forall b. a`, not only a syntactic body `a`. The
+  rule is deliberately not extended to `mu`: a recursive owner carries nominal
+  structural identity even when its self variable is vacuous. Its lexical
+  identity node is retained for source/checked-IR authority but bound directly
+  at the coercion-copy gen, rather than below a `TyMu` owner that cannot
+  structurally reach it. A `StructuralResultBinder` nested inside that nominal
+  `STMu` is also retained by semantic identity. It is compiler-owned Church
+  representation metadata in the repo's explicit recursive-type extension,
+  not a source quantifier in Figure 8.2.3's restricted-type grammar. This keeps
+  the empty-data shape `mu self. forall result. result` constructor-directed
+  and prevents presolution from treating its collapsed bottom node as a locked
+  evidence frontier. Unreachable ordinary `forall` nodes are never created,
+  rather than being cleaned from an invalid binding tree afterward.
+- `O08-SYN-TO-GRAPH` is no longer one fixed graph with randomized names. Its
+  QuickCheck generator composes nested arrows, bases, constructors,
+  variable-headed applications, structural bounds, `forall`, `mu`, bottom, and
+  repeated free existentials. A separately implemented recursive oracle checks
+  both copies against source structure, identity-bearing lexical binders,
+  existential sharing, permissions, Eq-Var/vacuity, source authority, and
+  binding-tree validity. Five additional deterministic seeds cover 500
+  generated cases during focused validation; together with the original
+  regression seed this covers 600 generated O08 cases. Final validation passed
+  the 79-example Phase 1 slice, the 227-example source-type finalization slice,
+  the thesis-claims checker, and the full 3702-example serial suite.
+
 ## 2026-07-26 - Construction-closed annotation and Phi authority
 
 - Annotation source selection is now represented by

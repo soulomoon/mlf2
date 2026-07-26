@@ -6,7 +6,7 @@ module MLF.Frontend.ConstraintGen.Translate
   )
 where
 
-import Control.Monad (foldM, forM)
+import Control.Monad (foldM, forM, when)
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
@@ -25,10 +25,12 @@ import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Syntax
 import MLF.Types.Identity
   ( IdDetails,
+    StructuralTypeBinderRole (StructuralResultBinder),
     TypeBinderIdentity,
     idDetailsIdentityKey,
     lookupTypeBinderIdentityAlias,
-    typeBinderIdentityFromNode
+    typeBinderIdentityFromNode,
+    typeBinderIdentityStructural
   )
 
 buildRootExprWithExternalBindings :: ExternalBindings -> ResolvedNormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
@@ -1048,15 +1050,29 @@ internalizeCoercionType :: GenNodeId -> NormSrcType -> ConstraintM CoercionTypeC
 internalizeCoercionType coerceGen ty = do
   (domainNode, shared1) <-
     internalizeCoercionCopy BindRigid False coerceGen coerceGen Map.empty Map.empty ty
-  (codomainNode, _shared2) <-
+  bindCoercionOwnedRoot BindRigid coerceGen shared1 domainNode
+  (codomainNode, shared2) <-
     internalizeCoercionCopy BindFlex False coerceGen coerceGen Map.empty shared1 ty
-  setBindParentOverride (typeRef domainNode) (genRef coerceGen) BindRigid
-  setBindParentOverride (typeRef codomainNode) (genRef coerceGen) BindFlex
+  bindCoercionOwnedRoot BindFlex coerceGen shared2 codomainNode
   pure
     CoercionTypeCopies
       { coercionRigidDomain = domainNode,
         coercionFlexibleCodomain = codomainNode
       }
+
+-- | Bind a copy-owned root without capturing a shared existential or an
+-- ambient Γ binder.  A bare variable annotation is itself part of the shared
+-- portion of κ, so the two copy roles name the same node; its existing owner
+-- is authoritative.
+bindCoercionOwnedRoot ::
+  BindFlag ->
+  GenNodeId ->
+  SharedEnv ->
+  NodeId ->
+  ConstraintM ()
+bindCoercionOwnedRoot bindFlag coerceGen shared root =
+  unlessShared shared root $
+    setBindParentOverride (typeRef root) (genRef coerceGen) bindFlag
 
 -- | Internalize constructor arguments left-to-right while threading
 -- coercion-copy sharing.
@@ -1131,57 +1147,98 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
     STTyApp {} ->
       throwError (InternalConstraintError "residual type application reached constraint generation")
     STForall var mBound body -> do
-      -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
-      -- variable) are unreachable here — normalization inlines them via
-      -- capture-avoiding substitution before constraint generation.
-      -- `mBound` is wrapped as `Maybe (SrcBound 'NormN)`; unwrapping with
-      -- `unNormBound` yields a `StructBound` whose root cannot be a variable.
-      --
-      -- Well-formedness check: binder must not occur in its own structural bound.
-      -- This catches cases like ∀(a ⩾ List a). a where the binder appears
-      -- nested inside a structural bound.
-      case mBound of
-        Just bound
-          | Set.member var (structBoundFreeVars (unNormBound bound)) ->
-              throwError (ForallBoundMentionsBinder var)
-        _ -> pure ()
-      ((varNode, bodyNode, shared2), scopeFrame) <- withScopedBuild $ do
-        varNode <- allocVar
-        recordKnownSourceTypeBinderIdentity var varNode
-        let tyEnv' = Map.insert var varNode tyEnv
-        (mbBoundNode, shared1) <- case mBound of
-          Nothing -> pure (Nothing, shared)
-          Just bound -> do
-            let boundAsNorm = structBoundToNormSrcType (unNormBound bound)
-            (boundNode, shared2) <-
-              internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared boundAsNorm
-            pure (Just boundNode, shared2)
+      when
+        ( maybe
+            False
+            (Set.member var . structBoundFreeVars . unNormBound)
+            mBound
+        )
+        (throwError (ForallBoundMentionsBinder var))
+      binderUse <- graphicBinderUseForSourceBinder var body
+      case binderUse of
+        -- Figure 8.2.3 Eq-Var tests the root of G(body), not merely the
+        -- source syntax.  Thus ∀(α ⋄ σ). ∀β. α also returns G(σ), because
+        -- the vacuous inner binder disappears before the root comparison.
+        GraphicBinderAtRoot ->
+          internalizeCoercionCopy
+            bindFlag
+            wrap
+            coerceGen
+            currentGen
+            tyEnv
+            shared
+            ( maybe
+                STBottom
+                (structBoundToNormSrcType . unNormBound)
+                mBound
+            )
+        -- If the fresh binder node is absent from G(body), return that graph
+        -- directly.  Constructing a phantom TyForall would leave a binding
+        -- child that the owner cannot reach and violate well-domination.
+        GraphicBinderAbsent ->
+          internalizeCoercionCopy
+            bindFlag
+            wrap
+            coerceGen
+            currentGen
+            tyEnv
+            shared
+            body
+        GraphicBinderNested -> do
+          -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
+          -- variable) are unreachable here — normalization inlines them via
+          -- capture-avoiding substitution before constraint generation.
+          -- `mBound` is wrapped as `Maybe (SrcBound 'NormN)`; unwrapping with
+          -- `unNormBound` yields a `StructBound` whose root cannot be a variable.
+          --
+          -- Well-formedness check: binder must not occur in its own structural bound.
+          -- This catches cases like ∀(a ⩾ List a). a where the binder appears
+          -- nested inside a structural bound.
+          ((varNode, bodyNode, shared2), scopeFrame) <- withScopedBuild $ do
+            varNode <- allocVar
+            recordKnownSourceTypeBinderIdentity var varNode
+            let tyEnv' = Map.insert var varNode tyEnv
+            (mbBoundNode, shared1) <- case mBound of
+              Nothing -> pure (Nothing, shared)
+              Just bound -> do
+                let boundAsNorm = structBoundToNormSrcType (unNormBound bound)
+                (boundNode, shared2) <-
+                  internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared boundAsNorm
+                pure (Just boundNode, shared2)
 
-        setVarBound varNode mbBoundNode
+            setVarBound varNode mbBoundNode
 
-        (bodyNode, shared2) <-
-          internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared1 body
-        pure (varNode, bodyNode, shared2)
+            (bodyNode, shared2) <-
+              internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared1 body
+            pure (varNode, bodyNode, shared2)
 
-      forallNode <- allocForall bodyNode
-      recordKnownSourceTypeBinderIdentity var forallNode
-      rebindScopeRoot (typeRef forallNode) bodyNode scopeFrame
-      attachUnder (typeRef varNode) (typeRef forallNode) bindFlag
-      unlessShared shared2 bodyNode $
-        attachUnder (typeRef bodyNode) (typeRef forallNode) bindFlag
-      withWrappedNode bindFlag wrap currentGen forallNode shared2
+          forallNode <- allocForall bodyNode
+          recordKnownSourceTypeBinderIdentity var forallNode
+          rebindScopeRoot (typeRef forallNode) bodyNode scopeFrame
+          attachUnder (typeRef varNode) (typeRef forallNode) bindFlag
+          unlessShared shared2 bodyNode $
+            attachUnder (typeRef bodyNode) (typeRef forallNode) bindFlag
+          withWrappedNode bindFlag wrap currentGen forallNode shared2
     STMu v body -> do
+      let binderIsLive = graphicBinderOccursFree v body
       ((varNode, bodyNode, shared1), scopeFrame) <- withScopedBuild $ do
         varNode <- allocVar
         recordKnownSourceTypeBinderIdentity v varNode
-        let tyEnv' = Map.insert v varNode tyEnv
+        let bodyEnv =
+              if binderIsLive
+                then Map.insert v varNode tyEnv
+                else tyEnv
         (bodyNode, shared1) <-
-          internalizeCoercionCopy bindFlag False coerceGen currentGen tyEnv' shared body
+          internalizeCoercionCopy bindFlag False coerceGen currentGen bodyEnv shared body
         pure (varNode, bodyNode, shared1)
       muNode <- allocMu bodyNode
       recordKnownSourceTypeBinderIdentity v muNode
       rebindScopeRoot (typeRef muNode) bodyNode scopeFrame
-      attachUnder (typeRef varNode) (typeRef muNode) bindFlag
+      let lexicalOwner =
+            if binderIsLive
+              then typeRef muNode
+              else genRef currentGen
+      attachUnder (typeRef varNode) lexicalOwner bindFlag
       withWrappedNode bindFlag wrap currentGen muNode shared1
     STBottom -> do
       varNode <- allocVar
@@ -1265,6 +1322,27 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
         Just identity -> recordSourceTypeBinderIdentity nid identity
         Nothing -> pure ()
 
+    -- Figure 8.2.3 classifies source quantifiers by the graph of their body.
+    -- A structural result binder is different: it is compiler-owned metadata
+    -- for the nominal Church encoding inside 'STMu', which is an explicit
+    -- extension beyond the paper's restricted-type grammar.  Preserve that
+    -- constructor-owned shell by semantic identity, even for the empty-data
+    -- shape @mu self. forall result. result@.
+    graphicBinderUseForSourceBinder ::
+      VarName ->
+      NormSrcType ->
+      ConstraintM GraphicBinderUse
+    graphicBinderUseForSourceBinder name body = do
+      identities <- gets bsTypeBinderIdentities
+      pure $
+        case
+          lookupTypeBinderIdentityAlias identities name
+            >>= typeBinderIdentityStructural
+        of
+          Just (_, StructuralResultBinder) -> GraphicBinderNested
+          Nothing -> graphicBinderUse name body
+          Just _ -> graphicBinderUse name body
+
 -- | An expansion occurrence is another graph representative of its source
 -- scheme.  Publish that source identity when it exists so presolution can
 -- route either representative to the same semantic binder.
@@ -1338,6 +1416,98 @@ structBoundToNormSrcType sb = case sb of
   STForall v mb body -> STForall v mb body
   STMu v body -> STMu v body
   STBottom -> STBottom
+
+data GraphicBinderUse
+  = GraphicBinderAtRoot
+  | GraphicBinderAbsent
+  | GraphicBinderNested
+  deriving (Eq, Show)
+
+data GraphicTypeSummary = GraphicTypeSummary
+  { graphicSummaryFreeVars :: Set.Set VarName,
+    graphicSummaryRootVariable :: Maybe VarName
+  }
+
+-- | Classify a binder by its occurrence in the graph that Figure 8.2.3 will
+-- construct for the body.  The root case is stronger than a syntactic
+-- @STVar@: vacuous and Eq-Var wrappers may disappear before the comparison.
+graphicBinderUse :: VarName -> NormSrcType -> GraphicBinderUse
+graphicBinderUse binder body =
+  let summary = summarizeGraphicType body
+   in if graphicSummaryRootVariable summary == Just binder
+        then GraphicBinderAtRoot
+        else
+          if Set.notMember binder (graphicSummaryFreeVars summary)
+            then GraphicBinderAbsent
+            else GraphicBinderNested
+
+graphicBinderOccursFree :: VarName -> NormSrcType -> Bool
+graphicBinderOccursFree binder =
+  Set.member binder . graphicSummaryFreeVars . summarizeGraphicType
+
+-- | Summarize the partial graph produced by Figure 8.2.3 before allocating
+-- nodes.  Unlike ordinary syntactic free-variable collection, a discarded
+-- binder contributes neither itself nor its bound.  Tracking the root
+-- variable at the same time implements Eq-Var after graph normalization.
+summarizeGraphicType :: NormSrcType -> GraphicTypeSummary
+summarizeGraphicType sourceType =
+  case sourceType of
+    STVar name ->
+      GraphicTypeSummary
+        { graphicSummaryFreeVars = Set.singleton name,
+          graphicSummaryRootVariable = Just name
+        }
+    STArrow dom cod ->
+      ownedSummary
+        ( graphicSummaryFreeVars (summarizeGraphicType dom)
+            <> graphicSummaryFreeVars (summarizeGraphicType cod)
+        )
+    STBase _ -> ownedSummary Set.empty
+    STCon _ args ->
+      ownedSummary
+        (foldMap (graphicSummaryFreeVars . summarizeGraphicType) args)
+    STVarApp name args ->
+      ownedSummary
+        ( Set.insert
+            name
+            (foldMap (graphicSummaryFreeVars . summarizeGraphicType) args)
+        )
+    STTyLam name body ->
+      ownedSummary
+        (Set.delete name (graphicSummaryFreeVars (summarizeGraphicType body)))
+    STTyApp fun arg ->
+      ownedSummary
+        ( graphicSummaryFreeVars (summarizeGraphicType fun)
+            <> graphicSummaryFreeVars (summarizeGraphicType arg)
+        )
+    STForall name mbBound body ->
+      let bodySummary = summarizeGraphicType body
+          boundSummary =
+            maybe
+              (ownedSummary Set.empty)
+              (summarizeGraphicType . structBoundToNormSrcType . unNormBound)
+              mbBound
+       in if graphicSummaryRootVariable bodySummary == Just name
+            then boundSummary
+            else
+              if Set.notMember name (graphicSummaryFreeVars bodySummary)
+                then bodySummary
+                else
+                  ownedSummary
+                    ( Set.delete name (graphicSummaryFreeVars bodySummary)
+                        <> graphicSummaryFreeVars boundSummary
+                    )
+    STMu name body ->
+      let bodySummary = summarizeGraphicType body
+       in ownedSummary
+            (Set.delete name (graphicSummaryFreeVars bodySummary))
+    STBottom -> ownedSummary Set.empty
+  where
+    ownedSummary freeVars =
+      GraphicTypeSummary
+        { graphicSummaryFreeVars = freeVars,
+          graphicSummaryRootVariable = Nothing
+        }
 
 -- | Check if a type variable name occurs free in a 'StructBound'.
 structBoundFreeVars :: StructBound -> Set.Set String

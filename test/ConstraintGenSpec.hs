@@ -114,6 +114,38 @@ isMuOwner :: TyNode -> Bool
 isMuOwner TyMu {} = True
 isMuOwner _ = False
 
+isIntBase :: TyNode -> Bool
+isIntBase TyBase {tnBase = BaseTy "Int"} = True
+isIntBase _ = False
+
+expectEliminatedSourceBinder ::
+    String ->
+    TypeBinderIdentity ->
+    NormSrcType ->
+    (TyNode -> Bool) ->
+    (TyNode -> Bool) ->
+    Expectation
+expectEliminatedSourceBinder name identity annotation isEliminatedOwner isExpectedRoot = do
+    let expr :: NormSurfaceExpr
+        expr = EAnn (ELit (LInt 1)) annotation
+    result <-
+        requireRight
+            ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                initialIdentityGenerator
+                Set.empty
+                Map.empty
+                (Map.singleton name identity)
+                Map.empty
+                expr
+            )
+    let constraint = crConstraint result
+        nodes = cNodes constraint
+    lookupNode nodes (crRoot result) >>= (`shouldSatisfy` isExpectedRoot)
+    nodeMapElems nodes `shouldNotSatisfy` any isEliminatedOwner
+    IntMap.elems (crSourceTypeBinderIdentities result)
+        `shouldNotSatisfy` elem identity
+    checkBindingTree constraint `shouldBe` Right ()
+
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
     describe "Source binder identities" $ do
@@ -154,6 +186,130 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 )
                 (expectSourceBinderIdentityNodes identity isMuOwner)
 
+        it "does not materialize a vacuous forall binder or its source identity" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991857)
+                annotation =
+                    STForall "unused" Nothing (STBase "Int")
+            expectEliminatedSourceBinder
+                "unused"
+                identity
+                annotation
+                isForallOwner
+                isIntBase
+
+        it "represents Eq-Var by its bound without a synthetic forall owner" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991858)
+                annotation =
+                    STForall
+                        "a"
+                        (Just (mkNormBound (STBase "Int")))
+                        (STVar "a")
+            expectEliminatedSourceBinder
+                "a"
+                identity
+                annotation
+                isForallOwner
+                isIntBase
+
+        it "recognizes Eq-Var after graph-normalizing a vacuous body wrapper" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991860)
+                annotation =
+                    STForall
+                        "a"
+                        (Just (mkNormBound (STBase "Int")))
+                        (STForall "unused" Nothing (STVar "a"))
+            expectEliminatedSourceBinder
+                "a"
+                identity
+                annotation
+                isForallOwner
+                isIntBase
+
+        it "preserves a nominal structural result binder instead of applying source Eq-Var" $ do
+            let ownerUnique = UniqueIdentity 991861
+                selfIdentity =
+                    typeBinderIdentityFromStructural
+                        ownerUnique
+                        StructuralSelfBinder
+                resultIdentity =
+                    typeBinderIdentityFromStructural
+                        ownerUnique
+                        StructuralResultBinder
+                annotation =
+                    STMu
+                        "self"
+                        (STForall "result" Nothing (STVar "result"))
+                expr :: NormSurfaceExpr
+                expr = EAnn (ELit (LInt 1)) annotation
+            result <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        ( Map.fromList
+                            [ ("self", selfIdentity)
+                            , ("result", resultIdentity)
+                            ]
+                        )
+                        Map.empty
+                        expr
+                    )
+            let constraint = crConstraint result
+                nodes = cNodes constraint
+                resultIdentityNodes =
+                    [ node
+                    | (key, identity) <-
+                        IntMap.toList (crSourceTypeBinderIdentities result)
+                    , identity == resultIdentity
+                    , Just node <- [lookupNodeMaybe nodes (NodeId key)]
+                    ]
+            length [() | TyForall {} <- nodeMapElems nodes] `shouldBe` 2
+            resultIdentityNodes `shouldSatisfy` any isForallOwner
+            lookupNode nodes (crRoot result) >>= (`shouldSatisfy` isMuOwner)
+            checkBindingTree constraint `shouldBe` Right ()
+
+        it "keeps a vacuous mu owner with its lexical identity gen-bound" $ do
+            let identity =
+                    typeBinderIdentityFromStructural
+                        (UniqueIdentity 991859)
+                        StructuralSelfBinder
+                annotation = STMu "unused" (STBase "Int")
+                expr :: NormSurfaceExpr
+                expr = EAnn (ELit (LInt 1)) annotation
+            result <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "unused" identity)
+                        Map.empty
+                        expr
+                    )
+            let constraint = crConstraint result
+                nodes = cNodes constraint
+                identityNodes =
+                    [ (NodeId key, node)
+                    | (key, nodeIdentity) <-
+                        IntMap.toList (crSourceTypeBinderIdentities result)
+                    , nodeIdentity == identity
+                    , Just node <- [lookupNodeMaybe nodes (NodeId key)]
+                    ]
+                muOwners = [node | (_, node) <- identityNodes, isMuOwner node]
+                lexicalBinders =
+                    [ (nodeId, flag)
+                    | (nodeId, TyVar {}) <- identityNodes
+                    , Just (GenRef _, flag) <-
+                        [lookupBindParent constraint (typeRef nodeId)]
+                    ]
+            length muOwners `shouldBe` 2
+            length lexicalBinders `shouldBe` 2
+            length [() | (_, BindRigid) <- lexicalBinders] `shouldBe` 1
+            length [() | (_, BindFlex) <- lexicalBinders] `shouldBe` 1
+            lookupNode nodes (crRoot result) >>= (`shouldSatisfy` isMuOwner)
+            checkBindingTree constraint `shouldBe` Right ()
+
         it "records a bare annotated lambda parameter as the resolved source binder" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991852)
                 expr = ELamAnn "x" (STVar "a") (EVar "x")
@@ -172,6 +328,28 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     IntMap.lookup (getNodeId paramNode) (crSourceTypeBinderIdentities result)
                         `shouldBe` Just identity
                 other -> expectationFailure ("Expected annotated lambda, saw " ++ show other)
+
+        it "keeps a bare ambient annotation binder restricted under the enclosing Gamma" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991854)
+                expr = EAnn (ELit (LInt 1)) (STVar "ambient")
+            result <-
+                requireRight
+                    ( generateConstraintsWithExternalBindingsAndTypeIdentitiesFromSupply
+                        initialIdentityGenerator
+                        Set.empty
+                        Map.empty
+                        (Map.singleton "ambient" identity)
+                        Map.empty
+                        (unsafeNormalizeExpr expr)
+                    )
+            let constraint = crConstraint result
+                root = crRoot result
+            lookupNodeMaybe (cNodes constraint) root
+                `shouldBe` Just (TyVar root Nothing)
+            IntMap.lookup (getNodeId root) (crSourceTypeBinderIdentities result)
+                `shouldBe` Just identity
+            nodeKind constraint (typeRef root)
+                `shouldBe` Right NodeRestricted
 
         it "propagates a source binder identity to polymorphic occurrence expansions" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991853)
@@ -663,7 +841,8 @@ spec = describe "Phase 1 — Constraint generation" $ do
 
         it "respects instance bounds in annotated lambda parameters (coercion)" $ do
             -- λ(x : ∀(a ⩾ Int). a). x desugars to a let-binding with a coercion term.
-            -- Uses of x in the body go through the coercion result type.
+            -- Figure 8.2.3 Eq-Var translates the annotation directly as Int;
+            -- uses of x in the body go through that coercion result.
             let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STVar "a")
                 expr = ELamAnn "x" ann (EVar "x")
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
@@ -683,33 +862,26 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                             other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
                                     other -> expectationFailure $ "Expected annotated let body, saw " ++ show other
                                 annotation <- lookupNode nodes schemeRoot
-                                binderId <- case annotation of
-                                    TyForall {tnBody = sourceBinder} -> pure sourceBinder
-                                    other -> expectationFailure ("Expected explicit source forall, saw " ++ show other) >> fail "missing source forall"
-                                binder <- lookupNode nodes binderId
-                                boundId <- case binder of
-                                    TyVar {tnBound = Just bound} -> pure bound
-                                    other -> expectationFailure ("Expected bounded forall binder, saw " ++ show other) >> fail "missing binder bound"
-                                rhs <- lookupNode nodes boundId
-                                case rhs of
+                                case annotation of
                                     TyBase {tnBase = BaseTy name} -> name `shouldBe` "Int"
-                                    other -> expectationFailure $ "Expected bound Int, saw " ++ show other
+                                    other -> expectationFailure $ "Expected direct Eq-Var Int, saw " ++ show other
                             other -> expectationFailure $ "Expected let-body for desugared ELamAnn, saw " ++ show other
                     other -> expectationFailure $ "Expected ALam annotation, saw " ++ show other
 
-        it "internalizes normalized forall bounds using indexed StructBound alias" $ do
+        it "internalizes normalized Eq-Var bounds through indexed StructBound" $ do
             let ann :: NormSrcType
                 ann = STForall "a" (Just (mkNormBound (STBase "Int"))) (STVar "a")
                 expr :: NormSurfaceExpr
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraph Set.empty expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
-                    hasIntBound =
-                        [ ()
-                        | TyVar { tnBound = Just boundId } <- nodeMapElems nodes
-                        , Just TyBase { tnBase = BaseTy "Int" } <- [lookupNodeMaybe nodes boundId]
-                        ]
-                hasIntBound `shouldSatisfy` (not . null)
+                lookupNodeMaybe nodes (crRoot result)
+                    `shouldSatisfy`
+                        ( \node ->
+                            case node of
+                                Just TyBase {tnBase = BaseTy "Int"} -> True
+                                _ -> False
+                        )
 
         it "internalizes Bottom type" $ do
             -- λ(x : ⊥). x desugars through a let-binding with scheme ⊥.
@@ -1107,7 +1279,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     Nothing -> expectationFailure "Missing binding parent for inner let RHS"
 
         it "binds explicit forall variables under the direct forall owner" $ do
-            let ann = STForall "a" Nothing (STBase "Int")
+            let ann =
+                    STForall
+                        "a"
+                        Nothing
+                        (STArrow (STVar "a") (STBase "Int"))
                 expr = EAnn (ELit (LInt 1)) ann
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result

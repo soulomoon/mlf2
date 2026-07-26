@@ -49,9 +49,19 @@
 - Made eMLF annotations construct the thesis coercion shape directly: rigid
   annotated domains and independently flexible codomains are direct graphic
   copies, with no synthetic `forall (beta >= sigma). beta` Eq-Var wrapper.
-  Source quantifier structure remains explicit through constraint generation,
-  Phi replay, and xMLF elaboration. Annotated `g g`, including the same term
-  passed through polymorphic `apply`, now has the principal
+  Nontrivial source quantifier structure remains explicit through constraint
+  generation, Phi replay, and xMLF elaboration; Figure 8.2.3's vacuous and
+  graph-normalized Eq-Var cases now return the body or bound graph before
+  allocating a `forall` binder. Recursive `mu` owners remain explicit because
+  they carry nominal structural identity even when their self variable is
+  vacuous; their `StructuralResultBinder` shell is likewise preserved by
+  semantic identity because nominal `STMu` Church encodings are an explicit
+  extension outside Figure 8.2.3's restricted-type grammar. A vacuous lexical
+  self is bound directly at the copy gen instead of being placed below an owner
+  that cannot structurally reach it. Bare shared roots keep their existing
+  owner, so an ambient Gamma binder cannot be captured by an annotation gen.
+  Annotated `g g`, including the same term passed through polymorphic `apply`,
+  now has the principal
   `forall (beta >= sigma-id). sigma-id -> beta` type and a checked xMLF term.
   Packet preparation records a unique source-to-construction binder quotient;
   Gamma publication applies its inverse in the outward source domain, while

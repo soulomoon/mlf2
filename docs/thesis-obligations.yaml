@@ -1468,10 +1468,12 @@ obligations:
   code_anchors:
   - src/MLF/Frontend/ConstraintGen/Translate.hs#internalizeCoercionType
   - src/MLF/Frontend/ConstraintGen/Translate.hs#internalizeCoercionCopy
+  - src/MLF/Frontend/ConstraintGen/Translate.hs#graphicBinderUseForSourceBinder
+  - src/MLF/Frontend/ConstraintGen/Translate.hs#summarizeGraphicType
   test_anchor:
     matcher: O08-SYN-TO-GRAPH
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck constructs mixed existential/universal annotations and checks distinct rigid/flexible copies, shared existential nodes, duplicated universal binders, source authority, and binding-tree validity.
+    rationale: QuickCheck structurally generates nested arrows, bases, constructors, variable-headed applications, bounded and unbounded foralls, recursive types, bottom, and repeated free existentials. An independent recursive graph oracle checks source-shape correspondence, shared existentials, distinct copy-owned nodes, lexical binder identities, Figure 8.2.3 vacuous/Eq-Var elimination, binding permissions, source authority, and binding-tree validity.
     kind: quickcheck
     min_success: 100
   status: anchored
