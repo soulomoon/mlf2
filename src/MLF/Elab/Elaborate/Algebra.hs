@@ -51,6 +51,9 @@ import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base
   ( EdgeArtifacts,
+    edgeArtifactTrace,
+    edgeArtifactWitness,
+    lookupEdgeArtifact,
   )
 import MLF.Constraint.Presolution.Plan.Requirements
   ( AmbientGammaAuthority (..),
@@ -78,7 +81,6 @@ import MLF.Constraint.Types.Phase (Phase)
 import MLF.Constraint.Types.Witness
   ( InstanceOp (..),
     ReplayContract (..),
-    ewEdgeId,
     ewLeft,
     ewRight,
     ewWitness,
@@ -87,9 +89,6 @@ import MLF.Constraint.Types.Witness
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     AnnotationBoundaryRole (..),
-    acEdgeExpansions,
-    acEdgeTraces,
-    acEdgeWitnesses,
     acIdentityEdges,
     annBinderKey,
     annExprReferenceKey,
@@ -1234,8 +1233,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
                 "source type=" ++ show sourceTy,
                 "target type=" ++ show targetTy,
                 "raw instantiation=" ++ show rawInst0,
-                "witness=" ++ show (IntMap.lookup edgeKey witnesses),
-                "trace=" ++ show (IntMap.lookup edgeKey traces)
+                "artifact=" ++ show edgeArtifact
               ]
   rawInst <-
     sourceSpecializeOutgoingHyp sourceTy rawInstScoped
@@ -1399,9 +1397,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
               "source bound=" ++ show (pvLookupVarBound presolutionView sourceNode),
               "target bound=" ++ show (pvLookupVarBound presolutionView targetNode),
               "source node type=" ++ show (reifyNodeTypePreferringBound scopeContext sourceNode),
-              "expansion=" ++ show (IntMap.lookup edgeKey expansions),
-              "witness=" ++ show (IntMap.lookup edgeKey witnesses),
-              "trace=" ++ show (IntMap.lookup edgeKey traces),
+              "artifact=" ++ show edgeArtifact,
               "source type=" ++ show sourceTy,
               "target type=" ++ show authoritativeTargetTy
             ]
@@ -1413,9 +1409,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
           [ "edge computation does not apply to its source",
             "authority=" ++ show replayAuthority,
             "site=" ++ show site,
-            "expansion=" ++ show (IntMap.lookup edgeKey expansions),
-            "witness=" ++ show (IntMap.lookup edgeKey witnesses),
-            "trace=" ++ show (IntMap.lookup edgeKey traces),
+            "artifact=" ++ show edgeArtifact,
             "source type=" ++ show sourceTy,
             "instantiation=" ++ show inst,
             "apply error=" ++ show err
@@ -1436,7 +1430,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
                     fecEndpointType = authoritativeTargetTy
                   }
               )
-                <$> IntMap.lookup edgeKey traces
+                <$> (edgeArtifactTrace <$> edgeArtifact)
           }
     else
       failEdge
@@ -1444,9 +1438,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
           "authority=" ++ show replayAuthority,
           "site source=" ++ show sourceNode,
           "site target=" ++ show targetNode,
-          "expansion=" ++ show (IntMap.lookup edgeKey expansions),
-          "witness=" ++ show (IntMap.lookup edgeKey witnesses),
-          "trace=" ++ show (IntMap.lookup edgeKey traces),
+          "artifact=" ++ show edgeArtifact,
           "source type=" ++ show sourceTy,
           "instantiation=" ++ show inst,
           "applied type=" ++ show appliedTy,
@@ -1467,35 +1459,33 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
     edgeId@(EdgeId edgeKey) = instantiationSiteEdgeId site
     sourceNode = canonical (instantiationSiteSource site)
     targetNode = canonical (instantiationSiteTarget site)
-    witnesses = acEdgeWitnesses annotationContext
-    traces = acEdgeTraces annotationContext
-    expansions = acEdgeExpansions annotationContext
+    edgeArtifact =
+      lookupEdgeArtifact edgeId (acEdgeArtifacts annotationContext)
     identityEdges = acIdentityEdges annotationContext
     graftedEdges = cGraftedEdges (pvConstraint (algPresolutionView algebraContext))
     frozenEndpointsCoverEveryGraft =
-      case IntMap.lookup edgeKey witnesses of
+      case edgeArtifact of
         Nothing -> False
-        Just edgeWitness ->
-          case
-              [ operated
-                | OpGraft operated _ <-
-                    getInstanceOps (ewWitness edgeWitness)
-              ]
-            of
-              [] -> False
-              operatedNodes ->
-                all
-                  (\operated -> IntMap.member (getNodeId operated) exactFrozenEndpoints)
-                  operatedNodes
+        Just artifact ->
+          let edgeWitness = edgeArtifactWitness artifact
+           in case
+                [ operated
+                  | OpGraft operated _ <-
+                      getInstanceOps (ewWitness edgeWitness)
+                ]
+              of
+                [] -> False
+                operatedNodes ->
+                  all
+                    (\operated -> IntMap.member (getNodeId operated) exactFrozenEndpoints)
+                    operatedNodes
     strictCheckedRoutesCoverEveryGraft =
-      case
-          ( IntMap.lookup edgeKey witnesses,
-            IntMap.lookup edgeKey traces
-          )
-        of
-          (Just edgeWitness, Just traceInfo)
-            | etReplayContract traceInfo == ReplayContractStrict ->
-                case
+      case edgeArtifact of
+        Just artifact ->
+          let edgeWitness = edgeArtifactWitness artifact
+              traceInfo = edgeArtifactTrace artifact
+           in etReplayContract traceInfo == ReplayContractStrict
+                && case
                     [ sourceBinder
                       | OpGraft _operated sourceBinder <-
                           getInstanceOps (ewWitness edgeWitness)
@@ -1506,7 +1496,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
                       all
                         (strictCheckedRouteExists traceInfo)
                         sourceBinders
-          _ -> False
+        Nothing -> False
     strictCheckedRouteExists traceInfo sourceBinder =
       case
           ( [ traceSource
@@ -1540,41 +1530,29 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
       | otherwise = ReplayEdgeAuthority
 
     edgeAuthority =
-      case
-          ( IntMap.lookup edgeKey witnesses,
-            IntMap.member edgeKey traces,
-            IntMap.member edgeKey expansions
-          )
-        of
-          (Just witness, True, True)
-            | ewEdgeId witness /= edgeId ->
-                failEdge
-                  [ "witness edge id does not match its artifact key",
-                    "witness edge=" ++ show (ewEdgeId witness)
-                  ]
-            | canonical (ewLeft witness) /= sourceNode ->
-                failEdge
-                  [ "witness source does not match the construction site",
-                    "site source=" ++ show sourceNode,
-                    "witness source=" ++ show (canonical (ewLeft witness))
-                  ]
-            | canonical (ewRight witness) /= targetNode ->
-                failEdge
-                  [ "witness destination does not match the construction site",
-                    "site target=" ++ show targetNode,
-                    "witness target=" ++ show (canonical (ewRight witness))
-                  ]
-            | otherwise -> pure ReplayEdgeAuthority
-          _ ->
-            case dataAuthority of
-              ReplayEdgeAuthority ->
-                failEdge
-                  [ "ordinary edge is missing replay artifacts",
-                    "has witness=" ++ show (IntMap.member edgeKey witnesses),
-                    "has trace=" ++ show (IntMap.member edgeKey traces),
-                    "has expansion=" ++ show (IntMap.member edgeKey expansions)
-                  ]
-              authority -> pure authority
+      case edgeArtifact of
+        Just artifact ->
+          validateReplayWitness (edgeArtifactWitness artifact)
+        Nothing ->
+          case dataAuthority of
+            ReplayEdgeAuthority ->
+              failEdge ["ordinary edge is missing its replay artifact packet"]
+            authority -> pure authority
+
+    validateReplayWitness witness
+      | canonical (ewLeft witness) /= sourceNode =
+          failEdge
+            [ "witness source does not match the construction site",
+              "site source=" ++ show sourceNode,
+              "witness source=" ++ show (canonical (ewLeft witness))
+            ]
+      | canonical (ewRight witness) /= targetNode =
+          failEdge
+            [ "witness destination does not match the construction site",
+              "site target=" ++ show targetNode,
+              "witness target=" ++ show (canonical (ewRight witness))
+            ]
+      | otherwise = pure ReplayEdgeAuthority
 
     edgeContext =
       owner
@@ -1798,9 +1776,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
             , "frozen source=" ++ show frozenSourceTy
             , "replay applies to checked source="
                 ++ show replayAppliesToCheckedSource
-            , "witness=" ++ show (IntMap.lookup edgeKey witnesses)
-            , "trace=" ++ show (IntMap.lookup edgeKey traces)
-            , "expansion=" ++ show (IntMap.lookup edgeKey expansions)
+            , "artifact=" ++ show edgeArtifact
             ]
 
     constructInstantiation source target
@@ -1824,8 +1800,7 @@ mkEdgeComputation algebraContext edgeTypeEnv resolvedLookup typeBindingLookup co
                     [ "cannot transport the source scheme to the exact application endpoint",
                       "source type=" ++ show source,
                       "target type=" ++ show target,
-                      "witness=" ++ show (IntMap.lookup edgeKey witnesses),
-                      "trace=" ++ show (IntMap.lookup edgeKey traces),
+                      "artifact=" ++ show edgeArtifact,
                       "solved source node=" ++ show (pvLookupNode presolutionView sourceNode),
                       "solved target node=" ++ show (pvLookupNode presolutionView targetNode),
                       "solved source bound=" ++ show (pvLookupVarBound presolutionView sourceNode),

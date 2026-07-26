@@ -40,8 +40,16 @@ import MLF.Constraint.Presolution.Plan.Target.GammaPlan.TestSupport
   )
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
-    EdgeArtifacts (..),
     defaultPlanBuilder,
+    edgeArtifactExpansion,
+    edgeArtifactTrace,
+    edgeArtifactWitness,
+    edgeArtifactsForTest,
+    emptyEdgeArtifacts,
+    insertEdgeArtifactForTest,
+    lookupEdgeArtifact,
+    setEdgeArtifactTraceForTest,
+    setEdgeArtifactWitnessForTest,
     sourceInteriorFromList,
     toListInterior,
   )
@@ -568,12 +576,12 @@ resultTypeInputsForArtifacts
         inputs =
           mkResultTypeInputs
             canonical
-            EdgeArtifacts
-              { eaEdgeExpansions = edgeExpansions,
-                eaEdgeWitnesses = edgeWitnesses,
-                eaEdgeTraces = edgeTraces,
-                eaIdentityEdges = prIdentityEdges pres
-              }
+            ( edgeArtifactsForTest
+                edgeExpansions
+                edgeWitnesses
+                edgeTraces
+                (prIdentityEdges pres)
+            )
             (viewFromSolved solvedClean)
             bindParentsGa
             (defaultPlanBuilder defaultTraceConfig)
@@ -6502,12 +6510,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           inputs =
             mkResultTypeInputs
               id
-              EdgeArtifacts
-                { eaEdgeExpansions = IntMap.empty,
-                  eaEdgeWitnesses = IntMap.empty,
-                  eaEdgeTraces = IntMap.empty,
-                  eaIdentityEdges = IntSet.empty
-                }
+              emptyEdgeArtifacts
               view0
               bindParentsGa
               (defaultPlanBuilder defaultTraceConfig)
@@ -9039,31 +9042,35 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                           )
                   else rewriteResultTypeInputs (ariClearVarBound childC) inputs
           duplicateReferencedTrace inputs eids =
-            let traceFor eid =
-                  IntMap.lookup (getEdgeId eid) edgeTraces0
-                edgeTraces0 = rtcEdgeTraces inputs
-                matchingTrace =
+            let edgeArtifacts0 = rtcEdgeArtifacts inputs
+                matchingArtifact =
                   listToMaybe
-                    [ tr
+                    [ artifact
                       | eid <- eids,
-                        Just tr <- [traceFor eid]
+                        Just artifact <- [lookupEdgeArtifact eid edgeArtifacts0]
                     ]
                 nextEdgeKey =
-                  case IntMap.lookupMax edgeTraces0 of
-                    Just (edgeKey, _trace) -> edgeKey + 1
+                  case IntMap.lookupMax (rtcEdgeTraces inputs) of
+                    Just (edgeKey, _) -> edgeKey + 1
                     Nothing -> 0
-             in case matchingTrace of
-                  Just tr ->
+                nextEdgeId = EdgeId nextEdgeKey
+             in case matchingArtifact of
+                  Just artifact ->
                     inputs
                       { rtcEdgeArtifacts =
-                          (rtcEdgeArtifacts inputs)
-                            { eaEdgeTraces =
-                                IntMap.insert nextEdgeKey tr edgeTraces0
-                            }
+                          insertEdgeArtifactForTest
+                            nextEdgeId
+                            (edgeArtifactExpansion artifact)
+                            ( (edgeArtifactWitness artifact)
+                                { ewEdgeId = nextEdgeId
+                                }
+                            )
+                            (edgeArtifactTrace artifact)
+                            edgeArtifacts0
                       }
                   Nothing ->
                     error
-                      ( "expected edge trace for "
+                      ( "expected edge artifact packet for "
                           ++ show eids
                           ++ " for local multi-inst fallback case"
                       )
@@ -9079,10 +9086,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   Just (edgeKey, tr) ->
                     inputs
                       { rtcEdgeArtifacts =
-                          (rtcEdgeArtifacts inputs)
-                            { eaEdgeTraces =
-                                IntMap.insert edgeKey (rewrite tr) edgeTraces0
-                            }
+                          setEdgeArtifactTraceForTest
+                            (EdgeId edgeKey)
+                            (rewrite tr)
+                            (rtcEdgeArtifacts inputs)
                       }
                   Nothing ->
                     error
@@ -9319,10 +9326,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         case IntMap.lookup edgeKey edgeWitnesses0 of
                           Just ew -> ew
                           Nothing ->
-                            case IntMap.elems edgeWitnesses0 of
-                              ew0 : _ -> ew0 {ewEdgeId = eid}
-                              [] ->
-                                error "expected an edge witness for local inst-arg singleton-base case"
+                            error "expected a complete edge packet for local inst-arg singleton-base case"
                       ew' =
                         seedWitness
                           { ewEdgeId = eid,
@@ -9330,10 +9334,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                           }
                    in inputs
                         { rtcEdgeArtifacts =
-                            (rtcEdgeArtifacts inputs)
-                              { eaEdgeWitnesses =
-                                  IntMap.insert edgeKey ew' edgeWitnesses0
-                              }
+                            setEdgeArtifactWitnessForTest
+                              eid
+                              ew'
+                              (rtcEdgeArtifacts inputs)
                         }
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
             let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
@@ -9618,10 +9622,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     case IntMap.lookup edgeKey edgeWitnesses0 of
                       Just ew -> ew
                       Nothing ->
-                        case IntMap.elems edgeWitnesses0 of
-                          ew0 : _ -> ew0 {ewEdgeId = eid}
-                          [] ->
-                            error "expected an edge witness for mixed retained-child/base-target case"
+                        error "expected a complete edge packet for mixed retained-child/base-target case"
                   ew' =
                     seedWitness
                       { ewEdgeId = eid,
@@ -9629,10 +9630,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       }
                in inputs
                     { rtcEdgeArtifacts =
-                        (rtcEdgeArtifacts inputs)
-                          { eaEdgeWitnesses =
-                              IntMap.insert edgeKey ew' edgeWitnesses0
-                          }
+                        setEdgeArtifactWitnessForTest
+                          eid
+                          ew'
+                          (rtcEdgeArtifacts inputs)
                     }
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
         let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
@@ -12552,8 +12553,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       case runToPresolutionWithAnnDefault defaultPolySyms expr of
         Left err -> expectationFailure ("Pipeline failed: " ++ err)
-        Right (PresolutionResult {prConstraint = cPres, prEdgeExpansions = exps, prEdgeWitnesses = ews}, _ann) -> do
-          let annEdges = IntSet.toList (cAnnEdges cPres)
+        Right (presolution@PresolutionResult {prConstraint = cPres}, _ann) -> do
+          let exps = prEdgeExpansions presolution
+              ews = prEdgeWitnesses presolution
+              annEdges = IntSet.toList (cAnnEdges cPres)
           annEdges `shouldSatisfy` (not . null)
           forM_ annEdges $ \eid -> do
             IntMap.member eid exps `shouldBe` True

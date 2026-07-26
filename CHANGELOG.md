@@ -3,13 +3,29 @@
 ## Unreleased
 
 ### Changed
+- Made the Phase 4-to-Phase 6 edge-artifact boundary construction-closed.
+  `EdgeArtifacts` is now an opaque map of complete per-edge packets, each
+  owning its expansion, normalized witness, frozen replay trace, and exact
+  expansion-construction certificate. Presolution publishes this value
+  directly from its already-complete `EdgeExecutionArtifacts` packets instead
+  of splitting and recombining component maps. Its test-facing smart
+  constructor rejects unequal component key sets and a witness whose embedded
+  `EdgeId` differs from the map key; safe map/filter/insert operations preserve
+  that invariant. Final preparation consumes the aggregate directly, while Φ,
+  annotation validation, application edge computation, identity-topology
+  recovery, identity-edge recognition, and root-`RaiseMerge` authority select
+  one packet with one `EdgeId` lookup. Missing non-trivial edges are reported
+  as missing complete packets rather than separately missing witness/trace
+  entries. Production code can no longer construct or repair a
+  witness-only, trace-only, expansion-only, or construction-only edge after
+  the fact; negative fixtures assert rejection at the constructor boundary.
 - Made Φ/Ω replay construction-closed. Production translation entry points now
   consume an opaque `PhiReplayCertificate` instead of independently accepting
   an `EdgeWitness` and optional `EdgeTrace`; `OmegaContext` likewise carries a
   required trace. The certificate constructor now accepts one producer-owned
-  `EdgeArtifacts` aggregate, fetches both artifacts through its shared edge
-  key, and verifies the witness's embedded edge identity; Phase 6 can no longer
-  compose witness and trace maps from different presolution packets.
+  `EdgeArtifacts` aggregate and projects witness/trace from its complete
+  edge-keyed packet; Phase 6 can no longer compose witness and trace maps from
+  different presolution packets.
   Annotation contexts and pre-elaboration authority validators retain that
   aggregate unchanged and reuse the certificate's checked witness/trace.
   Association is deliberately not guessed from root IDs, which may remain in

@@ -50,8 +50,16 @@ import qualified Data.Set as Set
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
-  ( EdgeArtifacts (..),
+  ( EdgeArtifacts,
+    edgeArtifactExpansion,
+    edgeArtifactTrace,
+    edgeArtifactWitness,
+    eaEdgeExpansions,
+    eaEdgeTraces,
+    eaEdgeWitnesses,
+    eaIdentityEdges,
     getCopyMapping,
+    lookupEdgeArtifact,
     rootWeakenRaiseMergeTraceAuthority,
   )
 import MLF.Constraint.Presolution.Plan.Requirements (GeneralizationRequirements (..))
@@ -263,8 +271,6 @@ validateAnnotationEdgeAuthority ::
   Either ElabError ()
 validateAnnotationEdgeAuthority sourceTypes edgeArtifacts = go
   where
-    expansions = eaEdgeExpansions edgeArtifacts
-
     go ann =
       case ann of
         AResolvedVar {} -> Right ()
@@ -275,18 +281,9 @@ validateAnnotationEdgeAuthority sourceTypes edgeArtifacts = go
         AAnn inner _ eid -> do
           requireSourceType eid
           _ <- mkPhiReplayCertificate eid edgeArtifacts
-          requireArtifact "expansion" expansions eid
           go inner
         ALetScope inner _ _ -> go inner
         AUnfold inner _ _ -> go inner
-
-    requireArtifact label artifacts eid@(EdgeId edgeKey)
-      | IntMap.member edgeKey artifacts = Right ()
-      | otherwise =
-          Left
-            ( ValidationFailed
-                ["missing edge " ++ label ++ " for annotation " ++ show eid]
-            )
 
     requireSourceType eid@(EdgeId edgeKey)
       | IntMap.member edgeKey sourceTypes = Right ()
@@ -309,7 +306,6 @@ validateElaborationEdgeAuthority ::
   Either ElabError ()
 validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
   where
-    expansions = eaEdgeExpansions edgeArtifacts
     identityEdges = eaIdentityEdges edgeArtifacts
 
     go ann =
@@ -364,9 +360,8 @@ validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
                         [label ++ " witness destination does not match its construction site: " ++ show eid]
                     )
 
-    requireReplay label eid = do
+    requireReplay _label eid = do
       replay <- mkPhiReplayCertificate eid edgeArtifacts
-      requireArtifact label "expansion" expansions eid
       Right replay
 
     requireIdentity label eid@(EdgeId edgeKey)
@@ -375,20 +370,6 @@ validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
           Left
             ( ValidationFailed
                 [label ++ " edge is missing identity provenance: " ++ show eid]
-            )
-
-    requireArtifact owner artifact artifacts eid@(EdgeId edgeKey)
-      | IntMap.member edgeKey artifacts = Right ()
-      | otherwise =
-          Left
-            ( ValidationFailed
-                [ "missing edge "
-                    ++ artifact
-                    ++ " for "
-                    ++ owner
-                    ++ " "
-                    ++ show eid
-                ]
             )
 
     requireSourceType eid@(EdgeId edgeKey)
@@ -2756,9 +2737,10 @@ reifyInstWithFrozenEndpointsFromCheckedSourceInConstructionGamma annotationConte
         (replayRequirements, replaySchemeInfo) <-
           mergeOccurrenceSchemeInfoIntoReplayRequirements
             edgeId
-            ( IntMap.lookup
-                (getEdgeId edgeId)
-                (acEdgeTraces annotationContext)
+            ( edgeArtifactTrace
+                <$> lookupEdgeArtifact
+                  edgeId
+                  (acEdgeArtifacts annotationContext)
             )
             constructionAliases
             requirements
@@ -2871,9 +2853,10 @@ reifyInstFromSourceSchemeInConstructionGamma annotationContext namedSetReify con
   (replayRequirements, replaySourceScheme) <-
     mergeOccurrenceSchemeInfoIntoReplayRequirements
       edgeId
-      ( IntMap.lookup
-          (getEdgeId edgeId)
-          (acEdgeTraces annotationContext)
+      ( edgeArtifactTrace
+          <$> lookupEdgeArtifact
+            edgeId
+            (acEdgeArtifacts annotationContext)
       )
       constructionAliases
       requirements
@@ -3058,22 +3041,18 @@ reifyInstWithSourceSchemeUsing ::
   AnnExpr ->
   EdgeId ->
   Either ElabError Instantiation
-reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotationContext namedSetReify resolvedLookup frozenEndpointTypes sourceAuthority endpointShapeAuthority funAnn (EdgeId eid) =
+reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotationContext namedSetReify resolvedLookup frozenEndpointTypes sourceAuthority endpointShapeAuthority funAnn edgeId@(EdgeId eid) =
   debugGeneralize
     ( "reifyInst: edge="
         ++ show eid
-        ++ " witness="
-        ++ show (IntMap.member eid edgeWitnesses)
-        ++ " trace="
-        ++ show (IntMap.member eid edgeTraces)
-        ++ " exp="
-        ++ show (IntMap.member eid edgeExpansions)
+        ++ " packet="
+        ++ show (isJust (lookupEdgeArtifact edgeId edgeArtifacts))
     )
     ()
-    `seq` case IntMap.lookup eid edgeWitnesses of
+    `seq` case lookupEdgeArtifact edgeId edgeArtifacts of
       Nothing ->
         case debugGeneralize
-          ("reifyInst: missing witness for edge " ++ show eid)
+          ("reifyInst: missing edge artifact packet " ++ show eid)
           () of
           ()
             | IntSet.member eid identityEdges ->
@@ -3081,21 +3060,22 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
             | otherwise ->
                 Left
                   ( ValidationFailed
-                      [ "missing edge witness for instantiation "
-                          ++ show (EdgeId eid)
+                      [ "missing edge artifact packet for instantiation "
+                          ++ show edgeId
                           ++ " at "
                           ++ show funAnn
                       ]
                   )
-      Just edgeWitness
-        | exactIdentityEdge edgeWitness -> Right InstId
-        | rigidRootTransitionEdge edgeWitness -> Right InstId
+      Just edgeArtifact
+        | exactIdentityEdge edgeArtifact -> Right InstId
+        | rigidRootTransitionEdge edgeArtifact -> Right InstId
         | otherwise -> do
         replay <-
           mkPhiReplayCertificate
-            (EdgeId eid)
-            (acEdgeArtifacts annotationContext)
-        let traceInfo = phiReplayTrace replay
+            edgeId
+            edgeArtifacts
+        let edgeWitness = edgeArtifactWitness edgeArtifact
+            traceInfo = phiReplayTrace replay
         mSchemeInfoRaw <-
           case sourceAuthority of
             Just sourceScheme -> pure (Just sourceScheme)
@@ -3127,7 +3107,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                   Right aligned -> pure (Just aligned)
             Nothing -> pure Nothing
         let
-            mExpansion = IntMap.lookup eid edgeExpansions
+            mExpansion = Just (edgeArtifactExpansion edgeArtifact)
             mTraceArgs =
               case mSchemeInfo of
                 Just schemeInfo
@@ -3342,9 +3322,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
     scopeContext = acScopeContext annotationContext
     presolutionView = scPresolutionView scopeContext
     gaParents = scGaParents scopeContext
-    edgeWitnesses = acEdgeWitnesses annotationContext
-    edgeTraces = acEdgeTraces annotationContext
-    edgeExpansions = acEdgeExpansions annotationContext
+    edgeArtifacts = acEdgeArtifacts annotationContext
     identityEdges = acIdentityEdges annotationContext
     canonical = pvCanonical presolutionView
     debugGeneralize :: String -> a -> a
@@ -3355,32 +3333,31 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
     -- that case.  In particular, do not run Σ over a scheme prepared at an
     -- enclosing subterm boundary: those binders are Γ, not work performed by
     -- this edge.
-    exactIdentityEdge edgeWitness =
-      ewLeft edgeWitness == ewRight edgeWitness
-        && ewForallIntros edgeWitness == 0
-        && null (getInstanceOps (ewWitness edgeWitness))
-        && IntMap.lookup eid edgeExpansions == Just ExpIdentity
-        && case IntMap.lookup eid edgeTraces of
-          Just traceInfo ->
-            null (etBinderArgs traceInfo)
-              && IntMap.null (etBinderReplayMap traceInfo)
-              && null (etReplayDomainBinders traceInfo)
-              && IntMap.null (getCopyMapping (etCopyMap traceInfo))
-              && etReplayContract traceInfo == ReplayContractNone
-          Nothing -> False
+    exactIdentityEdge edgeArtifact =
+      let edgeWitness = edgeArtifactWitness edgeArtifact
+          traceInfo = edgeArtifactTrace edgeArtifact
+       in ewLeft edgeWitness == ewRight edgeWitness
+            && ewForallIntros edgeWitness == 0
+            && null (getInstanceOps (ewWitness edgeWitness))
+            && edgeArtifactExpansion edgeArtifact == ExpIdentity
+            && null (etBinderArgs traceInfo)
+            && IntMap.null (etBinderReplayMap traceInfo)
+            && null (etReplayDomainBinders traceInfo)
+            && IntMap.null (getCopyMapping (etCopyMap traceInfo))
+            && etReplayContract traceInfo == ReplayContractNone
 
     -- Lemma 11.5.3 constructs a flex-to-rigid terminal transition as
     -- Weaken(r); RaiseMerge(r,d).  Figure 15.3.4 translates both rigid
     -- operations to the identity, so a later arity-based refinement must not
     -- manufacture a type application for binders owned by the enclosing Γ.
-    rigidRootTransitionEdge edgeWitness =
-      case (getInstanceOps (ewWitness edgeWitness), IntMap.lookup eid edgeTraces) of
-        ( [OpWeaken weakened, OpRaiseMerge operated exterior],
-          Just traceInfo
-          ) ->
-            weakened == operated
-              && rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo
-        _ -> False
+    rigidRootTransitionEdge edgeArtifact =
+      let edgeWitness = edgeArtifactWitness edgeArtifact
+          traceInfo = edgeArtifactTrace edgeArtifact
+       in case getInstanceOps (ewWitness edgeWitness) of
+            [OpWeaken weakened, OpRaiseMerge operated exterior] ->
+              weakened == operated
+                && rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo
+            _ -> False
 
     edgeContextError err =
       case err of

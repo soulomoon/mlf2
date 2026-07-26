@@ -21,7 +21,7 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution
     ( PresolutionView(..)
     , EdgeTrace(..)
-    , PresolutionResult(..)
+    , prEdgeTraces
     )
 import MLF.Constraint.Presolution.TestSupport
     ( CopyMapping(..)

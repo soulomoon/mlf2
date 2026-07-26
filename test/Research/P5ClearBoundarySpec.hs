@@ -16,8 +16,8 @@ import MLF.Constraint.Presolution.Plan.Context
     , emptyExpansionConstructionPlacements
     )
 import MLF.Constraint.Presolution.TestSupport
-    ( EdgeArtifacts(..)
-    , defaultPlanBuilder
+    ( defaultPlanBuilder
+    , edgeArtifactsForTest
     )
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph
@@ -876,12 +876,12 @@ resultTypeInputsForArtifacts
         inputs =
             mkResultTypeInputs
                 canonical
-                EdgeArtifacts
-                    { eaEdgeExpansions = edgeExpansions
-                    , eaEdgeWitnesses = edgeWitnesses
-                    , eaEdgeTraces = edgeTraces
-                    , eaIdentityEdges = prIdentityEdges pres
-                    }
+                ( edgeArtifactsForTest
+                    edgeExpansions
+                    edgeWitnesses
+                    edgeTraces
+                    (prIdentityEdges pres)
+                )
                 (Finalize.presolutionViewFromSolved solvedClean)
                 bindParentsGa
                 (defaultPlanBuilder defaultTraceConfig)

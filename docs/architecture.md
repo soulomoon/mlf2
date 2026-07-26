@@ -675,17 +675,32 @@ semantics that are not represented elsewhere just as explicitly.”
   provenance. Witness operation node IDs, `etBinderArgs`, `etInterior`, and
   `etCopyMap` keys live in one source-ID domain; canonical IDs are derived at
   lookup sites rather than globally rewriting trace provenance.
-- Φ/Ω cannot consume a witness and trace independently. The opaque
-  `PhiReplayCertificate` accepts one producer-owned `EdgeArtifacts` aggregate,
-  fetches and pairs the witness and trace through its shared edge key, then
-  checks that the witness's embedded edge identity agrees. `AnnotationContext`,
-  annotation/result-type validation, and occurrence translation carry that
-  same aggregate rather than reconstructing or independently selecting its
-  maps. The certificate does not rederive packet association from `ewRoot`,
-  `etRoot`, or `etResultRoot`: replay/finalization can leave those IDs in
-  distinct source, destination, and construction presentations. Production Φ
-  entry points and `OmegaContext` require this paired authority; only the
-  test-support seam can express a missing trace.
+- The Phase 4-to-Phase 6 `EdgeArtifacts` value is an opaque map of complete
+  per-edge packets. Each packet owns its expansion, normalized witness, frozen
+  replay trace, and exact `RawExpansionConstruction`. Presolution publishes it
+  directly from the complete `EdgeExecutionArtifacts` map; no production
+  boundary splits and recombines parallel maps. `mkEdgeArtifacts` proves
+  identical component key sets for test fixtures and agreement between the
+  selected key and `EdgeWitness.ewEdgeId`; aggregate map/filter/insert
+  operations preserve those facts. `PresolutionResult` owns only this
+  aggregate and derives compatibility projections from it. Production
+  therefore cannot represent a witness-only, trace-only, expansion-only, or
+  construction-only edge.
+- Per-edge consumers—including Φ replay, application computation,
+  identity-topology recovery, and root-`RaiseMerge` authority—select a packet
+  once and project all required fields from that value. Bulk result-type
+  indexes may derive read-only witness or trace views from the aggregate, but
+  no production API accepts independently supplied component maps.
+- Φ/Ω consumes one of those packets through the opaque
+  `PhiReplayCertificate`. `AnnotationContext`, annotation/result-type
+  validation, identity-edge recognition, root-`RaiseMerge` authority, and
+  occurrence translation carry and query the same aggregate rather than
+  reconstructing or independently selecting its projections. The certificate
+  does not rederive packet association from `ewRoot`, `etRoot`, or
+  `etResultRoot`: replay/finalization can leave those IDs in distinct source,
+  destination, and construction presentations. Production Φ entry points and
+  `OmegaContext` require this paired authority; only the test-support seam can
+  express a missing trace before a packet is constructed.
 - `RawExpansionConstruction` records the exact destination-domain parent edits
   made while constructing χₑ, together with argument and semantic-meta roles.
   Composed expansion steps union compatible certificates and reject a shared

@@ -23,6 +23,7 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
     , PresolutionResult(..)
+    , prEdgeTraces
     )
 import MLF.Constraint.Presolution.Base
     ( EdgeWitnessNonSourceOrigin(..)
@@ -946,12 +947,12 @@ spec = describe "EdgeTrace" $ do
                 _ -> False
         case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left err -> expectationFailure ("Presolution failed: " ++ show err)
-            Right PresolutionResult{ prEdgeTraces = traces } -> do
+            Right presolution -> do
                 finalizedTrace <-
                     maybe
                         (expectationFailure "Expected finalized EdgeTrace for EdgeId 0" >> fail "missing finalized trace")
                         pure
-                        (IntMap.lookup 0 traces)
+                        (IntMap.lookup 0 (prEdgeTraces presolution))
                 -- etBinderArgs is a mixed-domain bridge: its binder is a
                 -- source identity and its argument is the destination
                 -- identity selected while constructing chi_e.  Neither side

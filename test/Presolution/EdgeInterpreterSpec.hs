@@ -35,7 +35,9 @@ import MLF.Constraint.Presolution.TestSupport
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
-    , PresolutionResult(..)
+    , prEdgeExpansions
+    , prEdgeTraces
+    , prEdgeWitnesses
     )
 import MLF.Constraint.Presolution.Base (EdgeSourceInterior(..), InteriorNodes(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Interpreter

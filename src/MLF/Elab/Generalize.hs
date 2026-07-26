@@ -144,7 +144,10 @@ import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (EdgeTrace (..))
 import MLF.Constraint.Presolution.Base
-  ( EdgeArtifacts (..),
+  ( EdgeArtifacts,
+    edgeArtifactTrace,
+    edgeArtifactWitness,
+    lookupEdgeArtifact,
     rootRaiseMergeTraceAuthority,
     rootWeakenRaiseMergeTraceAuthority,
   )
@@ -1083,20 +1086,22 @@ data RootRaiseMergeAuthority = RootRaiseMergeAuthority
 -- trace proves that the operated node is the frozen source root, the other
 -- endpoint is outside that source interior, and no binder replay is involved.
 rootRaiseMergeAuthorityFor :: EdgeArtifacts -> EdgeId -> Either ElabError (Maybe RootRaiseMergeAuthority)
-rootRaiseMergeAuthorityFor artifacts eid@(EdgeId edgeKey) =
-  case (IntMap.lookup edgeKey (eaEdgeWitnesses artifacts), IntMap.lookup edgeKey (eaEdgeTraces artifacts)) of
-    (Just witness, Just traceInfo) ->
-      case validAuthorities traceInfo (getInstanceOps (ewWitness witness)) of
-        [] -> Right Nothing
-        [authority] -> Right (Just authority)
-        authorities ->
-          Left
-            ( ValidationFailed
-                [ "edge carries multiple root RaiseMerge authorities: " ++ show eid,
-                  "  authorities: " ++ show authorities
-                ]
-            )
-    _ -> Right Nothing
+rootRaiseMergeAuthorityFor artifacts eid =
+  case lookupEdgeArtifact eid artifacts of
+    Just artifact ->
+      let witness = edgeArtifactWitness artifact
+          traceInfo = edgeArtifactTrace artifact
+       in case validAuthorities traceInfo (getInstanceOps (ewWitness witness)) of
+            [] -> Right Nothing
+            [authority] -> Right (Just authority)
+            authorities ->
+              Left
+                ( ValidationFailed
+                    [ "edge carries multiple root RaiseMerge authorities: " ++ show eid,
+                      "  authorities: " ++ show authorities
+                    ]
+                )
+    Nothing -> Right Nothing
   where
     validAuthorities traceInfo = go
       where

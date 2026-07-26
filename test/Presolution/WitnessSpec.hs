@@ -37,8 +37,10 @@ import MLF.Constraint.Presolution.Witness
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
-    , PresolutionResult(..)
     , EdgeTrace(..)
+    , prEdgeExpansionConstructions
+    , prEdgeExpansions
+    , prEdgeWitnesses
     )
 import MLF.Constraint.Presolution.Base
     ( rootRaiseMergeTraceAuthority
@@ -416,10 +418,9 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult
-                    { prEdgeExpansions = exps
-                    , prEdgeWitnesses = ews
-                    } -> do
+                Right presolution -> do
+                    let exps = prEdgeExpansions presolution
+                        ews = prEdgeWitnesses presolution
                     case IntMap.lookup edgeId exps of
                         Just (ExpInstantiate _) -> pure ()
                         Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
@@ -2791,11 +2792,10 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("Presolution failed: " ++ show err)
-                Right PresolutionResult
-                    { prEdgeExpansions = exps
-                    , prEdgeWitnesses = ews
-                    , prEdgeExpansionConstructions = constructions
-                    } -> do
+                Right presolution -> do
+                    let constructions = prEdgeExpansionConstructions presolution
+                        exps = prEdgeExpansions presolution
+                        ews = prEdgeWitnesses presolution
                     case IntMap.lookup 0 exps of
                         Just (ExpCompose _) -> pure ()
                         Just other -> expectationFailure ("Expected ExpCompose, got " ++ show other)

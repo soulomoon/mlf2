@@ -202,37 +202,37 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
         Left (ResidualTyExpNodes residualTyExpNodes)
     validateTranslatablePresolution finalConstraint
 
-    let rawEdgeTraces = psEdgeTraces finalState
-        rawEdgeExpansionConstructions =
-            psEdgeExpansionConstructions finalState
+    rawEdgeArtifacts <-
+        case
+            edgeArtifactsFromExecutionArtifacts
+                (psEdgeExecutionArtifacts finalState)
+                IntSet.empty
+        of
+            Left err -> Left (InvalidEdgeArtifacts err)
+            Right artifacts -> Right artifacts
+    let
         edgeArtifacts =
             dropTrivialSchemeEdges
                 finalConstraint
-                (EdgeArtifacts (psEdgeExpansions finalState) (psEdgeWitnesses finalState) rawEdgeTraces IntSet.empty)
-        edgeWitnesses = eaEdgeWitnesses edgeArtifacts
+                rawEdgeArtifacts
         edgeTraces = eaEdgeTraces edgeArtifacts
-        edgeExpansions = eaEdgeExpansions edgeArtifacts
-        edgeExpansionConstructions =
-            IntMap.restrictKeys
-                rawEdgeExpansionConstructions
-                (IntSet.fromAscList (IntMap.keys edgeTraces))
         nonTrivialEdgeKeys =
             IntSet.fromList
                 [ getEdgeId (instEdgeId edge)
                 | edge <- cInstEdges constraint
                 , IntSet.notMember (getEdgeId (instEdgeId edge)) (cLetEdges finalConstraint)
                 ]
-        witnessKeys = IntSet.fromAscList (IntMap.keys edgeWitnesses)
-        traceKeys = IntSet.fromAscList (IntMap.keys edgeTraces)
-        missingWitnesses =
-            map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys witnessKeys))
-        missingTraces =
-            map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys traceKeys))
+        missingArtifacts =
+            map EdgeId
+                ( IntSet.toList
+                    ( IntSet.difference
+                        nonTrivialEdgeKeys
+                        (edgeArtifactKeys edgeArtifacts)
+                    )
+                )
         canonical = chaseRedirectsStable redirects
-    when (not (null missingWitnesses)) $
-        Left (MissingEdgeWitnesses missingWitnesses)
-    when (not (null missingTraces)) $
-        Left (MissingEdgeTraces missingTraces)
+    when (not (null missingArtifacts)) $
+        Left (MissingEdgeArtifacts missingArtifacts)
     forM_ (IntMap.toList edgeTraces) $ \(eid, tr) ->
         when (IntSet.member eid nonTrivialEdgeKeys) $ do
             validateReplayMapTraceContract canonical constraint finalConstraint eid tr
@@ -241,11 +241,7 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
 
     return PresolutionResult
         { prConstraint = presolvedConstraint
-        , prEdgeExpansions = edgeExpansions
-        , prEdgeWitnesses = edgeWitnesses
-        , prEdgeTraces = edgeTraces
-        , prEdgeExpansionConstructions = edgeExpansionConstructions
-        , prIdentityEdges = eaIdentityEdges edgeArtifacts
+        , prEdgeArtifacts = edgeArtifacts
         , prRedirects = redirects
         , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)

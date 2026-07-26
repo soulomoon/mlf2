@@ -6,7 +6,10 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
-import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution
+    ( prEdgeTraces
+    , prEdgeWitnesses
+    )
 import MLF.Constraint.Types.Graph
     ( TyNode(..) )
 import qualified MLF.Constraint.NodeAccess as NodeAccess

@@ -21,7 +21,13 @@ import MLF.Binding.GraphOps qualified as GraphOps
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..))
 import MLF.Constraint.Inert qualified as Inert
-import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
+import MLF.Constraint.Presolution
+  ( EdgeTrace (..),
+    PresolutionError (..),
+    PresolutionResult (..),
+    PresolutionView (..),
+    prEdgeWitnesses,
+  )
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
     PresolutionState (..),
@@ -2396,8 +2402,8 @@ propPropSolve _size =
 propPropWitness :: Int -> Property
 propPropWitness _size =
   case runToPresolutionDefault Set.empty letIdAppExpr of
-    Right PresolutionResult {prConstraint = c, prEdgeWitnesses = witnesses} ->
-      let entries = IntMap.toList witnesses
+    Right presolution@PresolutionResult {prConstraint = c} ->
+      let entries = IntMap.toList (prEdgeWitnesses presolution)
        in conjoin
             [ counterexample (show entries) (not (null entries)),
               counterexample (show entries) $
@@ -2842,8 +2848,8 @@ propPresolutionClearsEdges expr =
 propEdgeWitnessOps :: Surf.SurfaceExpr -> ([EdgeWitness] -> Bool) -> Property
 propEdgeWitnessOps expr predicate =
   case runToPresolutionDefault Set.empty expr of
-    Right PresolutionResult {prEdgeWitnesses = witnesses} ->
-      let values = IntMap.elems witnesses
+    Right presolution ->
+      let values = IntMap.elems (prEdgeWitnesses presolution)
        in counterexample (show values) (predicate values)
     Left err -> counterexample err False
 

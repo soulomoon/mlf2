@@ -20,9 +20,7 @@ import ElabTermTestSupport
     , testTVar
     )
 import MLF.Constraint.Presolution.Base
-    ( EdgeArtifacts(..)
-    , EdgeTrace(..)
-    , emptyEdgeArtifacts
+    ( EdgeTrace(..)
     )
 import MLF.Constraint.Presolution.Plan.Requirements
     ( AmbientGammaAuthority(..)
@@ -36,7 +34,12 @@ import MLF.Constraint.Presolution.Plan.Finalize.TestSupport
     ( finalizeBinderPlanBinderRefs
     , mkFinalizeBinderPlan
     )
-import MLF.Constraint.Presolution.TestSupport (sourceInteriorFromList)
+import MLF.Constraint.Presolution.TestSupport
+    ( edgeArtifactsForTest
+    , setEdgeArtifactTraceForTest
+    , setEdgeArtifactWitnessForTest
+    , sourceInteriorFromList
+    )
 import MLF.Constraint.Types.Graph
     ( BaseTy(..)
     , BindFlag(..)
@@ -60,7 +63,11 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , nodeRefKey
     )
-import MLF.Constraint.Types.Witness (InstanceOp(..), ReplayContract(..))
+import MLF.Constraint.Types.Witness
+    ( Expansion(ExpIdentity)
+    , InstanceOp(..)
+    , ReplayContract(..)
+    )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Elab.Generalize
     ( CompilerExactResultStage(..)
@@ -2356,10 +2363,11 @@ spec = do
                     , etReplayContract = ReplayContractNone
                     }
             artifacts =
-                emptyEdgeArtifacts
-                    { eaEdgeWitnesses = IntMap.singleton 91 witness
-                    , eaEdgeTraces = IntMap.singleton 91 trace
-                    }
+                edgeArtifactsForTest
+                    (IntMap.singleton 91 ExpIdentity)
+                    (IntMap.singleton 91 witness)
+                    (IntMap.singleton 91 trace)
+                    IntSet.empty
             requirementsFor resultRoot expectedBound =
                     GeneralizationRequirements
                         { grRequiredGammaBinders =
@@ -2389,9 +2397,10 @@ spec = do
                                 ]
                         }
                 rigidArtifacts =
-                    artifacts
-                        { eaEdgeWitnesses = IntMap.singleton 91 rigidWitness
-                        }
+                    setEdgeArtifactWitnessForTest
+                        edgeId
+                        rigidWitness
+                        artifacts
             rootRaiseMergeAuthorityFor rigidArtifacts edgeId `shouldBe` Right Nothing
 
         it "accepts an exactly constructed exterior Γ binder" $ do
@@ -2538,9 +2547,10 @@ spec = do
             let resultRoot = NodeId 18
                 resultTrace = trace {etResultRoot = resultRoot}
                 resultArtifacts =
-                    artifacts
-                        { eaEdgeTraces = IntMap.singleton 91 resultTrace
-                        }
+                    setEdgeArtifactTraceForTest
+                        edgeId
+                        resultTrace
+                        artifacts
                 schemeInfo =
                     schemeInfoFromRefSubst
                         resultScheme

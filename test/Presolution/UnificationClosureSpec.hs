@@ -14,6 +14,8 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
+    , prEdgeTraces
+    , prEdgeWitnesses
     )
 import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport

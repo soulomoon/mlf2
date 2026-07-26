@@ -79,6 +79,7 @@ import qualified Data.List.NonEmpty as NonEmpty
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
 import Data.Ord (comparing)
 import Control.Applicative ((<|>))
+import Data.Bifunctor (first)
 import Control.Monad (filterM, foldM, guard, unless)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
@@ -90,7 +91,19 @@ import MLF.Constraint.Presolution
     , PresolutionPlanBuilder(..)
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution.Base (EdgeArtifacts(..), getCopyMapping)
+import MLF.Constraint.Presolution.Base
+    ( EdgeArtifacts
+    , EdgeArtifactsError
+    , edgeArtifactExpansion
+    , edgeArtifactTrace
+    , edgeArtifactWitness
+    , eaEdgeExpansionConstructions
+    , eaEdgeTraces
+    , eaEdgeWitnesses
+    , mapEdgeArtifacts
+    , lookupEdgeArtifact
+    , getCopyMapping
+    )
 import MLF.Constraint.Presolution.Construction
     ( RawExpansionConstruction
     , rawExpansionConstructionArgumentKeys
@@ -139,7 +152,6 @@ import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Types.Witness
     ( Expansion(..)
     , ReplayContract(..)
-    , ewEdgeId
     , ewForallIntros
     , ewLeft
     , ewRight
@@ -3570,6 +3582,11 @@ prepareGeneralizationArtifact traceCfg identityGenerator exactProducerSourceType
         pres
         [ann]
 
+edgeArtifactsSolveError :: EdgeArtifactsError -> SolveError
+edgeArtifactsSolveError err =
+    Solve.ValidationFailed
+        ["invalid presolution edge artifact packet: " ++ show err]
+
 prepareGeneralizationArtifactForRoots
     :: TraceConfig
     -> IdentityGenerator
@@ -3594,15 +3611,16 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
     let preRewrite = snapshotConstraint pres
     (solvedClean, presolutionViewClean) <-
         Finalize.finalizeSnapshotArtifacts preRewrite (snapshotUnionFind pres)
-    let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+    let canonNode =
+            makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
+        rawEdgeArtifacts = prEdgeArtifacts pres
     traceCopyArtifacts <-
         prepareTraceCopyArtifacts
             acyclicBase
             presolutionViewClean
             (prRedirects pres)
             canonNode
-            (prEdgeTraces pres)
-            (prEdgeExpansionConstructions pres)
+            rawEdgeArtifacts
     let acyclicBaseForGeneralization = toPresolvedConstraint acyclicBase
         planBuilder = prPlanBuilder pres
         TraceCopyArtifacts
@@ -3624,26 +3642,20 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
         Finalize.finalizePresolutionViewFromSnapshot
             constraintForGen
             (Solved.canonicalMap solvedClean)
+    edgeArtifacts <-
+        first edgeArtifactsSolveError
+            ( mapEdgeArtifacts
+                (canonicalizeExpansion canonNode)
+                (canonicalizeWitness canonNode)
+                (canonicalizeTrace canonNode)
+                rawEdgeArtifacts
+            )
     let annNodeCanonical = canonicalizeNode canonNode
         constructionIdentityRepresentative node =
             case resolveGaSolvedToBase bindParentsGa (annNodeCanonical node) of
                 SolvedToBaseMapped baseNode -> baseNode
                 SolvedToBaseSameDomain baseNode -> baseNode
                 SolvedToBaseMissing -> annNodeCanonical node
-        rawEdgeArtifacts =
-            EdgeArtifacts
-                { eaEdgeExpansions = prEdgeExpansions pres
-                , eaEdgeWitnesses = prEdgeWitnesses pres
-                , eaEdgeTraces = prEdgeTraces pres
-                , eaIdentityEdges = prIdentityEdges pres
-                }
-        edgeArtifacts =
-            EdgeArtifacts
-                { eaEdgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (eaEdgeExpansions rawEdgeArtifacts)
-                , eaEdgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (eaEdgeWitnesses rawEdgeArtifacts)
-                , eaEdgeTraces = IntMap.map (canonicalizeTrace canonNode) (eaEdgeTraces rawEdgeArtifacts)
-                , eaIdentityEdges = prIdentityEdges pres
-                }
         prepareAnn =
             alignAnnInstantiationSites (eaEdgeWitnesses edgeArtifacts)
                 . redirectAndCanonicalizeAnn annNodeCanonical (prRedirects pres)
@@ -4660,7 +4672,7 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
         sourceBodyRoot
         boundaryScopeRoot
         boundaryBodyRoot
-        edgeId@(EdgeId edgeKey) = do
+        edgeId = do
         rootAuthority <-
             rootRaiseMergeAuthorityFor edgeArtifacts edgeId
         case rootAuthority of
@@ -4671,11 +4683,7 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                     )
             Nothing -> topologyConsumer
       where
-        rawWitness = IntMap.lookup edgeKey (eaEdgeWitnesses rawEdgeArtifacts)
-        rawTrace = IntMap.lookup edgeKey (eaEdgeTraces rawEdgeArtifacts)
-        rawExpansion = IntMap.lookup edgeKey (eaEdgeExpansions rawEdgeArtifacts)
-        candidateResult =
-            (etResultRoot <$> rawTrace) <|> (ewRight <$> rawWitness)
+        rawArtifact = lookupEdgeArtifact edgeId rawEdgeArtifacts
         directFlexOwner node =
             IntMap.lookup
                 (nodeRefKey (typeRef node))
@@ -4688,17 +4696,17 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
         -- lambda (the ordinary @\x -> f x@ case), no additional consumer is
         -- introduced.
         topologyConsumer =
-            case candidateResult of
-                Just resultRoot
-                    | directFlexOwner resultRoot
+            case rawArtifact of
+                Just artifact
+                    | let traceInfo = edgeArtifactTrace artifact
+                          resultRoot = etResultRoot traceInfo
+                    , directFlexOwner resultRoot
                     , not (directFlexOwner sourceBodyRoot) -> do
-                        witness <- requireArtifact "witness" rawWitness
-                        traceInfo <- requireArtifact "trace" rawTrace
-                        expansion <- requireArtifact "expansion" rawExpansion
+                        let witness = edgeArtifactWitness artifact
+                            expansion = edgeArtifactExpansion artifact
                         let failures =
                                 concat
-                                    [ expect (ewEdgeId witness == edgeId) "witness edge id differs from the body edge"
-                                    , expect (ewLeft witness == resultRoot) "witness left is not the frozen result root"
+                                    [ expect (ewLeft witness == resultRoot) "witness left is not the frozen result root"
                                     , expect (ewRight witness == resultRoot) "witness right is not the frozen result root"
                                     , expect (ewRoot witness == resultRoot) "witness root is not the frozen result root"
                                     , expect (ewForallIntros witness == 0) "identity topology has forall introductions"
@@ -4743,20 +4751,6 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                                     )
                             else topologyFailure resultRoot failures
                 _ -> pure Nothing
-
-        requireArtifact :: String -> Maybe a -> Either ElabError a
-        requireArtifact label =
-            maybe
-                ( Left
-                    ( ValidationFailed
-                        [ "identity-topology consumer is missing its " ++ label
-                        , "  edge: " ++ show edgeId
-                        , "  lambda scope: " ++ show sourceScopeRoot
-                        , "  body source: " ++ show sourceBodyRoot
-                        ]
-                    )
-                )
-                Right
 
         expect condition message = [message | not condition]
 
@@ -9688,11 +9682,12 @@ prepareTraceCopyArtifacts
     -> PresolutionView q
     -> IntMap.IntMap NodeId
     -> Canonicalizer
-    -> IntMap.IntMap EdgeTrace
-    -> IntMap.IntMap RawExpansionConstruction
+    -> EdgeArtifacts
     -> Either SolveError TraceCopyArtifacts
-prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edgeTraces edgeConstructions =
-    let adoptNode = canonicalizeNode canonNode
+prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edgeArtifacts =
+    let edgeTraces = eaEdgeTraces edgeArtifacts
+        edgeConstructions = eaEdgeExpansionConstructions edgeArtifacts
+        adoptNode = canonicalizeNode canonNode
         baseNodes = cNodes baseConstraint
         edgeTracesForCopy =
             IntMap.filter

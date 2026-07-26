@@ -20,6 +20,9 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
     , PresolutionResult(..)
+    , prEdgeExpansions
+    , prEdgeTraces
+    , prEdgeWitnesses
     )
 import MLF.Constraint.Presolution.Base (PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
@@ -714,8 +717,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps } ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just ExpIdentity -> pure ()
                         Just other -> expectationFailure $ "Expected ExpIdentity, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
@@ -759,7 +762,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prConstraint = c', prEdgeExpansions = exps } -> do
+                Right presolution@PresolutionResult{prConstraint = c'} -> do
+                    let exps = prEdgeExpansions presolution
                     case IntMap.lookup 0 exps of
                         Just (ExpInstantiate _) -> pure ()
                         other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
@@ -817,7 +821,9 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult {prEdgeExpansions = exps, prEdgeTraces = traces, prUnionFind = presolutionUf} -> do
+                Right presolution@PresolutionResult {prUnionFind = presolutionUf} -> do
+                    let exps = prEdgeExpansions presolution
+                        traces = prEdgeTraces presolution
                     case (IntMap.lookup 0 exps, IntMap.lookup 0 traces) of
                         (Just (ExpInstantiate args), Just traceInfo) -> do
                             length args `shouldBe` 2
@@ -1002,8 +1008,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult {prEdgeExpansions = exps} ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just (ExpInstantiate args) -> length args `shouldBe` 1
                         other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
 
@@ -1064,8 +1070,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult {prEdgeExpansions = exps} ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just ExpForall {} -> pure ()
                         other -> expectationFailure $ "Expected ExpForall, got " ++ show other
 
@@ -1127,8 +1133,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult {prEdgeExpansions = exps} ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just (ExpInstantiate args) -> length args `shouldBe` 1
                         Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
@@ -1172,8 +1178,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps } ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just (ExpInstantiate args) -> length args `shouldBe` 1
                         Just other -> expectationFailure $ "Expected ExpInstantiate, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
@@ -1220,7 +1226,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps } -> do
+                Right presolution -> do
+                    let exps = prEdgeExpansions presolution
                     case IntMap.lookup 0 exps of
                         Just
                             ( ExpCompose
@@ -1262,7 +1269,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
+                Right presolution@PresolutionResult{prConstraint = c'} -> do
+                    let exps = prEdgeExpansions presolution
                     case IntMap.lookup 0 exps of
                         Just ExpIdentity -> pure ()
                         other -> expectationFailure $ "Expected ExpIdentity, got " ++ show other
@@ -1358,8 +1366,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps } ->
-                    case IntMap.lookup 0 exps of
+                Right presolution ->
+                    case IntMap.lookup 0 (prEdgeExpansions presolution) of
                         Just (ExpForall (s NE.:| [])) -> s `shouldBe` ForallSpec []
                         Just other -> expectationFailure $ "Expected ExpForall, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
@@ -1905,7 +1913,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps } -> do
+                Right presolution -> do
+                    let exps = prEdgeExpansions presolution
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
                         (Just (ExpInstantiate [n1]), Just (ExpInstantiate [n2])) ->
                             n1 `shouldNotBe` n2
@@ -1936,7 +1945,8 @@ spec = do
 
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
-                Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
+                Right presolution@PresolutionResult{prConstraint = c'} -> do
+                    let exps = prEdgeExpansions presolution
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
                         (Just (ExpInstantiate [n1]), Just (ExpInstantiate [n2])) -> do
                             n1 `shouldBe` n2
@@ -2014,8 +2024,9 @@ spec = do
                     }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
-                Right PresolutionResult{ prEdgeExpansions = exps } ->
-                    IntMap.size exps `shouldSatisfy` (> 0)
+                Right presolution ->
+                    IntMap.size (prEdgeExpansions presolution)
+                        `shouldSatisfy` (> 0)
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
 
         it "O10-EXP-APPLY" $ do
@@ -2037,6 +2048,7 @@ spec = do
                     }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
             case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
-                Right PresolutionResult{ prEdgeWitnesses = ews } ->
-                    IntMap.size ews `shouldSatisfy` (> 0)
+                Right presolution ->
+                    IntMap.size (prEdgeWitnesses presolution)
+                        `shouldSatisfy` (> 0)
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err

@@ -24,7 +24,7 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution (PresolutionPlanBuilder, PresolutionView (..))
-import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
+import MLF.Constraint.Presolution.Base (EdgeArtifacts)
 import MLF.Constraint.Types.Graph
   ( Constraint,
     EdgeId (..),

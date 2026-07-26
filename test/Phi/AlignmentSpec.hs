@@ -10,14 +10,24 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Constraint.Presolution (PresolutionResult(..), PresolutionView(..), EdgeTrace(..))
+import MLF.Constraint.Presolution
+    ( EdgeTrace(..)
+    , PresolutionResult(..)
+    , PresolutionView(..)
+    , prEdgeExpansions
+    , prEdgeTraces
+    , prEdgeWitnesses
+    , prIdentityEdges
+    )
 import MLF.Constraint.Presolution.Base
-    ( EdgeArtifacts(..)
-    , EdgeSourceInterior(..)
+    ( EdgeSourceInterior(..)
     , InteriorNodes(..)
     )
 import qualified MLF.Constraint.Finalize.TestSupport as Finalize
-import MLF.Constraint.Presolution.TestSupport (defaultPlanBuilder)
+import MLF.Constraint.Presolution.TestSupport
+    ( defaultPlanBuilder
+    , edgeArtifactsForTest
+    )
 import MLF.Constraint.Types.Graph (BaseTy(..), EdgeId(..), NodeId(..), cBindParents, cNodes, toListNode)
 import MLF.Constraint.Types.Witness
     ( InstanceOp(..)
@@ -459,12 +469,11 @@ spec = describe "Phi alignment" $ do
                         , gaExpansionConstructionPlacements = emptyExpansionConstructionPlacements
                         }
                 edgeArtifacts =
-                    EdgeArtifacts
-                        { eaEdgeWitnesses = prEdgeWitnesses presolution
-                        , eaEdgeTraces = prEdgeTraces presolution
-                        , eaEdgeExpansions = prEdgeExpansions presolution
-                        , eaIdentityEdges = prIdentityEdges presolution
-                        }
+                    edgeArtifactsForTest
+                        (prEdgeExpansions presolution)
+                        (prEdgeWitnesses presolution)
+                        (prEdgeTraces presolution)
+                        (prIdentityEdges presolution)
                 translateFull ann edgeId =
                     reifyInstWithSourceScheme
                         defaultTraceConfig

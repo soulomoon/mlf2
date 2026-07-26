@@ -5,7 +5,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution (prEdgeExpansions)
 import MLF.Constraint.Types.Witness (Expansion(..))
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
 import SpecUtil (runToPresolutionDefault)

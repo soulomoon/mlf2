@@ -23,6 +23,10 @@ import MLF.Constraint.Presolution
     PresolutionPlanBuilder (..),
     PresolutionResult (..),
     PresolutionView (..),
+    prEdgeExpansions,
+    prEdgeTraces,
+    prEdgeWitnesses,
+    prIdentityEdges,
   )
 import MLF.Constraint.Presolution.Plan.Context
   ( GaBindParents (..),
@@ -39,8 +43,19 @@ import MLF.Constraint.Presolution.Plan.Requirements
   )
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
-    EdgeArtifacts (..),
+    EdgeArtifacts,
+    EdgeArtifactsError (..),
+    deleteEdgeArtifactForTest,
     defaultPlanBuilder,
+    eaEdgeExpansionConstructions,
+    eaEdgeExpansions,
+    eaEdgeTraces,
+    eaEdgeWitnesses,
+    eaIdentityEdges,
+    edgeArtifactsForTest,
+    emptyRawExpansionConstruction,
+    mkEdgeArtifacts,
+    setEdgeArtifactsIdentityEdges,
     sourceInteriorFromList,
     insertCopy,
     lookupCopy,
@@ -707,12 +722,12 @@ resultTypeInputsForArtifacts
         inputs =
           mkResultTypeInputs
             canonical
-            EdgeArtifacts
-              { eaEdgeExpansions = edgeExpansions,
-                eaEdgeWitnesses = edgeWitnesses,
-                eaEdgeTraces = edgeTraces,
-                eaIdentityEdges = prIdentityEdges pres
-              }
+            ( edgeArtifactsForTest
+                edgeExpansions
+                edgeWitnesses
+                edgeTraces
+                (prIdentityEdges pres)
+            )
             (presolutionViewFromSolved solvedClean)
             bindParentsGa
             (defaultPlanBuilder defaultTraceConfig)
@@ -1139,7 +1154,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           expectationFailure
             ("Expected ValidationFailed from malformed PresolutionView 'Raw, got " ++ show other)
 
-    it "annotation result-type path is driven by runtime witness payload" $ do
+    it "rejects a witnessless annotation packet before result-type computation" $ do
       let expr =
             EAnn
               (ELam "x" (EVar "x"))
@@ -1147,27 +1162,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
       let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
       case annCanon of
-        AAnn inner annNodeId eid -> do
-          let inputsMissingWitness =
-                inputs
-                  { rtcEdgeArtifacts =
-                      (rtcEdgeArtifacts inputs)
-                        { eaEdgeWitnesses =
-                            IntMap.delete (getEdgeId eid) (rtcEdgeWitnesses inputs)
-                        }
-                  }
-          computeResultTypeFromAnn inputsMissingWitness inner inner annNodeId eid
-            `shouldBe`
-              Left
-                ( Elab.ValidationFailed
-                    [ "missing edge witness for Phi replay"
-                    , "  edge: " ++ show eid
-                    ]
-                )
+        AAnn _ _ eid ->
+          case
+              mkEdgeArtifacts
+                (rtcEdgeExpansions inputs)
+                (IntMap.delete (getEdgeId eid) (rtcEdgeWitnesses inputs))
+                (rtcEdgeTraces inputs)
+                (eaEdgeExpansionConstructions (rtcEdgeArtifacts inputs))
+                (eaIdentityEdges (rtcEdgeArtifacts inputs))
+            of
+            Left EdgeArtifactKeyMismatch{} -> pure ()
+            other ->
+              expectationFailure
+                ("expected witnessless packet construction rejection, got " ++ show other)
         other ->
           expectationFailure ("Expected top-level AAnn for witness guard, got " ++ show other)
 
-    it "annotation elaboration requires witness, trace, and expansion authority by construction" $ do
+    it "annotation elaboration requires one complete edge packet by construction" $ do
       let expr =
             EAnn
               (ELam "x" (EVar "x"))
@@ -1178,6 +1189,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           witnesses = eaEdgeWitnesses edgeArtifacts
           traces = eaEdgeTraces edgeArtifacts
           expansions = eaEdgeExpansions edgeArtifacts
+          constructions = eaEdgeExpansionConstructions edgeArtifacts
       case annCanon of
         AAnn _ _ eid -> do
           let edgeKey = getEdgeId eid
@@ -1192,27 +1204,38 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             `shouldBe` Right ()
           Annotation.validateAnnotationEdgeAuthority IntMap.empty edgeArtifacts annCanon
             `shouldBe` Left (Elab.ValidationFailed ["missing source type for annotation " ++ show eid])
-          Annotation.validateAnnotationEdgeAuthority
-            sourceTypes
-            (edgeArtifacts {eaEdgeWitnesses = IntMap.delete edgeKey witnesses})
-            annCanon
-            `shouldBe`
-              Left
-                ( Elab.ValidationFailed
-                    [ "missing edge witness for Phi replay",
-                      "  edge: " ++ show eid
-                    ]
-                )
-          Annotation.validateAnnotationEdgeAuthority
-            sourceTypes
-            (edgeArtifacts {eaEdgeTraces = IntMap.delete edgeKey traces})
-            annCanon
-            `shouldBe` Left (Elab.MissingEdgeTrace eid)
-          Annotation.validateAnnotationEdgeAuthority
-            sourceTypes
-            (edgeArtifacts {eaEdgeExpansions = IntMap.delete edgeKey expansions})
-            annCanon
-            `shouldBe` Left (Elab.ValidationFailed ["missing edge expansion for annotation " ++ show eid])
+          forM_
+            [ mkEdgeArtifacts
+                expansions
+                (IntMap.delete edgeKey witnesses)
+                traces
+                constructions
+                (eaIdentityEdges edgeArtifacts),
+              mkEdgeArtifacts
+                expansions
+                witnesses
+                (IntMap.delete edgeKey traces)
+                constructions
+                (eaIdentityEdges edgeArtifacts),
+              mkEdgeArtifacts
+                (IntMap.delete edgeKey expansions)
+                witnesses
+                traces
+                constructions
+                (eaIdentityEdges edgeArtifacts),
+              mkEdgeArtifacts
+                expansions
+                witnesses
+                traces
+                (IntMap.delete edgeKey constructions)
+                (eaIdentityEdges edgeArtifacts)
+            ]
+            $ \result ->
+              case result of
+                Left EdgeArtifactKeyMismatch{} -> pure ()
+                other ->
+                  expectationFailure
+                    ("expected partial edge packet construction rejection, got " ++ show other)
         other ->
           expectationFailure ("Expected top-level AAnn for elaboration authority guard, got " ++ show other)
 
@@ -1233,40 +1256,22 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (rtcCanonical inputs)
                   IntMap.empty
               nonIdentityArtifacts =
-                edgeArtifacts {eaIdentityEdges = identityEdgesWithoutBody}
+                setEdgeArtifactsIdentityEdges
+                  identityEdgesWithoutBody
+                  edgeArtifacts
               withoutBodyArtifacts =
-                nonIdentityArtifacts
-                  { eaEdgeWitnesses = IntMap.delete edgeKey witnesses,
-                    eaEdgeTraces = IntMap.delete edgeKey traces,
-                    eaEdgeExpansions = IntMap.delete edgeKey expansions
-                  }
+                deleteEdgeArtifactForTest bodyEid nonIdentityArtifacts
           IntMap.member edgeKey witnesses `shouldBe` True
           IntMap.member edgeKey traces `shouldBe` True
           IntMap.member edgeKey expansions `shouldBe` True
           validate nonIdentityArtifacts annCanon
             `shouldBe` Right ()
+          validate withoutBodyArtifacts annCanon
+            `shouldSatisfy` isLeft
           validate
-            (nonIdentityArtifacts {eaEdgeWitnesses = IntMap.delete edgeKey witnesses})
-            annCanon
-            `shouldBe`
-              Left
-                ( Elab.ValidationFailed
-                    [ "missing edge witness for Phi replay",
-                      "  edge: " ++ show bodyEid
-                    ]
-                )
-          validate
-            (nonIdentityArtifacts {eaEdgeTraces = IntMap.delete edgeKey traces})
-            annCanon
-            `shouldBe` Left (Elab.MissingEdgeTrace bodyEid)
-          validate
-            (nonIdentityArtifacts {eaEdgeExpansions = IntMap.delete edgeKey expansions})
-            annCanon
-            `shouldBe` Left (Elab.ValidationFailed ["missing edge expansion for lambda body " ++ show bodyEid])
-          validate
-            ( withoutBodyArtifacts
-                { eaIdentityEdges = IntSet.insert edgeKey identityEdgesWithoutBody
-                }
+            ( setEdgeArtifactsIdentityEdges
+                (IntSet.insert edgeKey identityEdgesWithoutBody)
+                withoutBodyArtifacts
             )
             annCanon
             `shouldBe` Right ()
@@ -1323,17 +1328,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           let mismatchedWitness = witness {ewEdgeId = EdgeId (edgeKey + 100000)}
               witnessesWithWrongId = IntMap.insert edgeKey mismatchedWitness witnesses
           case
-              Annotation.validateElaborationEdgeAuthority
-                (rtcCanonical inputs)
-                IntMap.empty
-                (edgeArtifacts {eaEdgeWitnesses = witnessesWithWrongId})
-                annCanon
+              mkEdgeArtifacts
+                (eaEdgeExpansions edgeArtifacts)
+                witnessesWithWrongId
+                (eaEdgeTraces edgeArtifacts)
+                (eaEdgeExpansionConstructions edgeArtifacts)
+                (eaIdentityEdges edgeArtifacts)
             of
-            Left (Elab.PhiInvariantError message) ->
-              message `shouldSatisfy` isInfixOf "different edge"
+            Left EdgeArtifactWitnessIdMismatch{} -> pure ()
             other ->
               expectationFailure
-                ("Expected mismatched replay edge rejection, got " ++ show other)
+                ("Expected mismatched replay edge construction rejection, got " ++ show other)
         other ->
           expectationFailure ("Expected top-level AApp for application authority guard, got " ++ show other)
 
@@ -5970,12 +5975,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             witnesses = IntMap.singleton (getEdgeId edgeId) witness
             traces = IntMap.singleton (getEdgeId edgeId) traceInfo
             edgeArtifacts =
-              EdgeArtifacts
-                { eaEdgeExpansions = IntMap.empty,
-                  eaEdgeWitnesses = witnesses,
-                  eaEdgeTraces = traces,
-                  eaIdentityEdges = IntSet.empty
-                }
+              edgeArtifactsForTest
+                (IntMap.singleton (getEdgeId edgeId) ExpIdentity)
+                witnesses
+                traces
+                IntSet.empty
             certificateBuilder ::
               EdgeId ->
               EdgeArtifacts ->
@@ -5987,32 +5991,31 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             expectationFailure
               ("Expected matching replay certificate, got " ++ show err)
         case
-            certificateBuilder
-              edgeId
-              (edgeArtifacts {eaEdgeTraces = IntMap.empty})
+            mkEdgeArtifacts
+              (eaEdgeExpansions edgeArtifacts)
+              witnesses
+              IntMap.empty
+              (eaEdgeExpansionConstructions edgeArtifacts)
+              IntSet.empty
           of
-          Left (Elab.MissingEdgeTrace missingEdge) ->
-            missingEdge `shouldBe` edgeId
+          Left EdgeArtifactKeyMismatch{} -> pure ()
           other ->
             expectationFailure
-              ("Expected missing-trace rejection, got " ++ show other)
+              ("Expected missing-trace packet construction rejection, got " ++ show other)
         let wrongEdge = EdgeId 78
             wrongKey = getEdgeId wrongEdge
         case
-            certificateBuilder
-              wrongEdge
-              EdgeArtifacts
-                { eaEdgeExpansions = IntMap.empty,
-                  eaEdgeWitnesses = IntMap.singleton wrongKey witness,
-                  eaEdgeTraces = IntMap.singleton wrongKey traceInfo,
-                  eaIdentityEdges = IntSet.empty
-                }
+            mkEdgeArtifacts
+              (IntMap.singleton wrongKey ExpIdentity)
+              (IntMap.singleton wrongKey witness)
+              (IntMap.singleton wrongKey traceInfo)
+              (IntMap.singleton wrongKey emptyRawExpansionConstruction)
+              IntSet.empty
           of
-          Left (Elab.PhiInvariantError message) ->
-            message `shouldSatisfy` isInfixOf "different edge"
+          Left EdgeArtifactWitnessIdMismatch{} -> pure ()
           other ->
             expectationFailure
-              ("Expected edge-identity rejection, got " ++ show other)
+              ("Expected edge-identity packet rejection, got " ++ show other)
 
       it "O15-TR-RIGID-RAISE: OpRaise on a rigid node outside I(r) translates to identity" $ do
         let root = NodeId 100
@@ -8769,12 +8772,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   ewWitness = InstanceWitness [OpRaiseMerge root exterior]
                 }
             edgeArtifacts =
-              EdgeArtifacts
-                { eaEdgeExpansions = IntMap.singleton edgeKey ExpIdentity,
-                  eaEdgeWitnesses = IntMap.singleton edgeKey witness,
-                  eaEdgeTraces = IntMap.singleton edgeKey traceInfo,
-                  eaIdentityEdges = IntSet.empty
-                }
+              edgeArtifactsForTest
+                (IntMap.singleton edgeKey ExpIdentity)
+                (IntMap.singleton edgeKey witness)
+                (IntMap.singleton edgeKey traceInfo)
+                IntSet.empty
         phi <-
           requireRight
             ( PhiTestSupport.reifyInstWithSourceScheme

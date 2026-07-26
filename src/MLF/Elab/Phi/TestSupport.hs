@@ -19,8 +19,10 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import MLF.Constraint.Presolution (EdgeTrace)
 import MLF.Constraint.Presolution.Base
-    ( EdgeArtifacts(..)
+    ( EdgeArtifacts
     , PresolutionPlanBuilder
+    , emptyRawExpansionConstruction
+    , mkEdgeArtifacts
     )
 import MLF.Constraint.Presolution.Plan.Context
     ( GaBindParents(..)
@@ -36,7 +38,11 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , toListNode
     )
-import MLF.Constraint.Types.Witness (EdgeWitness, ewEdgeId)
+import MLF.Constraint.Types.Witness
+    ( EdgeWitness
+    , Expansion(ExpIdentity)
+    , ewEdgeId
+    )
 import MLF.Elab.Elaborate.Annotation
     ( AnnotationContext(..)
     , reifyInstFromSourceScheme
@@ -113,14 +119,7 @@ phiFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaPar
     replay <-
         Translate.mkPhiReplayCertificate
             (ewEdgeId witness)
-            EdgeArtifacts
-                { eaEdgeExpansions = IntMap.empty
-                , eaEdgeWitnesses =
-                    IntMap.singleton (getEdgeId (ewEdgeId witness)) witness
-                , eaEdgeTraces =
-                    IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo
-                , eaIdentityEdges = IntSet.empty
-                }
+            (edgeArtifactsForReplayTest traceInfo witness)
     Translate.phiFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
@@ -146,14 +145,7 @@ phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionVi
     replay <-
         Translate.mkPhiReplayCertificate
             (ewEdgeId witness)
-            EdgeArtifacts
-                { eaEdgeExpansions = IntMap.empty
-                , eaEdgeWitnesses =
-                    IntMap.singleton (getEdgeId (ewEdgeId witness)) witness
-                , eaEdgeTraces =
-                    IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo
-                , eaIdentityEdges = IntSet.empty
-                }
+            (edgeArtifactsForReplayTest traceInfo witness)
     Translate.phiOccurrenceFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
@@ -161,6 +153,25 @@ phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionVi
         (fromMaybe (gaBindParentsFromView presolutionView) mbGaParents)
         mSchemeInfo
         replay
+
+edgeArtifactsForReplayTest :: EdgeTrace -> EdgeWitness -> EdgeArtifacts
+edgeArtifactsForReplayTest traceInfo witness =
+    case
+        mkEdgeArtifacts
+            (IntMap.singleton edgeKey ExpIdentity)
+            (IntMap.singleton edgeKey witness)
+            (IntMap.singleton edgeKey traceInfo)
+            (IntMap.singleton edgeKey emptyRawExpansionConstruction)
+            IntSet.empty
+    of
+        Left err ->
+            error
+                ( "edgeArtifactsForReplayTest: invalid replay fixture: "
+                    ++ show err
+                )
+        Right edgeArtifacts -> edgeArtifacts
+  where
+    edgeKey = getEdgeId (ewEdgeId witness)
 
 -- | Low-level Phi fixtures that predate preserved source provenance receive a
 -- complete identity certificate over their own graph.  This seam is test-only;

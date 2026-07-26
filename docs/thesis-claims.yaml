@@ -405,7 +405,7 @@ claims:
         - src/MLF/Elab/Elaborate/Annotation.hs#validateElaborationEdgeAuthority
     deviations: []
     status: defended
-    notes: "Phi and Omega consume an opaque edge-keyed witness/trace replay certificate built from one producer-owned EdgeArtifacts aggregate; Phase 6 validators and consumers cannot independently compose witness and trace maps, while missing traces and mismatched witness edge identities remain unconstructible at the production translation boundary."
+    notes: "EdgeArtifacts is an opaque map of complete expansion/witness/trace/construction packets published directly from construction-closed edge execution artifacts; its test builder proves identical keys and embedded EdgeId agreement. Phi and Omega consume an opaque replay certificate projected by one edge lookup, so Phase 6 cannot compose component maps or represent a partial production packet."
 
   - id: CLM-SIGMA-REORDER
     type: definition

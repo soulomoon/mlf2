@@ -1,3 +1,37 @@
+## 2026-07-26 - Construction-closed Phase 4 edge packets
+
+- `EdgeArtifacts` no longer exports a record constructor containing four
+  independently mutable `IntMap`s. It owns an opaque `IntMap EdgeArtifact`;
+  every `EdgeArtifact` contains the edge's expansion, normalized witness,
+  frozen replay trace, and exact expansion-construction certificate.
+- Production finalization projects `EdgeArtifacts` directly from the
+  construction-closed `EdgeExecutionArtifacts` map; it no longer splits the
+  producer packet into component maps and reassembles it afterward.
+  `mkEdgeArtifacts` remains a checked test-support boundary and rejects unequal
+  expansion/witness/trace/construction key sets plus a witness whose embedded
+  `EdgeId` disagrees with the selected map key. `mapEdgeArtifacts`,
+  `filterEdgeArtifacts`, and `insertEdgeArtifact` preserve the invariant, so
+  canonicalization and Var-Let filtering cannot create partial packets.
+- `PresolutionResult` stores only the aggregate; its compatibility projections
+  derive expansion, witness, trace, construction, and identity views from that
+  value. Generalization preparation consumes the aggregate directly and
+  canonicalizes it as one value.
+  `mkPhiReplayCertificate`, annotation authority validation, application edge
+  computation, identity-topology recovery, identity-edge recognition, and
+  root-`RaiseMerge` authority now use a single per-edge packet lookup. Driver
+  completeness failure is one `MissingEdgeArtifacts` error. Tests that
+  previously deleted only one component now assert construction failure;
+  valid mutation fixtures replace or clone a complete packet.
+- The previously slow higher-kinded runtime parity row remains one merged
+  interpreter/LLVM/native test and completes in 1.160 seconds locally. The
+  explicit two-artifact Prelude-cache regression completes in 1.941 seconds
+  and confirms one semantic Prelude build. This preserves the located package
+  provenance/cache repair while continuing the eMLF work.
+- Validation passes Phase 6 (323 examples), Phi alignment (11), root
+  `RaiseMerge` Gamma construction (12), all 107 thesis obligations at 100
+  generated cases each, the thesis-claims checker, warning-free
+  `cabal build all -j1`, and the full 3703-example serial suite.
+
 ## 2026-07-26 - Aggregate-owned Phi replay authority
 
 - `mkPhiReplayCertificate` now accepts one `EdgeArtifacts` aggregate instead

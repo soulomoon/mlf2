@@ -23,7 +23,12 @@ import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Types.Graph (Constraint, NodeId)
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
-import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
+import MLF.Constraint.Presolution.Base
+    ( EdgeArtifacts
+    , eaEdgeExpansions
+    , eaEdgeTraces
+    , eaEdgeWitnesses
+    )
 import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Constraint.Types.Phase (Phase)

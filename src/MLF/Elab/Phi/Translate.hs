@@ -87,8 +87,9 @@ import MLF.Constraint.Presolution.Base
     , EdgeSourceInterior(..)
     , InteriorNodes(..)
     , copiedNodes
-    , eaEdgeTraces
-    , eaEdgeWitnesses
+    , edgeArtifactTrace
+    , edgeArtifactWitness
+    , lookupEdgeArtifact
     )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Computation
@@ -155,41 +156,21 @@ mkPhiReplayCertificate
     -> EdgeArtifacts
     -> Either ElabError PhiReplayCertificate
 mkPhiReplayCertificate expectedEdge edgeArtifacts = do
-    witness <-
-        case IntMap.lookup edgeKey witnesses of
+    artifact <-
+        case lookupEdgeArtifact expectedEdge edgeArtifacts of
             Nothing ->
                 Left
                     ( ValidationFailed
-                        [ "missing edge witness for Phi replay"
+                        [ "missing edge artifact packet for Phi replay"
                         , "  edge: " ++ show expectedEdge
                         ]
                     )
-            Just edgeWitness -> Right edgeWitness
-    if ewEdgeId witness /= expectedEdge
-        then
-            Left
-                ( PhiInvariantError
-                    ( unlines
-                        [ "Phi replay witness belongs to a different edge"
-                        , "  expected: " ++ show expectedEdge
-                        , "  witness: " ++ show (ewEdgeId witness)
-                        ]
-                    )
-                )
-        else do
-            traceInfo <-
-                case IntMap.lookup edgeKey traces of
-                    Nothing -> Left (MissingEdgeTrace expectedEdge)
-                    Just edgeTrace -> Right edgeTrace
-            Right
-                PhiReplayCertificate
-                    { prcTrace = traceInfo
-                    , prcWitness = witness
-                    }
-  where
-    edgeKey = getEdgeId expectedEdge
-    witnesses = eaEdgeWitnesses edgeArtifacts
-    traces = eaEdgeTraces edgeArtifacts
+            Just edgeArtifact -> Right edgeArtifact
+    Right
+        PhiReplayCertificate
+            { prcTrace = edgeArtifactTrace artifact
+            , prcWitness = edgeArtifactWitness artifact
+            }
 
 -- | Read the frozen source-graph trace certified for this replay packet.
 phiReplayTrace :: PhiReplayCertificate -> EdgeTrace

@@ -13,8 +13,27 @@ module MLF.Constraint.Presolution.Base (
     lookupExpansionResult,
     lookupExpansionResultUnder,
     canonicalizeExpansionResultMap,
-    EdgeArtifacts(..),
+    EdgeArtifact,
+    edgeArtifactExpansion,
+    edgeArtifactWitness,
+    edgeArtifactTrace,
+    edgeArtifactExpansionConstruction,
+    EdgeArtifacts,
+    EdgeArtifactsError(..),
+    mkEdgeArtifacts,
+    edgeArtifactsFromExecutionArtifacts,
     emptyEdgeArtifacts,
+    lookupEdgeArtifact,
+    edgeArtifactKeys,
+    insertEdgeArtifact,
+    filterEdgeArtifacts,
+    mapEdgeArtifacts,
+    setEdgeArtifactsIdentityEdges,
+    eaEdgeExpansions,
+    eaEdgeWitnesses,
+    eaEdgeTraces,
+    eaEdgeExpansionConstructions,
+    eaIdentityEdges,
     RawExpansionConstruction,
     emptyRawExpansionConstruction,
     mkRawExpansionConstruction,
@@ -23,6 +42,11 @@ module MLF.Constraint.Presolution.Base (
     rawExpansionConstructionArgumentKeys,
     rawExpansionConstructionSemanticMetaKeys,
     PresolutionResult(..),
+    prEdgeExpansions,
+    prEdgeWitnesses,
+    prEdgeTraces,
+    prEdgeExpansionConstructions,
+    prIdentityEdges,
     PresolutionPlanBuilder(..),
     PresolutionError(..),
     TranslatabilityIssue(..),
@@ -156,7 +180,14 @@ import MLF.Constraint.Presolution.Construction
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Presolved))
 import qualified MLF.Constraint.Types.Graph as Types
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, InstanceOp, ReplayContract(..))
+import MLF.Constraint.Types.Witness
+    ( EdgeWitness
+    , Expansion
+    , ForallSpec
+    , InstanceOp
+    , ReplayContract(..)
+    , ewEdgeId
+    )
 import MLF.Constraint.Types.Presolution (Presolution, PresolutionSnapshot (..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
@@ -235,16 +266,218 @@ lookupExpansionResultUnder canonical wrapper results = do
     normalized <- canonicalizeExpansionResultMap canonical results
     pure (lookupExpansionResult (canonical wrapper) normalized)
 
-data EdgeArtifacts = EdgeArtifacts
-    { eaEdgeExpansions :: IntMap Expansion
-    , eaEdgeWitnesses :: IntMap EdgeWitness
-    , eaEdgeTraces :: IntMap EdgeTrace
-    , eaIdentityEdges :: IntSet.IntSet
+-- | One construction-closed proof packet for an instantiation edge.
+--
+-- The constructor is private: an expansion choice, its normalized derivation
+-- witness, frozen replay trace, and exact construction certificate are
+-- committed together and can only be selected by the same semantic edge
+-- identity.
+data EdgeArtifact = EdgeArtifact
+    { edgeArtifactExpansion :: !Expansion
+    , edgeArtifactWitness :: !EdgeWitness
+    , edgeArtifactTrace :: !EdgeTrace
+    , edgeArtifactExpansionConstruction :: !RawExpansionConstruction
     }
     deriving (Eq, Show)
 
+-- | Phase 4 artifacts consumed by Phase 6.  Keeping one map of complete
+-- packets makes independently missing witness/trace/expansion/construction
+-- state unrepresentable after construction.
+data EdgeArtifacts = EdgeArtifactsInternal
+    { edgeArtifactsByEdge :: !(IntMap EdgeArtifact)
+    , eaIdentityEdges :: !IntSet.IntSet
+    }
+    deriving (Eq, Show)
+
+data EdgeArtifactsError
+    = EdgeArtifactKeyMismatch
+        { edgeArtifactExpansionKeys :: !IntSet.IntSet
+        , edgeArtifactWitnessKeys :: !IntSet.IntSet
+        , edgeArtifactTraceKeys :: !IntSet.IntSet
+        , edgeArtifactExpansionConstructionKeys :: !IntSet.IntSet
+        }
+    | EdgeArtifactWitnessIdMismatch
+        { edgeArtifactMapKey :: !Int
+        , edgeArtifactEmbeddedEdgeId :: !EdgeId
+        }
+    deriving (Eq, Show)
+
+mkEdgeArtifacts
+    :: IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntMap RawExpansionConstruction
+    -> IntSet.IntSet
+    -> Either EdgeArtifactsError EdgeArtifacts
+mkEdgeArtifacts expansions witnesses traces constructions identityEdges
+    | expansionKeys /= witnessKeys
+        || witnessKeys /= traceKeys
+        || traceKeys /= constructionKeys =
+        Left
+            EdgeArtifactKeyMismatch
+                { edgeArtifactExpansionKeys = expansionKeys
+                , edgeArtifactWitnessKeys = witnessKeys
+                , edgeArtifactTraceKeys = traceKeys
+                , edgeArtifactExpansionConstructionKeys = constructionKeys
+                }
+    | otherwise = do
+        artifacts <-
+            IntMap.traverseWithKey
+                (\edgeKey expansion ->
+                    case
+                        ( IntMap.lookup edgeKey witnesses
+                        , IntMap.lookup edgeKey traces
+                        , IntMap.lookup edgeKey constructions
+                        )
+                    of
+                        (Just witness, Just traceInfo, Just construction) ->
+                            mkEdgeArtifact
+                                edgeKey
+                                expansion
+                                witness
+                                traceInfo
+                                construction
+                        _ ->
+                            Left
+                                EdgeArtifactKeyMismatch
+                                    { edgeArtifactExpansionKeys = expansionKeys
+                                    , edgeArtifactWitnessKeys = witnessKeys
+                                    , edgeArtifactTraceKeys = traceKeys
+                                    , edgeArtifactExpansionConstructionKeys =
+                                        constructionKeys
+                                    }
+                )
+                expansions
+        pure
+            EdgeArtifactsInternal
+                { edgeArtifactsByEdge = artifacts
+                , eaIdentityEdges = identityEdges
+                }
+  where
+    expansionKeys = IntSet.fromAscList (IntMap.keys expansions)
+    witnessKeys = IntSet.fromAscList (IntMap.keys witnesses)
+    traceKeys = IntSet.fromAscList (IntMap.keys traces)
+    constructionKeys = IntSet.fromAscList (IntMap.keys constructions)
+
 emptyEdgeArtifacts :: EdgeArtifacts
-emptyEdgeArtifacts = EdgeArtifacts IntMap.empty IntMap.empty IntMap.empty IntSet.empty
+emptyEdgeArtifacts =
+    EdgeArtifactsInternal
+        { edgeArtifactsByEdge = IntMap.empty
+        , eaIdentityEdges = IntSet.empty
+        }
+
+lookupEdgeArtifact :: EdgeId -> EdgeArtifacts -> Maybe EdgeArtifact
+lookupEdgeArtifact edgeId =
+    IntMap.lookup (getEdgeId edgeId) . edgeArtifactsByEdge
+
+edgeArtifactKeys :: EdgeArtifacts -> IntSet.IntSet
+edgeArtifactKeys =
+    IntMap.keysSet . edgeArtifactsByEdge
+
+insertEdgeArtifact
+    :: EdgeId
+    -> Expansion
+    -> EdgeWitness
+    -> EdgeTrace
+    -> RawExpansionConstruction
+    -> EdgeArtifacts
+    -> Either EdgeArtifactsError EdgeArtifacts
+insertEdgeArtifact edgeId expansion witness traceInfo construction edgeArtifacts = do
+    artifact <-
+        mkEdgeArtifact
+            (getEdgeId edgeId)
+            expansion
+            witness
+            traceInfo
+            construction
+    pure
+        edgeArtifacts
+            { edgeArtifactsByEdge =
+                IntMap.insert
+                    (getEdgeId edgeId)
+                    artifact
+                    (edgeArtifactsByEdge edgeArtifacts)
+            }
+
+filterEdgeArtifacts
+    :: (EdgeId -> Bool)
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+filterEdgeArtifacts keep edgeArtifacts =
+    edgeArtifacts
+        { edgeArtifactsByEdge =
+            IntMap.filterWithKey
+                (\edgeKey _ -> keep (EdgeId edgeKey))
+                (edgeArtifactsByEdge edgeArtifacts)
+        }
+
+mapEdgeArtifacts
+    :: (Expansion -> Expansion)
+    -> (EdgeWitness -> EdgeWitness)
+    -> (EdgeTrace -> EdgeTrace)
+    -> EdgeArtifacts
+    -> Either EdgeArtifactsError EdgeArtifacts
+mapEdgeArtifacts mapExpansion mapWitness mapTrace edgeArtifacts = do
+    artifacts <-
+        IntMap.traverseWithKey
+            (\edgeKey artifact ->
+                mkEdgeArtifact
+                    edgeKey
+                    (mapExpansion (edgeArtifactExpansion artifact))
+                    (mapWitness (edgeArtifactWitness artifact))
+                    (mapTrace (edgeArtifactTrace artifact))
+                    (edgeArtifactExpansionConstruction artifact)
+            )
+            (edgeArtifactsByEdge edgeArtifacts)
+    pure edgeArtifacts {edgeArtifactsByEdge = artifacts}
+
+setEdgeArtifactsIdentityEdges
+    :: IntSet.IntSet
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+setEdgeArtifactsIdentityEdges identityEdges edgeArtifacts =
+    edgeArtifacts {eaIdentityEdges = identityEdges}
+
+eaEdgeExpansions :: EdgeArtifacts -> IntMap Expansion
+eaEdgeExpansions =
+    IntMap.map edgeArtifactExpansion . edgeArtifactsByEdge
+
+eaEdgeWitnesses :: EdgeArtifacts -> IntMap EdgeWitness
+eaEdgeWitnesses =
+    IntMap.map edgeArtifactWitness . edgeArtifactsByEdge
+
+eaEdgeTraces :: EdgeArtifacts -> IntMap EdgeTrace
+eaEdgeTraces =
+    IntMap.map edgeArtifactTrace . edgeArtifactsByEdge
+
+eaEdgeExpansionConstructions
+    :: EdgeArtifacts
+    -> IntMap RawExpansionConstruction
+eaEdgeExpansionConstructions =
+    IntMap.map edgeArtifactExpansionConstruction . edgeArtifactsByEdge
+
+mkEdgeArtifact
+    :: Int
+    -> Expansion
+    -> EdgeWitness
+    -> EdgeTrace
+    -> RawExpansionConstruction
+    -> Either EdgeArtifactsError EdgeArtifact
+mkEdgeArtifact edgeKey expansion witness traceInfo construction
+    | ewEdgeId witness /= EdgeId edgeKey =
+        Left
+            EdgeArtifactWitnessIdMismatch
+                { edgeArtifactMapKey = edgeKey
+                , edgeArtifactEmbeddedEdgeId = ewEdgeId witness
+                }
+    | otherwise =
+        Right
+            EdgeArtifact
+                { edgeArtifactExpansion = expansion
+                , edgeArtifactWitness = witness
+                , edgeArtifactTrace = traceInfo
+                , edgeArtifactExpansionConstruction = construction
+                }
 
 -- | Exceptional operand origins for an edge-witness operation.  Source-only
 -- operations need no entry.  A mixed Merge names its operated node in the
@@ -263,15 +496,33 @@ data EdgeWitnessNonSourceOrigin
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
     { prConstraint :: Constraint 'Presolved
-    , prEdgeExpansions :: IntMap Expansion
-    , prEdgeWitnesses :: IntMap EdgeWitness
-    , prEdgeTraces :: IntMap EdgeTrace
-    , prEdgeExpansionConstructions :: IntMap RawExpansionConstruction
-    , prIdentityEdges :: IntSet.IntSet
+    , prEdgeArtifacts :: EdgeArtifacts
     , prRedirects :: IntMap NodeId -- ^ Map from old TyExp IDs to their replacement IDs
     , prUnionFind :: PresolutionUf
     , prPlanBuilder :: PresolutionPlanBuilder
     } deriving (Eq, Show)
+
+prEdgeExpansions :: PresolutionResult -> IntMap Expansion
+prEdgeExpansions =
+    eaEdgeExpansions . prEdgeArtifacts
+
+prEdgeWitnesses :: PresolutionResult -> IntMap EdgeWitness
+prEdgeWitnesses =
+    eaEdgeWitnesses . prEdgeArtifacts
+
+prEdgeTraces :: PresolutionResult -> IntMap EdgeTrace
+prEdgeTraces =
+    eaEdgeTraces . prEdgeArtifacts
+
+prEdgeExpansionConstructions
+    :: PresolutionResult
+    -> IntMap RawExpansionConstruction
+prEdgeExpansionConstructions =
+    eaEdgeExpansionConstructions . prEdgeArtifacts
+
+prIdentityEdges :: PresolutionResult -> IntSet.IntSet
+prIdentityEdges =
+    eaIdentityEdges . prEdgeArtifacts
 
 instance PresolutionSnapshot PresolutionResult where
     snapshotConstraint = prConstraint
@@ -297,6 +548,8 @@ instance Show PresolutionPlanBuilder where
 -- | Errors that can occur during presolution.
 data PresolutionError
     = UnmatchableTypes NodeId NodeId String  -- ^ Type mismatch during expansion
+    | InvalidEdgeArtifacts EdgeArtifactsError
+      -- ^ Phase 4 attempted to publish a partial or mis-keyed edge packet.
     | UnresolvedExpVar ExpVarId              -- ^ ExpVar couldn't be resolved
     | ArityMismatch String Int Int           -- ^ (context, expected, actual)
     | InstantiateOnNonForall NodeId          -- ^ Tried to instantiate a non-forall node
@@ -340,8 +593,8 @@ data PresolutionError
     | ResidualUnifyEdges [UnifyEdge]         -- ^ Presolution artifact must not retain unification work.
     | ResidualInstEdges [InstEdge]           -- ^ Presolution artifact must not retain instantiation edges.
     | ResidualTyExpNodes [NodeId]            -- ^ Presolution artifact must be TyExp-free.
-    | MissingEdgeWitnesses [EdgeId]          -- ^ Non-trivial instantiation edges missing witness entries.
-    | MissingEdgeTraces [EdgeId]             -- ^ Non-trivial instantiation edges missing trace entries.
+    | MissingEdgeArtifacts [EdgeId]
+      -- ^ Non-trivial instantiation edges missing complete proof packets.
     | ExpansionDestinationConflict ExpVarId [GenNodeId]
       -- ^ One expansion variable is demanded at more than one propagation
       -- destination.  Its assignment may later acquire argument payloads, and
@@ -405,6 +658,30 @@ data EdgeExecutionArtifacts = EdgeExecutionArtifacts
     , eeaTrace :: !EdgeTrace
     }
     deriving (Eq, Show)
+
+-- | Publish the construction-closed execution packets without first splitting
+-- them into independently keyed component maps.
+edgeArtifactsFromExecutionArtifacts
+    :: IntMap EdgeExecutionArtifacts
+    -> IntSet.IntSet
+    -> Either EdgeArtifactsError EdgeArtifacts
+edgeArtifactsFromExecutionArtifacts executionArtifacts identityEdges = do
+    artifacts <-
+        IntMap.traverseWithKey
+            (\edgeKey executionArtifact ->
+                mkEdgeArtifact
+                    edgeKey
+                    (eeaExpansion executionArtifact)
+                    (eeaWitness executionArtifact)
+                    (eeaTrace executionArtifact)
+                    (eeaExpansionConstruction executionArtifact)
+            )
+            executionArtifacts
+    pure
+        EdgeArtifactsInternal
+            { edgeArtifactsByEdge = artifacts
+            , eaIdentityEdges = identityEdges
+            }
 
 data PresolutionState p = PresolutionStateInternal
     { psConstraint :: Constraint p
@@ -1754,12 +2031,13 @@ dropTrivialSchemeEdges
 dropTrivialSchemeEdges constraint edgeArtifacts =
     let dropEdgeIds = cLetEdges constraint
         identityEdgeIds = dropEdgeIds `IntSet.union` cGraftedEdges constraint
-        keepEdge eid = not (IntSet.member eid dropEdgeIds)
-        witnesses' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeWitnesses edgeArtifacts)
-        traces' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeTraces edgeArtifacts)
-        expansions' = IntMap.filterWithKey (\eid _ -> keepEdge eid) (eaEdgeExpansions edgeArtifacts)
         identityEdges' = eaIdentityEdges edgeArtifacts `IntSet.union` identityEdgeIds
-    in EdgeArtifacts expansions' witnesses' traces' identityEdges'
+    in setEdgeArtifactsIdentityEdges
+        identityEdges'
+        ( filterEdgeArtifacts
+            (\edgeId -> IntSet.notMember (getEdgeId edgeId) dropEdgeIds)
+            edgeArtifacts
+        )
 
 {- Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

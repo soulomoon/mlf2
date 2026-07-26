@@ -14,6 +14,11 @@ module MLF.Constraint.Presolution (
     computePresolutionWithTiming,
     computePresolutionWithTimingAndRootOwnership,
     PresolutionResult(..),
+    prEdgeExpansions,
+    prEdgeWitnesses,
+    prEdgeTraces,
+    prEdgeExpansionConstructions,
+    prIdentityEdges,
     PresolutionView(..),
     PresolutionPlanBuilder(..),
     PresolutionError(..),
@@ -26,7 +31,12 @@ import MLF.Constraint.Presolution.Base (
     EdgeTrace(..),
     PresolutionError(..),
     PresolutionPlanBuilder(..),
-    PresolutionResult(..)
+    PresolutionResult(..),
+    prEdgeExpansions,
+    prEdgeWitnesses,
+    prEdgeTraces,
+    prEdgeExpansionConstructions,
+    prIdentityEdges
     )
 import MLF.Constraint.Presolution.Driver (computePresolution, computePresolutionWithTiming, computePresolutionWithTimingAndRootOwnership)
 import MLF.Constraint.Presolution.View

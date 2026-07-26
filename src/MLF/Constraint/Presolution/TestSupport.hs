@@ -1,6 +1,27 @@
 module MLF.Constraint.Presolution.TestSupport (
     EdgeWitnessOp(..),
-    EdgeArtifacts(..),
+    EdgeArtifact,
+    EdgeArtifacts,
+    EdgeArtifactsError(..),
+    edgeArtifactExpansion,
+    edgeArtifactWitness,
+    edgeArtifactTrace,
+    edgeArtifactExpansionConstruction,
+    eaEdgeExpansions,
+    eaEdgeWitnesses,
+    eaEdgeTraces,
+    eaEdgeExpansionConstructions,
+    eaIdentityEdges,
+    mkEdgeArtifacts,
+    emptyEdgeArtifacts,
+    lookupEdgeArtifact,
+    edgeArtifactsForTest,
+    insertEdgeArtifactForTest,
+    setEdgeArtifactExpansionForTest,
+    setEdgeArtifactWitnessForTest,
+    setEdgeArtifactTraceForTest,
+    deleteEdgeArtifactForTest,
+    setEdgeArtifactsIdentityEdges,
     TranslatabilityIssue(..),
     ExpansionResultMap(..),
     PresolutionState(..),
@@ -89,8 +110,25 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Base
     ( CopyMap
     , CopyMapping(..)
-    , EdgeArtifacts(..)
+    , EdgeArtifact
+    , EdgeArtifacts
+    , EdgeArtifactsError(..)
     , EdgeExecutionArtifacts(..)
+    , edgeArtifactExpansion
+    , edgeArtifactWitness
+    , edgeArtifactTrace
+    , edgeArtifactExpansionConstruction
+    , eaEdgeExpansions
+    , eaEdgeWitnesses
+    , eaEdgeTraces
+    , eaEdgeExpansionConstructions
+    , eaIdentityEdges
+    , mkEdgeArtifacts
+    , emptyEdgeArtifacts
+    , lookupEdgeArtifact
+    , insertEdgeArtifact
+    , filterEdgeArtifacts
+    , setEdgeArtifactsIdentityEdges
     , EdgeTrace
     , ExpansionResultMap(..)
     , InteriorNodes(..)
@@ -208,6 +246,131 @@ import MLF.Util.Trace (TraceConfig)
 
 defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
 defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
+
+edgeArtifactsForTest
+    :: IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntSet.IntSet
+    -> EdgeArtifacts
+edgeArtifactsForTest expansions witnesses traces identityEdges =
+    expectEdgeArtifacts
+        ( mkEdgeArtifacts
+            expansions
+            witnesses
+            traces
+            (IntMap.map (const emptyRawExpansionConstruction) expansions)
+            identityEdges
+        )
+
+insertEdgeArtifactForTest
+    :: EdgeId
+    -> Expansion
+    -> EdgeWitness
+    -> EdgeTrace
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+insertEdgeArtifactForTest edgeId expansion witness traceInfo =
+    insertEdgeArtifactWithConstructionForTest
+        edgeId
+        expansion
+        witness
+        traceInfo
+        emptyRawExpansionConstruction
+
+insertEdgeArtifactWithConstructionForTest
+    :: EdgeId
+    -> Expansion
+    -> EdgeWitness
+    -> EdgeTrace
+    -> RawExpansionConstruction
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+insertEdgeArtifactWithConstructionForTest edgeId expansion witness traceInfo construction =
+    expectEdgeArtifacts
+        . insertEdgeArtifact
+            edgeId
+            expansion
+            witness
+            traceInfo
+            construction
+
+setEdgeArtifactExpansionForTest
+    :: EdgeId
+    -> Expansion
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+setEdgeArtifactExpansionForTest edgeId expansion edgeArtifacts =
+    case lookupEdgeArtifact edgeId edgeArtifacts of
+        Nothing ->
+            error
+                ( "setEdgeArtifactExpansionForTest: missing edge packet "
+                    ++ show edgeId
+                )
+        Just artifact ->
+            insertEdgeArtifactWithConstructionForTest
+                edgeId
+                expansion
+                (edgeArtifactWitness artifact)
+                (edgeArtifactTrace artifact)
+                (edgeArtifactExpansionConstruction artifact)
+                edgeArtifacts
+
+setEdgeArtifactWitnessForTest
+    :: EdgeId
+    -> EdgeWitness
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+setEdgeArtifactWitnessForTest edgeId witness edgeArtifacts =
+    case lookupEdgeArtifact edgeId edgeArtifacts of
+        Nothing ->
+            error
+                ( "setEdgeArtifactWitnessForTest: missing edge packet "
+                    ++ show edgeId
+                )
+        Just artifact ->
+            insertEdgeArtifactWithConstructionForTest
+                edgeId
+                (edgeArtifactExpansion artifact)
+                witness
+                (edgeArtifactTrace artifact)
+                (edgeArtifactExpansionConstruction artifact)
+                edgeArtifacts
+
+setEdgeArtifactTraceForTest
+    :: EdgeId
+    -> EdgeTrace
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+setEdgeArtifactTraceForTest edgeId traceInfo edgeArtifacts =
+    case lookupEdgeArtifact edgeId edgeArtifacts of
+        Nothing ->
+            error
+                ( "setEdgeArtifactTraceForTest: missing edge packet "
+                    ++ show edgeId
+                )
+        Just artifact ->
+            insertEdgeArtifactWithConstructionForTest
+                edgeId
+                (edgeArtifactExpansion artifact)
+                (edgeArtifactWitness artifact)
+                traceInfo
+                (edgeArtifactExpansionConstruction artifact)
+                edgeArtifacts
+
+deleteEdgeArtifactForTest :: EdgeId -> EdgeArtifacts -> EdgeArtifacts
+deleteEdgeArtifactForTest edgeId =
+    filterEdgeArtifacts (/= edgeId)
+
+expectEdgeArtifacts
+    :: Either EdgeArtifactsError EdgeArtifacts
+    -> EdgeArtifacts
+expectEdgeArtifacts result =
+    case result of
+        Left err ->
+            error ("invalid test edge artifact packet: " ++ show err)
+        Right edgeArtifacts ->
+            edgeArtifacts
 
 -- | Test-only view of the total terminal-root binding-flag classifier.  The
 -- production mutation paths consume its non-optional result, so 'Nothing'
