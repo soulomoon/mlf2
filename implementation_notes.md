@@ -1,3 +1,30 @@
+## 2026-07-26 - Mixed annotation publication and bounded self-application
+
+- The §12.3.2 source pseudo-type `exists beta. forall alpha.
+  beta -> alpha -> alpha` now uses one construction rule at source-annotation
+  boundaries: free existential refs are generalized against the enclosing
+  Gamma before the explicit universal spine. This applies both to expression
+  roots and to nested let RHS publication; a focused regression verifies that
+  `beta` is instantiated by the let use and does not leak into the enclosing
+  `Bool` result.
+- Compiler-exact root closure consumes the packet's prepared
+  source-result identity route. It can therefore reuse the source constructor's
+  abstraction without equating an unrelated local Gamma binder by position or
+  bound shape.
+- Annotation child construction now has three explicit cases: lambdas enter
+  the source scheme's binder scope, inferable producers at monomorphic source
+  types receive that exact endpoint, and inferable producers at quantified
+  source types synthesize before the annotation computation. This keeps
+  direct `__io_bind ... : IO Unit` applications constrained without replacing
+  the paper's canonical `omega[N] id` by a pointwise forall construction.
+- Focused validation passes the thesis annotation evidence 9/9, Phase 7
+  typechecking 127/127, the eMLF boundary matrix 39/39, source-binder
+  projection 22/22, compiler-exact completion 5/5, and the paper term through
+  LLVM/native emission. This completes the tested annotated `g g` construction
+  chain; it is not a proof that every term in the full eMLF calculus or its
+  metatheory is implemented. The final serial gate passes `cabal build all
+  -j1` and all 3692 tests under `cabal test -j1`.
+
 ## 2026-07-25 - Annotation coercion construction audit
 
 - Source annotation construction now returns a role-labelled coercion pair:

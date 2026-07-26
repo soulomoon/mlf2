@@ -68,7 +68,14 @@
   checked producer type and no longer repairs an `InstBot` payload by replacing
   its bound after witness translation. The corresponding thesis obligation now
   checks mixed existential/universal κ structure, including shared existential
-  nodes and independently copied universal binders.
+  nodes and independently copied universal binders. Source-annotation
+  publication now constructs existential binders against the ambient Gamma
+  before the annotation-owned universal spine, both at roots and nested let
+  bindings. Compiler-exact root closure reuses an existing abstraction only
+  through its prepared source-result identity route. Annotation children now
+  distinguish lambda guidance, monomorphic application endpoints, and
+  quantified inferable producers, preserving both direct `IO Unit`
+  construction and the paper's canonical `omega[N] id`.
 - Made local class evidence construction specialize the complete
   evidence-method head before applying method-local evidence. Nullary uses
   take their specialization from the expected result; non-nullary calls infer

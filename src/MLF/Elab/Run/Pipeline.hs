@@ -173,6 +173,7 @@ import MLF.Elab.Run.Generalize.Prepare
     preparedIdentityGenerator,
     preparedCompilerExactExpectedType,
     applyPreparedTermSourceBinderAliases,
+    preparedCompilerExactSourceResultBinderRoutes,
     preparedReadContextReady,
     preparedResultTypeViewReady,
     stripPreparedWitnesslessAuthoritativeAnn,
@@ -180,6 +181,7 @@ import MLF.Elab.Run.Generalize.Prepare
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
     constructTermWithSchemeSubstRefs,
+    constructTermWithSchemeSubstRefsByBinderRoutes,
     preserveRetainedChildAuthoritativeResult,
     substInTermRefs,
   )
@@ -632,6 +634,7 @@ data PreparedPipelineRootStage = PreparedPipelineRootStage
     pprsElaboratedTerm :: !XmlfTerm,
     pprsSubstitutedTerm :: !XmlfTerm,
     pprsCompilerExactResultBoundCertificates :: ![CompilerExactResultBoundCertificate],
+    pprsCompilerExactRootBinderRoutes :: ![(TypeBinderRef, TypeBinderRef)],
     pprsAuthoritativeCanonicalAnn :: !AnnExpr,
     pprsAuthoritativePrecanonicalAnn :: !AnnExpr,
     pprsRootExactness :: !PreparedRootExactness
@@ -1520,6 +1523,15 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
         projectCompilerExactResultBoundCertificates
           rootSubst
           compilerExactResultBoundCertificates
+  compilerExactRootBinderRoutes <-
+    case preparedRootConstruction of
+      PreparedOrdinaryRootConstruction{} -> pure []
+      PreparedExactRootConstruction deferred _ ->
+        fromElabError
+          ( preparedCompilerExactSourceResultBinderRoutes
+              prepared
+              (dreaEdgeId deferred)
+          )
 
   preparedGenerator <-
     fromElabError (preparedIdentityGenerator prepared)
@@ -1530,6 +1542,7 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
               PreparedOrdinaryRootConstruction{} -> PreparedOrdinaryRoot
               PreparedExactRootConstruction deferred _ -> PreparedExactRoot deferred
           )
+          compilerExactRootBinderRoutes
           initialTcEnv
           rootSubst
           (prgClosure rootGeneralizationFinal)
@@ -2930,6 +2943,16 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
   termSubst <-
     timePipelineValueSuffix timing label ".subst_root" $
       evaluate (substInTermRefs rootSubst term)
+  compilerExactRootBinderRoutes <-
+    case preparedRootConstruction of
+      PreparedOrdinaryRootConstruction{} -> pure []
+      PreparedExactRootConstruction deferred _ ->
+        evaluatePipelineEitherSuffix timing label ".exact_root_binder_routes" $
+          fromElabError
+            ( preparedCompilerExactSourceResultBinderRoutes
+                prepared
+                (dreaEdgeId deferred)
+            )
   pure
     PreparedPipelineRootStage
       { pprsPreparedGeneralization = prepared,
@@ -2943,6 +2966,8 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
           projectCompilerExactResultBoundCertificates
             rootSubst
             compilerExactResultBoundCertificates,
+        pprsCompilerExactRootBinderRoutes =
+          compilerExactRootBinderRoutes,
         pprsAuthoritativeCanonicalAnn = authoritativeAnnCanonFinal,
         pprsAuthoritativePrecanonicalAnn = authoritativeAnnPreFinal,
         pprsRootExactness =
@@ -2964,6 +2989,7 @@ closeAndFreshenPipelineRootStage timing label identityGenerator preparedRoot = d
         ( closePipelineTermFromSupply
             identityGenerator
             (pprsRootExactness preparedRoot)
+            (pprsCompilerExactRootBinderRoutes preparedRoot)
             initialTcEnv
             rootSubst
             rootClosure
@@ -3133,6 +3159,7 @@ closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
     ( closePipelineTermFromSupply
         (identityGeneratorAfter closeInputs)
         PreparedOrdinaryRoot
+        []
         initialTcEnv
         rootSubst
         (PreparedWholeRootClosure [] rootScheme)
@@ -3162,8 +3189,8 @@ closePreparedExactExpectedType rootClosure expectedType =
           TForallRef ref mbBound ty
       | otherwise = ty
 
-closePipelineTermFromSupply :: IdentityGenerator -> PreparedRootExactness -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> PreparedRootClosure -> XmlfTerm -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
-closePipelineTermFromSupply suppliedGenerator rootExactness initialTcEnv rootSubst rootClosure term termSubst =
+closePipelineTermFromSupply :: IdentityGenerator -> PreparedRootExactness -> [(TypeBinderRef, TypeBinderRef)] -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> PreparedRootClosure -> XmlfTerm -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
+closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoutes initialTcEnv rootSubst rootClosure term termSubst =
   let termSubstType = typeCheckWithEnv initialTcEnv termSubst
       rootClosureScheme = preparedRootClosureScheme rootClosure
       rootType = schemeToType rootClosureScheme
@@ -3185,7 +3212,15 @@ closePipelineTermFromSupply suppliedGenerator rootExactness initialTcEnv rootSub
       termClosed0 =
         case (rootExactness, rootClosure) of
           (PreparedExactRoot{}, _) ->
-            constructTermWithSchemeSubstRefs rootSubst rootClosureScheme term
+            -- Exact source binders are outer construction authority. Reuse
+            -- only an abstraction with the same identity; a distinct leading
+            -- abstraction is a local Gamma that must remain inside the exact
+            -- root rather than being positionally renamed to it.
+            constructTermWithSchemeSubstRefsByBinderRoutes
+              exactRootBinderRoutes
+              rootSubst
+              rootClosureScheme
+              term
           -- A local root closure has already constructed the leading forall
           -- spine stored in the scheme body.  Its explicit scheme binders are
           -- the distinct outer/root-owned spine, so emit exactly those here.
@@ -3221,6 +3256,14 @@ closePipelineTermFromSupply suppliedGenerator rootExactness initialTcEnv rootSub
                               rootSubst
                               rootClosureScheme
                               termSubst
+                    | not (null (freeTypeVarRefsType ty)),
+                      termConstructsRootForallSubsequence
+                        rootClosureScheme
+                        termSubst ->
+                        closeTermWithSchemeSubstRefsIfNeeded
+                          rootSubst
+                          rootClosureScheme
+                          term
                     | not (null (freeTypeVarRefsType ty)),
                       rootSchemeMatchesOpenTerm rootClosureScheme ty ->
                         closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
@@ -3269,6 +3312,37 @@ termConstructsRootForallSpine scheme =
                   go remaining rhs
             _ -> go remaining body
         _ -> False
+
+-- | A source constructor can own a later binder in the root scheme while an
+-- inferred existential remains root-owned.  The paper's
+-- @exists beta. forall alpha. ...@ annotation is the representative case:
+-- annotation elaboration constructs @Lambda alpha@, then root closure must
+-- insert @Lambda beta@ before it.  Full binder identity, not the number or
+-- spelling of abstractions, is the construction proof.
+termConstructsRootForallSubsequence :: ElabScheme -> XmlfTerm -> Bool
+termConstructsRootForallSubsequence scheme term =
+  case constructedRefs term of
+    [] -> False
+    refs -> refs `isIdentitySubsequenceOf` map fst (schemeBinderRefs scheme)
+  where
+    constructedRefs current =
+      case current of
+        ETyAbsRef ref _ body -> ref : constructedRefs body
+        ELet resolved _ rhs body ->
+          case body of
+            EVarNode occurrence
+              | resolvedVarSameIdentity resolved occurrence ->
+                  constructedRefs rhs
+            _ -> constructedRefs body
+        _ -> []
+
+    [] `isIdentitySubsequenceOf` _ = True
+    _ `isIdentitySubsequenceOf` [] = False
+    refs@(ref : rest) `isIdentitySubsequenceOf` (candidate : candidates)
+      | typeBinderRefsSameIdentity ref candidate =
+          rest `isIdentitySubsequenceOf` candidates
+      | otherwise =
+          refs `isIdentitySubsequenceOf` candidates
 
 rootSchemeHasPolymorphicBound :: ElabScheme -> Bool
 rootSchemeHasPolymorphicBound =

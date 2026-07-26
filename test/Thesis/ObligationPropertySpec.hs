@@ -92,6 +92,10 @@ spec = do
         expectElabAnnotationErasure expr
     it "constructs a bounded annotation abstraction" $
       expectElabBoundedAnnotationAbs
+    it "constructs the paper's mixed existential/universal annotation" $
+      expectElabMixedAnnotation
+    it "keeps a nested mixed annotation local to its let RHS" $
+      expectNestedMixedAnnotationLocal
     it "constructs the paper's annotated self-application" $
       expectElabAnnotatedSelfApp
 
@@ -679,6 +683,42 @@ expectElabBoundedAnnotationAbs =
         Right checkedTy -> checkedTy `shouldMatchType` boundedIdentityAnnotationType
       expectBoundedIdentityAnnotationShape term
 
+-- Thesis §12.3.2 uses κ = exists beta. forall alpha.
+-- beta -> (alpha -> alpha) as the representative source annotation.  The
+-- existential beta is inferred and generalized outside the annotation-owned
+-- universal alpha; the two binders must both be present in the checked xMLF
+-- construction.
+expectElabMixedAnnotation :: Expectation
+expectElabMixedAnnotation =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr mixedAnnotationExpr) of
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+    Right (term, ty) -> do
+      if TypeOps.alphaEqType ty mixedAnnotationType
+        then pure ()
+        else
+          expectationFailure
+            ( "mixed annotation term: "
+                ++ show term
+                ++ "\nactual type: "
+                ++ show ty
+                ++ "\nexpected type: "
+                ++ show mixedAnnotationType
+            )
+      Elab.typeCheck term `shouldBe` Right ty
+      eraseXmlfTerm term `shouldBe` eraseSurfaceAnnotations mixedAnnotationExpr
+
+-- The inferred existential in the source annotation belongs to the
+-- annotation's publication boundary.  Using the annotated value in an outer
+-- let must instantiate that binder, not leak it into the enclosing result.
+expectNestedMixedAnnotationLocal :: Expectation
+expectNestedMixedAnnotationLocal =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr nestedMixedAnnotationExpr) of
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+    Right (term, ty) -> do
+      ty `shouldMatchType` boolTy
+      Elab.typeCheck term `shouldBe` Right ty
+      eraseXmlfTerm term `shouldBe` eraseSurfaceAnnotations nestedMixedAnnotationExpr
+
 -- Thesis §15.3.8: omega = lambda (g : sigma-id) . g g elaborates, up to
 -- identity computations, to
 --   Lambda (alpha >= sigma-id). lambda (g : sigma-id).
@@ -787,6 +827,43 @@ boundedIdentityAnnotationType =
     "a"
     (Just (boundFromType polyIdTy))
     (Elab.TArrow (testTVar "a") (testTVar "a"))
+
+mixedAnnotationExpr :: Surf.SurfaceExpr
+mixedAnnotationExpr =
+  Surf.EAnn
+    (Surf.ELam "x" (Surf.ELam "y" (Surf.EVar "y")))
+    ( Surf.STForall
+        "alpha"
+        Nothing
+        ( Surf.STArrow
+            (Surf.STVar "beta")
+            (Surf.STArrow (Surf.STVar "alpha") (Surf.STVar "alpha"))
+        )
+    )
+
+nestedMixedAnnotationExpr :: Surf.SurfaceExpr
+nestedMixedAnnotationExpr =
+  Surf.ELet
+    "k"
+    mixedAnnotationExpr
+    ( Surf.EApp
+        (Surf.EApp (Surf.EVar "k") (Surf.ELit (Surf.LInt 1)))
+        (Surf.ELit (Surf.LBool True))
+    )
+
+mixedAnnotationType :: Elab.ElabType
+mixedAnnotationType =
+  testTForall
+    "beta"
+    Nothing
+    ( testTForall
+        "alpha"
+        Nothing
+        ( Elab.TArrow
+            (testTVar "beta")
+            (Elab.TArrow (testTVar "alpha") (testTVar "alpha"))
+        )
+    )
 
 expectBoundedIdentityAnnotationShape :: Elab.XmlfTerm -> Expectation
 expectBoundedIdentityAnnotationShape term =

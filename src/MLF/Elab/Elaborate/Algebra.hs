@@ -6221,18 +6221,38 @@ type LocalVarKey = ResolvedVar
 localVarKeyMatchesReference :: LocalVarKey -> ResolvedVar -> Bool
 localVarKeyMatchesReference = resolvedVarSameIdentity
 
-sourceSchemePairForAnnotation :: AlgebraContext p -> ScopeContext p -> NodeId -> EdgeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
-sourceSchemePairForAnnotation algebraContext scopeContext nodeId edgeId =
+-- | Close the existential part of a source annotation against the enclosing
+-- paper Gamma, before its explicit universal spine.  This is the pseudo-type
+-- order from §12.3.2: @exists beta. forall alpha. ...@.  A solved existential
+-- already owned by the ambient Gamma remains free instead of being
+-- re-generalized at the annotation boundary.
+sourceAnnotationSchemeAgainstEnv :: Env -> ElabType -> ElabScheme
+sourceAnnotationSchemeAgainstEnv env ty =
+  let sourceScheme = schemeFromType ty
+      existentialBinders =
+        [ (ref, Nothing)
+        | ref <- freeTypeVarRefsInOccurrenceOrder ty
+        , not (envOwnsExactTypeBinderRef env ref)
+        ]
+   in mkElabSchemeWithRefs
+        (existentialBinders ++ schemeBinderRefs sourceScheme)
+        (schemeBody sourceScheme)
+
+sourceSchemePairForAnnotation :: Env -> AlgebraContext p -> ScopeContext p -> NodeId -> EdgeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
+sourceSchemePairForAnnotation env algebraContext scopeContext nodeId edgeId =
   case
       IntMap.lookup
         (getEdgeId edgeId)
         (algAnnotationExpectedTypesByEdge algebraContext)
     of
     Just expectedTy -> do
-      let fallback = (schemeFromType expectedTy, IntMap.empty)
+      let annotationScheme ty =
+            normalizeSchemeSubstPair
+              (sourceAnnotationSchemeAgainstEnv env ty, IntMap.empty)
+          fallback = annotationScheme expectedTy
       pure $
         case reifyNodeTypePreferringBound scopeContext nodeId of
-          Right ty@TMuRef {} -> Just (schemeFromType ty, IntMap.empty)
+          Right ty@TMuRef {} -> Just (annotationScheme ty)
           _ -> Just fallback
     Nothing -> pure Nothing
 
@@ -6248,14 +6268,14 @@ sourceSchemePairForExactLambdaParamNode algebraContext scopeContext nodeId =
       pure (Just (schemeFromType ty, IntMap.empty))
     Nothing -> pure Nothing
 
-sourceSchemePairForOuterAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
-sourceSchemePairForOuterAnnotation algebraContext scopeContext annExpr =
+sourceSchemePairForOuterAnnotation :: Env -> AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
+sourceSchemePairForOuterAnnotation env algebraContext scopeContext annExpr =
   case annExpr of
-    AAnn _ annNodeId edgeId -> sourceSchemePairForAnnotation algebraContext scopeContext annNodeId edgeId
-    AExactAnn _ _ annNodeId edgeId -> sourceSchemePairForAnnotation algebraContext scopeContext annNodeId edgeId
-    ALetScope inner _ _ -> sourceSchemePairForOuterAnnotation algebraContext scopeContext inner
-    AUnfold (AAnn _ annNodeId edgeId) _ _ -> sourceSchemePairForAnnotation algebraContext scopeContext annNodeId edgeId
-    AUnfold (AExactAnn _ _ annNodeId edgeId) _ _ -> sourceSchemePairForAnnotation algebraContext scopeContext annNodeId edgeId
+    AAnn _ annNodeId edgeId -> sourceSchemePairForAnnotation env algebraContext scopeContext annNodeId edgeId
+    AExactAnn _ _ annNodeId edgeId -> sourceSchemePairForAnnotation env algebraContext scopeContext annNodeId edgeId
+    ALetScope inner _ _ -> sourceSchemePairForOuterAnnotation env algebraContext scopeContext inner
+    AUnfold (AAnn _ annNodeId edgeId) _ _ -> sourceSchemePairForAnnotation env algebraContext scopeContext annNodeId edgeId
+    AUnfold (AExactAnn _ _ annNodeId edgeId) _ _ -> sourceSchemePairForAnnotation env algebraContext scopeContext annNodeId edgeId
     _ -> pure Nothing
 
 -- | Find the exact boundary that owns one delayed subterm result.  Only the
@@ -15839,7 +15859,7 @@ elabAlg algebraContext layer =
                     else AmbiguousStructuralRecursiveCandidate
             letResultSourceScheme <- sourceSchemePairForExactLambdaParamNode algebraContext scopeContext (canonical trivialRoot)
             schemeRootSourceScheme <- sourceSchemePairForExactLambdaParamNode algebraContext scopeContext schemeRootId
-            rhsOuterSourceScheme <- sourceSchemePairForOuterAnnotation algebraContext scopeContext rhsAnn
+            rhsOuterSourceScheme <- sourceSchemePairForOuterAnnotation env algebraContext scopeContext rhsAnn
             let authoritativeSourceSchemePair =
                   rhsOuterSourceScheme <|> letResultSourceScheme <|> schemeRootSourceScheme
                 schemeRootRef =
@@ -17674,23 +17694,56 @@ elabAlg algebraContext layer =
                           , "  edge: " ++ show eid
                           ]
                       )
-            -- The source annotation is the construction contract for its
-            -- child.  An enclosing application may expose the consumer's
-            -- flexible endpoint (for example @IO a@ with @a >= Unit@), but
-            -- the annotated producer must first be built at its exact source
-            -- type (@IO Unit@).  The annotation edge then owns the single
-            -- outgoing computation to the consumer.  Passing the outer
-            -- expected type into the child would instead leave an InstId at
-            -- two different endpoints and try to repair that mismatch after
-            -- construction.
+            -- A source annotation guides a lambda that cannot synthesize its
+            -- own polymorphic parameter/result spine.  An inferable producer
+            -- (notably an application) must instead be elaborated at the type
+            -- selected by its graph edge, and only then coerced by this
+            -- annotation edge.  Pre-entering the target forall for
+            -- @omega id : forall a. a -> a@ would construct the pointwise
+            -- @Lambda a. omega[forall(>a); N] id@ instead of the paper's
+            -- canonical explicit-bound elimination @omega[N] id@.
+            let annotationSourceScheme =
+                  sourceAnnotationSchemeAgainstEnv env annotationSourceTy
+                annotationChildEnv =
+                  case
+                      ( lambdaAnn exprAnn
+                      , null (schemeBinderRefs annotationSourceScheme)
+                      )
+                    of
+                    (True, _) ->
+                      extendEnvTypeScope
+                        (schemeBinderRefs annotationSourceScheme)
+                        env
+                          { envExpectedTermEndpoint =
+                              Just
+                                ( ExactConstructionExpectedTerm
+                                    (schemeBody annotationSourceScheme)
+                                )
+                          }
+                    (False, True) ->
+                      -- A monomorphic source annotation is the exact endpoint
+                      -- for an inferable producer as well. This fixes the
+                      -- result parameter of applications such as
+                      -- @__io_bind ... : IO Unit@ during construction.
+                      env
+                        { envExpectedTermEndpoint =
+                            Just
+                              ( ExactConstructionExpectedTerm
+                                  annotationSourceTy
+                              )
+                        }
+                    (False, False) ->
+                      -- Quantified inferable producers must synthesize before
+                      -- the annotation edge computes them to the source
+                      -- scheme. Entering that scheme here would turn
+                      -- @omega[N] id@ into a pointwise forall.
+                      env
+                        { envExpectedTermEndpoint = Nothing
+                        }
             exprElaboration <-
               elabDetailed
                 exprOut
-                env
-                  { envExpectedTermEndpoint =
-                      Just
-                        (ExactConstructionExpectedTerm annotationSourceTy)
-                  }
+                annotationChildEnv
             annotatedTerm <-
               elaborateAnnotationTerm
                 ( case envApplicationSourceOccurrence env of
@@ -17701,9 +17754,9 @@ elabAlg algebraContext layer =
                 annotationContext
                 namedSetReify
                 (\details -> ebSchemeInfo <$> lookupEnvBindingForDetails details env)
-                (typeCheckEnvFrom env)
-                (envConstructionBinderRenames env)
-                (envConstructionIdentityRoutes env)
+                (typeCheckEnvFrom annotationChildEnv)
+                (envConstructionBinderRenames annotationChildEnv)
+                (envConstructionIdentityRoutes annotationChildEnv)
                 exprAnn
                 annNodeId
                 eid

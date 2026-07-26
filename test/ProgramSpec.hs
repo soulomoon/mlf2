@@ -12304,7 +12304,13 @@ spec = do
                     , Elab.resolvedVarSameIdentity omegaVar omegaOccurrence
                     , Elab.resolvedVarSameIdentity idVar idOccurrence
                     ]
-            boundedUses `shouldSatisfy` (not . null)
+            case boundedUses of
+                [] ->
+                    expectationFailure
+                        ( "expected explicit-bound N use, got "
+                            ++ show (checkedBindingTerm mainBinding)
+                        )
+                _ -> pure ()
 
         it "keeps the recursive Nat application identity-correct after bound computations normalize" $ do
             program <-

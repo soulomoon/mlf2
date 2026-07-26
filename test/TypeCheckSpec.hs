@@ -52,6 +52,7 @@ import MLF.Elab.TermClosure
     ( alignTermTypeVarsToScheme
     , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
+    , constructTermWithSchemeSubstRefsByBinderRoutes
     , substInTermRefs
     )
 import MLF.Types.Elab
@@ -1671,6 +1672,109 @@ spec = describe "Phase 7 typecheck" $ do
                     (eTyAbsWithRef targetInner Nothing deferredBody)
         alignTopTyAbsToScheme scheme term `shouldBe` Just expected
         closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term `shouldBe` expected
+
+    it "inserts a missing binder before an identity-matched abstraction" $ do
+        let betaRef = typeRef 660 "beta"
+            alphaRef = typeRef 661 "alpha"
+            betaParam =
+                generatedResolvedLocal
+                    662
+                    "$x#0"
+                    "x"
+                    (tVarWithRef betaRef)
+            alphaParam =
+                generatedResolvedLocal
+                    663
+                    "$y#0"
+                    "y"
+                    (tVarWithRef alphaRef)
+            body =
+                ELam
+                    betaParam
+                    (ELam alphaParam (EVarNode alphaParam))
+            term = eTyAbsWithRef alphaRef Nothing body
+            scheme =
+                mkElabSchemeWithRefs
+                    [(betaRef, Nothing), (alphaRef, Nothing)]
+                    ( TArrow
+                        (tVarWithRef betaRef)
+                        ( TArrow
+                            (tVarWithRef alphaRef)
+                            (tVarWithRef alphaRef)
+                        )
+                    )
+            expected =
+                eTyAbsWithRef
+                    betaRef
+                    Nothing
+                    (eTyAbsWithRef alphaRef Nothing body)
+        alignTopTyAbsToScheme scheme term `shouldBe` Just expected
+        closeTermWithSchemeSubstRefsIfNeeded
+            IntMap.empty
+            scheme
+            term
+            `shouldBe` expected
+        typeCheck expected `shouldBe` Right (schemeToType scheme)
+
+    it "keeps an unrelated local Gamma inside an exact root binder" $ do
+        let rootRef = typeRef 664 "a"
+            localRef = typeRef 665 "e"
+            localTerm =
+                eTyAbsWithRef
+                    localRef
+                    (Just builtinIntTy)
+                    ( ETyInst
+                        (ELit (LInt 1))
+                        (instAbstrWithRef localRef)
+                    )
+            scheme =
+                mkElabSchemeWithRefs
+                    [(rootRef, Nothing)]
+                    ( tForallWithRef
+                        localRef
+                        (Just builtinIntTy)
+                        (tVarWithRef localRef)
+                    )
+            expected =
+                eTyAbsWithRef rootRef Nothing localTerm
+        constructTermWithSchemeSubstRefsByBinderRoutes
+            []
+            IntMap.empty
+            scheme
+            localTerm
+            `shouldBe` expected
+        typeCheck expected `shouldBe` Right (schemeToType scheme)
+
+    it "reuses an exact root binder only through its construction route" $ do
+        let rootRef = typeRef 666 "result"
+            sourceRef = typeRef 667 "result"
+            sourceTerm =
+                eTyAbsWithRef
+                    sourceRef
+                    (Just builtinIntTy)
+                    ( ETyInst
+                        (ELit (LInt 1))
+                        (instAbstrWithRef sourceRef)
+                    )
+            scheme =
+                mkElabSchemeWithRefs
+                    [(rootRef, Just builtinIntTy)]
+                    (tVarWithRef rootRef)
+            expected =
+                eTyAbsWithRef
+                    rootRef
+                    (Just builtinIntTy)
+                    ( ETyInst
+                        (ELit (LInt 1))
+                        (instAbstrWithRef rootRef)
+                    )
+        constructTermWithSchemeSubstRefsByBinderRoutes
+            [(sourceRef, rootRef)]
+            IntMap.empty
+            scheme
+            sourceTerm
+            `shouldBe` expected
+        typeCheck expected `shouldBe` Right (schemeToType scheme)
 
     it "constructs a missing bounded forall after an existing abstraction prefix" $ do
         let sourceOuter = typeRef 649 "source-a"

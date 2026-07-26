@@ -2084,12 +2084,18 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                 (const Nothing)
                 Just
                 (TypeCheck.typeCheckWithEnv tcEnv exprFresh)
-            sourceInst <-
-              inferPreservingAnnotationInstFor
-                boundaryRole
-                sourceTy
-                (schemeToType expectedSourceScheme)
-            pure (exprFresh, sourceInst)
+            constructed <-
+              either
+                (const Nothing)
+                Just
+                ( constructExactAnnotationTermFor
+                    boundaryRole
+                    tcEnv
+                    sourceTy
+                    (schemeToType expectedSourceScheme)
+                    exprFresh
+                )
+            pure (constructed, InstId)
       annotatedLambdaParamConstruction = do
         closed <-
           closeAnnotatedLambdaParam

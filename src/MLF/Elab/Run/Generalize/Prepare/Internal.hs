@@ -35,6 +35,7 @@ module MLF.Elab.Run.Generalize.Prepare.Internal (
     preparedResultTypeViewReady,
     preparedIdentityGenerator,
     applyPreparedTermSourceBinderAliases,
+    preparedCompilerExactSourceResultBinderRoutes,
     insertPreparedTermSourceBinderAlias,
     completePreparedCompilerExactSubtermResults,
     preparedCompilerExactExpectedType,
@@ -202,6 +203,10 @@ import MLF.Elab.Generalize
     , subtermGeneralizationConsumerAuthority
     , subtermGeneralizationConsumerIdentity
     , subtermGeneralizationConsumerConstructionSchemeInfo
+    , subtermGeneralizationCompilerExactBoundary
+    , subtermGeneralizationCompilerExactExistingRef
+    , subtermGeneralizationCompilerExactResultRef
+    , subtermGeneralizationCompilerExactResultStage
     , subtermGeneralizationInheritedGammaRoutes
     , subtermGeneralizationGammaAuthority
     , subtermGeneralizationSchemeInfo
@@ -3730,24 +3735,36 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
             do
                 producerTypes <- exactProducerTypes
                 exactEdgePlans <- compilerExactEdgePlans
-                prepareSubtermGeneralizations
-                    identityGenerator
-                    constructionIdentityRepresentative
-                    annNodeCanonical
-                    acyclicBaseForGeneralization
-                    presolutionViewForGen
-                    rawEdgeArtifacts
-                    edgeArtifacts
-                    producerTypes
-                    annExpectedTypes
-                    (prRedirects pres)
-                    bindParentsGa
-                    sourceBinderRefs
-                    (IntMap.map ceepConstructionRefs exactEdgePlans)
-                    resultTypeView
-                    scopeOverrides
-                    anns
-                    annCanons
+                case
+                    ( prepareSubtermGeneralizations
+                        identityGenerator
+                        constructionIdentityRepresentative
+                        annNodeCanonical
+                        acyclicBaseForGeneralization
+                        presolutionViewForGen
+                        rawEdgeArtifacts
+                        edgeArtifacts
+                        producerTypes
+                        annExpectedTypes
+                        (prRedirects pres)
+                        bindParentsGa
+                        sourceBinderRefs
+                        (IntMap.map ceepConstructionRefs exactEdgePlans)
+                        resultTypeView
+                        scopeOverrides
+                        anns
+                        annCanons
+                    )
+                  of
+                    Right preparedPackets -> pure preparedPackets
+                    Left cause ->
+                        Left
+                            ( ValidationFailed
+                                [ "subterm packet preparation failed"
+                                , "  roots: " ++ show annCanons
+                                , "  cause: " ++ show cause
+                                ]
+                            )
         subtermGeneralizations = fst <$> subtermPreparation
         preparedGenerator = snd <$> subtermPreparation
     pure
@@ -5090,11 +5107,24 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
         generalizeTarget targetBoundOverlays scopeRoot target requirements = do
             view <- resultTypeViewWithOverlays targetBoundOverlays
             (schemeRaw, subst, inheritedGammaRoutes) <-
-                View.rtvGeneralizeTargetWithRequirementsCertified
-                    requirements
-                    view
-                    scopeRoot
-                    target
+                case
+                    View.rtvGeneralizeTargetWithRequirementsCertified
+                        requirements
+                        view
+                        scopeRoot
+                        target
+                of
+                    Right generalized -> pure generalized
+                    Left cause ->
+                        Left
+                            ( ValidationFailed
+                                [ "subterm packet generalization failed"
+                                , "  scope: " ++ show scopeRoot
+                                , "  target: " ++ show target
+                                , "  requirements: " ++ show requirements
+                                , "  cause: " ++ show cause
+                                ]
+                            )
             pure (target, schemeRaw, subst, inheritedGammaRoutes)
 
     -- A packet may mention binders introduced by an enclosing source forall
@@ -5191,6 +5221,69 @@ applyPreparedTermSourceBinderAliases artifact rootSubst term =
             (pgaCanonical artifact)
             (pgaSourceBinderRefs artifact)
             (Reduce.freeTypeVarRefsTerm term)
+
+-- | Publish the source-result quotient prepared for one compiler-exact edge.
+-- The packet result is the binder emitted by the checked source constructor;
+-- the source result is the exact annotation binder selected at that result
+-- position.  Keeping this route explicit lets root closure reuse that
+-- construction without guessing from quantifier position or bound shape.
+preparedCompilerExactSourceResultBinderRoutes
+    :: PreparedGeneralizationArtifact
+    -> EdgeId
+    -> Either ElabError [(TypeBinderRef, TypeBinderRef)]
+preparedCompilerExactSourceResultBinderRoutes artifact exactEdge = do
+    packets <- pgaSubtermGeneralizations artifact
+    let matchingPackets =
+            [ packet
+            | packet <- Map.elems packets
+            , subtermGeneralizationCompilerExactBoundary packet
+                == Just exactEdge
+            , subtermGeneralizationCompilerExactResultStage packet
+                == Just CompleteBeforeCompilerExact
+            ]
+    foldM insertRoute [] matchingPackets
+  where
+    insertRoute routes packet =
+        case
+            ( subtermGeneralizationCompilerExactResultRef packet
+            , subtermGeneralizationCompilerExactExistingRef packet
+            )
+        of
+            (Just packetResultRef, Just sourceResultRef) ->
+                case
+                    find
+                        ( typeBinderRefsSameIdentity packetResultRef
+                            . fst
+                        )
+                        routes
+                of
+                    Nothing ->
+                        pure ((packetResultRef, sourceResultRef) : routes)
+                    Just (_, existingSourceRef)
+                        | typeBinderRefsSameIdentity
+                            existingSourceRef
+                            sourceResultRef ->
+                            pure routes
+                        | otherwise ->
+                            Left
+                                ( ValidationFailed
+                                    [ "compiler exact packet result has conflicting source routes"
+                                    , "  exact edge: " ++ show exactEdge
+                                    , "  packet result: " ++ show packetResultRef
+                                    , "  first source result: "
+                                        ++ show existingSourceRef
+                                    , "  second source result: "
+                                        ++ show sourceResultRef
+                                    ]
+                                )
+            _ ->
+                Left
+                    ( ValidationFailed
+                        [ "source-owned compiler exact packet has no complete result route"
+                        , "  exact edge: " ++ show exactEdge
+                        , "  packet: " ++ show packet
+                        ]
+                    )
 
 
 -- | Merge one free term alias into the root substitution.  A conflicting
@@ -5609,8 +5702,22 @@ prepareOrdinaryRootConstructionScope
     -> AnnExpr
     -> Either ElabError PreparedRootConstructionScope
 prepareOrdinaryRootConstructionScope artifact authoritativeAnnCanon sourceScopeAnnPre = do
-    subtermPackets <- pgaSubtermGeneralizations artifact
+    subtermPackets <-
+        case pgaSubtermGeneralizations artifact of
+            Right packets -> pure packets
+            Left cause ->
+                Left
+                    ( ValidationFailed
+                        [ "ordinary root construction could not prepare subterm packets"
+                        , "  root: " ++ show authoritativeAnnCanon
+                        , "  cause: " ++ show cause
+                        ]
+                    )
     exactProducerTypes <- pgaExactProducerTypes artifact
+    annotationConstructionBinders <-
+        preparedTransparentRootSourceAnnotationBinders
+            artifact
+            authoritativeAnnCanon
     exactApplicationEdges <-
         preparedExactApplicationArgumentEdges
             artifact
@@ -5641,7 +5748,17 @@ prepareOrdinaryRootConstructionScope artifact authoritativeAnnCanon sourceScopeA
             []
             authoritativeAnnCanon
             authoritativeAnnCanon
-    let completeRequirements = rbrRequirements rootBoundary
+    let annotationConstructionRefs =
+            map fst annotationConstructionBinders
+        completeRequirements0 = rbrRequirements rootBoundary
+        completeRequirements =
+            completeRequirements0
+                { grAmbientBinderRefs =
+                    distinctTypeBinderRefs
+                        ( annotationConstructionRefs
+                            ++ grAmbientBinderRefs completeRequirements0
+                        )
+                }
     case grRequiredGammaBinders completeRequirements of
         [] ->
             pure
@@ -5705,6 +5822,7 @@ prepareOrdinaryRootConstructionScope artifact authoritativeAnnCanon sourceScopeA
             prepareRequiredRootConstructionScope
                 (pgaPresolutionView artifact)
                 (pgaBindParentsGa artifact)
+                annotationConstructionBinders
                 (rbrLocallyClosedGammas rootBoundary)
                 inheritedGammaRoutes
                 completeRequirements
@@ -5766,6 +5884,14 @@ generalizePreparedRootDetailedWithConstructionResult
 generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCanon constructionAnnPre authoritativeResultAnnCanon mbOwnerFinalConstruction localApplicationCertificates = do
     subtermPackets <- pgaSubtermGeneralizations artifact
     exactProducerTypes <- pgaExactProducerTypes artifact
+    constructionAnnotationBinders <-
+        preparedTransparentRootSourceAnnotationBinders
+            artifact
+            constructionAnnCanon
+    resultAnnotationBinders <-
+        preparedTransparentRootSourceAnnotationBinders
+            artifact
+            authoritativeResultAnnCanon
     constructionExactApplicationEdges <-
         preparedExactApplicationArgumentEdges
             artifact
@@ -5878,15 +6004,32 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
             resultBoundaryApplicationCertificates
             constructionAnnCanon
             authoritativeResultAnnCanon
-    let constructionRequirements = rbrRequirements constructionBoundary
-        resultRequirements = rbrRequirements resultBoundary
+    let withAnnotationAmbient binders requirements =
+            requirements
+                { grAmbientBinderRefs =
+                    distinctTypeBinderRefs
+                        ( map fst binders
+                            ++ grAmbientBinderRefs requirements
+                        )
+                }
+        constructionRequirements =
+            withAnnotationAmbient
+                constructionAnnotationBinders
+                (rbrRequirements constructionBoundary)
+        resultRequirements =
+            withAnnotationAmbient
+                resultAnnotationBinders
+                (rbrRequirements resultBoundary)
+        sourceAnnotationExpectedType =
+            transparentRootSourceAnnotationExpectedType
+                authoritativeResultAnnCanon
         resultLocalApplicationRouteKeys =
             IntSet.unions
                 ( map
                     (IntMap.keysSet . lgccLocalBinderRoutes)
                     resultLocalApplicationCertificates
                 )
-        resultLocalGammaClosures =
+        rawResultLocalGammaClosures =
             foldr insertDistinctClosure []
                 [ closure
                 | closure <-
@@ -5901,6 +6044,55 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
                         resultLocalApplicationCertificates
                     )
                 ]
+        resultLocalGammaClosures =
+            case sourceAnnotationExpectedType of
+                Just expectedType ->
+                    -- The checked source annotation has already consumed or
+                    -- preserved child Gamma computations internal to its
+                    -- coercion. A local constructor whose exterior is routed
+                    -- to a binder visible in the annotation result remains
+                    -- the owner of that binder, however; moving it back to
+                    -- the root would duplicate the constructor's Lambda.
+                    filter
+                        (sourceAnnotationRetainsLocalGamma expectedType)
+                        rawResultLocalGammaClosures
+                Nothing -> rawResultLocalGammaClosures
+        sourceAnnotationRetainsLocalGamma expectedType closure =
+            any
+                ( \candidateRef ->
+                    any
+                        (typeBinderRefsSameIdentity candidateRef)
+                        expectedRefs
+                )
+                closureResultRefs
+          where
+            expectedRefs =
+                typeBinderDeclarationRefs expectedType
+                    ++ freeTypeVarRefsType expectedType
+            exteriorNode = lgcExteriorNode closure
+            constructionRouteNodes =
+                exteriorNode
+                    : gaConstructionRouteNodes
+                        (pgaAnnNodeCanonical artifact)
+                        (pgaBindParentsGa artifact)
+                        exteriorNode
+            consumerRef =
+                typeBinderRefFromIdentity
+                    (lgcConsumerIdentity closure)
+                    ( typeBinderIdentityStableName
+                        (lgcConsumerIdentity closure)
+                    )
+            closureResultRefs =
+                consumerRef
+                    : [ sourceRef
+                      | routeNode <- constructionRouteNodes
+                      , sourceRef <-
+                            maybeToList
+                                ( IntMap.lookup
+                                    (getNodeId routeNode)
+                                    resultSourceBinderRefs
+                                )
+                      ]
         hasResultLocalConstruction =
             not (null resultLocalGammaClosures)
                 || any
@@ -5982,33 +6174,105 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
                     generalizeTargetNode
                         (pgaPresolutionView artifact)
                         (annNode authoritativeResultAnnCanon)
-        sourceAnnotationRootScheme = do
-            expectedType <-
-                transparentRootSourceAnnotationExpectedType
-                    authoritativeResultAnnCanon
-            let expectedRefs =
-                    distinctTypeBinderRefs
-                        ( typeBinderDeclarationRefs expectedType
-                            ++ freeTypeVarRefsType expectedType
+        selectRootBinderClosure binders initialRefs =
+            [ binder
+            | binder@(ref, _) <- binders
+            , refMember ref closedRefs
+            ]
+          where
+            closedRefs = close (distinctTypeBinderRefs initialRefs)
+            close refs =
+                let dependencies =
+                        [ dependency
+                        | (ref, Just bound) <- binders
+                        , refMember ref refs
+                        , dependency <- freeTypeVarRefsType (tyToElab bound)
+                        , any
+                            (typeBinderRefsSameIdentity dependency . fst)
+                            binders
+                        ]
+                    refs' =
+                        distinctTypeBinderRefs (refs ++ dependencies)
+                in if length refs' == length refs
+                    then refs
+                    else close refs'
+            refMember ref = any (typeBinderRefsSameIdentity ref)
+    sourceAnnotationRootScheme <-
+        case sourceAnnotationExpectedType of
+            Nothing -> pure Nothing
+            Just expectedType -> do
+                (graphScheme, graphSubst) <-
+                    generalizeAtWithBuilderRequired
+                        (pgaPlanBuilder artifact)
+                        constructionRequirements
+                        (Just (pgaBindParentsGa artifact))
+                        (pgaPresolutionView artifact)
+                        rootScope
+                        rootTarget
+                let expectedRefs =
+                        distinctTypeBinderRefs
+                            ( typeBinderDeclarationRefs expectedType
+                                ++ freeTypeVarRefsType expectedType
+                            )
+                    expectedSubst =
+                        IntMap.filter
+                            ( \sourceRef ->
+                                any
+                                    (typeBinderRefsSameIdentity sourceRef)
+                                    expectedRefs
+                            )
+                            (pgaSourceBinderRefs artifact)
+                    annotationSubst =
+                        IntMap.union graphSubst expectedSubst
+                routedAnnotationScheme <-
+                    applyPreparedRootBinderSubst
+                        "source annotation result"
+                        annotationSubst
+                        (schemeFromType expectedType)
+                let annotationBinders =
+                        schemeBinderRefs routedAnnotationScheme
+                    rootedFreeRefs =
+                        freeTypeVarRefsType
+                            (schemeToType routedAnnotationScheme)
+                    rootedBinders =
+                        [ binder
+                        | binder@(ref, _) <-
+                            selectRootBinderClosure
+                                (schemeBinderRefs graphScheme)
+                                rootedFreeRefs
+                        , not
+                            ( any
+                                (typeBinderRefsSameIdentity ref . fst)
+                                annotationBinders
+                            )
+                        ]
+                    -- Free annotation refs owned by this root's graph
+                    -- generalization acquire the graph-planned binder (and
+                    -- any bound dependencies).  The remaining refs retain
+                    -- their source-side identity as ambient authority; they
+                    -- are recorded by 'inheritedRootRefs' below and must not
+                    -- be manufactured into unrelated root binders merely
+                    -- because the annotation mentions them.
+                    rootedAnnotationScheme =
+                        mkElabSchemeWithRefs
+                            (rootedBinders ++ annotationBinders)
+                            (schemeBody routedAnnotationScheme)
+                pure
+                    ( Just
+                        ( rootedAnnotationScheme
+                        , annotationSubst
                         )
-                expectedSubst =
-                    IntMap.filter
-                        ( \sourceRef ->
-                            any
-                                (typeBinderRefsSameIdentity sourceRef)
-                                expectedRefs
-                        )
-                        (pgaSourceBinderRefs artifact)
-            pure (schemeFromType expectedType, expectedSubst)
+                    )
     (scheme, subst) <-
         case (sourceAnnotationRootScheme, mbOwnerFinalConstruction) of
             (Just annotationScheme, _)
                 | not hasResultLocalConstruction ->
                 -- A source annotation has already constructed and checked
-                -- its edge-owned expected type.  That expected type owns its
-                -- forall declarations; rebuilding only the graph body would
-                -- expose those declarations as free variables and then try
-                -- to recover them after the fact.
+                -- its edge-owned expected type once all internal Gamma
+                -- computations have their own construction authority.  That
+                -- expected type owns its forall declarations; rebuilding only
+                -- the graph body would expose those declarations as free
+                -- variables and then try to recover them after the fact.
                 pure annotationScheme
             (_, Just certificate)
                 | null
@@ -6274,6 +6538,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
                 prepareRequiredRootConstructionScopeDetailed
                     (pgaPresolutionView artifact)
                     (pgaBindParentsGa artifact)
+                    constructionAnnotationBinders
                     locallyClosedGammas
                     constructionInheritedGammaRoutes
                     constructionRequirements
@@ -7887,17 +8152,19 @@ requiredGammaBinderConstructionRef constructionSubst requirement =
 prepareRequiredRootConstructionScope
     :: PresolutionView 'Presolved
     -> GaBindParents 'Presolved
+    -> [(TypeBinderRef, Maybe BoundType)]
     -> IntMap.IntMap LocalGammaClosure
     -> Reify.InheritedGammaRoutes
     -> GeneralizationRequirements
     -> ElabScheme
     -> IntMap.IntMap TypeBinderRef
     -> Either ElabError PreparedRootConstructionScope
-prepareRequiredRootConstructionScope presolutionView ga locallyClosedGammas inheritedGammaRoutes requirements constructionScheme fullSubst =
+prepareRequiredRootConstructionScope presolutionView ga ambientConstructionBinders locallyClosedGammas inheritedGammaRoutes requirements constructionScheme fullSubst =
     fst
         <$> prepareRequiredRootConstructionScopeDetailed
             presolutionView
             ga
+            ambientConstructionBinders
             locallyClosedGammas
             inheritedGammaRoutes
             requirements
@@ -7912,6 +8179,7 @@ prepareRequiredRootConstructionScope presolutionView ga locallyClosedGammas inhe
 prepareRequiredRootConstructionScopeDetailed
     :: PresolutionView 'Presolved
     -> GaBindParents 'Presolved
+    -> [(TypeBinderRef, Maybe BoundType)]
     -> IntMap.IntMap LocalGammaClosure
     -> Reify.InheritedGammaRoutes
     -> GeneralizationRequirements
@@ -7920,7 +8188,7 @@ prepareRequiredRootConstructionScopeDetailed
     -> Either
         ElabError
         (PreparedRootConstructionScope, [TypeBinderRef])
-prepareRequiredRootConstructionScopeDetailed presolutionView ga locallyClosedGammas inheritedGammaRoutes requirements constructionScheme fullSubst = do
+prepareRequiredRootConstructionScopeDetailed presolutionView ga ambientConstructionBinders locallyClosedGammas inheritedGammaRoutes requirements constructionScheme fullSubst = do
     rigidBindParents <-
         bindingToElab
             ( Binding.canonicalizeBindParentsUnder
@@ -7982,6 +8250,8 @@ prepareRequiredRootConstructionScopeDetailed presolutionView ga locallyClosedGam
         selectedBinders =
             inheritedAmbientBinders ++ selectedSchemeBinders
         selectedBinderRefs = map fst selectedBinders
+        availableDependencyRefs =
+            map fst ambientConstructionBinders ++ selectedBinderRefs
         missingRoots =
             [ ref
             | ref <- requiredRefs
@@ -8006,7 +8276,7 @@ prepareRequiredRootConstructionScopeDetailed presolutionView ga locallyClosedGam
             [ dependency
             | (_, Just bound) <- selectedBinders
             , dependency <- freeTypeVarRefsType (tyToElab bound)
-            , not (refMember dependency selectedBinderRefs)
+            , not (refMember dependency availableDependencyRefs)
             ]
         retainedSchemeAliases =
             IntMap.filter
@@ -8366,6 +8636,41 @@ preparedScopeRootForBoundary artifact edgeId fallbackNode =
         (pgaScopeOverrides artifact)
         edgeId
         fallbackNode
+
+-- | Binder declarations owned by a source annotation that transparently
+-- encloses the root currently being constructed.  These declarations are in
+-- scope while the annotation's child is checked, so a local Gamma bound may
+-- depend on them without promoting them to root-owned source binders.
+--
+-- Stop at every non-transparent constructor.  In particular, an annotation
+-- in a lambda body or let sibling must be installed by that annotation's own
+-- construction path and must never become ambient to the enclosing root.
+preparedTransparentRootSourceAnnotationBinders
+    :: PreparedGeneralizationArtifact
+    -> AnnExpr
+    -> Either ElabError [(TypeBinderRef, Maybe BoundType)]
+preparedTransparentRootSourceAnnotationBinders artifact = collect
+  where
+    collect ann =
+        case ann of
+            AAnn _ _ edgeId -> do
+                expectedType <-
+                    case
+                        IntMap.lookup
+                            (getEdgeId edgeId)
+                            (pgaAnnotationExpectedTypesByEdge artifact)
+                    of
+                        Just ty -> pure ty
+                        Nothing ->
+                            Left
+                                ( ValidationFailed
+                                    [ "transparent root source annotation has no edge-owned expected type"
+                                    , "  edge: " ++ show edgeId
+                                    ]
+                                )
+                pure (schemeBinderRefs (schemeFromType expectedType))
+            ALetScope inner _ _ -> collect inner
+            _ -> pure []
 
 -- | Extend the global source-binder carrier with only the compiler-exact
 -- structural projections owned by the supplied annotated subtree.  Keeping

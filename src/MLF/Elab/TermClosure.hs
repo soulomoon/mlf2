@@ -3,6 +3,7 @@
 module MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
     constructTermWithSchemeSubstRefs,
+    constructTermWithSchemeSubstRefsByBinderRoutes,
     etaExpandTermToSchemeSubstRefs,
     alignTopTyAbsToScheme,
     alignTermTypeVarsToScheme,
@@ -30,6 +31,15 @@ import MLF.Frontend.Syntax (Lit (LInt))
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef, substTypeSimpleRef)
 
 type TypeVarRename = (TypeBinderRef, TypeBinderRef)
+
+binderBoundsAgree :: Maybe BoundType -> Maybe BoundType -> Bool
+binderBoundsAgree Nothing Nothing = True
+binderBoundsAgree (Just left) (Just right) =
+  let leftTy = tyToElab left
+      rightTy = tyToElab right
+   in alphaEqType leftTy rightTy
+        || churchAwareEqType leftTy rightTy
+binderBoundsAgree _ _ = False
 
 closeTermWithSchemeSubstRefsIfNeeded :: IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> XmlfTerm
 closeTermWithSchemeSubstRefsIfNeeded subst sch term =
@@ -79,6 +89,87 @@ constructTermWithSchemeSubstRefs subst scheme term =
         freshenSchemeAndSubstAgainstTerm term subst scheme
       termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
    in wrapTermWithScheme scheme' termSubst
+
+-- | Construct a root scheme around an open producer without identifying
+-- unrelated leading abstractions by position.  A same-identity abstraction,
+-- or one related to a root binder by an explicit construction route, is
+-- reused exactly once; every other leading abstraction remains an inner,
+-- locally owned Gamma.
+--
+-- This is the exact-root construction rule.  For example, closing
+-- @Lambda a. ...@ with a scheme that also owns @a@ must not duplicate it,
+-- while closing @Lambda e >= tau. ... Hyp(e)@ with @forall a. ...@ must
+-- produce @Lambda a. Lambda e >= tau. ... Hyp(e)@ rather than rename @e@ to
+-- the unbounded @a@.
+constructTermWithSchemeSubstRefsByBinderRoutes
+  :: [(TypeBinderRef, TypeBinderRef)]
+  -> IntMap.IntMap TypeBinderRef
+  -> ElabScheme
+  -> XmlfTerm
+  -> XmlfTerm
+constructTermWithSchemeSubstRefsByBinderRoutes binderRoutes subst scheme term =
+  let (subst', scheme', renames) =
+        freshenSchemeAndSubstAgainstTerm term subst scheme
+      termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
+      rootBinders = schemeBinderRefs scheme'
+      (existingBinders, body) = splitTopTyAbs termSubst
+   in case partitionExistingBinders rootBinders existingBinders of
+        Just (localBinders, reusedRenames) ->
+          let localTerm =
+                foldr
+                  (\(ref, mbBound) acc -> eTyAbsWithRef ref mbBound acc)
+                  body
+                  localBinders
+              localTerm' = renameTermTypeVars reusedRenames localTerm
+           in wrapTermWithScheme scheme' localTerm'
+        -- Conflicting or out-of-order same-identity declarations cannot be
+        -- repaired by adding another abstraction with that identity.  Keep
+        -- the checked producer intact so the exact-boundary validator reports
+        -- the authority mismatch without first manufacturing an invalid term.
+        Nothing -> termSubst
+  where
+    partitionExistingBinders rootBinders =
+      go rootBinders
+      where
+        go _ [] = Just ([], [])
+        go remaining (binder@(existingRef, existingBound) : rest) =
+          case
+              break
+                (\(rootRef, _) -> existingRef `constructsRootBinder` rootRef)
+                remaining
+            of
+            (_, (rootRef, rootBound) : remainingAfter)
+              | binderBoundsAgree existingBound rootBound -> do
+                  (localBinders, renames) <- go remainingAfter rest
+                  pure
+                    ( localBinders
+                    , [ (existingRef, rootRef)
+                      | existingRef /= rootRef
+                      ]
+                        ++ renames
+                    )
+              | otherwise -> Nothing
+            _
+              | any
+                  (\(rootRef, _) ->
+                    existingRef `constructsRootBinder` rootRef
+                  )
+                  rootBinders ->
+                  -- The identity was already consumed, so this is either a
+                  -- duplicate declaration or an order inversion.
+                  Nothing
+              | otherwise -> do
+                  (localBinders, renames) <- go remaining rest
+                  pure (binder : localBinders, renames)
+
+    existingRef `constructsRootBinder` rootRef =
+      typeBinderRefsSameIdentity existingRef rootRef
+        || any
+          (\(sourceRef, targetRef) ->
+            typeBinderRefsSameIdentity existingRef sourceRef
+              && typeBinderRefsSameIdentity rootRef targetRef
+          )
+          binderRoutes
 
 -- | Make a polymorphic value explicit at a let/publication boundary.  A term
 -- may already have the complete scheme type because an application returns a
@@ -596,45 +687,95 @@ alignTopTyAbsToScheme :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
 alignTopTyAbsToScheme sch term =
   let binds = schemeBinderRefs sch
       (topBinds, body) = splitTopTyAbs term
-      existingCount = length topBinds
-   in if existingCount > length binds
-        then Nothing
-        else
-          let (expectedPrefix, missingSuffix) = splitAt existingCount binds
+      identityMatches =
+        matchExistingBinderSubsequence topBinds binds
+      hasSharedIdentity =
+        any
+          (\(existingRef, _) ->
+            any
+              (typeBinderRefsSameIdentity existingRef . fst)
+              binds
+          )
+          topBinds
+   in case identityMatches of
+        Just matched
+          | hasSharedIdentity ->
+              validateRebuilt
+                ( rebuild binds body
+                    [ (oldRef, expectedRef)
+                    | ((oldRef, _), (expectedRef, _)) <- matched
+                    , oldRef /= expectedRef
+                    ]
+                )
+        _
+          | hasSharedIdentity -> Nothing
+          | otherwise -> alignPositionally binds topBinds body
+  where
+    rebuild binds body renames =
+      foldr
+        (\(ref, mbBound) acc -> eTyAbsWithRef ref mbBound acc)
+        (renameTermTypeVars renames body)
+        binds
+
+    alignPositionally binds topBinds body
+      | existingCount > length binds = Nothing
+      | otherwise =
+          let (expectedPrefix, missingSuffix) =
+                splitAt existingCount binds
               renames =
                 [ (oldRef, newRef)
-                  | ((oldRef, _), (newRef, _)) <- zip topBinds expectedPrefix,
-                    oldRef /= newRef
+                | ((oldRef, _), (newRef, _)) <-
+                    zip topBinds expectedPrefix
+                , oldRef /= newRef
                 ]
               body' = renameTermTypeVars renames body
               completedBody =
                 foldr
-                  (\(ref, mbBound) acc -> eTyAbsWithRef ref mbBound acc)
+                  (\(ref, mbBound) acc ->
+                    eTyAbsWithRef ref mbBound acc
+                  )
                   body'
                   missingSuffix
-              -- The existing abstractions are replaced one-for-one by the
-              -- eliminator/scheme contract.  Only the unmatched suffix adds
-              -- new abstraction layers, so a partial handler spine cannot be
-              -- wrapped in a duplicate copy of its common prefix.
+              -- With no shared identity, the eliminator/scheme contract is
+              -- the only authority relating the existing prefix to the
+              -- expected binders. Only its unmatched suffix is new.
               rebuilt =
                 foldr
-                  (\(ref, mbBound) acc -> eTyAbsWithRef ref mbBound acc)
+                  (\(ref, mbBound) acc ->
+                    eTyAbsWithRef ref mbBound acc
+                  )
                   completedBody
                   expectedPrefix
-           in case typeCheckOpenTerm rebuilt of
-                Right tyAligned
-                  | alphaEqType tyAligned (schemeToType sch) -> Just rebuilt
-                Right _ -> Nothing
-                -- Deferred placeholders can make the body temporarily
-                -- uncheckable even though the explicit abstraction spine is
-                -- already present.  Accept only when every deferred-free
-                -- sibling and its enclosing application/let context checks;
-                -- mere occurrence of an unrelated hole is not an excuse for
-                -- an ordinary type error.  The post-rewrite final gate still
-                -- validates the completed body.
-                Left _
-                  | deferredTypecheckFailureIsIsolated rebuilt -> Just rebuilt
-                  | otherwise -> Nothing
+           in validateRebuilt rebuilt
+      where
+        existingCount = length topBinds
+
+    validateRebuilt rebuilt =
+      case typeCheckOpenTerm rebuilt of
+        Right tyAligned
+          | alphaEqType tyAligned (schemeToType sch) -> Just rebuilt
+        Right _ -> Nothing
+        -- Deferred placeholders can make the body temporarily uncheckable
+        -- even though the explicit abstraction spine is already present.
+        -- Accept only when every deferred-free sibling and its enclosing
+        -- application/let context checks.
+        Left _
+          | deferredTypecheckFailureIsIsolated rebuilt -> Just rebuilt
+          | otherwise -> Nothing
+
+    matchExistingBinderSubsequence [] _ = Just []
+    matchExistingBinderSubsequence _ [] = Nothing
+    matchExistingBinderSubsequence
+      existing@(oldBinder@(oldRef, oldBound) : oldRest)
+      (newBinder@(newRef, newBound) : newRest)
+        | typeBinderRefsSameIdentity oldRef newRef =
+            if binderBoundsAgree oldBound newBound
+              then
+                ((oldBinder, newBinder) :)
+                  <$> matchExistingBinderSubsequence oldRest newRest
+              else Nothing
+        | otherwise =
+            matchExistingBinderSubsequence existing newRest
 
 topTyAbsRefs :: XmlfTerm -> [TypeBinderRef]
 topTyAbsRefs term = case term of
