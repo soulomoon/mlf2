@@ -9,7 +9,6 @@ module MLF.Elab.Elaborate
     elaborateWithEnv,
     elaborateWithEnvDetailed,
     elaborateWithEnvReadModel,
-    validateElaborationWithEnv,
   )
 where
 
@@ -18,7 +17,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Presolution (PresolutionView (..))
-import MLF.Constraint.Presolution.Base (EdgeArtifacts)
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Elaborate.Algebra
@@ -31,7 +29,9 @@ import MLF.Elab.Elaborate.Algebra
   )
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
-    validateElaborationEdgeAuthority,
+    AuthorizedElaborationRoot,
+    authorizedElaborationConstructionAnn,
+    authorizedElaborationEdgeAuthority,
   )
 import MLF.Elab.Elaborate.Scope
   ( GeneralizeAtWith,
@@ -44,7 +44,6 @@ import MLF.Elab.ReadModel (ElabReadModel (..))
 import MLF.Elab.Run.Scope (ConstructionScopes)
 import MLF.Elab.Run.TypeOps (mkInlineBoundVarsContextWithReadModelCanonical)
 import MLF.Elab.Types (ElabError, ElabType, TypeBinderRef, XmlfTerm)
-import MLF.Frontend.ConstraintGen.Types (AnnExpr)
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (NormSrcType)
 import MLF.Types.Identity (TypeBinderIdentity)
@@ -63,11 +62,9 @@ data ElabEnv (p :: Phase) = ElabEnv
     eeCanonical :: NodeId -> NodeId,
     eeReadModel :: Either ElabError (ElabReadModel p),
     eeGaParents :: GaBindParents p,
-    eeEdgeArtifacts :: EdgeArtifacts,
     eeExactProducerTypes :: Either ElabError (IntMap.IntMap ElabType),
     eeCompilerExactConstructionRefs :: Either ElabError (IntMap.IntMap (IntMap.IntMap TypeBinderRef)),
     eeScopeOverrides :: ConstructionScopes,
-    eeAnnotationExpectedTypesByEdge :: IntMap.IntMap ElabType,
     -- Exact lambdas have no annotation edge.  Their parameter source type is
     -- therefore the only remaining node-keyed annotation authority.
     eeExactLambdaParamSourceTypes :: IntMap.IntMap NormSrcType,
@@ -85,54 +82,40 @@ data ElabEnv (p :: Phase) = ElabEnv
 elaborateWithEnv ::
   ElabConfig p ->
   ElabEnv p ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   Either ElabError XmlfTerm
-elaborateWithEnv config elabEnv ann =
-  elaboratedTerm <$> elaborateWithEnvDetailed config elabEnv ann
+elaborateWithEnv config elabEnv root =
+  elaboratedTerm <$> elaborateWithEnvDetailed config elabEnv root
 
 elaborateWithEnvDetailed ::
   ElabConfig p ->
   ElabEnv p ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   Either ElabError ElaboratedTerm
-elaborateWithEnvDetailed config elabEnv ann = do
+elaborateWithEnvDetailed config elabEnv root = do
   readModel <- eeReadModel elabEnv
-  elaborateWithEnvReadModelDetailed config elabEnv readModel ann
-
-validateElaborationWithEnv :: ElabEnv p -> AnnExpr -> Either ElabError ()
-validateElaborationWithEnv elabEnv ann = do
-  _ <- eeReadModel elabEnv
-  validateElaborationEdgeAuthority
-    (eeCanonical elabEnv)
-    (eeAnnotationExpectedTypesByEdge elabEnv)
-    (eeEdgeArtifacts elabEnv)
-    ann
+  elaborateWithEnvReadModelDetailed config elabEnv readModel root
 
 elaborateWithEnvReadModel ::
   ElabConfig p ->
   ElabEnv p ->
   ElabReadModel p ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   Either ElabError XmlfTerm
-elaborateWithEnvReadModel config elabEnv readModel ann =
+elaborateWithEnvReadModel config elabEnv readModel root =
   elaboratedTerm
-    <$> elaborateWithEnvReadModelDetailed config elabEnv readModel ann
+    <$> elaborateWithEnvReadModelDetailed config elabEnv readModel root
 
 elaborateWithEnvReadModelDetailed ::
   ElabConfig p ->
   ElabEnv p ->
   ElabReadModel p ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   Either ElabError ElaboratedTerm
-elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
+elaborateWithEnvReadModelDetailed config elabEnv readModel root = do
   subtermGeneralizations <- eeSubtermGeneralizations elabEnv
   exactProducerTypes <- eeExactProducerTypes elabEnv
   compilerExactConstructionRefs <- eeCompilerExactConstructionRefs elabEnv
-  validateElaborationEdgeAuthority
-    canonical
-    (eeAnnotationExpectedTypesByEdge elabEnv)
-    (eeEdgeArtifacts elabEnv)
-    ann
   let namedSet = ermNamedNodes readModel
       inlineBoundVarsContext =
         mkInlineBoundVarsContextWithReadModelCanonical canonical readModel
@@ -154,13 +137,13 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
         AnnotationContext
           { acTraceConfig = ecTraceConfig config,
             acScopeContext = scopeContext,
-            acAnnotationExpectedTypesByEdge = eeAnnotationExpectedTypesByEdge elabEnv,
+            acElaborationEdgeAuthority =
+              authorizedElaborationEdgeAuthority root,
             acSourceTypeHeadIdentities = eeSourceTypeHeadIdentities elabEnv,
             acSourceTypeBinderIdentities = eeSourceTypeBinderIdentities elabEnv,
             acSourceBinderRefs = eeSourceBinderRefs elabEnv,
             acDirectSourceBinderKeys = eeDirectSourceBinderKeys elabEnv,
-            acSubtermGeneralizations = subtermGeneralizations,
-            acEdgeArtifacts = eeEdgeArtifacts elabEnv
+            acSubtermGeneralizations = subtermGeneralizations
           }
       algebraContext =
         AlgebraContext
@@ -170,7 +153,6 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
             algResolvedLambdaParamNode = resolvedLambdaParamNode canonical lookupNode,
             algAnnotationContext = annotationContext,
             algNamedSetReify = namedSet,
-            algAnnotationExpectedTypesByEdge = eeAnnotationExpectedTypesByEdge elabEnv,
             algExactLambdaParamSourceTypes = eeExactLambdaParamSourceTypes elabEnv,
             algSourceTypeHeadIdentities = eeSourceTypeHeadIdentities elabEnv,
             algSourceTypeBinderIdentities = eeSourceTypeBinderIdentities elabEnv,
@@ -178,7 +160,10 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel ann = do
             algExactProducerTypes = exactProducerTypes,
             algCompilerExactConstructionRefs = compilerExactConstructionRefs
           }
-      ElabOut {elabDetailed = runElab} = para (elabAlg algebraContext) ann
+      ElabOut {elabDetailed = runElab} =
+        para
+          (elabAlg algebraContext)
+          (authorizedElaborationConstructionAnn root)
   runElab (eeInitialTermEnv elabEnv)
   where
     presolutionView = ermPresolutionView readModel

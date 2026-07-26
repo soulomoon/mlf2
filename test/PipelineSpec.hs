@@ -117,10 +117,12 @@ import MLF.Elab.Generalize
     selectLocalGammaEdgeOwnership,
   )
 import MLF.Elab.Elaborate.Annotation
-  ( sourceTypeToElabTypeWithIdentitiesFromSupply,
+  ( authorizedElaborationResultAnn,
+    sourceTypeToElabTypeWithIdentitiesFromSupply,
   )
 import MLF.Elab.Run.Generalize.Prepare
-  ( computePreparedResultType,
+  ( authorizePreparedAnn,
+    computePreparedResultType,
     generalizePreparedRoot,
     prepareGeneralizationArtifact,
     preparedAnnotated,
@@ -10979,6 +10981,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       redirects `shouldSatisfy` (not . IntMap.null)
       preparedTestRedirects artifactView `shouldBe` redirects
       preparedAnnotated artifact `shouldBe` canonicalizedAnn
+      authorizedRoot <-
+        requireRight (authorizePreparedAnn artifact ann)
+      authorizedElaborationResultAnn authorizedRoot
+        `shouldBe` canonicalizedAnn
+      authorizePreparedAnn artifact (ALit (LInt 0) (NodeId 999999))
+        `shouldSatisfy` isLeft
       annNodeOccurrences (preparedAnnotated artifact)
         `shouldBe` map (preparedTestCanonicalizeNode artifactView) (annNodeOccurrences redirectedAnn)
       baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)

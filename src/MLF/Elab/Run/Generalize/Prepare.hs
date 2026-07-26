@@ -11,7 +11,7 @@ module MLF.Elab.Run.Generalize.Prepare (
     prepareGeneralizationArtifactForRoots,
     withPreparedResolvedTermSchemes,
     preparedAnnotated,
-    canonicalizePreparedAnn,
+    authorizePreparedAnn,
     preparedReadContextReady,
     preparedResultTypeViewReady,
     preparedIdentityGenerator,
@@ -46,7 +46,7 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , applyPreparedCompilerExactRootBinderIdentities
     , applyPreparedTermSourceBinderAliases
     , preparedCompilerExactSourceResultBinderRoutes
-    , canonicalizePreparedAnn
+    , authorizePreparedAnn
     , computePreparedResultType
     , computePreparedResultTypeWithRootGeneralization
     , generalizePreparedRoot

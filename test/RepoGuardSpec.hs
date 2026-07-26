@@ -87,6 +87,48 @@ spec = describe "Repository guardrails" $ do
     annotationSource
       `shouldContain` "EdgeArtifacts -> AnnExpr -> Either ElabError AnnExpr"
 
+  it "annotation types and replay artifacts stay construction-paired" $ do
+    annotationSource <-
+      readFileStrict "src/MLF/Elab/Elaborate/Annotation.hs"
+    elaborateSource <- readFileStrict "src/MLF/Elab/Elaborate.hs"
+    algebraSource <-
+      readFileStrict "src/MLF/Elab/Elaborate/Algebra.hs"
+    prepareSource <-
+      readFileStrict "src/MLF/Elab/Run/Generalize/Prepare/Internal.hs"
+    pipelineSource <- readFileStrict "src/MLF/Elab/Run/Pipeline.hs"
+    let annotationExports =
+          unlines (takeWhile (/= "where") (lines annotationSource))
+    annotationExports
+      `shouldContain` "ElaborationEdgeAuthority,"
+    annotationExports
+      `shouldNotContain` "ElaborationEdgeAuthority (..)"
+    annotationExports
+      `shouldContain` "AuthorizedElaborationRoot,"
+    annotationExports
+      `shouldNotContain` "AuthorizedElaborationRoot (..)"
+    prepareSource
+      `shouldContain` "mkElaborationEdgeAuthority"
+    prepareSource
+      `shouldContain` "pgaAuthorizedElaborationRoots"
+    elaborateSource
+      `shouldContain` "AuthorizedElaborationRoot ->"
+    elaborateSource
+      `shouldContain` "authorizedElaborationEdgeAuthority root"
+    elaborateSource
+      `shouldNotContain` "eeElaborationEdgeAuthority ::"
+    elaborateSource
+      `shouldNotContain` "eeAnnotationExpectedTypesByEdge ::"
+    elaborateSource
+      `shouldNotContain` "eeEdgeArtifacts ::"
+    annotationSource
+      `shouldNotContain` "acAnnotationExpectedTypesByEdge ::"
+    annotationSource
+      `shouldNotContain` "acEdgeArtifacts :: EdgeArtifacts"
+    algebraSource
+      `shouldNotContain` "algAnnotationExpectedTypesByEdge ::"
+    pipelineSource
+      `shouldNotContain` "validateElaborationWithEnv"
+
   it "normalized witness publication is construction-closed" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     driverSource <- readFileStrict "src/MLF/Constraint/Presolution/Driver.hs"

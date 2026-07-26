@@ -1,3 +1,34 @@
+## 2026-07-26 - Construction-owned annotation/replay authority
+
+- Generalization preparation now calls `mkElaborationEdgeAuthority` while all
+  canonical annotated roots are available. The constructor checks every
+  lambda, application, annotation, let-scope, and unfold edge; rejects missing
+  or orphan annotation types and duplicate annotation-edge ownership; and
+  seals the occurrence-owned type map with the complete `EdgeArtifacts`
+  aggregate.
+- Each validated canonical root is exposed only as an opaque
+  `AuthorizedElaborationRoot`. `elaborateWithEnvDetailed` requires that
+  capability and obtains both the construction tree and its edge authority
+  from it. A caller can no longer pass an arbitrary `AnnExpr` beside a
+  separately valid environment.
+- Removed the parallel annotation-type and edge-artifact fields from
+  `PreparedGeneralizationArtifact`, `ElabEnv`, `AnnotationContext`, and
+  `AlgebraContext`, plus the separate pre-elaboration validation calls.
+  Generalization and elaboration project both views from the same sealed
+  authority instead of reconnecting them by `EdgeId` after construction.
+- This closes a forgeable Chapter 15 construction seam and strengthens the
+  executable evidence for §15.3.5-§15.3.8. It does not discharge the remaining
+  mechanized-proof deviations for all eMLF terms.
+- Validation:
+  - the construction-authority, lambda/application authority, prepared-root,
+    and repository-boundary regressions pass;
+  - the paper `g g` checked-IR/Phi slice passes (`21 examples, 0 failures`);
+  - the previously slow `rejects bare overloaded method use` row passes in
+    `0.0914s` Hspec time (`2.08s` wall time);
+  - `scripts/check-thesis-claims.sh` passes (`21 claims, 5 documented
+    deviations`); and
+  - `cabal build all -j1 && cabal test -j1` passes.
+
 ## 2026-07-26 - Normalization-owned witness publication
 
 - `normalizeEdgeWitnessesM` now returns an opaque
@@ -112,11 +143,11 @@
   producer's per-edge packet boundary through Phase 6 and removes the API state
   in which a caller could select a witness from one presolution and a trace
   from another.
-- `AnnotationContext` stores that aggregate directly. Annotation,
-  lambda/application/unfold authority validation, ordinary occurrence replay,
-  and result-type replay all construct the same opaque certificate; checked
-  witness and trace projections come back from the certificate rather than
-  parallel ad hoc validation.
+- `AnnotationContext` reaches that aggregate through its construction-owned
+  elaboration authority. Annotation, lambda/application/unfold authority
+  construction, ordinary occurrence replay, and result-type replay all use the
+  same opaque certificate; checked witness and trace projections come back
+  from the certificate rather than parallel ad hoc validation.
 - Focused validation passes Phase 6 (322 examples), Phi alignment (11
   examples, including annotated `g g`), the nine fixed annotation cases, and
   all 107 thesis-obligation properties at 100 generated cases each. The

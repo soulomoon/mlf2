@@ -712,16 +712,26 @@ semantics that are not represented elsewhere just as explicitly.”
   that aggregate. A site without a packet is retained only when its `EdgeId`
   belongs to the producer-owned identity-edge set; otherwise preparation fails
   closed rather than interpreting missing witness data as identity.
+- Generalization preparation constructs one opaque
+  `ElaborationEdgeAuthority` from every canonical annotated root, the
+  occurrence-owned annotation-type map, and the complete edge aggregate. Its
+  constructor rejects missing or orphan annotation types, duplicate ownership,
+  missing replay/identity evidence, and application endpoint disagreement.
+  Each accepted root is published as an opaque `AuthorizedElaborationRoot`
+  carrying that same authority. The Phase-6 entry point requires this root
+  capability; `ElabEnv`, `AnnotationContext`, and `AlgebraContext` cannot
+  install annotation types and replay artifacts as independent fields, and
+  there is no post-construction validation pass that repairs their association.
 - Φ/Ω consumes one of those packets through the opaque
-  `PhiReplayCertificate`. `AnnotationContext`, annotation/result-type
-  validation, identity-edge recognition, root-`RaiseMerge` authority, and
-  occurrence translation carry and query the same aggregate rather than
-  reconstructing or independently selecting its projections. The certificate
-  does not rederive packet association from `ewRoot`, `etRoot`, or
-  `etResultRoot`: replay/finalization can leave those IDs in distinct source,
-  destination, and construction presentations. Production Φ entry points and
-  `OmegaContext` require this paired authority; only the test-support seam can
-  express a missing trace before a packet is constructed.
+  `PhiReplayCertificate`. Annotation/result-type consumers, identity-edge
+  recognition, root-`RaiseMerge` authority, and occurrence translation carry
+  and query the same aggregate rather than reconstructing or independently
+  selecting its projections. The certificate does not rederive packet
+  association from `ewRoot`, `etRoot`, or `etResultRoot`: replay/finalization
+  can leave those IDs in distinct source, destination, and construction
+  presentations. Production Φ entry points and `OmegaContext` require this
+  paired authority; only the test-support seam can express a missing trace
+  before a packet is constructed.
 - `RawExpansionConstruction` records the exact destination-domain parent edits
   made while constructing χₑ, together with argument and semantic-meta roles.
   Composed expansion steps union compatible certificates and reject a shared

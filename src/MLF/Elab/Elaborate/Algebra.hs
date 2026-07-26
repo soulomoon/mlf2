@@ -89,9 +89,11 @@ import MLF.Constraint.Types.Witness
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     AnnotationBoundaryRole (..),
+    acEdgeArtifacts,
     acIdentityEdges,
     annBinderKey,
     annExprReferenceKey,
+    annotationExpectedTypeForEdge,
     desugaredAnnLambdaInfo,
     elaborateAnnotationTerm,
     elaborateExactAnnotationTerm,
@@ -938,10 +940,6 @@ data AlgebraContext (p :: Phase) = AlgebraContext
     algResolvedLambdaParamNode :: NodeId -> Maybe NodeId,
     algAnnotationContext :: AnnotationContext p,
     algNamedSetReify :: IntSet.IntSet,
-    -- | Identity-bearing expected types keyed by the source annotation edge
-    -- that owns them.  Result nodes may be identified during solving; source
-    -- coercion occurrences may not.
-    algAnnotationExpectedTypesByEdge :: IntMap.IntMap ElabType,
     -- | Source types for compiler-owned exact lambda parameters, which have no
     -- annotation edge and therefore retain their node-keyed authority.
     algExactLambdaParamSourceTypes :: IntMap.IntMap NormSrcType,
@@ -6220,9 +6218,9 @@ sourceAnnotationSchemeAgainstEnv env ty =
 sourceSchemePairForAnnotation :: Env -> AlgebraContext p -> ScopeContext p -> NodeId -> EdgeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
 sourceSchemePairForAnnotation env algebraContext scopeContext nodeId edgeId =
   case
-      IntMap.lookup
-        (getEdgeId edgeId)
-        (algAnnotationExpectedTypesByEdge algebraContext)
+      annotationExpectedTypeForEdge
+        (algAnnotationContext algebraContext)
+        edgeId
     of
     Just expectedTy -> do
       let annotationScheme ty =
@@ -9078,9 +9076,9 @@ elabAlg algebraContext layer =
             let preservedAnnotationTyRaw =
                   case mAnnLambda of
                     Just (_, _, annotationEdge, _) ->
-                      IntMap.lookup
-                        (getEdgeId annotationEdge)
-                        (algAnnotationExpectedTypesByEdge algebraContext)
+                      annotationExpectedTypeForEdge
+                        annotationContext
+                        annotationEdge
                     Nothing -> Nothing
             let enclosingConstructionBinderRenames =
                   envConstructionBinderRenames envAtLambdaBoundary
@@ -15864,9 +15862,9 @@ elabAlg algebraContext layer =
                               == Just (annBinderKey mediatorDetails)
                           )
                         annotationTy <-
-                          IntMap.lookup
-                            (getEdgeId annotationEdge)
-                            (algAnnotationExpectedTypesByEdge algebraContext)
+                          annotationExpectedTypeForEdge
+                            annotationContext
+                            annotationEdge
                         pure (TArrow annotationTy annotationTy)
                       _ -> Nothing
                 independentIdentityProducerHead funAnn =
@@ -17637,11 +17635,7 @@ elabAlg algebraContext layer =
       ElabOut
         { elabDetailed = \env -> do
             annotationSourceTy <-
-              case
-                  IntMap.lookup
-                    (getEdgeId eid)
-                    (acAnnotationExpectedTypesByEdge annotationContext)
-                of
+              case annotationExpectedTypeForEdge annotationContext eid of
                   Just ty ->
                     pure
                       ( applyTypeVarRefRenames

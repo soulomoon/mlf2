@@ -30,7 +30,7 @@ module MLF.Elab.Run.Generalize.Prepare.Internal (
     unclaimedEdgesOutsideLocalGammaClosures,
     placeNestedRootRequirements,
     preparedAnnotated,
-    canonicalizePreparedAnn,
+    authorizePreparedAnn,
     preparedReadContextReady,
     preparedResultTypeViewReady,
     preparedIdentityGenerator,
@@ -166,6 +166,14 @@ import MLF.Elab.Elaborate.Algebra
     , OwnerFinalConstruction(..)
     , completeCompilerExactSubtermResultsWithBounds
     , mkEnv
+    )
+import MLF.Elab.Elaborate.Annotation
+    ( AuthorizedElaborationRoot
+    , ElaborationEdgeAuthority
+    , authorizedElaborationRoots
+    , elaborationAnnotationExpectedTypesByEdge
+    , elaborationEdgeArtifacts
+    , mkElaborationEdgeAuthority
     )
 import MLF.Elab.Elaborate.Algebra.ConstructionGamma
     ( completeUnboundedForallSpecializesTo
@@ -394,17 +402,15 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaReadModel :: Either ElabError (ElabReadModel 'Presolved)
     , pgaBaseReadModel :: Either ElabError (ElabReadModel 'Presolved)
     , pgaResultTypeView :: Either ElabError (ResultTypeView 'Presolved)
-    , pgaEdgeArtifacts :: EdgeArtifacts
+    , pgaElaborationEdgeAuthority :: ElaborationEdgeAuthority
     , pgaExactProducerTypes :: Either ElabError (IntMap.IntMap ElabType)
-    -- Source annotations are occurrence-owned.  Solving may identify their
-    -- graph result nodes, but it cannot identify the source coercion edges
-    -- that carry their expected types.
-    , pgaAnnotationExpectedTypesByEdge :: IntMap.IntMap ElabType
     , pgaAnnotationSourceNodeKeys :: IntSet.IntSet
     , pgaScopeOverrides :: ConstructionScopes
     , pgaSubtermGeneralizations :: Either ElabError SubtermGeneralizations
     , pgaIdentityGenerator :: Either ElabError IdentityGenerator
     , pgaAnnotated :: AnnExpr
+    , pgaAuthorizedElaborationRoots
+        :: [(AnnExpr, AuthorizedElaborationRoot)]
     , pgaAnnNodeCanonical :: NodeId -> NodeId
     , pgaCanonical :: NodeId -> NodeId
     , pgaPlanBuilder :: PresolutionPlanBuilder
@@ -420,6 +426,17 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     -- only for occurrence-owned application endpoints.
     , pgaResolvedTermSchemes :: Map.Map ResolvedTermIdentityKey SchemeInfo
     }
+
+preparedEdgeArtifacts :: PreparedGeneralizationArtifact -> EdgeArtifacts
+preparedEdgeArtifacts =
+    elaborationEdgeArtifacts . pgaElaborationEdgeAuthority
+
+preparedAnnotationExpectedTypesByEdge
+    :: PreparedGeneralizationArtifact
+    -> IntMap.IntMap ElabType
+preparedAnnotationExpectedTypesByEdge =
+    elaborationAnnotationExpectedTypesByEdge
+        . pgaElaborationEdgeAuthority
 
 withPreparedResolvedTermSchemes
     :: Map.Map ResolvedTermIdentityKey SchemeInfo
@@ -3742,6 +3759,19 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
                 Left (Solve.ValidationFailed messages)
             Left err ->
                 Left (Solve.ValidationFailed [show err])
+    elaborationEdgeAuthority <-
+        case
+            mkElaborationEdgeAuthority
+                annNodeCanonical
+                annotationExpectedTypesByEdge
+                edgeArtifacts
+                annCanons
+        of
+            Right authority -> pure authority
+            Left (ValidationFailed messages) ->
+                Left (Solve.ValidationFailed messages)
+            Left err ->
+                Left (Solve.ValidationFailed [show err])
     scopeOverrideParts <-
         case
             traverse
@@ -3803,14 +3833,15 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
             , pgaReadModel = readModel
             , pgaBaseReadModel = baseReadModel
             , pgaResultTypeView = resultTypeView
-            , pgaEdgeArtifacts = edgeArtifacts
+            , pgaElaborationEdgeAuthority = elaborationEdgeAuthority
             , pgaExactProducerTypes = exactProducerTypes
-            , pgaAnnotationExpectedTypesByEdge = annotationExpectedTypesByEdge
             , pgaAnnotationSourceNodeKeys = annotationSourceNodeKeys
             , pgaScopeOverrides = scopeOverrides
             , pgaSubtermGeneralizations = subtermGeneralizations
             , pgaIdentityGenerator = preparedGenerator
             , pgaAnnotated = annCanon
+            , pgaAuthorizedElaborationRoots =
+                zip anns (authorizedElaborationRoots elaborationEdgeAuthority)
             , pgaAnnNodeCanonical = annNodeCanonical
             , pgaCanonical = pvCanonical presolutionViewForGen
             , pgaPlanBuilder = planBuilder
@@ -5174,16 +5205,27 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
 preparedAnnotated :: PreparedGeneralizationArtifact -> AnnExpr
 preparedAnnotated = pgaAnnotated
 
-canonicalizePreparedAnn
+-- | Select the canonical root that was sealed during preparation.  Compare the
+-- complete source tree and return the stored capability; never canonicalize a
+-- new tree against an existing authority after the fact.
+authorizePreparedAnn
     :: PreparedGeneralizationArtifact
     -> AnnExpr
-    -> Either ElabError AnnExpr
-canonicalizePreparedAnn artifact =
-    alignAnnInstantiationSites
-        (pgaEdgeArtifacts artifact)
-        . redirectAndCanonicalizeAnn
-            (pgaAnnNodeCanonical artifact)
-            (pgaRedirects artifact)
+    -> Either ElabError AuthorizedElaborationRoot
+authorizePreparedAnn artifact sourceAnn =
+    case
+        find
+            ((== sourceAnn) . fst)
+            (pgaAuthorizedElaborationRoots artifact)
+    of
+        Just (_, authorizedRoot) -> Right authorizedRoot
+        Nothing ->
+            Left
+                ( ValidationFailed
+                    [ "annotated root does not belong to the prepared edge authority"
+                    , "  root: " ++ show sourceAnn
+                    ]
+                )
 
 preparedReadContextReady :: PreparedGeneralizationArtifact -> Either ElabError ()
 preparedReadContextReady artifact = do
@@ -5561,13 +5603,11 @@ preparedElaborationEnvWithInitialEnv annSourceTypes initialTermEnv artifact =
         , eeCanonical = pgaAnnNodeCanonical artifact
         , eeReadModel = pgaReadModel artifact
         , eeGaParents = pgaBindParentsGa artifact
-        , eeEdgeArtifacts = pgaEdgeArtifacts artifact
         , eeExactProducerTypes = pgaExactProducerTypes artifact
         , eeCompilerExactConstructionRefs =
             IntMap.map ceepConstructionRefs
                 <$> pgaCompilerExactEdgePlans artifact
         , eeScopeOverrides = pgaScopeOverrides artifact
-        , eeAnnotationExpectedTypesByEdge = pgaAnnotationExpectedTypesByEdge artifact
         , eeExactLambdaParamSourceTypes =
             canonicalizePreparedExactLambdaParamSourceTypes artifact annSourceTypes
         , eeSourceTypeHeadIdentities = Map.empty
@@ -5601,7 +5641,7 @@ stripPreparedWitnesslessAuthoritativeAnn
     -> (AnnExpr, AnnExpr)
 stripPreparedWitnesslessAuthoritativeAnn artifact =
     stripWitnesslessAuthoritativeAnnWith
-        (eaEdgeWitnesses (pgaEdgeArtifacts artifact))
+        (eaEdgeWitnesses (preparedEdgeArtifacts artifact))
 
 -- | Publish the exact endpoint of a resolved application argument before root
 -- Gamma planning. Both the function and argument schemes come from their
@@ -5748,7 +5788,7 @@ prepareOrdinaryRootConstructionScope artifact authoritativeAnnCanon sourceScopeA
             (pgaBindParentsGa artifact)
             rootScope
             (pgaPresolutionView artifact)
-            (pgaEdgeArtifacts artifact)
+            (preparedEdgeArtifacts artifact)
             exactProducerTypes
             sourceBinderRefs
             sourceBinderRefs
@@ -5966,7 +6006,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
             (pgaBindParentsGa artifact)
             rootScope
             (pgaPresolutionView artifact)
-            (pgaEdgeArtifacts artifact)
+            (preparedEdgeArtifacts artifact)
             exactProducerTypes
             constructionCertificateSourceBinderRefs
             constructionSourceBinderRefs
@@ -6004,7 +6044,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
             (pgaBindParentsGa artifact)
             rootScope
             (pgaPresolutionView artifact)
-            (pgaEdgeArtifacts artifact)
+            (preparedEdgeArtifacts artifact)
             exactProducerTypes
             resultCertificateSourceBinderRefs
             resultSourceBinderRefs
@@ -6336,7 +6376,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
     let unvalidatedRootSchemeInfo = schemeInfoFromRefSubst scheme subst
     mRootRaiseMergeAuthority <-
         rootRaiseMergeAuthorityForExpression
-            (pgaEdgeArtifacts artifact)
+            (preparedEdgeArtifacts artifact)
             authoritativeResultAnnCanon
     let rootRaiseMergeClosedLocally =
             case mRootRaiseMergeAuthority of
@@ -6370,7 +6410,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
             else
                 case
                     prepareRootRaiseMergeScheme
-                        (pgaEdgeArtifacts artifact)
+                        (preparedEdgeArtifacts artifact)
                         authoritativeResultAnnCanon
                         constructionRequirements
                         unvalidatedRootSchemeInfo
@@ -6622,7 +6662,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
             AAnn _ _ edgeId ->
                 IntMap.lookup
                     (getEdgeId edgeId)
-                    (pgaAnnotationExpectedTypesByEdge artifact)
+                    (preparedAnnotationExpectedTypesByEdge artifact)
             ALetScope inner _ _ ->
                 transparentRootSourceAnnotationExpectedType inner
             _ -> Nothing
@@ -8669,7 +8709,7 @@ preparedTransparentRootSourceAnnotationBinders artifact = collect
                     case
                         IntMap.lookup
                             (getEdgeId edgeId)
-                            (pgaAnnotationExpectedTypesByEdge artifact)
+                            (preparedAnnotationExpectedTypesByEdge artifact)
                     of
                         Just ty -> pure ty
                         Nothing ->
@@ -8808,7 +8848,7 @@ sourceAnnotationDeclarationIdentitiesForAnn artifact = collect
                     case
                         IntMap.lookup
                             (getEdgeId edgeId)
-                            (pgaAnnotationExpectedTypesByEdge artifact)
+                            (preparedAnnotationExpectedTypesByEdge artifact)
                     of
                         Just ty -> pure ty
                         Nothing ->

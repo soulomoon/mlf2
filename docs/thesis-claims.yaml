@@ -402,10 +402,10 @@ claims:
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#mkPhiReplayCertificate
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
-        - src/MLF/Elab/Elaborate/Annotation.hs#validateElaborationEdgeAuthority
+        - src/MLF/Elab/Elaborate/Annotation.hs#mkElaborationEdgeAuthority
     deviations: []
     status: defended
-    notes: "EdgeArtifacts is an opaque map of complete expansion/witness/trace/construction packets published through a normalization-owned opaque token from construction-closed edge execution artifacts. Final result construction cannot reread mutable edge state. The Base owner module, PresolutionResult constructor, and witness-assembly implementation module are hidden; component-map builders exist only in TestSupport and prove identical keys plus embedded EdgeId agreement. PresolutionState is constructed from the same complete packets, while its legacy component-map fixture and projections are test-only. Phi, Omega, and application-site preparation consume the aggregate by one edge lookup; a missing site packet is valid only with explicit identity-edge authority."
+    notes: "EdgeArtifacts is an opaque map of complete expansion/witness/trace/construction packets published through a normalization-owned opaque token from construction-closed edge execution artifacts. Final result construction cannot reread mutable edge state. The Base owner module, PresolutionResult constructor, and witness-assembly implementation module are hidden; component-map builders exist only in TestSupport and prove identical keys plus embedded EdgeId agreement. PresolutionState is constructed from the same complete packets, while its legacy component-map fixture and projections are test-only. Generalization preparation seals occurrence-owned annotation types, the complete aggregate, and each accepted canonical root into ElaborationEdgeAuthority and AuthorizedElaborationRoot capabilities; Phase 6 cannot receive their components separately. Phi, Omega, and application-site preparation consume that aggregate by one edge lookup; a missing site packet is valid only with explicit identity-edge authority."
 
   - id: CLM-SIGMA-REORDER
     type: definition

@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Changed
+- Made the annotation-type/replay boundary construction-owned. Generalization
+  preparation now validates all canonical roots once and seals their
+  occurrence-owned annotation types together with the complete
+  `EdgeArtifacts` aggregate in an opaque `ElaborationEdgeAuthority`. Accepted
+  roots become opaque `AuthorizedElaborationRoot` capabilities, and the
+  Phase-6 entry point requires that capability instead of accepting an
+  arbitrary `AnnExpr` beside an environment. Removed the parallel
+  expected-type/artifact fields from prepared, environment, annotation, and
+  algebra contexts and removed the post-construction validation pass.
+  Construction rejects missing/orphan types, duplicate annotation-edge
+  ownership, missing replay/identity evidence, and application endpoint
+  disagreement.
 - Made final witness publication depend on normalization by construction.
   `normalizeEdgeWitnessesM` now returns an opaque
   `NormalizedEdgeArtifacts` token, and the presolution driver must consume
@@ -46,9 +58,10 @@
   constructor rejects unequal component key sets and a witness whose embedded
   `EdgeId` differs from the map key; safe map/filter/insert operations preserve
   that invariant. Final preparation consumes the aggregate directly, while Φ,
-  annotation validation, application edge computation, identity-topology
-  recovery, identity-edge recognition, and root-`RaiseMerge` authority select
-  one packet with one `EdgeId` lookup. Missing non-trivial edges are reported
+  annotation authority construction, application edge computation,
+  identity-topology recovery, identity-edge recognition, and root-`RaiseMerge`
+  authority select one packet with one `EdgeId` lookup. Missing non-trivial
+  edges are reported
   as missing complete packets rather than separately missing witness/trace
   entries. Production code can no longer construct or repair a
   witness-only, trace-only, expansion-only, or construction-only edge after
@@ -60,8 +73,8 @@
   `EdgeArtifacts` aggregate and projects witness/trace from its complete
   edge-keyed packet; Phase 6 can no longer compose witness and trace maps from
   different presolution packets.
-  Annotation contexts and pre-elaboration authority validators retain that
-  aggregate unchanged and reuse the certificate's checked witness/trace.
+  `ElaborationEdgeAuthority` retains that aggregate unchanged, and authorized
+  annotation contexts reuse the certificate's checked witness/trace.
   Association is deliberately not guessed from root IDs, which may remain in
   different source, destination, and construction domains. Missing-trace
   construction remains representable only behind `MLF.Elab.Phi.TestSupport`

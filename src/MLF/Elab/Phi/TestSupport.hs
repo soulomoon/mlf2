@@ -44,6 +44,7 @@ import MLF.Constraint.Types.Witness
     )
 import MLF.Elab.Elaborate.Annotation
     ( AnnotationContext(..)
+    , mkElaborationEdgeAuthority
     , reifyInstFromSourceScheme
     )
 import MLF.Elab.Elaborate.Scope (ScopeContext(..))
@@ -212,6 +213,12 @@ reifyInstWithSourceScheme
     -> Either ElabError Instantiation
 reifyInstWithSourceScheme traceCfg planBuilder presolutionView gaParents edgeArtifacts sourceScheme ann edgeId = do
     readModel <- buildElabReadModel presolutionView
+    edgeAuthority <-
+        mkElaborationEdgeAuthority
+            (pvCanonical presolutionView)
+            IntMap.empty
+            edgeArtifacts
+            []
     let namedSet = ermNamedNodes readModel
         generalizeAt mbGa =
             generalizeAtWithBuilder planBuilder mbGa presolutionView
@@ -245,12 +252,11 @@ reifyInstWithSourceScheme traceCfg planBuilder presolutionView gaParents edgeArt
             AnnotationContext
                 { acTraceConfig = traceCfg
                 , acScopeContext = scopeContext
-                , acAnnotationExpectedTypesByEdge = IntMap.empty
+                , acElaborationEdgeAuthority = edgeAuthority
                 , acSourceTypeHeadIdentities = Map.empty
                 , acSourceTypeBinderIdentities = Map.empty
                 , acSourceBinderRefs = IntMap.empty
                 , acDirectSourceBinderKeys = IntSet.empty
                 , acSubtermGeneralizations = Map.empty
-                , acEdgeArtifacts = edgeArtifacts
                 }
     reifyInstFromSourceScheme annotationContext namedSet sourceScheme ann edgeId

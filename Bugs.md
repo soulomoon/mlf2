@@ -8,6 +8,41 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-006
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: Phase 6 stored source-annotation expected types and replay artifacts
+  in independent fields and accepted an arbitrary annotated tree beside them.
+- Expected vs actual:
+  - Expected: thesis coercion `cκ` is inseparable from the occurrence-owned
+    edge and canonical annotated root whose graph construction produced κ.
+  - Actual before fix: `PreparedGeneralizationArtifact`, `ElabEnv`,
+    `AnnotationContext`, and `AlgebraContext` carried parallel expected-type
+    and edge-artifact maps. A runtime validator checked the selected tree
+    afterward, but the types still permitted components or a tree from
+    different preparation packets to be combined.
+- Fix:
+  - Added opaque `ElaborationEdgeAuthority`, constructed once from all
+    canonical roots, occurrence-owned expected types, and complete
+    `EdgeArtifacts`.
+  - Reject missing/orphan annotation types, duplicate annotation-edge
+    ownership, missing replay/identity evidence, and application endpoint
+    disagreement at authority construction.
+  - Publish only opaque `AuthorizedElaborationRoot` values and require one at
+    the Phase-6 entry point; removed the parallel fields and later validation
+    calls.
+- Regression tests:
+  - `test/ElaborationSpec.hs` (`annotation elaboration requires one complete edge packet by construction`)
+  - `test/ElaborationSpec.hs` (lambda/application edge-authority guards)
+  - `test/PipelineSpec.hs` (`prepared generalization artifact drives redirecting instantiation behavior`)
+  - `test/RepoGuardSpec.hs` (`annotation types and replay artifacts stay construction-paired`)
+- Thesis impact:
+  - Makes the occurrence/κ association used by §§15.3.5-15.3.8
+    construction-owned instead of a post-construction convention. This is
+    stronger executable evidence, not a mechanized proof for all eMLF terms.
+
 ### BUG-2026-07-26-005
 - Status: Resolved
 - Priority: High

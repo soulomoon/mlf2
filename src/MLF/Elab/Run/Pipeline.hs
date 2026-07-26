@@ -112,7 +112,7 @@ import MLF.Constraint.Types.Graph
     toListNode,
   )
 import MLF.Constraint.Types.Phase (Phase (Acyclic, Presolved, Raw))
-import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnvDetailed, validateElaborationWithEnv)
+import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnvDetailed)
 import MLF.Elab.Elaborate.Algebra
   ( CompilerExactResultBoundCertificate,
     ElaboratedTerm (..),
@@ -126,7 +126,9 @@ import MLF.Elab.Elaborate.Algebra
     withEnvLocalGammaClosures,
   )
 import MLF.Elab.Elaborate.Annotation
-  ( elaborateClosedExactAnnotationTermAtType,
+  ( AuthorizedElaborationRoot,
+    authorizedElaborationResultAnn,
+    elaborateClosedExactAnnotationTermAtType,
     sourceTypeToElabTypeWithIdentitiesFromSupply,
   )
 import MLF.Elab.Generalize
@@ -158,7 +160,7 @@ import MLF.Elab.Run.Generalize.Prepare
     applyPreparedCompilerExactRootBinderIdentities,
     applyPreparedRootBinderIdentities,
     applyPreparedRootSourceTypeBinderIdentities,
-    canonicalizePreparedAnn,
+    authorizePreparedAnn,
     computePreparedResultTypeWithRootGeneralization,
     completePreparedCompilerExactSubtermResults,
     generalizePreparedRootDetailed,
@@ -167,7 +169,6 @@ import MLF.Elab.Run.Generalize.Prepare
     prepareGeneralizationArtifact,
     prepareGeneralizationArtifactForRoots,
     withPreparedResolvedTermSchemes,
-    preparedAnnotated,
     preparedElaborationConfig,
     preparedElaborationEnvWithInitialEnv,
     preparedIdentityGenerator,
@@ -575,11 +576,13 @@ data DeferredRootExactAnnotation = DeferredRootExactAnnotation
 
 data RootElaborationPlan
   = OrdinaryRootElaborationPlan
-      { repElaborationCanonicalAnn :: !AnnExpr,
+      { repAuthorizedElaborationRoot :: !AuthorizedElaborationRoot,
+        repElaborationCanonicalAnn :: !AnnExpr,
         repElaborationPrecanonicalAnn :: !AnnExpr
       }
   | ExactRootElaborationPlan
-      { repElaborationCanonicalAnn :: !AnnExpr,
+      { repAuthorizedElaborationRoot :: !AuthorizedElaborationRoot,
+        repElaborationCanonicalAnn :: !AnnExpr,
         repElaborationPrecanonicalAnn :: !AnnExpr,
         repResultCanonicalAnn :: !AnnExpr,
         repResultPrecanonicalAnn :: !AnnExpr,
@@ -652,15 +655,19 @@ data FreshenedPipelineRootStage = FreshenedPipelineRootStage
 
 type PipelineStage a = ExceptT PipelineError IO a
 
-rootElaborationPlan :: AnnExpr -> AnnExpr -> Either ElabError RootElaborationPlan
-rootElaborationPlan annCanon annPre =
+rootElaborationPlan ::
+  AuthorizedElaborationRoot ->
+  AnnExpr ->
+  Either ElabError RootElaborationPlan
+rootElaborationPlan authorizedRoot annPre =
   case annCanon of
     AExactAnn innerCanon _ _ edgeId ->
       case annPre of
         AExactAnn innerPre _ _ _ ->
           Right
             ExactRootElaborationPlan
-              { repElaborationCanonicalAnn = innerCanon,
+              { repAuthorizedElaborationRoot = authorizedRoot,
+                repElaborationCanonicalAnn = innerCanon,
                 repElaborationPrecanonicalAnn = innerPre,
                 repResultCanonicalAnn = annCanon,
                 repResultPrecanonicalAnn = annPre,
@@ -679,9 +686,12 @@ rootElaborationPlan annCanon annPre =
     _ ->
       Right
         OrdinaryRootElaborationPlan
-          { repElaborationCanonicalAnn = annCanon,
+          { repAuthorizedElaborationRoot = authorizedRoot,
+            repElaborationCanonicalAnn = annCanon,
             repElaborationPrecanonicalAnn = annPre
           }
+  where
+    annCanon = authorizedElaborationResultAnn authorizedRoot
 
 -- | Prepare only the authority available before term construction.  Ordinary
 -- roots receive a construction-only Γ.  A compiler-owned exact root fixes its
@@ -1398,7 +1408,6 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
           (preparedExternalSchemesByIdentity extPrepared)
           prepared0
       initialTcEnv = preparedExternalTypeCheckEnv extPrepared
-      annCanon = preparedAnnotated prepared
       elabConfig = preparedElaborationConfig traceCfg prepared
       elabEnv =
         preparedElaborationEnvWithSourceBinderAliases
@@ -1406,7 +1415,9 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
           annSourceTypes
           extPrepared
           prepared
-  rootPlan <- fromElabError (rootElaborationPlan annCanon ann)
+  authorizedRoot <-
+    fromElabError (authorizePreparedAnn prepared ann)
+  rootPlan <- fromElabError (rootElaborationPlan authorizedRoot ann)
   preparedRootConstruction <-
     fromElabError
       ( prepareRootConstruction
@@ -1420,16 +1431,12 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
           (repElaborationCanonicalAnn rootPlan)
           elabEnv
       )
-  case preparedRootConstruction of
-    PreparedExactRootConstruction{} ->
-      fromElabError (validateElaborationWithEnv constructionElabEnv annCanon)
-    PreparedOrdinaryRootConstruction{} -> pure ()
   elaboration <-
     case
         elaborateWithEnvDetailed
           elabConfig
           constructionElabEnv
-          (repElaborationCanonicalAnn rootPlan)
+          (repAuthorizedElaborationRoot rootPlan)
       of
         Right elaborated -> pure elaborated
         Left err ->
@@ -1806,7 +1813,6 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
           withPreparedResolvedTermSchemes
             (preparedExternalSchemesByIdentity extPrepared)
             prepared0
-        annCanon = preparedAnnotated prepared
         elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
           preparedElaborationEnvWithSourceBinderAliases
@@ -1814,6 +1820,9 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
             annSourceTypes
             extPrepared
             prepared
+    authorizedRoot <-
+      evaluatePipelineEitherSuffix timing label ".authorize_elaboration_root" $
+        fromElabError (authorizePreparedAnn prepared ann)
     identityGenerator <-
       evaluatePipelineEitherSuffix timing label ".identity_supply" $
         fromElabError (preparedIdentityGenerator prepared)
@@ -1828,7 +1837,7 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
       prepared
       elabConfig
       elabEnv
-      annCanon
+      authorizedRoot
       ann
 
 prepareRootPresolutionContextWithTiming ::
@@ -1930,14 +1939,16 @@ prepareRootFinalizationStageWithTiming timing label traceCfg preparedContext =
       (Left err, _) -> fromPipelineEither (Left err)
       (_, Left err) -> fromPipelineEither (Left err)
       (Right (), Right ()) -> pure ()
-    let annCanon = preparedAnnotated prepared
-        elabConfig = preparedElaborationConfig traceCfg prepared
+    let elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
           preparedElaborationEnvWithSourceBinderAliases
             (rpSourceTypeBinderAliases partition)
             annSourceTypes
             extPrepared
             prepared
+    authorizedRoot <-
+      evaluatePipelineEitherSuffix timing label ".authorize_elaboration_root" $
+        fromElabError (authorizePreparedAnn prepared ann)
     preparePipelineRootStage
       timing
       label
@@ -1946,7 +1957,7 @@ prepareRootFinalizationStageWithTiming timing label traceCfg preparedContext =
       prepared
       elabConfig
       elabEnv
-      annCanon
+      authorizedRoot
       ann
   where
     finalizationContext = prfcFinalizationContext preparedContext
@@ -2756,11 +2767,11 @@ finishPreparedPipelineRootWithTiming ::
   IO (Either PipelineError PipelineElabDetailedResult)
 finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv annPre =
   runExceptT $ do
-    annCanon <-
+    authorizedRoot <-
       ExceptT
         ( pure
             ( fromElabError
-                (canonicalizePreparedAnn prepared annPre)
+                (authorizePreparedAnn prepared annPre)
             )
         )
     finishPreparedPipelineRootStage
@@ -2774,7 +2785,7 @@ finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode
       prepared
       elabConfig
       elabEnv
-      annCanon
+      authorizedRoot
       annPre
 
 finishPreparedPipelineRootStage ::
@@ -2788,10 +2799,10 @@ finishPreparedPipelineRootStage ::
   PreparedGeneralizationArtifact ->
   ElabConfig 'Presolved ->
   ElabEnv 'Presolved ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   AnnExpr ->
   PipelineStage PipelineElabDetailedResult
-finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv annCanon annPre = do
+finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv authorizedRoot annPre = do
   preparedRoot <-
     preparePipelineRootStage
       timing
@@ -2801,7 +2812,7 @@ finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode trac
       prepared
       elabConfig
       elabEnv
-      annCanon
+      authorizedRoot
       annPre
   freshenedRoot <-
     closeAndFreshenPipelineRootStage
@@ -2824,14 +2835,14 @@ preparePipelineRootStage ::
   PreparedGeneralizationArtifact ->
   ElabConfig 'Presolved ->
   ElabEnv 'Presolved ->
-  AnnExpr ->
+  AuthorizedElaborationRoot ->
   AnnExpr ->
   PipelineStage PreparedPipelineRootStage
-preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig elabEnv annCanon annPre = do
+preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig elabEnv authorizedRoot annPre = do
   let initialTcEnv = preparedExternalTypeCheckEnv extPrepared
   rootPlan <-
     evaluatePipelineEitherSuffix timing label ".plan_root_exact" $
-      fromElabError (rootElaborationPlan annCanon annPre)
+      fromElabError (rootElaborationPlan authorizedRoot annPre)
   preparedRootConstruction <-
     evaluatePipelineEitherSuffix timing label ".generalize_root_construction" $
       fromElabError
@@ -2847,18 +2858,13 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
             (repElaborationCanonicalAnn rootPlan)
             elabEnv
         )
-  case preparedRootConstruction of
-    PreparedExactRootConstruction{} ->
-      evaluatePipelineEitherSuffix timing label ".validate_root_exact" $
-        fromElabError (validateElaborationWithEnv constructionElabEnv annCanon)
-    PreparedOrdinaryRootConstruction{} -> pure ()
   elaboration <-
     evaluatePipelineEitherSuffix timing label ".elaborate" $
       case
           elaborateWithEnvDetailed
             elabConfig
             constructionElabEnv
-            (repElaborationCanonicalAnn rootPlan)
+            (repAuthorizedElaborationRoot rootPlan)
         of
           Right elaborated -> pure elaborated
           Left err ->

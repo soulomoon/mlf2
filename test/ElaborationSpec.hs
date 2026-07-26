@@ -7,7 +7,7 @@ import IdentityTestSupport
 import qualified ElabTypeTestSupport as TestElab
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, unless, when)
-import Data.Either (isLeft)
+import Data.Either (isLeft, isRight)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List (find, isInfixOf, mapAccumL)
@@ -1202,10 +1202,51 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           IntMap.member edgeKey witnesses `shouldBe` True
           IntMap.member edgeKey traces `shouldBe` True
           IntMap.member edgeKey expansions `shouldBe` True
-          Annotation.validateAnnotationEdgeAuthority sourceTypes edgeArtifacts annCanon
-            `shouldBe` Right ()
-          Annotation.validateAnnotationEdgeAuthority IntMap.empty edgeArtifacts annCanon
+          edgeAuthority <-
+            requireRight
+              ( Annotation.mkElaborationEdgeAuthority
+                  (rtcCanonical inputs)
+                  sourceTypes
+                  edgeArtifacts
+                  [annCanon]
+              )
+          case Annotation.authorizedElaborationRoots edgeAuthority of
+            [authorizedRoot] -> do
+              Annotation.authorizedElaborationResultAnn authorizedRoot
+                `shouldBe` annCanon
+              Annotation.authorizedElaborationConstructionAnn authorizedRoot
+                `shouldBe` annCanon
+            roots ->
+              expectationFailure
+                ("expected one authorized elaboration root, got " ++ show roots)
+          Annotation.mkElaborationEdgeAuthority
+            (rtcCanonical inputs)
+            IntMap.empty
+            edgeArtifacts
+            [annCanon]
             `shouldBe` Left (Elab.ValidationFailed ["missing source type for annotation " ++ show eid])
+          Annotation.mkElaborationEdgeAuthority
+            (rtcCanonical inputs)
+            (IntMap.insert (edgeKey + 100000) (TestElab.tBase (BaseTy "Bool")) sourceTypes)
+            edgeArtifacts
+            [annCanon]
+            `shouldBe` Left
+              ( Elab.ValidationFailed
+                  [ "annotation expected-type authority has no source occurrence",
+                    "  edges: [" ++ show (EdgeId (edgeKey + 100000)) ++ "]"
+                  ]
+              )
+          Annotation.mkElaborationEdgeAuthority
+            (rtcCanonical inputs)
+            sourceTypes
+            edgeArtifacts
+            [annCanon, annCanon]
+            `shouldBe` Left
+              ( Elab.ValidationFailed
+                  [ "one annotation edge is owned by multiple source occurrences",
+                    "  edge: " ++ show eid
+                  ]
+              )
           forM_
             [ mkEdgeArtifacts
                 expansions
@@ -1253,10 +1294,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         ALam _ _ _ _ _ bodyEid _ -> do
           let edgeKey = getEdgeId bodyEid
               identityEdgesWithoutBody = IntSet.delete edgeKey identityEdges
-              validate =
-                Annotation.validateElaborationEdgeAuthority
+              validate edgeArtifacts' ann =
+                Annotation.mkElaborationEdgeAuthority
                   (rtcCanonical inputs)
                   IntMap.empty
+                  edgeArtifacts'
+                  [ann]
               nonIdentityArtifacts =
                 setEdgeArtifactsIdentityEdges
                   identityEdgesWithoutBody
@@ -1267,7 +1310,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           IntMap.member edgeKey traces `shouldBe` True
           IntMap.member edgeKey expansions `shouldBe` True
           validate nonIdentityArtifacts annCanon
-            `shouldBe` Right ()
+            `shouldSatisfy` isRight
           validate withoutBodyArtifacts annCanon
             `shouldSatisfy` isLeft
           validate
@@ -1276,7 +1319,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 withoutBodyArtifacts
             )
             annCanon
-            `shouldBe` Right ()
+            `shouldSatisfy` isRight
         other ->
           expectationFailure ("Expected top-level ALam for lambda-body authority guard, got " ++ show other)
 
@@ -1291,11 +1334,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           edgeArtifacts = rtcEdgeArtifacts inputs
           witnesses = eaEdgeWitnesses edgeArtifacts
           identityEdges = eaIdentityEdges edgeArtifacts
-          validate =
-            Annotation.validateElaborationEdgeAuthority
+          validate ann =
+            Annotation.mkElaborationEdgeAuthority
               (rtcCanonical inputs)
               IntMap.empty
               edgeArtifacts
+              [ann]
       case annCanon of
         ALet name details schemeGen schemeRoot expVar rhsGen rhs (ALetScope (AApp fun arg funSite argSite appNode) scopeNode scopeEid) resultNode -> do
           let eid@(EdgeId edgeKey) = instantiationSiteEdgeId funSite
@@ -1316,7 +1360,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               badTargetAnn =
                 rebuild (funSite {instantiationSiteTarget = stale})
           IntSet.member edgeKey identityEdges `shouldBe` False
-          validate annCanon `shouldBe` Right ()
+          validate annCanon `shouldSatisfy` isRight
           validate badSourceAnn
             `shouldBe` Left
               (Elab.ValidationFailed ["application function witness source does not match its construction site: " ++ show eid])

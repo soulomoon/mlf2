@@ -3,11 +3,22 @@
 {-# LANGUAGE KindSignatures #-}
 
 module MLF.Elab.Elaborate.Annotation
-  ( AnnotationContext (..),
+  ( ElaborationEdgeAuthority,
+    mkElaborationEdgeAuthority,
+    elaborationEdgeArtifacts,
+    elaborationAnnotationExpectedTypesByEdge,
+    AuthorizedElaborationRoot,
+    authorizedElaborationRoots,
+    authorizedElaborationResultAnn,
+    authorizedElaborationConstructionAnn,
+    authorizedElaborationEdgeAuthority,
+    AnnotationContext (..),
+    acEdgeArtifacts,
     acEdgeWitnesses,
     acEdgeTraces,
     acEdgeExpansions,
     acIdentityEdges,
+    annotationExpectedTypeForEdge,
     AnnotationBoundaryRole (..),
     closeTermForAnnotation,
     stripUnusedTopTyAbs,
@@ -21,8 +32,6 @@ module MLF.Elab.Elaborate.Annotation
     elaborateClosedExactAnnotationTerm,
     elaborateClosedExactAnnotationTermAtType,
     constructExactTermAtType,
-    validateAnnotationEdgeAuthority,
-    validateElaborationEdgeAuthority,
     freshenTermTypeAbsAgainstEnv,
     reifyInst,
     reifyInstWithFrozenEndpoints,
@@ -223,114 +232,123 @@ import MLF.Types.Identity
   )
 import MLF.Util.Trace (TraceConfig, traceElab)
 
-data AnnotationContext (p :: Phase) = AnnotationContext
-  { acTraceConfig :: TraceConfig,
-    acScopeContext :: ScopeContext p,
-    acAnnotationExpectedTypesByEdge :: IntMap.IntMap ElabType,
-    acSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
-    acSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
-    acSourceBinderRefs :: IntMap.IntMap TypeBinderRef,
-    acDirectSourceBinderKeys :: IntSet.IntSet,
-    acSubtermGeneralizations :: SubtermGeneralizations,
-    acEdgeArtifacts :: EdgeArtifacts
+-- | Construction authority for all instantiation edges consumed while
+-- elaborating one prepared root set.
+--
+-- Source-annotation types and replay artifacts are deliberately stored in one
+-- opaque value.  The thesis coercion @cκ@ (§12.3.2, §15.3.8) associates κ with
+-- one occurrence-owned instantiation edge; allowing callers to install the
+-- expected-type map and the replay aggregate independently would make a
+-- same-numbered edge from a different preparation packet representable.
+data ElaborationEdgeAuthority = ElaborationEdgeAuthority
+  { elaborationAnnotationExpectedTypesByEdge :: !(IntMap.IntMap ElabType),
+    elaborationEdgeArtifacts :: !EdgeArtifacts,
+    elaborationAuthorizedRootAnns :: ![AnnExpr]
   }
+  deriving (Eq, Show)
 
-acEdgeWitnesses :: AnnotationContext p -> IntMap.IntMap EdgeWitness
-acEdgeWitnesses = eaEdgeWitnesses . acEdgeArtifacts
+-- | One annotated root sealed together with the edge authority that validated
+-- it.  The constructor is private, so elaboration cannot be invoked with an
+-- arbitrary 'AnnExpr' and an unrelated valid authority.
+data AuthorizedElaborationRoot = AuthorizedElaborationRoot
+  { authorizedElaborationEdgeAuthority :: !ElaborationEdgeAuthority,
+    authorizedElaborationResultAnn :: !AnnExpr
+  }
+  deriving (Eq, Show)
 
-acEdgeTraces :: AnnotationContext p -> IntMap.IntMap EdgeTrace
-acEdgeTraces = eaEdgeTraces . acEdgeArtifacts
+authorizedElaborationRoots ::
+  ElaborationEdgeAuthority ->
+  [AuthorizedElaborationRoot]
+authorizedElaborationRoots authority =
+  [ AuthorizedElaborationRoot
+      { authorizedElaborationEdgeAuthority = authority,
+        authorizedElaborationResultAnn = ann
+      }
+  | ann <- elaborationAuthorizedRootAnns authority
+  ]
 
-acEdgeExpansions :: AnnotationContext p -> IntMap.IntMap Expansion
-acEdgeExpansions = eaEdgeExpansions . acEdgeArtifacts
+-- | A compiler-exact root owns its final annotation outside term
+-- construction; its child is the root that Phase 6 constructs.  Ordinary
+-- roots construct the whole authorized tree.
+authorizedElaborationConstructionAnn ::
+  AuthorizedElaborationRoot ->
+  AnnExpr
+authorizedElaborationConstructionAnn root =
+  case authorizedElaborationResultAnn root of
+    AExactAnn inner _ _ _ -> inner
+    ann -> ann
 
-acIdentityEdges :: AnnotationContext p -> IntSet.IntSet
-acIdentityEdges = eaIdentityEdges . acEdgeArtifacts
-
--- | Source-annotation authority belongs to the coercion occurrence, not its
--- result graph node.  Distinct annotations may solve to one canonical node but
--- retain distinct source types and lexical binder identities.
-annotationExpectedTypeForEdge :: AnnotationContext p -> EdgeId -> Maybe ElabType
-annotationExpectedTypeForEdge annotationContext edgeId =
-  IntMap.lookup
-    (getEdgeId edgeId)
-    (acAnnotationExpectedTypesByEdge annotationContext)
-
--- | Validate the replay artifacts owned by source annotations before
--- elaboration starts.  An 'AAnn' is the source-level coercion form from
--- thesis §12.3.2/§15.3.8, so its instantiation edge is never an optional
--- let-simplification edge: the presolution witness, replay trace, and explicit
--- expansion are the construction authority for the emitted xMLF computation.
--- 'ALetScope' is intentionally excluded because it represents the
--- constraint-only Var-Let identity edge whose artifacts are discarded after
--- presolution.
-validateAnnotationEdgeAuthority ::
-  IntMap.IntMap ElabType ->
-  EdgeArtifacts ->
-  AnnExpr ->
-  Either ElabError ()
-validateAnnotationEdgeAuthority sourceTypes edgeArtifacts = go
-  where
-    go ann =
-      case ann of
-        AResolvedVar {} -> Right ()
-        ALit {} -> Right ()
-        ALam _ _ _ _ body _ _ -> go body
-        AApp fun arg _ _ _ -> go fun >> go arg
-        ALet _ _ _ _ _ _ rhs body _ -> go rhs >> go body
-        AAnn inner _ eid -> do
-          requireSourceType eid
-          _ <- mkPhiReplayCertificate eid edgeArtifacts
-          go inner
-        ALetScope inner _ _ -> go inner
-        AUnfold inner _ _ -> go inner
-
-    requireSourceType eid@(EdgeId edgeKey)
-      | IntMap.member edgeKey sourceTypes = Right ()
-      | otherwise =
-          Left
-            ( ValidationFailed
-                ["missing source type for annotation " ++ show eid]
-            )
-
--- | Validate every instantiation edge consumed by term elaboration.  The
--- thesis translation (Definition 15.3.12 and Figure 15.3.5) obtains each
--- application computation from its edge witness.  An edge may omit replay
--- artifacts only when an earlier phase retained explicit provenance that the
--- edge was discharged as xMLF identity by construction.
-validateElaborationEdgeAuthority ::
+-- | Pair annotation types with the complete replay aggregate while the
+-- prepared annotated roots are still available.  Every elaboration edge is
+-- checked once here; downstream contexts can only project from this authority
+-- and therefore cannot repair or re-pair the components after construction.
+mkElaborationEdgeAuthority ::
   (NodeId -> NodeId) ->
   IntMap.IntMap ElabType ->
   EdgeArtifacts ->
-  AnnExpr ->
-  Either ElabError ()
-validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
+  [AnnExpr] ->
+  Either ElabError ElaborationEdgeAuthority
+mkElaborationEdgeAuthority canonical sourceTypes edgeArtifacts roots = do
+  annotationEdgeKeys <- foldM validateRoot IntSet.empty roots
+  let orphanSourceTypeKeys =
+        IntMap.keysSet sourceTypes
+          `IntSet.difference` annotationEdgeKeys
+  if IntSet.null orphanSourceTypeKeys
+    then
+      Right
+        ElaborationEdgeAuthority
+          { elaborationAnnotationExpectedTypesByEdge = sourceTypes,
+            elaborationEdgeArtifacts = edgeArtifacts,
+            elaborationAuthorizedRootAnns = roots
+          }
+    else
+      Left
+        ( ValidationFailed
+            [ "annotation expected-type authority has no source occurrence",
+              "  edges: "
+                ++ show
+                  (map EdgeId (IntSet.toAscList orphanSourceTypeKeys))
+            ]
+        )
   where
     identityEdges = eaIdentityEdges edgeArtifacts
 
-    go ann =
+    validateRoot seen ann =
       case ann of
-        AResolvedVar {} -> Right ()
-        ALit {} -> Right ()
+        AResolvedVar {} -> Right seen
+        ALit {} -> Right seen
         ALam _ _ _ _ body bodyEid _ -> do
           requireReplayOrIdentity "lambda body" bodyEid
-          go body
+          validateRoot seen body
         AApp fun arg funSite argSite _ -> do
           requireApplicationSite "application function" funSite
           requireApplicationSite "application argument" argSite
-          go fun
-          go arg
-        ALet _ _ _ _ _ _ rhs body _ -> go rhs >> go body
+          afterFun <- validateRoot seen fun
+          validateRoot afterFun arg
+        ALet _ _ _ _ _ _ rhs body _ -> do
+          afterRhs <- validateRoot seen rhs
+          validateRoot afterRhs body
         AAnn inner _ eid -> do
+          seen' <- claimAnnotationEdge seen eid
           requireSourceType eid
           _ <- requireReplay "annotation" eid
-          go inner
+          validateRoot seen' inner
         ALetScope inner _ eid -> do
           requireIdentity "let scope" eid
-          go inner
+          validateRoot seen inner
         AUnfold inner _ eid -> do
           _ <- requireReplay "unfold" eid
-          go inner
+          validateRoot seen inner
+
+    claimAnnotationEdge seen eid@(EdgeId edgeKey)
+      | IntSet.member edgeKey seen =
+          Left
+            ( ValidationFailed
+                [ "one annotation edge is owned by multiple source occurrences",
+                  "  edge: " ++ show eid
+                ]
+            )
+      | otherwise = Right (IntSet.insert edgeKey seen)
 
     requireReplayOrIdentity label eid@(EdgeId edgeKey)
       | IntSet.member edgeKey identityEdges = Right ()
@@ -379,6 +397,44 @@ validateElaborationEdgeAuthority canonical sourceTypes edgeArtifacts = go
             ( ValidationFailed
                 ["missing source type for annotation " ++ show eid]
             )
+
+data AnnotationContext (p :: Phase) = AnnotationContext
+  { acTraceConfig :: TraceConfig,
+    acScopeContext :: ScopeContext p,
+    acElaborationEdgeAuthority :: ElaborationEdgeAuthority,
+    acSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
+    acSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
+    acSourceBinderRefs :: IntMap.IntMap TypeBinderRef,
+    acDirectSourceBinderKeys :: IntSet.IntSet,
+    acSubtermGeneralizations :: SubtermGeneralizations
+  }
+
+acEdgeArtifacts :: AnnotationContext p -> EdgeArtifacts
+acEdgeArtifacts =
+  elaborationEdgeArtifacts . acElaborationEdgeAuthority
+
+acEdgeWitnesses :: AnnotationContext p -> IntMap.IntMap EdgeWitness
+acEdgeWitnesses = eaEdgeWitnesses . acEdgeArtifacts
+
+acEdgeTraces :: AnnotationContext p -> IntMap.IntMap EdgeTrace
+acEdgeTraces = eaEdgeTraces . acEdgeArtifacts
+
+acEdgeExpansions :: AnnotationContext p -> IntMap.IntMap Expansion
+acEdgeExpansions = eaEdgeExpansions . acEdgeArtifacts
+
+acIdentityEdges :: AnnotationContext p -> IntSet.IntSet
+acIdentityEdges = eaIdentityEdges . acEdgeArtifacts
+
+-- | Source-annotation authority belongs to the coercion occurrence, not its
+-- result graph node.  Distinct annotations may solve to one canonical node but
+-- retain distinct source types and lexical binder identities.
+annotationExpectedTypeForEdge :: AnnotationContext p -> EdgeId -> Maybe ElabType
+annotationExpectedTypeForEdge annotationContext edgeId =
+  IntMap.lookup
+    (getEdgeId edgeId)
+    ( elaborationAnnotationExpectedTypesByEdge
+        (acElaborationEdgeAuthority annotationContext)
+    )
 
 closeTermForAnnotation :: XmlfTerm -> XmlfTerm
 closeTermForAnnotation term =
