@@ -1157,7 +1157,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         }
                   }
           computeResultTypeFromAnn inputsMissingWitness inner inner annNodeId eid
-            `shouldBe` Left (Elab.ValidationFailed ["missing edge witness for annotation"])
+            `shouldBe`
+              Left
+                ( Elab.ValidationFailed
+                    [ "missing edge witness for Phi replay"
+                    , "  edge: " ++ show eid
+                    ]
+                )
         other ->
           expectationFailure ("Expected top-level AAnn for witness guard, got " ++ show other)
 
@@ -5902,6 +5908,58 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           Left (Elab.MissingEdgeTrace (EdgeId eid)) -> eid `shouldBe` 77
           Left err -> expectationFailure ("Expected MissingEdgeTrace, got " ++ show err)
           Right inst -> expectationFailure ("Expected fail-fast MissingEdgeTrace, got " ++ Elab.pretty inst)
+
+      it "constructs Φ replay authority only from one edge-keyed witness/trace packet" $ do
+        let edgeId = EdgeId 77
+            sourceRoot = NodeId 10
+            witnessRoot = NodeId 12
+            resultRoot = NodeId 13
+            traceInfo =
+              EdgeTrace
+                { etRoot = sourceRoot,
+                  etResultRoot = resultRoot,
+                  etBinderArgs = [],
+                  etInterior = sourceInteriorFromList [sourceRoot],
+                  etReplayContract = ReplayContractNone,
+                  etBinderReplayMap = IntMap.empty,
+                  etReplayDomainBinders = [],
+                  etCopyMap = mempty
+                }
+            witness =
+              EdgeWitness
+                { ewEdgeId = edgeId,
+                  ewLeft = sourceRoot,
+                  ewRight = resultRoot,
+                  ewRoot = witnessRoot,
+                  ewForallIntros = 0,
+                  ewWitness = InstanceWitness []
+                }
+            witnesses = IntMap.singleton (getEdgeId edgeId) witness
+            traces = IntMap.singleton (getEdgeId edgeId) traceInfo
+        case Elab.mkPhiReplayCertificate edgeId witnesses traces of
+          Right _ -> pure ()
+          Left err ->
+            expectationFailure
+              ("Expected matching replay certificate, got " ++ show err)
+        case Elab.mkPhiReplayCertificate edgeId witnesses IntMap.empty of
+          Left (Elab.MissingEdgeTrace missingEdge) ->
+            missingEdge `shouldBe` edgeId
+          other ->
+            expectationFailure
+              ("Expected missing-trace rejection, got " ++ show other)
+        let wrongEdge = EdgeId 78
+            wrongKey = getEdgeId wrongEdge
+        case
+            Elab.mkPhiReplayCertificate
+              wrongEdge
+              (IntMap.singleton wrongKey witness)
+              (IntMap.singleton wrongKey traceInfo)
+          of
+          Left (Elab.PhiInvariantError message) ->
+            message `shouldSatisfy` isInfixOf "different edge"
+          other ->
+            expectationFailure
+              ("Expected edge-identity rejection, got " ++ show other)
 
       it "O15-TR-RIGID-RAISE: OpRaise on a rigid node outside I(r) translates to identity" $ do
         let root = NodeId 100

@@ -675,6 +675,14 @@ semantics that are not represented elsewhere just as explicitly.”
   provenance. Witness operation node IDs, `etBinderArgs`, `etInterior`, and
   `etCopyMap` keys live in one source-ID domain; canonical IDs are derived at
   lookup sites rather than globally rewriting trace provenance.
+- Φ/Ω cannot consume a witness and trace independently. The opaque
+  `PhiReplayCertificate` fetches and pairs them at the elaboration boundary
+  through one producer-owned edge key, then checks that the witness's embedded
+  edge identity agrees. It does not rederive packet association from `ewRoot`,
+  `etRoot`, or `etResultRoot`: replay/finalization can leave those IDs in
+  distinct source, destination, and construction presentations. Production Φ
+  entry points and `OmegaContext` require this paired authority; only the
+  test-support seam can express a missing trace.
 - `RawExpansionConstruction` records the exact destination-domain parent edits
   made while constructing χₑ, together with argument and semantic-meta roles.
   Composed expansion steps union compatible certificates and reject a shared

@@ -34,6 +34,9 @@ module MLF.Elab.Phi.Translate (
     -- * Checked occurrence endpoint authority
     PhiOccurrenceRole(..),
     PhiEndpointShapeAuthority(..),
+    -- * Construction-closed replay authority
+    PhiReplayCertificate,
+    mkPhiReplayCertificate,
     -- * Translation entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
     phiFromEdgeWitnessWithTraceReadModel,
@@ -116,6 +119,65 @@ data PhiEndpointShapeAuthority = PhiEndpointShapeAuthority
     }
     deriving (Eq, Show)
 
+-- | Construction evidence that one witness and one frozen trace belong to the
+-- same instantiation edge.
+--
+-- The constructor is private so the Φ/Ω implementation cannot observe a
+-- witness without the trace required by thesis §15.3.5.
+data PhiReplayCertificate = PhiReplayCertificate
+    { prcTrace :: !EdgeTrace
+    , prcWitness :: !EdgeWitness
+    }
+    deriving (Eq, Show)
+
+-- | Select and pair the proof artifacts emitted for one edge.  Both artifacts
+-- are fetched from their producer-owned maps with the same edge key, and the
+-- witness's embedded edge identity must agree with that key.
+--
+-- Root IDs are deliberately not used to rediscover this association:
+-- 'ewRoot', 'etRoot', and 'etResultRoot' can inhabit different source,
+-- destination, and construction presentations after replay/finalization.  The
+-- edge-keyed packet committed by presolution is the construction authority.
+mkPhiReplayCertificate
+    :: EdgeId
+    -> IntMap.IntMap EdgeWitness
+    -> IntMap.IntMap EdgeTrace
+    -> Either ElabError PhiReplayCertificate
+mkPhiReplayCertificate expectedEdge witnesses traces = do
+    witness <-
+        case IntMap.lookup edgeKey witnesses of
+            Nothing ->
+                Left
+                    ( ValidationFailed
+                        [ "missing edge witness for Phi replay"
+                        , "  edge: " ++ show expectedEdge
+                        ]
+                    )
+            Just edgeWitness -> Right edgeWitness
+    if ewEdgeId witness /= expectedEdge
+        then
+            Left
+                ( PhiInvariantError
+                    ( unlines
+                        [ "Phi replay witness belongs to a different edge"
+                        , "  expected: " ++ show expectedEdge
+                        , "  witness: " ++ show (ewEdgeId witness)
+                        ]
+                    )
+                )
+        else do
+            traceInfo <-
+                case IntMap.lookup edgeKey traces of
+                    Nothing -> Left (MissingEdgeTrace expectedEdge)
+                    Just edgeTrace -> Right edgeTrace
+            Right
+                PhiReplayCertificate
+                    { prcTrace = traceInfo
+                    , prcWitness = witness
+                    }
+  where
+    edgeKey = getEdgeId expectedEdge
+
 data PhiOuterShape
     = PhiArrowShape
     | PhiMuShape
@@ -130,10 +192,9 @@ phiFromEdgeWitnessWithTrace
     -> PresolutionView p
     -> GaBindParents p
     -> Maybe SchemeInfo
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo replay =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTrace
             traceCfg
@@ -141,8 +202,7 @@ phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents 
             presolutionView
             gaParents
             mSchemeInfo
-            mTrace
-            ew
+            replay
 
 -- | Translate a recorded edge witness into the paper-shaped
 -- @phi_R;T(e)@ occurrence computation.
@@ -152,22 +212,17 @@ phiOccurrenceFromEdgeWitnessWithTrace
     -> PresolutionView p
     -> GaBindParents p
     -> Maybe SchemeInfo
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo mTrace ew =
-    case mTrace of
-        Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-        Just _ -> do
-            readModel <- buildElabReadModel presolutionView
-            phiOccurrenceFromEdgeWitnessWithTraceReadModel
-                traceCfg
-                generalizeAtWith
-                readModel
-                gaParents
-                mSchemeInfo
-                mTrace
-                ew
+phiOccurrenceFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo replay = do
+    readModel <- buildElabReadModel presolutionView
+    phiOccurrenceFromEdgeWitnessWithTraceReadModel
+        traceCfg
+        generalizeAtWith
+        readModel
+        gaParents
+        mSchemeInfo
+        replay
 
 phiFromEdgeWitnessWithTraceReadModel
     :: TraceConfig
@@ -175,10 +230,9 @@ phiFromEdgeWitnessWithTraceReadModel
     -> ElabReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo replay =
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
         traceCfg
         generalizeAtWith
@@ -186,8 +240,7 @@ phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParen
         gaParents
         mSchemeInfo
         IntMap.empty
-        mTrace
-        ew
+        replay
 
 -- | Read-model translation with exact endpoints already constructed by
 -- sibling edges.  The map is occurrence-local and keyed by frozen node id;
@@ -199,10 +252,9 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     -> GaBindParents p
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes mTrace ew =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes replay =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
@@ -212,8 +264,7 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith 
             mSchemeInfo
             frozenEndpointTypes
             Nothing
-            mTrace
-            ew
+            replay
 
 -- | Frozen-endpoint translation with application-owned endpoint-shape
 -- authority.  Only application construction should call this entry point;
@@ -226,10 +277,9 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> PhiEndpointShapeAuthority
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
@@ -239,8 +289,7 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWi
             mSchemeInfo
             frozenEndpointTypes
             (Just endpointShapeAuthority)
-            mTrace
-            ew
+            replay
 
 -- | Read-model variant of 'phiOccurrenceFromEdgeWitnessWithTrace'.
 phiOccurrenceFromEdgeWitnessWithTraceReadModel
@@ -249,10 +298,9 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModel
     -> ElabReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo mTrace ew =
+phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo replay =
     phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
         traceCfg
         generalizeAtWith
@@ -261,8 +309,7 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readMod
         mSchemeInfo
         IntMap.empty
         Nothing
-        mTrace
-        ew
+        replay
 
 phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     :: TraceConfig
@@ -272,15 +319,19 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
-    case mTrace of
-        Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-        Just _ -> do
-            phiReadModel <- buildPhiReadModel readModel
-            phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew
+phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay = do
+    phiReadModel <- buildPhiReadModel readModel
+    phiFromEdgeWitnessCore
+        traceCfg
+        generalizeAtWith
+        phiReadModel
+        gaParents
+        mSchemeInfo
+        frozenEndpointTypes
+        endpointShapeAuthority
+        replay
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -299,10 +350,9 @@ phiFromEdgeWitnessCore
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
-    -> Maybe EdgeTrace
-    -> EdgeWitness
+    -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay = do
     let namedSet0 = ermNamedNodes readModel
     case if tcGeneralize traceCfg
         then
@@ -325,23 +375,17 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
         () -> pure ()
     -- See Note [Trace-First Copied Set]
     let copied =
-            case mTrace of
-                Nothing -> IntSet.empty
-                Just tr ->
-                    IntSet.fromList
-                        [ getNodeId (canonicalNode nid)
-                        | nid <- copiedNodes (etCopyMap tr)
-                        ]
+            IntSet.fromList
+                [ getNodeId (canonicalNode nid)
+                | nid <- copiedNodes (etCopyMap traceInfo)
+                ]
         interior =
-            case mTrace of
-                Nothing -> IntSet.empty
-                Just tr ->
-                    case etInterior tr of
-                        EdgeSourceInterior (InteriorNodes s) ->
-                            IntSet.fromList
-                                [ getNodeId (canonicalNode (NodeId key))
-                                | key <- IntSet.toList s
-                                ]
+            case etInterior traceInfo of
+                EdgeSourceInterior (InteriorNodes s) ->
+                    IntSet.fromList
+                        [ getNodeId (canonicalNode (NodeId key))
+                        | key <- IntSet.toList s
+                        ]
         namedSet1 = IntSet.difference namedSet0 copied
         rootKey = getNodeId (canonicalNode (ewRoot ew))
         namedSet =
@@ -366,25 +410,24 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                 Just si ->
                     let schemeArity = length (schemeBinderRefs (siScheme si))
                         traceBinderKeys =
-                            maybe
-                                IntSet.empty
-                                (IntSet.fromList . map (getNodeId . fst) . etBinderArgs)
-                                mTrace
+                            IntSet.fromList
+                                (map (getNodeId . fst) (etBinderArgs traceInfo))
                         schemeBinderKeys = schemeInfoBinderIdentityKeySet si
                         traceDomainCovered =
                             traceBinderKeys `IntSet.isSubsetOf` schemeBinderKeys
-                    in case mTrace of
-                        Just tr
-                            | isStrictReplayContract (etReplayContract tr) ->
-                                case replaySpineBinderArgs si tr of
-                                    Just [] -> Just si
-                                    Just _
-                                        | schemeInfoAlreadyInReplayDomain si tr -> Just si
-                                    _ -> Nothing
-                        _
-                            | (schemeArity == 0 && not (IntSet.null traceBinderKeys))
-                                || not traceDomainCovered -> Nothing
-                            | otherwise -> Just si
+                    in if isStrictReplayContract (etReplayContract traceInfo)
+                        then
+                            case replaySpineBinderArgs si traceInfo of
+                                Just [] -> Just si
+                                Just _
+                                    | schemeInfoAlreadyInReplayDomain si traceInfo -> Just si
+                                _ -> Nothing
+                        else
+                            if
+                                (schemeArity == 0 && not (IntSet.null traceBinderKeys))
+                                    || not traceDomainCovered
+                                then Nothing
+                                else Just si
                 Nothing -> Nothing
     case debugPhi
         ("phi scheme replay-subst edge=" ++ show (ewEdgeId ew)
@@ -392,103 +435,91 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
         )
         () of
         () -> pure ()
+    let replayContract = etReplayContract traceInfo
     siReplay <-
-        case mTrace of
-            Just tr
-                | isStrictReplayContract (etReplayContract tr) ->
-                    case mSchemeInfo of
-                        Just supplied
-                            | null (schemeSpineBinderRefs (siScheme supplied))
-                            , null
-                                ( freeTypeVarRefsType
-                                    (schemeToType (siScheme supplied))
-                                )
-                            , replaySpineBinderArgs supplied tr == Just []
-                            , suppliedOccurrenceMatchesEndpoint supplied -> do
-                                -- A closed monomorphic occurrence already is
-                                -- the complete source computation.  The strict
-                                -- trace still validates its frozen replay
-                                -- domain, but rebuilding the producer root can
-                                -- expose an owner-local graph placeholder that
-                                -- is absent from this occurrence.  The checked
-                                -- producer is selected only when its outer
-                                -- type shape also satisfies the application
-                                -- endpoint owned by the caller; otherwise the
-                                -- producer-root path below reconstructs the
-                                -- computation and fails closed.
-                                validateStrictReplayTraceDomain supplied tr
-                                pure supplied
-                        _ -> do
-                            sourceSchemeInfo <-
-                                case mSchemeInfo of
-                                    Just supplied -> pure supplied
-                                    Nothing -> schemeInfoForRoot (ewRoot ew)
-                            producerSource <- schemeInfoForRoot (ewRoot ew)
-                            validateStrictReplayTraceDomain producerSource tr
-                            case replaySpineBinderArgs producerSource tr of
-                                Just [] -> pure sourceSchemeInfo
-                                Just _ ->
-                                    case mSchemeInfoReplaySeed of
-                                        Just replayReady
-                                            | schemeInfoAlreadyInReplayDomain replayReady tr ->
-                                                    pure replayReady
-                                        _ -> do
-                                            -- A reduced consumer presentation may omit
-                                            -- producer binders.  Rename the producer's
-                                            -- existing binders in place; never infer a
-                                            -- spine from the broader frozen trace.
-                                            case transportSchemeInfoToReplayDomain producerSource tr of
-                                                Just transported -> pure transported
-                                                Nothing ->
-                                                    Left $
-                                                        PhiInvariantError $
-                                                            unlines
-                                                                [ "strict replay producer scheme cannot be transported without changing its type tree"
-                                                                , "edge: " ++ show (ewEdgeId ew)
-                                                                , "consumer scheme: " ++ show (schemeToType (siScheme sourceSchemeInfo))
-                                                                , "producer scheme: " ++ show (schemeToType (siScheme producerSource))
-                                                                , "producer replay refs: " ++ show (schemeSpineBinderRefs (siScheme producerSource))
-                                                                , "producer subst: " ++ show (schemeInfoBinderRefSubst producerSource)
-                                                                , "trace binder args: " ++ show (etBinderArgs tr)
-                                                                , "classified replay spine: " ++ show (replaySpineBinderArgs producerSource tr)
-                                                                , "producer replay domain: " ++ show (producerReplayDomain producerSource tr)
-                                                                ]
-                                Nothing ->
-                                    Left $
-                                        PhiInvariantError $
-                                            unlines
-                                                [ "strict replay trace cannot be classified against the producer type tree"
-                                                , "edge: " ++ show (ewEdgeId ew)
-                                                , "producer scheme: " ++ show (schemeToType (siScheme producerSource))
-                                                , "producer subst: " ++ show (schemeInfoBinderRefSubst producerSource)
-                                                , "trace binder args: " ++ show (etBinderArgs tr)
-                                                , "trace replay map: " ++ show (IntMap.toList (etBinderReplayMap tr))
-                                                ]
-            _ ->
+        if isStrictReplayContract replayContract
+            then
+                case mSchemeInfo of
+                    Just supplied
+                        | null (schemeSpineBinderRefs (siScheme supplied))
+                        , null
+                            ( freeTypeVarRefsType
+                                (schemeToType (siScheme supplied))
+                            )
+                        , replaySpineBinderArgs supplied traceInfo == Just []
+                        , suppliedOccurrenceMatchesEndpoint supplied -> do
+                            -- A closed monomorphic occurrence already is the
+                            -- complete source computation.  The strict trace
+                            -- still validates its frozen replay domain, but
+                            -- rebuilding the producer root can expose an
+                            -- owner-local graph placeholder absent from this
+                            -- occurrence.
+                            validateStrictReplayTraceDomain supplied traceInfo
+                            pure supplied
+                    _ -> do
+                        sourceSchemeInfo <-
+                            case mSchemeInfo of
+                                Just supplied -> pure supplied
+                                Nothing -> schemeInfoForRoot (ewRoot ew)
+                        producerSource <- schemeInfoForRoot (ewRoot ew)
+                        validateStrictReplayTraceDomain producerSource traceInfo
+                        case replaySpineBinderArgs producerSource traceInfo of
+                            Just [] -> pure sourceSchemeInfo
+                            Just _ ->
+                                case mSchemeInfoReplaySeed of
+                                    Just replayReady
+                                        | schemeInfoAlreadyInReplayDomain replayReady traceInfo ->
+                                                pure replayReady
+                                    _ ->
+                                        case transportSchemeInfoToReplayDomain producerSource traceInfo of
+                                            Just transported -> pure transported
+                                            Nothing ->
+                                                Left $
+                                                    PhiInvariantError $
+                                                        unlines
+                                                            [ "strict replay producer scheme cannot be transported without changing its type tree"
+                                                            , "edge: " ++ show (ewEdgeId ew)
+                                                            , "consumer scheme: " ++ show (schemeToType (siScheme sourceSchemeInfo))
+                                                            , "producer scheme: " ++ show (schemeToType (siScheme producerSource))
+                                                            , "producer replay refs: " ++ show (schemeSpineBinderRefs (siScheme producerSource))
+                                                            , "producer subst: " ++ show (schemeInfoBinderRefSubst producerSource)
+                                                            , "trace binder args: " ++ show (etBinderArgs traceInfo)
+                                                            , "classified replay spine: " ++ show (replaySpineBinderArgs producerSource traceInfo)
+                                                            , "producer replay domain: " ++ show (producerReplayDomain producerSource traceInfo)
+                                                            ]
+                            Nothing ->
+                                Left $
+                                    PhiInvariantError $
+                                        unlines
+                                            [ "strict replay trace cannot be classified against the producer type tree"
+                                            , "edge: " ++ show (ewEdgeId ew)
+                                            , "producer scheme: " ++ show (schemeToType (siScheme producerSource))
+                                            , "producer subst: " ++ show (schemeInfoBinderRefSubst producerSource)
+                                            , "trace binder args: " ++ show (etBinderArgs traceInfo)
+                                            , "trace replay map: " ++ show (IntMap.toList (etBinderReplayMap traceInfo))
+                                            ]
+            else
                 case mSchemeInfoReplaySeed of
                     Nothing -> schemeInfoForRoot (ewRoot ew)
                     Just si -> pure si
-    let replayContract =
-            maybe ReplayContractNone etReplayContract mTrace
     (traceBinderSourcesRaw, traceBinderReplayMapRaw, traceBinderMapDomainRaw) <-
-        computeTraceBinderReplayBridge mTrace replayContract siReplay
+        computeTraceBinderReplayBridge traceInfo replayContract siReplay
     replaySpineSourcesRaw <-
-        case mTrace of
-            Just tr
-                | isStrictReplayContract replayContract ->
-                    case replaySpineBinderArgs siReplay tr of
-                        Just binderArgs ->
-                            pure
-                                ( IntSet.fromList
-                                    [ getNodeId sourceBinder
-                                    | (_producerBinder, sourceBinder, _argument) <- binderArgs
-                                    ]
-                                )
-                        Nothing ->
-                            Left $
-                                PhiInvariantError $
-                                    "transported replay scheme lost its producer-spine classification"
-            _ -> pure traceBinderSourcesRaw
+        if isStrictReplayContract replayContract
+            then
+                case replaySpineBinderArgs siReplay traceInfo of
+                    Just binderArgs ->
+                        pure
+                            ( IntSet.fromList
+                                [ getNodeId sourceBinder
+                                | (_producerBinder, sourceBinder, _argument) <- binderArgs
+                                ]
+                            )
+                    Nothing ->
+                        Left $
+                            PhiInvariantError $
+                                "transported replay scheme lost its producer-spine classification"
+            else pure traceBinderSourcesRaw
     let traceBinderSources =
             debugPhi
                 ("phi traceBinderSources=" ++ show (IntSet.toList traceBinderSourcesRaw))
@@ -512,6 +543,10 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
         introCount
         ops
   where
+    traceInfo = prcTrace replay
+
+    ew = prcWitness replay
+
     readModel = phiReadModelElabReadModel phiReadModel
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize traceCfg
@@ -570,7 +605,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
             , ocReifyTypeWithNamedSetRefsNoFallback = reifyTypeWithNamedSetRefsNoFallbackAt
             , ocCopyMap = copyMap
             , ocGaParents = gaParents
-            , ocTrace = mTrace
+            , ocTrace = traceInfo
             , ocSchemeInfo = mSchemeInfoCtx
             , ocTraceBinderSources = traceBinderSources
             , ocReplaySpineSources = replaySpineSources
@@ -606,101 +641,98 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
     reifyTypeWithNamedSetRefsNoFallbackAt = reifyTypeWithNamedSetRefsNoFallbackReadModel readModel
 
     computeTraceBinderReplayBridge
-        :: Maybe EdgeTrace
+        :: EdgeTrace
         -> ReplayContract
         -> SchemeInfo
         -> Either ElabError (IntSet.IntSet, IntMap.IntMap NodeId, IntSet.IntSet)
-    computeTraceBinderReplayBridge mbTrace replayContract siReplay =
-        case mbTrace of
-            Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
-            Just tr ->
-                let traceBinderSourcesInOrder =
-                        reverse $
-                            snd $
-                                foldl'
-                                    (\(seen, acc) (binder, _arg) ->
-                                        let key = getNodeId binder
-                                        in if IntSet.member key seen
-                                            then (seen, acc)
-                                            else (IntSet.insert key seen, binder : acc)
-                                    )
-                                    (IntSet.empty, [])
-                                    (etBinderArgs tr)
-                    traceBinderSourceKeys = map getNodeId traceBinderSourcesInOrder
-                    traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
-                    replayMapRaw = etBinderReplayMap tr
-                    replayMapDomain = IntSet.fromAscList (IntMap.keys replayMapRaw)
-                    replayBinderDomainRaw =
-                        case etReplayDomainBinders tr of
-                            replayBinders@(_ : _) ->
-                                IntSet.fromList (map getNodeId replayBinders)
-                            [] ->
-                                schemeInfoBinderIdentityKeySet siReplay
-                    targetInReplayDomainRaw replayTarget =
-                        IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
-                    missingSources =
-                        IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
-                    extraSources =
-                        IntSet.toList (IntSet.difference replayMapDomain traceBinderSourceSet)
-                in if isStrictReplayContract replayContract
+    computeTraceBinderReplayBridge tr replayContract siReplay =
+        let traceBinderSourcesInOrder =
+                reverse $
+                    snd $
+                        foldl'
+                            (\(seen, acc) (binder, _arg) ->
+                                let key = getNodeId binder
+                                in if IntSet.member key seen
+                                    then (seen, acc)
+                                    else (IntSet.insert key seen, binder : acc)
+                            )
+                            (IntSet.empty, [])
+                            (etBinderArgs tr)
+            traceBinderSourceKeys = map getNodeId traceBinderSourcesInOrder
+            traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
+            replayMapRaw = etBinderReplayMap tr
+            replayMapDomain = IntSet.fromAscList (IntMap.keys replayMapRaw)
+            replayBinderDomainRaw =
+                case etReplayDomainBinders tr of
+                    replayBinders@(_ : _) ->
+                        IntSet.fromList (map getNodeId replayBinders)
+                    [] ->
+                        schemeInfoBinderIdentityKeySet siReplay
+            targetInReplayDomainRaw replayTarget =
+                IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
+            missingSources =
+                IntSet.toList (IntSet.difference traceBinderSourceSet replayMapDomain)
+            extraSources =
+                IntSet.toList (IntSet.difference replayMapDomain traceBinderSourceSet)
+        in if isStrictReplayContract replayContract
+            then
+                if not (null missingSources) || not (null extraSources)
                     then
-                        if not (null missingSources) || not (null extraSources)
-                            then
-                                Left $
-                                    PhiInvariantError $
-                                        unlines
-                                            [ "trace binder replay-map domain mismatch"
-                                            , "edge: " ++ show (ewEdgeId ew)
-                                            , "trace binder sources: " ++ show traceBinderSourceKeys
-                                            , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
-                                            , "missing source keys: " ++ show missingSources
-                                            , "extra source keys: " ++ show extraSources
-                                            ]
-                        else
-                            let validateTarget sourceKey = do
-                                    replayTargetRaw <-
-                                        case IntMap.lookup sourceKey replayMapRaw of
-                                            Just replayTarget -> Right replayTarget
-                                            Nothing ->
-                                                Left $
-                                                    PhiInvariantError $
-                                                        unlines
-                                                            [ "trace binder replay-map missing source key after domain validation"
-                                                            , "edge: " ++ show (ewEdgeId ew)
-                                                            , "source key: " ++ show sourceKey
-                                                            ]
-                                    if targetInReplayDomainRaw replayTargetRaw
-                                        then pure (sourceKey, replayTargetRaw)
-                                        else
+                        Left $
+                            PhiInvariantError $
+                                unlines
+                                    [ "trace binder replay-map domain mismatch"
+                                    , "edge: " ++ show (ewEdgeId ew)
+                                    , "trace binder sources: " ++ show traceBinderSourceKeys
+                                    , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
+                                    , "missing source keys: " ++ show missingSources
+                                    , "extra source keys: " ++ show extraSources
+                                    ]
+                    else
+                        let validateTarget sourceKey = do
+                                replayTargetRaw <-
+                                    case IntMap.lookup sourceKey replayMapRaw of
+                                        Just replayTarget -> Right replayTarget
+                                        Nothing ->
                                             Left $
                                                 PhiInvariantError $
                                                     unlines
-                                                        [ "replay-map target outside replay binder domain"
+                                                        [ "trace binder replay-map missing source key after domain validation"
                                                         , "edge: " ++ show (ewEdgeId ew)
                                                         , "source key: " ++ show sourceKey
-                                                        , "replay target: " ++ show replayTargetRaw
-                                                        , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
                                                         ]
-                            in case mapM validateTarget traceBinderSourceKeys of
-                                Left err -> Left err
-                                Right replayEntries ->
-                                    Right
-                                        ( traceBinderSourceSet
-                                        , IntMap.fromList replayEntries
-                                        , replayMapDomain
-                                        )
+                                if targetInReplayDomainRaw replayTargetRaw
+                                    then pure (sourceKey, replayTargetRaw)
+                                    else
+                                        Left $
+                                            PhiInvariantError $
+                                                unlines
+                                                    [ "replay-map target outside replay binder domain"
+                                                    , "edge: " ++ show (ewEdgeId ew)
+                                                    , "source key: " ++ show sourceKey
+                                                    , "replay target: " ++ show replayTargetRaw
+                                                    , "replay binder domain: " ++ show (IntSet.toList replayBinderDomainRaw)
+                                                    ]
+                        in case mapM validateTarget traceBinderSourceKeys of
+                            Left err -> Left err
+                            Right replayEntries ->
+                                Right
+                                    ( traceBinderSourceSet
+                                    , IntMap.fromList replayEntries
+                                    , replayMapDomain
+                                    )
+            else
+                if IntMap.null replayMapRaw
+                    then Right (traceBinderSourceSet, IntMap.empty, IntSet.empty)
                     else
-                        if IntMap.null replayMapRaw
-                            then Right (traceBinderSourceSet, IntMap.empty, IntSet.empty)
-                            else
-                                Left $
-                                    PhiInvariantError $
-                                        unlines
-                                            [ "trace replay map expected empty under ReplayContractNone"
-                                            , "edge: " ++ show (ewEdgeId ew)
-                                            , "trace binder sources: " ++ show traceBinderSourceKeys
-                                            , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
-                                            ]
+                        Left $
+                            PhiInvariantError $
+                                unlines
+                                    [ "trace replay map expected empty under ReplayContractNone"
+                                    , "edge: " ++ show (ewEdgeId ew)
+                                    , "trace binder sources: " ++ show traceBinderSourceKeys
+                                    , "replay-map domain: " ++ show (IntMap.keys replayMapRaw)
+                                    ]
 
     -- Validate the producer-owned replay bridge before transporting any
     -- consumer SchemeInfo into that key space.  Otherwise a malformed replay
@@ -1128,16 +1160,13 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
     instScopeRoot root0 =
         let rootC = canonicalNode root0
             baseFromTrace =
-                case mTrace of
-                    Nothing -> Nothing
-                    Just tr ->
-                        let traceCopyMap = getCopyMapping (etCopyMap tr)
-                            revMatches =
-                                [ NodeId k
-                                | (k, v) <- IntMap.toList traceCopyMap
-                                , canonicalNode v == rootC
-                                ]
-                        in listToMaybe revMatches
+                let traceCopyMap = getCopyMapping (etCopyMap traceInfo)
+                    revMatches =
+                        [ NodeId k
+                        | (k, v) <- IntMap.toList traceCopyMap
+                        , canonicalNode v == rootC
+                        ]
+                in listToMaybe revMatches
             baseRep =
                 IntMap.lookup (getNodeId rootC) (gaSolvedToBase gaParents)
                     <|> baseFromTrace
@@ -1163,7 +1192,4 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                         goScope (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonicalNode parent))
 
     copyMap :: IntMap.IntMap NodeId
-    copyMap =
-        case mTrace of
-            Nothing -> IntMap.empty
-            Just tr -> getCopyMapping (etCopyMap tr)
+    copyMap = getCopyMapping (etCopyMap traceInfo)

@@ -400,10 +400,11 @@ claims:
         - O15-CONTEXT-REJECT
       property_tests: []
       code_paths:
+        - src/MLF/Elab/Phi/Translate.hs#mkPhiReplayCertificate
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
     deviations: []
     status: defended
-    notes: ""
+    notes: "Phi and Omega consume an opaque edge-keyed witness/trace replay certificate; missing traces and mismatched witness edge identities are unconstructible at the production translation boundary."
 
   - id: CLM-SIGMA-REORDER
     type: definition

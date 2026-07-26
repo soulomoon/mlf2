@@ -32,10 +32,11 @@ import MLF.Constraint.Types.Graph
     , EdgeId
     , NodeId(..)
     , NodeRef
+    , getEdgeId
     , getNodeId
     , toListNode
     )
-import MLF.Constraint.Types.Witness (EdgeWitness)
+import MLF.Constraint.Types.Witness (EdgeWitness, ewEdgeId)
 import MLF.Elab.Elaborate.Annotation
     ( AnnotationContext(..)
     , reifyInstFromSourceScheme
@@ -52,7 +53,7 @@ import qualified MLF.Elab.Sigma as Sigma
 import MLF.Elab.Types
     ( BoundType
     , ElabScheme
-    , ElabError
+    , ElabError(..)
     , Instantiation
     , SchemeInfo
     , TypeBinderRef
@@ -104,12 +105,23 @@ phiFromEdgeWitnessWithTraceForTest
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents =
+phiFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents mSchemeInfo mTrace witness = do
+    traceInfo <-
+        case mTrace of
+            Just trace -> Right trace
+            Nothing -> Left (MissingEdgeTrace (ewEdgeId witness))
+    replay <-
+        Translate.mkPhiReplayCertificate
+            (ewEdgeId witness)
+            (IntMap.singleton (getEdgeId (ewEdgeId witness)) witness)
+            (IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo)
     Translate.phiFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
         presolutionView
         (fromMaybe (gaBindParentsFromView presolutionView) mbGaParents)
+        mSchemeInfo
+        replay
 
 phiOccurrenceFromEdgeWitnessWithTraceForTest
     :: TraceConfig
@@ -120,12 +132,23 @@ phiOccurrenceFromEdgeWitnessWithTraceForTest
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents =
+phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents mSchemeInfo mTrace witness = do
+    traceInfo <-
+        case mTrace of
+            Just trace -> Right trace
+            Nothing -> Left (MissingEdgeTrace (ewEdgeId witness))
+    replay <-
+        Translate.mkPhiReplayCertificate
+            (ewEdgeId witness)
+            (IntMap.singleton (getEdgeId (ewEdgeId witness)) witness)
+            (IntMap.singleton (getEdgeId (ewEdgeId witness)) traceInfo)
     Translate.phiOccurrenceFromEdgeWitnessWithTrace
         traceCfg
         generalizeAt
         presolutionView
         (fromMaybe (gaBindParentsFromView presolutionView) mbGaParents)
+        mSchemeInfo
+        replay
 
 -- | Low-level Phi fixtures that predate preserved source provenance receive a
 -- complete identity certificate over their own graph.  This seam is test-only;

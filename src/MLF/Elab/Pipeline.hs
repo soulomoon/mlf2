@@ -56,6 +56,8 @@ module MLF.Elab.Pipeline
     sigmaReorder,
 
     -- * Witness translation (production path)
+    PhiReplayCertificate,
+    mkPhiReplayCertificate,
     phiFromEdgeWitnessWithTrace,
     phiOccurrenceFromEdgeWitnessWithTrace,
     runPipelineElab,
@@ -99,7 +101,9 @@ where
 
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import MLF.Elab.Phi
-  ( contextToNodeBound,
+  ( PhiReplayCertificate,
+    contextToNodeBound,
+    mkPhiReplayCertificate,
     phiFromEdgeWitnessWithTrace,
     phiOccurrenceFromEdgeWitnessWithTrace,
   )

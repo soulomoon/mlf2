@@ -29,7 +29,10 @@ import MLF.Constraint.Types.Graph
     toListNode,
   )
 import MLF.Constraint.Types.Witness (ewRight)
-import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
+import MLF.Elab.Phi
+  ( mkPhiReplayCertificate,
+    phiFromEdgeWitnessWithTraceReadModel,
+  )
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
@@ -210,9 +213,22 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                 | otherwise -> Nothing
               _ -> Nothing
           instAppBasesFromWitness funEid =
-            case (phiReadModel, IntMap.lookup (getEdgeId funEid) edgeWitnesses) of
-              (Right readModel, Just ew) ->
-                case phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel bindParentsGa Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+            case phiReadModel of
+              Right readModel ->
+                case do
+                  replay <-
+                    mkPhiReplayCertificate
+                      funEid
+                      edgeWitnesses
+                      edgeTraces
+                  phiFromEdgeWitnessWithTraceReadModel
+                    traceCfg
+                    generalizeAtWith
+                    readModel
+                    bindParentsGa
+                    Nothing
+                    replay
+                of
                   Right inst ->
                     IntSet.fromList
                       [ getNodeId nid

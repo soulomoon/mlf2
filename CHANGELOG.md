@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Made Φ/Ω replay construction-closed. Production translation entry points now
+  consume an opaque `PhiReplayCertificate` instead of independently accepting
+  an `EdgeWitness` and optional `EdgeTrace`; `OmegaContext` likewise carries a
+  required trace. The certificate constructor fetches both artifacts through
+  the same producer-owned edge key and verifies the witness's embedded edge
+  identity. It deliberately does not guess association from root IDs, which
+  may remain in different source, destination, and construction domains.
+  Missing-trace construction remains representable only behind
+  `MLF.Elab.Phi.TestSupport` for negative tests.
 - Made normalized Ω witnesses construction-closed. `normalizeInstanceOpsFull`
   now returns an opaque `ValidatedInstanceOps` certificate instead of a raw
   operation list, and the production façade no longer exports an unconditional

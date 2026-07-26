@@ -1,3 +1,26 @@
+## 2026-07-26 - Construction-closed Phi replay certificates
+
+- Production Φ entry points no longer accept an `EdgeWitness` beside a
+  `Maybe EdgeTrace`. They consume an opaque `PhiReplayCertificate`, so Ω
+  interpretation cannot be entered without both artifacts.
+- `mkPhiReplayCertificate` fetches both artifacts through one producer-owned
+  edge key and validates the witness's embedded edge identity. It deliberately
+  does not infer association from roots: presolution replay/finalization can
+  leave `ewRoot`, `etRoot`, and `etResultRoot` in distinct construction,
+  frozen-source, and destination presentations. Their common committed edge
+  packet is the authority.
+- `OmegaContext` and its internal domain environment now carry `EdgeTrace`
+  directly. All no-trace branches and empty replay/copy/interior substitutes
+  are removed from production; only `MLF.Elab.Phi.TestSupport` retains an
+  optional trace to assert `MissingEdgeTrace`.
+- Focused validation passed the 111-example Φ translation slice, 11 Φ
+  alignment examples (including the paper's annotated `g g` construction), 21
+  eMLF source-annotation examples, and all 107 thesis-obligation properties at
+  100 generated cases each. The thesis-claims checker, warning-free
+  `cabal build all -j1`, and the full 3703-example serial suite also pass. This
+  closes a forgeable interpreter state but does not claim a mechanized proof of
+  Chapter 15.
+
 ## 2026-07-26 - Construction-closed normalized witness certificates
 
 - `normalizeInstanceOpsFull` no longer returns raw `[InstanceOp]`. Successful

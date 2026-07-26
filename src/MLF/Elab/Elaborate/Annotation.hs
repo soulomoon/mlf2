@@ -103,6 +103,7 @@ import MLF.Elab.Elaborate.Annotation.Construction
   )
 import MLF.Elab.Phi
   ( PhiEndpointShapeAuthority,
+    mkPhiReplayCertificate,
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints,
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor,
   )
@@ -3092,7 +3093,15 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
         | exactIdentityEdge edgeWitness -> Right InstId
         | rigidRootTransitionEdge edgeWitness -> Right InstId
         | otherwise -> do
-        let mTrace = IntMap.lookup eid edgeTraces
+        traceInfo <-
+          case IntMap.lookup eid edgeTraces of
+            Nothing -> Left (MissingEdgeTrace (EdgeId eid))
+            Just trace -> Right trace
+        replay <-
+          mkPhiReplayCertificate
+            (EdgeId eid)
+            edgeWitnesses
+            edgeTraces
         mSchemeInfoRaw <-
           case sourceAuthority of
             Just sourceScheme -> pure (Just sourceScheme)
@@ -3103,8 +3112,8 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                 resolvedLookup
                 funAnn
         mSchemeInfo <-
-          case (mTrace, mSchemeInfoRaw) of
-            (Just traceInfo, Just schemeInfo) ->
+          case mSchemeInfoRaw of
+            Just schemeInfo ->
               case
                   strictReplayCheckedSchemeInfo
                     replaySourceBinderRefs
@@ -3122,12 +3131,12 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                           )
                       )
                   Right aligned -> pure (Just aligned)
-            _ -> pure mSchemeInfoRaw
+            Nothing -> pure Nothing
         let
             mExpansion = IntMap.lookup eid edgeExpansions
             mTraceArgs =
-              case (mTrace, mSchemeInfo) of
-                (Just traceInfo, Just schemeInfo)
+              case mSchemeInfo of
+                Just schemeInfo
                   | not (null (etBinderArgs traceInfo)) ->
                       reifyTraceBinderInstArgs
                         namedSetReify
@@ -3135,8 +3144,8 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         traceInfo
                 _ -> Nothing
             mExpansionInst =
-              case (mExpansion, mSchemeInfo, mTrace) of
-                (Just (ExpInstantiate args), Just schemeInfo, Just traceInfo) ->
+              case (mExpansion, mSchemeInfo) of
+                (Just (ExpInstantiate args), Just schemeInfo) ->
                   case
                     fullValidExpansionInstFor
                       namedSetReify
@@ -3193,8 +3202,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         gaParents
                         mSchemeInfo
                         frozenEndpointTypes
-                        mTrace
-                        edgeWitness
+                        replay
                     Just authority ->
                       phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor
                         traceCfg
@@ -3204,8 +3212,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         mSchemeInfo
                         frozenEndpointTypes
                         authority
-                        mTrace
-                        edgeWitness
+                        replay
         let substForPhi = maybe IntMap.empty schemeInfoBinderRefSubst mSchemeInfo
             resolvePhiVar ref = do
               nid <- typeBinderRefNode ref
@@ -3241,8 +3248,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                       targetTy = authoritativeTargetType namedSetReify edgeWitness schemeInfo
                       traceArgs = mTraceArgs
                       expansionInstResult =
-                        mTrace >>= \traceInfo ->
-                          pure
+                        Just
                           ( fullValidExpansionInstFor
                               namedSetReify
                               schemeInfo

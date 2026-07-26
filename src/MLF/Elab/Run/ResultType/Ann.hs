@@ -13,7 +13,6 @@ import MLF.Constraint.Types.Graph
     , NodeRef(..)
     , cGenNodes
     , cNodes
-    , getEdgeId
     , getNodeId
     , lookupGen
     , lookupNodeIn
@@ -22,7 +21,10 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
+import MLF.Elab.Phi
+    ( mkPhiReplayCertificate
+    , phiFromEdgeWitnessWithTraceReadModel
+    )
 import MLF.Elab.ReadModel (ermNamedNodes)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps
@@ -86,10 +88,11 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
 
     let rootPre = annNode inner
         rootC = canonical rootPre
-    ew <- case IntMap.lookup (getEdgeId eid) edgeWitnesses of
-        Nothing -> Left (ValidationFailed ["missing edge witness for annotation"])
-        Just ew' -> Right ew'
-    let mTrace = IntMap.lookup (getEdgeId eid) edgeTraces
+    replay <-
+        mkPhiReplayCertificate
+            eid
+            edgeWitnesses
+            edgeTraces
     let targetC = View.rtvSchemeBodyTarget view rootC
         scopeRootNodePre0 = annNode innerPre
         scopeRootNodePre =
@@ -122,7 +125,14 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
             | scopeRoot' == scopeRoot && target' == targetC = Right (sch0, subst0)
             | otherwise = View.rtvGeneralizeTarget view scopeRoot' target'
     readModel <- View.rtvReadModel view
-    phi0 <- phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel bindParentsGa (Just schemeInfo) mTrace ew
+    phi0 <-
+        phiFromEdgeWitnessWithTraceReadModel
+            traceCfg
+            generalizeAtWith
+            readModel
+            bindParentsGa
+            (Just schemeInfo)
+            replay
     let namedSetSolved = ermNamedNodes readModel
     let annBound = View.rtvLookupVarBound view annNodeId
         annTargetNode0 =

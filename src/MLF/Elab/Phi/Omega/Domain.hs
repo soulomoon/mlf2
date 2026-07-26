@@ -42,7 +42,7 @@ data OmegaContext (p :: Phase) = OmegaContext
     , ocReifyTypeWithNamedSetRefsNoFallback :: IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
     , ocGaParents :: GaBindParents p
-    , ocTrace :: Maybe EdgeTrace
+    , ocTrace :: EdgeTrace
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet
     , ocReplaySpineSources :: IntSet.IntSet
@@ -58,7 +58,7 @@ data OmegaDomainEnv = OmegaDomainEnv
     { odeCanonicalNode :: NodeId -> NodeId
     , odeLookupNodePV :: NodeId -> Maybe TyNode
     , odeCopyMap :: IntMap.IntMap NodeId
-    , odeTrace :: Maybe EdgeTrace
+    , odeTrace :: EdgeTrace
     , odeTraceBinderSources :: IntSet.IntSet
     , odeTraceBinderReplayMap :: IntMap.IntMap NodeId
     , odeTraceBinderMapDomain :: IntSet.IntSet
@@ -220,20 +220,17 @@ resolveNonRootWeakenBinder env binderKeys ids sourceTarget replayTarget
 
 traceBinderOrder :: OmegaDomainEnv -> [Int]
 traceBinderOrder env =
-    case odeTrace env of
-        Nothing -> []
-        Just tr ->
-            reverse $
-                snd $
-                    foldl
-                        (\(seen, acc) (binder, _arg) ->
-                            let key = getNodeId binder
-                            in if IntSet.member key seen
-                                then (seen, acc)
-                                else (IntSet.insert key seen, key : acc)
-                        )
-                        (IntSet.empty, [])
-                        (etBinderArgs tr)
+    reverse $
+        snd $
+            foldl
+                (\(seen, acc) (binder, _arg) ->
+                    let key = getNodeId binder
+                    in if IntSet.member key seen
+                        then (seen, acc)
+                        else (IntSet.insert key seen, key : acc)
+                )
+                (IntSet.empty, [])
+                (etBinderArgs (odeTrace env))
 
 traceBinderOrderIx :: OmegaDomainEnv -> IntMap.IntMap Int
 traceBinderOrderIx env = IntMap.fromList (zip (traceBinderOrder env) [0 :: Int ..])
@@ -247,13 +244,10 @@ reverseCopyByTarget env =
 
 reverseTraceByTarget :: OmegaDomainEnv -> IntMap.IntMap [Int]
 reverseTraceByTarget env =
-    case odeTrace env of
-        Nothing -> IntMap.empty
-        Just tr ->
-            IntMap.fromListWith (++)
-                [ (getNodeId binder, [getNodeId binder])
-                | (binder, _arg) <- etBinderArgs tr
-                ]
+    IntMap.fromListWith (++)
+        [ (getNodeId binder, [getNodeId binder])
+        | (binder, _arg) <- etBinderArgs (odeTrace env)
+        ]
 
 invCopyMap :: OmegaDomainEnv -> IntMap.IntMap NodeId
 invCopyMap env =

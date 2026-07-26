@@ -291,8 +291,8 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
     copyMap :: IntMap.IntMap NodeId
     copyMap = ocCopyMap ctx
 
-    mTrace :: Maybe EdgeTrace
-    mTrace = ocTrace ctx
+    traceInfo :: EdgeTrace
+    traceInfo = ocTrace ctx
 
     -- Note [Witness-domain diagnostics only]: failure messages may report raw
     -- witness-domain source matches derived from trace/copy-map artifacts, but
@@ -313,9 +313,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
 
     producerReplayBinderKeys :: IntSet.IntSet
     producerReplayBinderKeys =
-      case mTrace of
-        Just tr -> IntSet.fromList (map getNodeId (etReplayDomainBinders tr))
-        Nothing -> IntSet.empty
+      IntSet.fromList (map getNodeId (etReplayDomainBinders traceInfo))
 
     edgeRoot :: NodeId
     edgeRoot = ocEdgeRoot ctx
@@ -372,43 +370,34 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
 
     interiorSet :: IntSet.IntSet
     interiorSet =
-      case mTrace of
-        Nothing -> IntSet.empty
-        Just tr ->
-          let EdgeSourceInterior (InteriorNodes s0) = etInterior tr
-              remapKey k =
-                let nidC = canonicalNode (NodeId k)
-                    keyC = getNodeId nidC
-                 in case lookupNodePV nidC of
-                      Just TyVar {} ->
-                        case IntMap.lookup keyC copyMap of
-                          Nothing -> keyC
-                          Just nid -> getNodeId (canonicalNode nid)
-                      _ -> keyC
-           in IntSet.fromList (map remapKey (IntSet.toList s0))
+      let EdgeSourceInterior (InteriorNodes s0) = etInterior traceInfo
+          remapKey k =
+            let nidC = canonicalNode (NodeId k)
+                keyC = getNodeId nidC
+             in case lookupNodePV nidC of
+                  Just TyVar {} ->
+                    case IntMap.lookup keyC copyMap of
+                      Nothing -> keyC
+                      Just nid -> getNodeId (canonicalNode nid)
+                  _ -> keyC
+       in IntSet.fromList (map remapKey (IntSet.toList s0))
 
     rootRaiseMergeTraceProof :: NodeId -> NodeId -> Bool
     rootRaiseMergeTraceProof operated other =
-      maybe False (rootRaiseMergeTraceAuthority operated other) mTrace
+      rootRaiseMergeTraceAuthority operated other traceInfo
 
     orderRoot :: NodeId
     -- Omega operations are frozen in the source witness domain, whose root is
     -- `etRoot`.  Keep this authority distinct from `sigmaOrderRoot`: the paper's
     -- quantifier reordering targets Typexp and therefore uses the destination
     -- expansion root `sc` instead.
-    orderRoot =
-      case mTrace of
-        Nothing -> edgeRoot
-        Just tr -> etRoot tr
+    orderRoot = etRoot traceInfo
 
     sigmaOrderRoot :: NodeId
     -- Thesis Def. 15.3.3/15.3.4: Typexp is S'(sc), where sc is the root of the
     -- expansion at the edge destination.  `etResultRoot` is the construction
     -- authority for exactly that root.
-    sigmaOrderRoot =
-      case mTrace of
-        Nothing -> edgeRight
-        Just tr -> etResultRoot tr
+    sigmaOrderRoot = etResultRoot traceInfo
 
     nodes = cNodes constraint
 
@@ -558,8 +547,8 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
 
     traceArgMap :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     traceArgMap namedSet' =
-      case (mTrace, mSchemeInfo) of
-        (Just tr, Just si') ->
+      case mSchemeInfo of
+        Just si' ->
           let subst = schemeInfoBinderRefSubst si'
               reifyArg binder arg =
                 let argC = canonicalNode arg
@@ -582,12 +571,12 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                       (Left err, Left _, Left _) -> Left err
               entries =
                 [ (typeArgKeyForRef ref, ty)
-                  | (binder, arg) <- etBinderArgs tr,
+                  | (binder, arg) <- etBinderArgs traceInfo,
                     Just ref <- [schemeRefForTraceBinder binder],
                     Right ty <- [reifyArg binder arg]
                 ]
            in Map.fromList entries
-        _ -> Map.empty
+        Nothing -> Map.empty
 
     inferredArgMapFromTarget :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     inferredArgMapFromTarget namedSet' =
@@ -912,10 +901,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
           operated == orderRoot,
           isTraceBinderSource' binder,
           not (isReplaySpineSource binder),
-          maybe
-            False
-            (rootWeakenRaiseMergeTraceAuthority operated exterior)
-            mTrace ->
+          rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo ->
             -- The grafted root has already been inlined into S'(r), but its
             -- adjacent Weaken is also the frozen rigid-root certificate for
             -- the terminal RaiseMerge.  Drop only the inlined Graft and keep
@@ -1008,10 +994,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
       (OpWeaken weakened : OpRaiseMerge operated exterior : rest)
         | weakened == operated,
           operated == orderRoot ->
-            if maybe
-                False
-                (rootWeakenRaiseMergeTraceAuthority operated exterior)
-                mTrace
+            if rootWeakenRaiseMergeTraceAuthority operated exterior traceInfo
               then go binderKeys namedSet' vs accum rest lookupBinder
               else
                 Left $
@@ -1212,7 +1195,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                     [ "OpRaiseMerge: root operation lacks exact source-interior trace authority",
                       "  operated root: " ++ show n,
                       "  exterior target: " ++ show m,
-                      "  trace: " ++ show mTrace
+                      "  trace: " ++ show traceInfo
                     ]
           else do
             nReplay <- resolveTraceBinderTarget' True "OpRaiseMerge(n)" n
@@ -1233,7 +1216,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                         "  binding parent n: " ++ show (lookupBindParent (typeRef nReplay)),
                         "  binding parent m: " ++ show (lookupBindParent (typeRef mReplay)),
                         "  remaining operations: " ++ show rest,
-                        "  trace: " ++ show mTrace
+                        "  trace: " ++ show traceInfo
                       ]
                   else
                     if not (isBinderNode' binderKeys nReplay)
@@ -1243,7 +1226,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                             [ "OpRaiseMerge: first target is non-binder node",
                               "  target node: " ++ show n,
                               "  canonical: " ++ show (canonicalNode nReplay),
-                              "  trace: " ++ show mTrace
+                              "  trace: " ++ show traceInfo
                             ]
                       else do
                         case lookupBinderIndex' binderKeys (vSpineIds vs) nReplay of
@@ -1398,7 +1381,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                     _ <- pure $ debugPhi ("OpRaise: nodeTy=" ++ show nodeTy) ()
                     _ <- pure $ debugPhi ("OpRaise: nodeTyBound=" ++ show nodeTyBound) ()
                     _ <- pure $ debugPhi ("OpRaise: inferredArgMap=" ++ show (inferredArgMap namedSet')) ()
-                    _ <- pure $ debugPhi ("OpRaise: traceArgs=" ++ show (fmap etBinderArgs mTrace)) ()
+                    _ <- pure $ debugPhi ("OpRaise: traceArgs=" ++ show (etBinderArgs traceInfo)) ()
 
                     let ids = vSpineIds vs
                         refs = vSpineBinderRefs vs

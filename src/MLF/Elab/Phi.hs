@@ -13,6 +13,9 @@ module MLF.Elab.Phi (
     -- * Checked occurrence endpoint authority
     PhiOccurrenceRole(..),
     PhiEndpointShapeAuthority(..),
+    -- * Construction-closed replay authority
+    PhiReplayCertificate,
+    mkPhiReplayCertificate,
     -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
     phiFromEdgeWitnessWithTraceReadModel,
@@ -26,6 +29,8 @@ import MLF.Elab.Phi.Context (contextToNodeBound)
 import MLF.Elab.Phi.Translate
     ( PhiEndpointShapeAuthority(..)
     , PhiOccurrenceRole(..)
+    , PhiReplayCertificate
+    , mkPhiReplayCertificate
     , phiFromEdgeWitnessWithTrace
     , phiFromEdgeWitnessWithTraceReadModel
     , phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
