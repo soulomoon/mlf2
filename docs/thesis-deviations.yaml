@@ -6,18 +6,25 @@ deviations:
     section: "11.5"
     thesis_ref: "Definition 11.5.2 (witness normalization)"
     description: >
-      Witness normalization is implemented and tested but not backed by formal
-      proofs from the thesis. The implementation follows the thesis conditions
-      (weaken-last, no delayed weaken, coalescing) but correctness is
-      established by executable tests, not mechanized proof.
+      Witness normalization is construction-closed and tested but not backed
+      by a mechanized proof of Lemma 11.5.3. Successful normalization returns
+      an opaque ValidatedInstanceOps token; source-identity restoration must
+      consume destination-validation evidence and prove its final operand
+      domain plus terminal root-transition authority before sealing. The
+      implementation follows the thesis conditions (weaken-last, no delayed
+      weaken, coalescing), but the universal semantic argument remains
+      executable evidence rather than a proof assistant theorem.
     impact: semantic-neutral
     rationale: >
-      Executable property proxies and the 15-row witness matrix provide strong
-      evidence. Full mechanization is future work.
+      Variable-size executable properties, negative authority regressions, and
+      the witness matrix provide strong evidence and prevent unvalidated
+      production construction. Full mechanization is future work.
     code_paths:
       - src/MLF/Constraint/Presolution/WitnessNorm.hs
       - src/MLF/Constraint/Presolution/WitnessCanon.hs
     test_evidence:
+      - matcher: "O11-WITNESS"
+        file: test/Thesis/ObligationPropertySpec.hs
       - matcher: "R-"
         file: test/Presolution/WitnessSpec.hs
       - matcher: "Phase 7 theorem obligations"

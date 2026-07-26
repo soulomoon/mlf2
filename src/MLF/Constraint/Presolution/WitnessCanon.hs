@@ -26,10 +26,16 @@ import qualified Data.IntSet as IntSet
 import Data.List (nubBy, partition, sortBy)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness (InstanceOp(..), ValidatedInstanceOps)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.Order (compareNodesByOrderKey)
-import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), OmegaNormalizeError(..), validateNormalizedWitness, compareNodesByOrderKeyM)
+import MLF.Constraint.Presolution.WitnessValidation
+    ( OmegaNormalizeEnv(..)
+    , OmegaNormalizeError(..)
+    , certifyNormalizedWitness
+    , compareNodesByOrderKeyM
+    , validatedInstanceOpsFromCertificate
+    )
 
 -- | A witness operand together with the source-domain evidence that produced
 -- its destination-domain node.  Normalization changes only 'pnNode'; it must
@@ -625,12 +631,16 @@ normalizeInstanceOpsCoreWithProvenanceBy operandInInterior env ops0 = do
             LT -> Right ()
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
 
--- | Normalize Ω and validate paper invariants (conditions (1)–(5)).
-normalizeInstanceOpsFull :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+-- | Normalize Ω and return construction evidence for paper invariants
+-- (conditions (1)–(5)).
+normalizeInstanceOpsFull
+    :: OmegaNormalizeEnv p
+    -> [InstanceOp]
+    -> Either OmegaNormalizeError ValidatedInstanceOps
 normalizeInstanceOpsFull env ops0 = do
     ops <- normalizeInstanceOpsCore env ops0
-    validateNormalizedWitness env ops
-    pure ops
+    validation <- certifyNormalizedWitness env ops
+    pure (validatedInstanceOpsFromCertificate validation)
 
 -- | Drop locally redundant witness operations without changing order.
 -- This removes consecutive duplicate raises and self-merges only when their

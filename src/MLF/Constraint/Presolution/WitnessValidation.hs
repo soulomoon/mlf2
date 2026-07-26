@@ -10,6 +10,9 @@ MLF thesis (conditions 1-5).
 module MLF.Constraint.Presolution.WitnessValidation (
     OmegaNormalizeEnv(..),
     OmegaNormalizeError(..),
+    NormalizedWitnessValidation,
+    certifyNormalizedWitness,
+    validatedInstanceOpsFromCertificate,
     validateNormalizedWitness,
     validateTerminalRootRaiseMerge,
     compareNodesByOrderKeyM
@@ -20,7 +23,13 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Types.Witness (InstanceOp(..), ReplayContract(..), isStrictReplayContract)
+import MLF.Constraint.Types.Witness
+    ( InstanceOp(..)
+    , ReplayContract(..)
+    , ValidatedInstanceOps
+    , isStrictReplayContract
+    )
+import qualified MLF.Constraint.Types.Witness.Internal as WitnessInternal
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Order (OrderKey, compareOrderKey)
@@ -157,11 +166,25 @@ compareNodesByOrderKeyM env a b =
   where
     canon = canonical env
 
-validateNormalizedWitness :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError ()
-validateNormalizedWitness env ops = do
+-- | Evidence that these exact operations passed Definition 11.5.1/11.5.2
+-- validation in one destination presentation.
+--
+-- The constructor stays private: finalized witnesses can only consume a
+-- certificate returned by 'certifyNormalizedWitness'.
+newtype NormalizedWitnessValidation =
+    NormalizedWitnessValidation [InstanceOp]
+
+-- | Validate a normalized witness and retain construction evidence for the
+-- exact operation sequence.
+certifyNormalizedWitness
+    :: OmegaNormalizeEnv p
+    -> [InstanceOp]
+    -> Either OmegaNormalizeError NormalizedWitnessValidation
+certifyNormalizedWitness env ops = do
     validateReplayMapContract
     mapM_ checkOp ops
     checkWeakenOrdering ops
+    pure (NormalizedWitnessValidation ops)
   where
     rootC = canonical env (oneRoot env)
 
@@ -439,3 +462,21 @@ validateNormalizedWitness env ops = do
                     Nothing -> checkWeakenOrdering rest
                     Just offender -> Left (DelayedWeakenViolation (canon n) offender)
             _ -> checkWeakenOrdering rest
+
+-- | Consume validation evidence for the exact operation sequence.
+validatedInstanceOpsFromCertificate
+    :: NormalizedWitnessValidation
+    -> ValidatedInstanceOps
+validatedInstanceOpsFromCertificate (NormalizedWitnessValidation ops) =
+    WitnessInternal.sealValidatedInstanceOps ops
+
+-- | Predicate-style compatibility for diagnostics and negative tests.
+--
+-- Production witness construction consumes 'NormalizedWitnessValidation'
+-- instead of discarding it.
+validateNormalizedWitness
+    :: OmegaNormalizeEnv p
+    -> [InstanceOp]
+    -> Either OmegaNormalizeError ()
+validateNormalizedWitness env ops =
+    () <$ certifyNormalizedWitness env ops

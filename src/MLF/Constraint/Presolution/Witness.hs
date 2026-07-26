@@ -32,7 +32,6 @@ module MLF.Constraint.Presolution.Witness
     reorderWeakenWithEnv,
     assertNoStandaloneGrafts,
     validateNormalizedWitness,
-    validatedInstanceOpsAfterNormalization,
     OmegaNormalizeEnv (..),
     OmegaNormalizeError (..),
   )
@@ -70,7 +69,6 @@ import MLF.Constraint.Types.Witness
     ExpansionF (..),
     InstanceOp (..),
     ReplayContract (..),
-    ValidatedInstanceOps,
     forallSpecBinderCount,
     mkEdgeWitness
   )
@@ -200,10 +198,6 @@ integrateTaggedEdgeWitnessOps root baseOps extraOps =
               FlexibleTerminalSourceEdgeWitnessOp _ -> [FlexibleTerminalSourceOperation]
           ]
    in (ops, nonSourceOpOrigins)
-
-validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps
-validatedInstanceOpsAfterNormalization =
-  WitnessInternal.validatedInstanceOpsAfterNormalization
 
 buildEdgeTrace ::
   NodeId ->

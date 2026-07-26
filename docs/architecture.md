@@ -323,7 +323,15 @@ runtime invariants as compile-time types:
   `mkEdgeWitness` currently enforces the construction-time invariant the live
   production path can prove directly (non-negative intro counts). Finalized
   `InstanceWitness` values now require a normalization-owned validated-ops
-  token before `mkInstanceWitness` can mint them, while
+  token before `mkInstanceWitness` can mint them. `normalizeInstanceOpsFull`
+  returns that opaque token directly instead of returning a raw operation list;
+  the predicate-style validator cannot mint one. Edge normalization consumes
+  its destination-presentation validation certificate when it restores frozen
+  source identities, then proves the final operand domain and terminal
+  root-`RaiseMerge` trace authority before sealing the source presentation.
+  The raw sealing primitive remains private to the internal witness owner, and
+  no `[InstanceOp] -> ValidatedInstanceOps` conversion is exported through a
+  production façade. Meanwhile,
   `mkUncheckedInstanceWitness` stays on the explicit owner-local
   pre-normalization seam. Context-heavy Ω
   normalization and Φ translation checks that are not subsumed by that token

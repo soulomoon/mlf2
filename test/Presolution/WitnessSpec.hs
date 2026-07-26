@@ -15,7 +15,7 @@ import MLF.Constraint.Types.Witness
     , ForallSpec(..)
     , InstanceOp(..)
     , ReplayContract(..)
-    , mkInstanceWitness
+    , getValidatedInstanceOps
     )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution.Witness
@@ -32,7 +32,6 @@ import MLF.Constraint.Presolution.Witness
     , normalizeInstanceOpsFull
     , reorderWeakenWithEnv
     , validateNormalizedWitness
-    , validatedInstanceOpsAfterNormalization
     , witnessFromExpansion
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
@@ -93,6 +92,13 @@ import Presolution.Util
     , genInstanceOp
     , hasRedundantOps
     )
+
+normalizeInstanceOpsForTest
+    :: OmegaNormalizeEnv p
+    -> [InstanceOp]
+    -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsForTest env ops =
+    getValidatedInstanceOps <$> normalizeInstanceOpsFull env ops
 
 spec :: Spec
 spec = do
@@ -1255,7 +1261,7 @@ spec = do
                 arg = NodeId 10
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
                 ops0 = [OpWeaken root, OpGraft arg child]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpGraft arg child, OpWeaken root]
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right [OpGraft arg child, OpWeaken root]
 
         it "keeps the strict root Weaken before its RaiseMerge transition" $ do
             let c = mkNormalizeConstraint
@@ -1269,7 +1275,7 @@ spec = do
                         , replayDomainBinders = [exterior]
                         }
                 ops0 = [OpWeaken root, OpRaise root, OpMerge root exterior]
-            normalizeInstanceOpsFull env ops0
+            normalizeInstanceOpsForTest env ops0
                 `shouldBe` Right [OpWeaken root, OpRaiseMerge root exterior]
 
         it "does not move Weaken past same-binder ops without descendants" $ do
@@ -1279,7 +1285,7 @@ spec = do
                 arg = NodeId 10
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                 ops0 = [OpWeaken n, OpGraft arg n]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpWeaken n, OpGraft arg n]
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right [OpWeaken n, OpGraft arg n]
 
         describe "graft-weaken canonical alignment (H16 upstream target)" $ do
             it "coalesces delayed graft-weaken pairs when middle ops are binder-disjoint" $ do
@@ -1290,7 +1296,7 @@ spec = do
                     (n1, n2) = orderedPairByPrec c root
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId binder, getNodeId n1, getNodeId n2])
                     ops0 = [OpGraft arg binder, OpMerge n2 n1, OpWeaken binder]
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Right [OpGraft arg binder, OpWeaken binder, OpMerge n2 n1]
 
             it "leaves graft standalone when middle ops touch protected set (Omega handles via atBinderKeep)" $ do
@@ -1319,7 +1325,7 @@ spec = do
                             (IntSet.fromList [getNodeId binder, getNodeId descendant, getNodeId arg])
                     ops0 = [OpGraft arg binder, OpRaise descendant, OpWeaken binder]
                 -- Graft stays standalone; raise and weaken follow in descendant-first order
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Right [OpGraft arg binder, OpRaise descendant, OpWeaken binder]
 
             it "rejects standalone graft with no matching weaken" $ do
@@ -1348,7 +1354,7 @@ spec = do
                             , replayContract = ReplayContractStrict
                             }
                     ops0 = [OpGraft (NodeId 30) (NodeId 20), OpWeaken (NodeId 20)]
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Right [OpGraft (NodeId 3) (NodeId 2), OpWeaken (NodeId 2)]
 
             it "rejects ambiguous graft-weaken mapping after canonicalization" $ do
@@ -1375,7 +1381,7 @@ spec = do
                         , OpWeaken (NodeId 21)
                         ]
                     isLeftResult = either (const True) (const False)
-                normalizeInstanceOpsFull env ops0 `shouldSatisfy` isLeftResult
+                normalizeInstanceOpsForTest env ops0 `shouldSatisfy` isLeftResult
 
             it "is idempotent for graft-weaken-heavy normalization" $ do
                 let c = mkNormalizeConstraint
@@ -1399,9 +1405,9 @@ spec = do
                         , OpGraft (NodeId 30) (NodeId 20)
                         , OpWeaken (NodeId 20)
                         ]
-                case normalizeInstanceOpsFull env ops0 of
+                case normalizeInstanceOpsForTest env ops0 of
                     Left err -> expectationFailure ("Expected normalization success, got: " ++ show err)
-                    Right ops1 -> normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
+                    Right ops1 -> normalizeInstanceOpsForTest env ops1 `shouldBe` Right ops1
 
         it "does not drop Graft/Weaken when a binder is eliminated by Merge" $ do
             let c = mkNormalizeConstraint
@@ -1411,7 +1417,7 @@ spec = do
                 arg = NodeId 10
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right ops0
 
         it "drops ops that only touch nodes outside the interior" $ do
             let c = mkNormalizeConstraint
@@ -1423,7 +1429,7 @@ spec = do
                     , OpWeaken (NodeId 1)
                     , OpMerge (NodeId 3) (NodeId 1)
                     ]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right []
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right []
 
         it "keeps ops under a rigid ancestor that was weakened" $ do
             let root = NodeId 0
@@ -1448,7 +1454,7 @@ spec = do
                     (mkNormalizeEnv c parent interior)
                         { weakened = IntSet.fromList [getNodeId parent] }
                 ops0 = [OpGraft arg child]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right ops0
 
         it "normalizes omega ops within a segment" $ do
             let c = mkNormalizeConstraint
@@ -1459,9 +1465,9 @@ spec = do
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId child])
                 seg1 = [OpWeaken root, OpGraft arg child]
                 seg2 = [OpGraft arg2 root]
-            normalizeInstanceOpsFull env seg1
+            normalizeInstanceOpsForTest env seg1
                 `shouldBe` Right [OpGraft arg child, OpWeaken root]
-            normalizeInstanceOpsFull env seg2
+            normalizeInstanceOpsForTest env seg2
                 `shouldBe` Right [OpGraft arg2 root]
 
         it "O15-TR-NODE-MERGE R-MERGE-NORM-09: normalizeInstanceOpsFull rejects wrong merge direction" $ do
@@ -1470,7 +1476,7 @@ spec = do
                 (mLess, nGreater) = orderedPairByPrec c root
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
                 ops0 = [OpMerge mLess nGreater]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Left (MergeDirectionInvalid mLess nGreater)
 
         it "preserves Graft/Weaken when a later Merge eliminates the binder during emission" $ do
             let a = NodeId 2
@@ -1574,7 +1580,7 @@ spec = do
                 n = NodeId 2
                 m = NodeId 3
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
-            normalizeInstanceOpsFull env [OpRaise n, OpMerge n m] `shouldBe` Right [OpRaiseMerge n m]
+            normalizeInstanceOpsForTest env [OpRaise n, OpMerge n m] `shouldBe` Right [OpRaiseMerge n m]
 
         it "coalesces multiple Raises followed by Merge into RaiseMerge" $ do
             let c = mkNormalizeConstraint
@@ -1582,7 +1588,7 @@ spec = do
                 n = NodeId 2
                 m = NodeId 3
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
-            normalizeInstanceOpsFull env [OpRaise n, OpRaise n, OpRaise n, OpMerge n m]
+            normalizeInstanceOpsForTest env [OpRaise n, OpRaise n, OpRaise n, OpMerge n m]
                 `shouldBe` Right [OpRaiseMerge n m]
 
         describe "RaiseMerge coalescing (interior aware)" $ do
@@ -1679,7 +1685,7 @@ spec = do
                             , OpRaiseMerge root exterior
                             ]
 
-        it "normalizeInstanceOpsFull produces validated witnesses when it succeeds" $ property $
+        it "normalizeInstanceOpsFull produces unforgeable validated witnesses when it succeeds" $ property $
             let c = mkNormalizeConstraint
                 root = NodeId 0
                 env = mkNormalizeEnv c root (IntSet.fromList [1, 2, 3])
@@ -1704,13 +1710,11 @@ spec = do
                     cover 10 normalizationSuccess "normalization-success" $
                         case normalized of
                             Left _ -> property True
-                            Right ops' ->
-                                conjoin
-                                    [ validateNormalizedWitness env ops' === Right ()
-                                    , getInstanceOps
-                                        (mkInstanceWitness (validatedInstanceOpsAfterNormalization ops'))
-                                        === ops'
-                                    ]
+                            Right validatedOps ->
+                                validateNormalizedWitness
+                                    env
+                                    (getValidatedInstanceOps validatedOps)
+                                    === Right ()
 
         it "allows ops on binders that are later eliminated (paper normalization only)" $ do
             let c = mkNormalizeConstraint
@@ -1720,7 +1724,7 @@ spec = do
                 arg = NodeId 10
                 env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
                 ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
-            normalizeInstanceOpsFull env ops0 `shouldBe` Right ops0
+            normalizeInstanceOpsForTest env ops0 `shouldBe` Right ops0
 
         describe "Witness normalization invariants (US-010 regression)" $ do
             it "O15-TR-NODE-RAISE R-RAISE-VALID-10: accepts OpRaise for transitively flex-bound interior binder" $ do
@@ -1737,11 +1741,11 @@ spec = do
                     n = NodeId 2
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                     ops0 = [OpRaise n, OpRaise n, OpRaise n]
-                case normalizeInstanceOpsFull env ops0 of
+                case normalizeInstanceOpsForTest env ops0 of
                     Left err -> expectationFailure ("normalization failed: " ++ show err)
                     Right ops1 -> do
                         ops1 `shouldBe` [OpRaise n]
-                        normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
+                        normalizeInstanceOpsForTest env ops1 `shouldBe` Right ops1
 
             it "OpRaise;OpMerge coalesces to OpRaiseMerge through full pipeline" $ do
                 let c = mkNormalizeConstraint
@@ -1750,7 +1754,7 @@ spec = do
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                     ops0 = [OpRaise n, OpMerge n m]
-                normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpRaiseMerge n m]
+                normalizeInstanceOpsForTest env ops0 `shouldBe` Right [OpRaiseMerge n m]
 
             it "multiple OpRaise;OpMerge coalesces to single OpRaiseMerge" $ do
                 let c = mkNormalizeConstraint
@@ -1759,7 +1763,7 @@ spec = do
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                     ops0 = [OpRaise n, OpRaise n, OpRaise n, OpMerge n m]
-                normalizeInstanceOpsFull env ops0 `shouldBe` Right [OpRaiseMerge n m]
+                normalizeInstanceOpsForTest env ops0 `shouldBe` Right [OpRaiseMerge n m]
 
             it "RaiseMerge validation rejects rigid endpoint only on non-operated node m" $ do
                 let root = NodeId 0
@@ -1811,7 +1815,7 @@ spec = do
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
                     ops0 = [OpRaise n, OpMerge n m]
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Right [OpRaiseMerge n m]
 
             it "US-010-V1: coalesces repeated Raise;Merge into RaiseMerge" $ do
@@ -1821,7 +1825,7 @@ spec = do
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId n])
                     ops0 = [OpRaise n, OpRaise n, OpMerge n m]
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Right [OpRaiseMerge n m]
 
             it "US-010-V2: single-binder binderArgs does not widen interior for Raise;Merge" $ do
@@ -1837,7 +1841,7 @@ spec = do
                             , replayContract = ReplayContractStrict
                             }
                     ops0 = [OpRaise n, OpMerge n m]
-                normalizeInstanceOpsFull env ops0
+                normalizeInstanceOpsForTest env ops0
                     `shouldBe` Left (OpOutsideInterior (OpMerge n m))
 
             it "R-RAISEMERGE-NORM-15: validated witnesses remain valid after idempotent re-normalization" $ do
@@ -1847,11 +1851,11 @@ spec = do
                     m = NodeId 3
                     env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
                     ops0 = [OpRaise n, OpMerge n m]
-                case normalizeInstanceOpsFull env ops0 of
+                case normalizeInstanceOpsForTest env ops0 of
                     Left err -> expectationFailure ("first normalization failed: " ++ show err)
                     Right ops1 -> do
                         ops1 `shouldBe` [OpRaiseMerge n m]
-                        normalizeInstanceOpsFull env ops1 `shouldBe` Right ops1
+                        normalizeInstanceOpsForTest env ops1 `shouldBe` Right ops1
 
         describe "Normalized witness validation" $ do
             it "rejects ops outside the interior (condition 1)" $ do
@@ -2723,7 +2727,7 @@ spec = do
             forAll (genInstanceOps 10) $ \ops ->
                 forAll genNormalizeEnvParams $ \envParams ->
                     let env = mkTestNormalizeEnv envParams
-                        normalized = normalizeInstanceOpsFull env ops
+                        normalized = normalizeInstanceOpsForTest env ops
                         normalizationSuccess =
                             case normalized of
                                 Left _ -> False
@@ -2733,14 +2737,14 @@ spec = do
                             case normalized of
                                 Left _ -> property True  -- Normalization failure is acceptable
                                 Right ops1 ->
-                                    case normalizeInstanceOpsFull env ops1 of
+                                    case normalizeInstanceOpsForTest env ops1 of
                                         Left _ -> property False  -- Second normalization should not fail
                                         Right ops2 -> ops1 === ops2
         it "canonicalized witnesses have no redundant operations" $ property $
             forAll (genInstanceOps 10) $ \ops ->
                 forAll genNormalizeEnvParams $ \envParams ->
                     let env = mkTestNormalizeEnv envParams
-                        normalized = normalizeInstanceOpsFull env ops
+                        normalized = normalizeInstanceOpsForTest env ops
                         normalizationSuccess =
                             case normalized of
                                 Left _ -> False
@@ -3069,7 +3073,7 @@ spec = do
                     , replayDomainBinders = []
                     , isAnnotationEdge = False
                     }
-            case normalizeInstanceOpsFull env [] of
+            case normalizeInstanceOpsForTest env [] of
                 Right _ -> pure ()
                 Left err -> expectationFailure $ "normalizeInstanceOpsFull failed: " ++ show err
 

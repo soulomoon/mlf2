@@ -1,3 +1,26 @@
+## 2026-07-26 - Construction-closed normalized witness certificates
+
+- `normalizeInstanceOpsFull` no longer returns raw `[InstanceOp]`. Successful
+  normalization returns opaque `ValidatedInstanceOps`, and the unconditional
+  `validatedInstanceOpsAfterNormalization` façade has been removed. The only
+  raw seal is owner-internal to `MLF.Constraint.Types.Witness.Internal`.
+- `certifyNormalizedWitness` retains evidence for the exact
+  destination-presentation operation sequence. `normalizeEdgeWitnessesM`
+  consumes that evidence after restoring frozen source identities and can seal
+  the final witness only after all operands are in the producer-approved
+  source/replay domain and any root `RaiseMerge` is unique, terminal, and
+  backed by the matching construction trace.
+- O11 witness properties now build variable-size flexible binding trees.
+  Independent expected sequences cover duplicate-Raise elimination,
+  delayed-Weaken placement with unrelated operations, RaiseMerge coalescing,
+  validation, and normalization idempotence. This closes the forgeable runtime
+  construction seam; `DEV-WITNESS-NORM-NO-PROOF` remains because Lemma 11.5.3
+  is not mechanized in a proof assistant.
+- Validation passed the 83-example witness-normalization slice (including 800
+  generated certification cases), all 107 thesis-obligation anchor executions,
+  the thesis claims/deviations checker, warning-free `cabal build all -j1`, and
+  the full 3702-example serial suite.
+
 ## 2026-07-26 - Structurally generated G(sigma) and unreachable-binder elimination
 
 - `internalizeCoercionType` binds only roots owned by a coercion copy. A bare

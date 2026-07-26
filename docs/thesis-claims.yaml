@@ -104,7 +104,7 @@ claims:
     deviations:
       - DEV-WITNESS-NORM-NO-PROOF
     status: defended
-    notes: ""
+    notes: "Validated witness values are construction-closed in production; the remaining deviation is specifically the absence of a mechanized proof of Lemma 11.5.3."
 
   # ── Ch. 12 — Global Algorithm ──────────────────────────────────────────
 

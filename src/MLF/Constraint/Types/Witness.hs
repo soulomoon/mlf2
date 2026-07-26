@@ -21,6 +21,7 @@ module MLF.Constraint.Types.Witness (
     InstanceWitness,
     ValidatedInstanceOps,
     getInstanceOps,
+    getValidatedInstanceOps,
     mkInstanceWitness,
     EdgeWitness,
     ewEdgeId,

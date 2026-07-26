@@ -1668,7 +1668,7 @@ obligations:
   test_anchor:
     matcher: O11-WITNESS-NORM
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution witness normalization output over source terms.
+    rationale: QuickCheck builds variable-size flexible binding trees and checks certified normalization, delayed Weaken placement, duplicate-Raise elimination, validation, and idempotence against an independently constructed expected sequence.
     kind: quickcheck
     min_success: 100
   status: anchored
@@ -1685,7 +1685,7 @@ obligations:
   test_anchor:
     matcher: O11-WITNESS-COALESCE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution witness normalization output over source terms.
+    rationale: QuickCheck varies the number of adjacent Raise operations over generated flexible trees and requires the whole block plus its exterior Merge to construct exactly one RaiseMerge.
     kind: quickcheck
     min_success: 100
   status: anchored
@@ -1702,7 +1702,7 @@ obligations:
   test_anchor:
     matcher: O11-WITNESS-REORDER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution witness normalization output over source terms.
+    rationale: QuickCheck varies descendant and unrelated operations over generated flexible trees and compares Weaken placement with an independent last-descendant oracle while requiring stable non-Weaken order.
     kind: quickcheck
     min_success: 100
   status: anchored

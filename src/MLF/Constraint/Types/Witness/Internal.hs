@@ -22,7 +22,8 @@ module MLF.Constraint.Types.Witness.Internal (
     InstanceOp(..),
     InstanceWitness(..),
     ValidatedInstanceOps,
-    validatedInstanceOpsAfterNormalization,
+    getValidatedInstanceOps,
+    sealValidatedInstanceOps,
     mkInstanceWitness,
     mkUncheckedInstanceWitness,
     EdgeWitness(..),
@@ -167,6 +168,10 @@ newtype InstanceWitness = InstanceWitness { getInstanceOps :: [InstanceOp] }
 newtype ValidatedInstanceOps = ValidatedInstanceOps [InstanceOp]
     deriving (Eq, Show)
 
+-- | Inspect the operations carried by a normalization certificate.
+getValidatedInstanceOps :: ValidatedInstanceOps -> [InstanceOp]
+getValidatedInstanceOps (ValidatedInstanceOps ops) = ops
+
 -- | Per-instantiation-edge witness metadata.
 --
 -- This is the data that Phase 6 uses to reconstruct an xMLF instantiation for
@@ -193,9 +198,14 @@ data WitnessError
     = NegativeForallIntros Int
     deriving (Eq, Show)
 
--- | Package finalized ops after the matching normalization/validation lane.
-validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps
-validatedInstanceOpsAfterNormalization = ValidatedInstanceOps
+-- | Owner-internal sealing primitive for the witness validator.
+--
+-- This is deliberately absent from the production façade.  Callers must
+-- obtain 'ValidatedInstanceOps' from the normalization/validation modules;
+-- exposing @[InstanceOp] -> ValidatedInstanceOps@ at that boundary would make
+-- the validation token forgeable.
+sealValidatedInstanceOps :: [InstanceOp] -> ValidatedInstanceOps
+sealValidatedInstanceOps = ValidatedInstanceOps
 
 -- | Smart constructor for finalized `InstanceWitness` values.
 mkInstanceWitness :: ValidatedInstanceOps -> InstanceWitness

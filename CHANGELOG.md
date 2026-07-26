@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Made normalized Ω witnesses construction-closed. `normalizeInstanceOpsFull`
+  now returns an opaque `ValidatedInstanceOps` certificate instead of a raw
+  operation list, and the production façade no longer exports an unconditional
+  list-to-certificate conversion. Edge normalization must consume its
+  destination-presentation certificate and prove the restored source/replay
+  operand domain plus terminal root-`RaiseMerge` trace authority before
+  constructing the final `InstanceWitness`. Variable-size O11 properties now
+  cover delayed Weaken placement, duplicate Raise elimination, RaiseMerge
+  coalescing, stable reordering, validation, and idempotence.
 - Made annotation/coercion selection closed by construction. Composite
   annotation producers must complete exact checked construction or retain that
   error; only a direct identity-bearing occurrence can select witness replay.

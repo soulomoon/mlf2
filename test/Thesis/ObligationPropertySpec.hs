@@ -38,6 +38,7 @@ import MLF.Constraint.Presolution.TestSupport
   )
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (..),
+    OmegaNormalizeError,
     coalesceRaiseMergeWithEnv,
     normalizeInstanceOpsFull,
     reorderWeakenWithEnv,
@@ -89,6 +90,13 @@ import SpecUtil
   )
 import Test.Hspec
 import Test.QuickCheck
+
+normalizeInstanceOpsForTest
+  :: OmegaNormalizeEnv p
+  -> [InstanceOp]
+  -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsForTest env ops =
+  getValidatedInstanceOps <$> normalizeInstanceOpsFull env ops
 
 spec :: Spec
 spec = do
@@ -964,17 +972,17 @@ propTrSeqCons _size =
 propTrRigidRaise :: Int -> Property
 propTrRigidRaise _size =
   let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
-   in normalizeInstanceOpsFull env [OpRaise (NodeId 2)] === Right []
+   in normalizeInstanceOpsForTest env [OpRaise (NodeId 2)] === Right []
 
 propTrRigidMerge :: Int -> Property
 propTrRigidMerge _size =
   let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
-   in normalizeInstanceOpsFull env [OpMerge (NodeId 2) (NodeId 3)] === Right []
+   in normalizeInstanceOpsForTest env [OpMerge (NodeId 2) (NodeId 3)] === Right []
 
 propTrRigidRaiseMerge :: Int -> Property
 propTrRigidRaiseMerge _size =
   let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
-   in normalizeInstanceOpsFull env [OpRaiseMerge (NodeId 2) (NodeId 3)] === Right []
+   in normalizeInstanceOpsForTest env [OpRaiseMerge (NodeId 2) (NodeId 3)] === Right []
 
 propTrRootGraft :: Int -> Property
 propTrRootGraft _size =
@@ -1004,7 +1012,7 @@ propTrRootWeaken _size =
       root = NodeId 0
       n = NodeId 2
       env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
-   in normalizeInstanceOpsFull env [OpWeaken n] === Right [OpWeaken n]
+   in normalizeInstanceOpsForTest env [OpWeaken n] === Right [OpWeaken n]
 
 propTrNodeGraft :: Int -> Property
 propTrNodeGraft _size =
@@ -1018,7 +1026,7 @@ propTrNodeGraft _size =
             binderReplayMap = IntMap.fromList [(getNodeId binder, binder)],
             replayContract = ReplayContractStrict
           }
-   in normalizeInstanceOpsFull env [OpGraft arg binder, OpWeaken binder] === Right [OpGraft arg binder, OpWeaken binder]
+   in normalizeInstanceOpsForTest env [OpGraft arg binder, OpWeaken binder] === Right [OpGraft arg binder, OpWeaken binder]
 
 propTrNodeMerge :: Int -> Property
 propTrNodeMerge size =
@@ -2450,22 +2458,95 @@ propCopyScheme size =
                 other -> counterexample ("expected copied scheme root arrow, got " ++ show other) False
         Left err -> counterexample (show err) False
 
-propWitnessNorm :: Int -> Property
-propWitnessNorm _size =
-  let c = mkNormalizeConstraint
+witnessChainFixture
+  :: Int
+  -> (OmegaNormalizeEnv 'Raw, NodeId, [NodeId], NodeId)
+witnessChainFixture requestedSize =
+  let chainSize = max 1 requestedSize
       root = NodeId 0
-      n = NodeId 2
-      m = NodeId 3
-      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
-   in normalizeInstanceOpsFull env [OpRaise n, OpMerge n m] === Right [OpRaiseMerge n m]
+      parent = NodeId 1
+      children = map NodeId [2 .. chainSize + 1]
+      sibling = NodeId (chainSize + 2)
+      allNodes = root : parent : children ++ [sibling]
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (getNodeId node, TyVar {tnId = node, tnBound = Nothing})
+                  | node <- allNodes
+                  ],
+              cBindParents =
+                bindParentsFromPairs
+                  ( (parent, root, BindFlex)
+                      : (sibling, root, BindFlex)
+                      : [ (child, parent, BindFlex)
+                        | child <- children
+                        ]
+                  )
+            }
+      env =
+        mkNormalizeEnv
+          c
+          root
+          (IntSet.fromList (map getNodeId allNodes))
+   in (env, parent, children, sibling)
+
+propWitnessNorm :: Int -> Property
+propWitnessNorm size =
+  let (env, parent, children, _sibling) = witnessChainFixture size
+      duplicatedRaises =
+        concat
+          [ replicate (1 + getNodeId child `mod` 3) (OpRaise child)
+          | child <- children
+          ]
+      input = OpWeaken parent : duplicatedRaises
+      expected = map OpRaise children ++ [OpWeaken parent]
+   in case normalizeInstanceOpsFull env input of
+        Left err -> counterexample (show err) False
+        Right validated ->
+          let normalized = getValidatedInstanceOps validated
+           in conjoin
+                [ counterexample "normalization did not delay Weaken or remove duplicate Raises" $
+                    normalized === expected,
+                  counterexample "the certified output does not satisfy Definition 11.5.2" $
+                    validateNormalizedWitness env normalized === Right (),
+                  counterexample "certified normalization is not idempotent" $
+                    normalizeInstanceOpsForTest env normalized === Right normalized
+                ]
 
 propWitnessCoalesce :: Int -> Property
-propWitnessCoalesce _size =
-  propTrRootRaiseMerge 0
+propWitnessCoalesce size =
+  let (env0, operated, _children, exterior) = witnessChainFixture size
+      env =
+        env0
+          { interior =
+              IntSet.delete
+                (getNodeId exterior)
+                (interior env0)
+          }
+      input = replicate (max 1 size) (OpRaise operated) ++ [OpMerge operated exterior]
+   in coalesceRaiseMergeWithEnv env input === Right [OpRaiseMerge operated exterior]
 
 propWitnessReorder :: Int -> Property
-propWitnessReorder _size =
-  propTrNodeWeaken 0
+propWitnessReorder size =
+  let (env, parent, children, sibling) = witnessChainFixture size
+      input =
+        OpRaise sibling
+          : OpWeaken parent
+          : concatMap
+              (\child -> [OpRaise child, OpRaise sibling])
+              children
+      nonWeakens = filter (/= OpWeaken parent) input
+      lastChildIndex =
+        maximum
+          [ index
+          | (index, OpRaise node) <- zip [0 :: Int ..] nonWeakens
+          , node `elem` children
+          ]
+      (prefix, suffix) = splitAt (lastChildIndex + 1) nonWeakens
+      expected = prefix ++ [OpWeaken parent] ++ suffix
+   in reorderWeakenWithEnv env input === Right expected
 
 propAcyclicCheck :: Int -> Property
 propAcyclicCheck size =
