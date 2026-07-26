@@ -1,3 +1,6 @@
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
 module MLF.Constraint.Presolution.TestSupport (
     EdgeWitnessOp(..),
     EdgeArtifact,
@@ -24,8 +27,29 @@ module MLF.Constraint.Presolution.TestSupport (
     setEdgeArtifactsIdentityEdges,
     TranslatabilityIssue(..),
     ExpansionResultMap(..),
-    PresolutionState(..),
+    PresolutionState
+        ( PresolutionState
+        , psConstraint
+        , psPresolution
+        , psUnionFind
+        , psNextNodeId
+        , psPendingWeakens
+        , psPendingWeakenOwners
+        , psWeakenReplayCertificates
+        , psBinderCache
+        , psGraphVersion
+        , psUnionFindVersion
+        , psBindParentsVersion
+        , psBindingModelCache
+        , psEdgeLocalSnapshot
+        , psBindingRepairCache
+        , psBindingRepairDirty
+        , psCachedRootGen
+        , psExpansionResults
+        , psEdgeExecutionArtifacts
+        ),
     EdgeExecutionArtifacts(..),
+    emptyPresolutionStateForTest,
     psEdgeExpansions,
     psEdgeWitnesses,
     psEdgeRaiseAuthorityNodes,
@@ -114,6 +138,7 @@ import MLF.Constraint.Presolution.Base
     , EdgeArtifacts
     , EdgeArtifactsError(..)
     , EdgeExecutionArtifacts(..)
+    , EdgeWitnessNonSourceOrigin
     , edgeArtifactExpansion
     , edgeArtifactWitness
     , edgeArtifactTrace
@@ -141,12 +166,8 @@ import MLF.Constraint.Presolution.Base
     , PresolutionError
     , TranslatabilityIssue(..)
     , PresolutionState(..)
-    , psEdgeExpansions
-    , psEdgeWitnesses
-    , psEdgeRaiseAuthorityNodes
-    , psEdgeNonSourceOpOrigins
-    , psEdgeExpansionConstructions
-    , psEdgeTraces
+    , PendingWeakenOwner
+    , mkPresolutionState
     , RawExpansionConstruction
     , emptyExpansionResultMap
     , emptyRawExpansionConstruction
@@ -232,17 +253,204 @@ import MLF.Constraint.Types.Graph
     , BindParents
     , BindingError
     , Constraint
-    , EdgeId
+    , EdgeId(..)
     , GenNodeId
     , InstEdge
     , NodeId
     , NodeRef
     , TyNode
     )
+import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.RootOwnership (emptyRootOwnershipIndex)
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion(..), InstanceOp)
+import MLF.Constraint.Types.Witness
+    ( EdgeWitness
+    , Expansion(..)
+    , InstanceOp
+    , ewEdgeId
+    )
 import MLF.Util.Timing (defaultTimingConfig, timingProgramOperations)
 import MLF.Util.Trace (TraceConfig)
+
+psEdgeExpansions :: PresolutionState p -> IntMap Expansion
+psEdgeExpansions =
+    IntMap.map eeaExpansion . psEdgeExecutionArtifacts
+
+psEdgeWitnesses :: PresolutionState p -> IntMap EdgeWitness
+psEdgeWitnesses =
+    IntMap.map eeaWitness . psEdgeExecutionArtifacts
+
+psEdgeRaiseAuthorityNodes :: PresolutionState p -> IntMap IntSet.IntSet
+psEdgeRaiseAuthorityNodes =
+    IntMap.map eeaRaiseAuthorityNodes . psEdgeExecutionArtifacts
+
+psEdgeNonSourceOpOrigins
+    :: PresolutionState p
+    -> IntMap (IntMap EdgeWitnessNonSourceOrigin)
+psEdgeNonSourceOpOrigins =
+    IntMap.map eeaNonSourceOpOrigins . psEdgeExecutionArtifacts
+
+psEdgeExpansionConstructions
+    :: PresolutionState p
+    -> IntMap RawExpansionConstruction
+psEdgeExpansionConstructions =
+    IntMap.map eeaExpansionConstruction . psEdgeExecutionArtifacts
+
+psEdgeTraces :: PresolutionState p -> IntMap EdgeTrace
+psEdgeTraces =
+    IntMap.map eeaTrace . psEdgeExecutionArtifacts
+
+legacyPresolutionStateView
+    :: PresolutionState p
+    -> ( Constraint p
+       , Presolution
+       , IntMap NodeId
+       , Int
+       , IntSet.IntSet
+       , IntMap PendingWeakenOwner
+       , IntMap [NodeId]
+       , IntMap Expansion
+       , IntMap EdgeWitness
+       , IntMap EdgeTrace
+       )
+legacyPresolutionStateView st =
+    ( psConstraint st
+    , psPresolution st
+    , psUnionFind st
+    , psNextNodeId st
+    , psPendingWeakens st
+    , psPendingWeakenOwners st
+    , psBinderCache st
+    , psEdgeExpansions st
+    , psEdgeWitnesses st
+    , psEdgeTraces st
+    )
+
+-- | Compatibility fixture syntax isolated to the test-support module.
+--
+-- Production construction accepts only complete 'EdgeExecutionArtifacts'.
+-- Older low-level specs can still use the compact positional form, but this
+-- builder validates identical keys and embedded edge identities before
+-- creating packets.
+pattern PresolutionState
+    :: Constraint p
+    -> Presolution
+    -> IntMap NodeId
+    -> Int
+    -> IntSet.IntSet
+    -> IntMap PendingWeakenOwner
+    -> IntMap [NodeId]
+    -> IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> PresolutionState p
+pattern PresolutionState
+    constraint
+    presolution
+    unionFind
+    nextNodeId
+    pendingWeakens
+    pendingWeakenOwners
+    binderCache
+    edgeExpansions
+    edgeWitnesses
+    edgeTraces <-
+    ( legacyPresolutionStateView ->
+        ( constraint
+        , presolution
+        , unionFind
+        , nextNodeId
+        , pendingWeakens
+        , pendingWeakenOwners
+        , binderCache
+        , edgeExpansions
+        , edgeWitnesses
+        , edgeTraces
+        )
+      )
+  where
+    PresolutionState
+        constraint
+        presolution
+        unionFind
+        nextNodeId
+        pendingWeakens
+        pendingWeakenOwners
+        binderCache
+        edgeExpansions
+        edgeWitnesses
+        edgeTraces =
+            mkPresolutionState
+                constraint
+                presolution
+                unionFind
+                nextNodeId
+                pendingWeakens
+                pendingWeakenOwners
+                binderCache
+                ( legacyEdgeExecutionArtifactsForTest
+                    edgeExpansions
+                    edgeWitnesses
+                    edgeTraces
+                )
+
+{-# COMPLETE PresolutionState #-}
+
+emptyPresolutionStateForTest
+    :: Constraint p
+    -> Int
+    -> PresolutionState p
+emptyPresolutionStateForTest constraint nextNodeId =
+    mkPresolutionState
+        constraint
+        (Presolution IntMap.empty)
+        IntMap.empty
+        nextNodeId
+        IntSet.empty
+        IntMap.empty
+        IntMap.empty
+        IntMap.empty
+
+legacyEdgeExecutionArtifactsForTest
+    :: IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntMap EdgeExecutionArtifacts
+legacyEdgeExecutionArtifactsForTest expansions witnesses traces
+    | expansionKeys /= witnessKeys || witnessKeys /= traceKeys =
+        error "PresolutionState test fixture: partial edge execution artifacts"
+    | otherwise =
+        IntMap.mapWithKey makeArtifact witnesses
+  where
+    expansionKeys = IntMap.keysSet expansions
+    witnessKeys = IntMap.keysSet witnesses
+    traceKeys = IntMap.keysSet traces
+
+    makeArtifact edgeKey witness
+        | ewEdgeId witness /= EdgeId edgeKey =
+            error
+                ( "PresolutionState test fixture: witness edge identity mismatch "
+                    ++ show (EdgeId edgeKey, ewEdgeId witness)
+                )
+        | otherwise =
+            EdgeExecutionArtifacts
+                { eeaExpansion = require "expansion" edgeKey expansions
+                , eeaWitness = witness
+                , eeaRaiseAuthorityNodes = IntSet.empty
+                , eeaNonSourceOpOrigins = IntMap.empty
+                , eeaExpansionConstruction = emptyRawExpansionConstruction
+                , eeaTrace = require "trace" edgeKey traces
+                }
+
+    require label key values =
+        case IntMap.lookup key values of
+            Just value -> value
+            Nothing ->
+                error
+                    ( "PresolutionState test fixture: missing "
+                        ++ label
+                        ++ " for "
+                        ++ show (EdgeId key)
+                    )
 
 defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
 defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)

@@ -45,6 +45,18 @@ spec = describe "Repository guardrails" $ do
     viewSource <- readFileStrict "src/MLF/Constraint/Presolution/View.hs"
     viewSource `shouldNotContain` "fromPresolutionResult"
 
+  it "production presolution state cannot reconstruct edge packets from component maps" $ do
+    baseSource <- readFileStrict "src/MLF/Constraint/Presolution/Base.hs"
+    let baseExports =
+          unlines (takeWhile (/= ") where") (lines baseSource))
+    baseExports `shouldNotContain` "PresolutionStateInternal"
+    baseSource `shouldNotContain` "legacyEdgeExecutionArtifacts"
+    baseSource `shouldNotContain` "pattern PresolutionState"
+    edgeUnifyStateSource <-
+      readFileStrict "src/MLF/Constraint/Presolution/EdgeUnify/State.hs"
+    edgeUnifyStateSource `shouldNotContain` "psEdgeWitnesses"
+    edgeUnifyStateSource `shouldNotContain` "psEdgeTraces"
+
   it "split child modules stay implementation-only in Cabal" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc

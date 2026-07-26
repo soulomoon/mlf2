@@ -56,6 +56,7 @@ import MLF.Constraint.Presolution.Base (
     CopyMap,
     EdgeSourceInterior(..),
     EdgeTrace(..),
+    EdgeExecutionArtifacts(..),
     InteriorNodes(..),
     InteriorSet,
     PendingWeakenOwner(..),
@@ -65,8 +66,6 @@ import MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
-    psEdgeTraces,
-    psEdgeWitnesses,
     WeakenReplayCertificate,
     certifyAppliedNonRootWeakenReplay,
     certifyEliminatedNonRootWeakenReplay,
@@ -500,15 +499,17 @@ applyPendingWeaken nid0 = do
     weakenCandidates st target =
         [ ( edgeKey
           , source
-          , etResultRoot trace
+          , etResultRoot (eeaTrace artifacts)
           , mergedBeforeWeaken
           , graftedBeforeWeaken
           )
-        | (edgeKey, trace) <- IntMap.toList (psEdgeTraces st)
-        , Just witness <- [IntMap.lookup edgeKey (psEdgeWitnesses st)]
+        | (edgeKey, artifacts) <-
+            IntMap.toList (psEdgeExecutionArtifacts st)
         , (source, mergedBeforeWeaken, graftedBeforeWeaken) <-
-            weakenSources (getInstanceOps (ewWitness witness))
-        , Just copied <- [lookupCopy source (etCopyMap trace)]
+            weakenSources
+                (getInstanceOps (ewWitness (eeaWitness artifacts)))
+        , Just copied <-
+            [lookupCopy source (etCopyMap (eeaTrace artifacts))]
         , copied == target
         ]
 

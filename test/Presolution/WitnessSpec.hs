@@ -52,11 +52,11 @@ import MLF.Constraint.Presolution.Construction
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , EdgeExecutionArtifacts(..)
+    , emptyPresolutionStateForTest
     , psEdgeExecutionArtifacts
     , psEdgeTraces
     , psEdgeWitnesses
     , CopyMapping(..)
-    , emptyExpansionResultMap
     , validateReplayMapTraceContract
     , runPresolutionM
     , certifyAppliedNonRootWeakenReplay
@@ -2092,30 +2092,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = IntMap.empty
-                            , psNextNodeId = 4
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint IntMap.empty 4 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
                         eid `shouldBe` edgeId
@@ -2175,30 +2152,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = IntMap.empty
-                            , psNextNodeId = 3
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint IntMap.empty 3 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
                         eid `shouldBe` edgeId
@@ -2254,30 +2208,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = IntMap.empty
-                            , psNextNodeId = 4
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint IntMap.empty 4 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) err) -> do
                         eid `shouldBe` edgeId
@@ -2325,30 +2256,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = IntMap.empty
-                            , psNextNodeId = 3
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint IntMap.empty 3 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (MissingOrderKey nid)) -> do
                         eid `shouldBe` edgeId
@@ -2410,30 +2318,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = uf
-                            , psNextNodeId = 32
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint uf 32 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
                         eid `shouldBe` edgeId
@@ -2491,30 +2376,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = uf
-                            , psNextNodeId = 4
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint uf 4 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
                         eid `shouldBe` edgeId
@@ -2576,30 +2438,7 @@ spec = do
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
-                    st0 = PresolutionStateInternal
-                            { psConstraint = constraint
-                            , psPresolution = Presolution IntMap.empty
-                            , psUnionFind = uf
-                            , psNextNodeId = 32
-                            , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                            , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                            , psExpansionResults = emptyExpansionResultMap
-                            , psEdgeExecutionArtifacts =
-                                singletonEdgeExecutionArtifactsForTest
-                                    edgeId
-                                    edgeWitness
-                                    edgeTrace
-                            }
+                    st0 = mkWitnessNormState constraint uf 32 edgeId edgeWitness edgeTrace
                 case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                     Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
                         eid `shouldBe` edgeId
@@ -3675,30 +3514,7 @@ spec = do
                         , etReplayContract = ReplayContractStrict
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 40
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                        , psGraphVersion = 0
-                        , psUnionFindVersion = 0
-                        , psBindParentsVersion = 0
-                        , psBindingModelCache = Nothing
-                        , psEdgeLocalSnapshot = Nothing
-                        , psBindingRepairCache = Nothing
-                        , psBindingRepairDirty = Nothing
-                        , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 40 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
@@ -4058,30 +3874,7 @@ spec = do
                         , etReplayContract = ReplayContractStrict
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 150
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 150 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left (WitnessNormalizationError (EdgeId eid) (ReplayMapIncomplete missing)) -> do
                     eid `shouldBe` edgeId
@@ -4134,30 +3927,7 @@ spec = do
                         , etReplayContract = ReplayContractNone
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 350
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 350 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
@@ -4220,30 +3990,7 @@ spec = do
                         , etReplayContract = ReplayContractNone
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 370
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 370 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
@@ -4687,30 +4434,7 @@ spec = do
                         , etReplayContract = ReplayContractNone
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 350
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 350 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left (WitnessNormalizationError (EdgeId eid) (ReplayContractNoneRequiresReplay op)) -> do
                     eid `shouldBe` edgeId
@@ -4754,30 +4478,7 @@ spec = do
                         , etReplayContract = ReplayContractNone
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 340
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 340 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
@@ -4831,30 +4532,7 @@ spec = do
                         , etReplayContract = ReplayContractNone
                         }
                 st0 =
-                    PresolutionStateInternal
-                        { psConstraint = c
-                        , psPresolution = Presolution IntMap.empty
-                        , psUnionFind = IntMap.empty
-                        , psNextNodeId = 450
-                        , psPendingWeakens = IntSet.empty
-                        , psPendingWeakenOwners = IntMap.empty
-                        , psWeakenReplayCertificates = IntMap.empty
-                        , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
-                        , psExpansionResults = emptyExpansionResultMap
-                        , psEdgeExecutionArtifacts =
-                            singletonEdgeExecutionArtifactsForTest
-                                edgeId
-                                edgeWitness
-                                edgeTrace
-                        }
+                    mkWitnessNormState c IntMap.empty 450 edgeId edgeWitness edgeTrace
             case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
                 Left err ->
                     expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
@@ -4888,24 +4566,9 @@ spec = do
             }
 
     mkWitnessNormState c uf nextNode edgeId edgeWitness edgeTrace =
-        PresolutionStateInternal
-            { psConstraint = c
-            , psPresolution = Presolution IntMap.empty
-            , psUnionFind = uf
-            , psNextNodeId = nextNode
-            , psPendingWeakens = IntSet.empty
-            , psPendingWeakenOwners = IntMap.empty
-            , psWeakenReplayCertificates = IntMap.empty
-            , psBinderCache = IntMap.empty
-            , psGraphVersion = 0
-            , psUnionFindVersion = 0
-            , psBindParentsVersion = 0
-            , psBindingModelCache = Nothing
-            , psEdgeLocalSnapshot = Nothing
-            , psBindingRepairCache = Nothing
+        (emptyPresolutionStateForTest c nextNode)
+            { psUnionFind = uf
             , psBindingRepairDirty = Nothing
-            , psCachedRootGen = Nothing
-            , psExpansionResults = emptyExpansionResultMap
             , psEdgeExecutionArtifacts =
                 singletonEdgeExecutionArtifactsForTest
                     edgeId

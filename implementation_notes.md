@@ -1,3 +1,28 @@
+## 2026-07-26 - Construction-closed presolution state
+
+- `PresolutionState` no longer exports either its internal constructor or the
+  legacy bidirectional pattern that rebuilt edge execution state from separate
+  expansion, witness, and trace maps. Production initialization goes through
+  `mkPresolutionState`, whose only edge input is an
+  `IntMap EdgeExecutionArtifacts`; cache and version state is initialized by
+  the owner.
+- Pending-Weaken certification now traverses complete execution packets, and
+  final replay validation selects each complete published `EdgeArtifact` by
+  the required `EdgeId`. Neither path projects witness and trace maps and then
+  reconnects them by integer key.
+- Compact positional state fixtures and component projections remain available
+  only from `MLF.Constraint.Presolution.TestSupport`. The test builder checks
+  identical key sets and the witness's embedded `EdgeId`; witness-normalization
+  fixtures share one smart helper rather than manually populating every
+  mutable-state cache field.
+- `RepoGuardSpec` prevents the legacy constructor/reconnection vocabulary from
+  returning to the production owners. This closes another forgeable
+  construction seam; it strengthens executable Chapter 15 evidence but is not
+  a mechanized proof for all eMLF terms. Focused validation passes 83 witness
+  normalization examples, 34 edge-interpreter examples, 60 O15 obligations,
+  and all 9 fixed annotation cases; the final serial suite passes 3704
+  examples.
+
 ## 2026-07-26 - Construction-closed Phase 4 edge packets
 
 - `EdgeArtifacts` no longer exports a record constructor containing four

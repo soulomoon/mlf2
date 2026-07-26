@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Changed
+- Closed the remaining mutable-state loophole beneath construction-closed edge
+  artifacts. `PresolutionState` now has an abstract constructor and is created
+  by `mkPresolutionState` from one map of complete
+  `EdgeExecutionArtifacts`; production no longer exposes the legacy
+  bidirectional pattern that accepted independent expansion, witness, and
+  trace maps while inventing empty Raise/origin/construction authority.
+  Component-map state projections and the compact positional fixture builder
+  now live only in `MLF.Constraint.Presolution.TestSupport`. Final replay
+  validation and pending-Weaken certification consume the complete packet
+  selected by its `EdgeId`, without projecting and reconnecting witness/trace
+  maps. A repository guard keeps those reconstruction names out of the
+  production owners. Focused witness/edge/Chapter-15/annotation regressions and
+  the full 3704-example serial suite pass.
 - Made the Phase 4-to-Phase 6 edge-artifact boundary construction-closed.
   `EdgeArtifacts` is now an opaque map of complete per-edge packets, each
   owning its expansion, normalized witness, frozen replay trace, and exact

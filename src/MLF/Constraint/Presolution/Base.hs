@@ -1,10 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module MLF.Constraint.Presolution.Base (
     PresolutionUf(..),
@@ -53,9 +51,7 @@ module MLF.Constraint.Presolution.Base (
     EdgeWitnessNonSourceOrigin(..),
     EdgeExecutionArtifacts(..),
     PresolutionState
-        ( PresolutionState
-        , PresolutionStateInternal
-        , psConstraint
+        ( psConstraint
         , psPresolution
         , psUnionFind
         , psNextNodeId
@@ -74,12 +70,7 @@ module MLF.Constraint.Presolution.Base (
         , psExpansionResults
         , psEdgeExecutionArtifacts
         ),
-    psEdgeExpansions,
-    psEdgeWitnesses,
-    psEdgeRaiseAuthorityNodes,
-    psEdgeNonSourceOpOrigins,
-    psEdgeExpansionConstructions,
-    psEdgeTraces,
+    mkPresolutionState,
     CachedBindingModel(..),
     CachedBindingRepairModel(..),
     emptyBindingRepairDirty,
@@ -705,71 +696,13 @@ data PresolutionState p = PresolutionStateInternal
     }
     deriving (Eq, Show)
 
-psEdgeExpansions :: PresolutionState p -> IntMap Expansion
-psEdgeExpansions = IntMap.map eeaExpansion . psEdgeExecutionArtifacts
-
-psEdgeWitnesses :: PresolutionState p -> IntMap EdgeWitness
-psEdgeWitnesses = IntMap.map eeaWitness . psEdgeExecutionArtifacts
-
-psEdgeRaiseAuthorityNodes :: PresolutionState p -> IntMap IntSet.IntSet
-psEdgeRaiseAuthorityNodes =
-    IntMap.map eeaRaiseAuthorityNodes . psEdgeExecutionArtifacts
-
-psEdgeNonSourceOpOrigins
-    :: PresolutionState p
-    -> IntMap (IntMap EdgeWitnessNonSourceOrigin)
-psEdgeNonSourceOpOrigins =
-    IntMap.map eeaNonSourceOpOrigins . psEdgeExecutionArtifacts
-
-psEdgeExpansionConstructions
-    :: PresolutionState p
-    -> IntMap RawExpansionConstruction
-psEdgeExpansionConstructions =
-    IntMap.map eeaExpansionConstruction . psEdgeExecutionArtifacts
-
-psEdgeTraces :: PresolutionState p -> IntMap EdgeTrace
-psEdgeTraces = IntMap.map eeaTrace . psEdgeExecutionArtifacts
-
-edgeExecutionArtifactProjections
-    :: IntMap EdgeExecutionArtifacts
-    -> (IntMap Expansion, IntMap EdgeWitness, IntMap EdgeTrace)
-edgeExecutionArtifactProjections artifacts =
-    ( IntMap.map eeaExpansion artifacts
-    , IntMap.map eeaWitness artifacts
-    , IntMap.map eeaTrace artifacts
-    )
-
-legacyEdgeExecutionArtifacts
-    :: IntMap Expansion
-    -> IntMap EdgeWitness
-    -> IntMap EdgeTrace
-    -> IntMap EdgeExecutionArtifacts
-legacyEdgeExecutionArtifacts expansions witnesses traces
-    | expansionKeys /= witnessKeys || witnessKeys /= traceKeys =
-        error "PresolutionState: partial legacy edge execution artifacts"
-    | otherwise =
-        IntMap.mapWithKey
-            (\edgeKey witness ->
-                EdgeExecutionArtifacts
-                    { eeaExpansion = require "expansion" edgeKey expansions
-                    , eeaWitness = witness
-                    , eeaRaiseAuthorityNodes = IntSet.empty
-                    , eeaNonSourceOpOrigins = IntMap.empty
-                    , eeaExpansionConstruction = emptyRawExpansionConstruction
-                    , eeaTrace = require "trace" edgeKey traces
-                    }
-            )
-            witnesses
-  where
-    expansionKeys = IntSet.fromAscList (IntMap.keys expansions)
-    witnessKeys = IntSet.fromAscList (IntMap.keys witnesses)
-    traceKeys = IntSet.fromAscList (IntMap.keys traces)
-    require label key values =
-        case IntMap.lookup key values of
-            Just value -> value
-            Nothing -> error ("PresolutionState: missing legacy " ++ label)
-
-pattern PresolutionState
+-- | Construct mutable presolution state from complete edge-execution packets.
+--
+-- The packet map is the only edge-artifact input.  In particular, callers
+-- cannot provide expansion, witness, trace, or construction maps separately
+-- and rely on this boundary to reconnect them or manufacture missing
+-- authority.  Cache/version fields are initialized owner-locally.
+mkPresolutionState
     :: Constraint p
     -> Presolution
     -> IntMap NodeId
@@ -777,11 +710,17 @@ pattern PresolutionState
     -> IntSet.IntSet
     -> IntMap PendingWeakenOwner
     -> IntMap [NodeId]
-    -> IntMap Expansion
-    -> IntMap EdgeWitness
-    -> IntMap EdgeTrace
+    -> IntMap EdgeExecutionArtifacts
     -> PresolutionState p
-pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces <-
+mkPresolutionState
+    constraint
+    presolution
+    unionFind
+    nextNodeId
+    pendingWeakens
+    pendingWeakenOwners
+    binderCache
+    edgeExecutionArtifacts =
     PresolutionStateInternal
         { psConstraint = constraint
         , psPresolution = presolution
@@ -789,39 +728,19 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
         , psNextNodeId = nextNodeId
         , psPendingWeakens = pendingWeakens
         , psPendingWeakenOwners = pendingWeakenOwners
+        , psWeakenReplayCertificates = IntMap.empty
         , psBinderCache = binderCache
-        , psEdgeExecutionArtifacts =
-            ( edgeExecutionArtifactProjections ->
-                (edgeExpansions, edgeWitnesses, edgeTraces)
-            )
+        , psGraphVersion = 0
+        , psUnionFindVersion = 0
+        , psBindParentsVersion = 0
+        , psBindingModelCache = Nothing
+        , psEdgeLocalSnapshot = Nothing
+        , psBindingRepairCache = Nothing
+        , psBindingRepairDirty = Just dirtyAllBindingRepair
+        , psCachedRootGen = Nothing
+        , psExpansionResults = emptyExpansionResultMap
+        , psEdgeExecutionArtifacts = edgeExecutionArtifacts
         }
-  where
-    PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces =
-        PresolutionStateInternal
-            constraint
-            presolution
-            unionFind
-            nextNodeId
-            pendingWeakens
-            pendingWeakenOwners
-            IntMap.empty
-            binderCache
-            0
-            0
-            0
-            Nothing
-            Nothing
-            Nothing
-            (Just dirtyAllBindingRepair)
-            Nothing
-            emptyExpansionResultMap
-            ( legacyEdgeExecutionArtifacts
-                edgeExpansions
-                edgeWitnesses
-                edgeTraces
-            )
-
-{-# COMPLETE PresolutionState #-}
 
 {-# INLINE invalidateBindingModelState #-}
 invalidateBindingModelState :: PresolutionState p -> PresolutionState p

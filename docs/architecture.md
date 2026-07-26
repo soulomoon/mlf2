@@ -663,9 +663,12 @@ semantics that are not represented elsewhere just as explicitly.”
   origins, raw construction certificate, and replay trace as one immutable
   proof artifact. `recordEdgeExecutionArtifacts` accepts an equal replay and
   rejects a write that changes any field; replay likewise rejects a packet that
-  conflicts with the committed edge. The exported legacy `PresolutionState`
-  fixture pattern remains a test-compatibility projection and may synthesize
-  empty auxiliary fields, so it is not the production construction contract.
+  conflicts with the committed edge. `PresolutionState` is abstract and its
+  smart constructor accepts only the complete packet map. The compact legacy
+  fixture pattern and component projections live exclusively in
+  `MLF.Constraint.Presolution.TestSupport`, where equal component keys and the
+  embedded witness `EdgeId` are checked before empty auxiliary test authority
+  can be synthesized.
 - `EdgeWitness.ewForallIntros` stores the number of quantifier introductions
   needed for the O phase, and `EdgeWitness.ewWitness` stores the Ω-only instance
   operations (`OpGraft`, `OpMerge`, `OpRaise`, `OpWeaken`, `OpRaiseMerge`).

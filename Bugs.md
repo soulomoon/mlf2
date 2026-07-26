@@ -8,6 +8,39 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-003
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: The published edge aggregate was construction-closed, but mutable
+  presolution state still exported a legacy bidirectional constructor that
+  accepted separate expansion, witness, and trace maps and manufactured empty
+  Raise, non-source-origin, and expansion-construction authority.
+- Expected vs actual:
+  - Expected: every production state constructor and same-edge consumer carries
+    the complete edge execution packet selected by one `EdgeId`.
+  - Actual before fix: `PresolutionState` could reconnect three component maps,
+    and pending-Weaken certification independently projected and rejoined the
+    witness and trace maps by integer key.
+- Fix:
+  - Made the `PresolutionState` constructor abstract and introduced
+    `mkPresolutionState`, whose sole edge-artifact input is
+    `IntMap EdgeExecutionArtifacts`.
+  - Moved the positional constructor and all mutable-state component
+    projections to `MLF.Constraint.Presolution.TestSupport`; its builder checks
+    equal keys and embedded witness `EdgeId`.
+  - Made final replay validation and pending-Weaken certification consume
+    complete per-edge packets directly.
+- Regression tests:
+  - `test/RepoGuardSpec.hs` (`production presolution state cannot reconstruct edge packets from component maps`)
+  - `test/Presolution/WitnessSpec.hs` (shared smart witness-normalization state fixtures)
+- Thesis impact:
+  - Prevents Phase 4 state from representing witness/trace pairs without their
+    construction authority, preserving the committed evidence used by thesis
+    sections 15.3.4-15.3.6. This is an implementation invariant, not a
+    mechanized proof of universal eMLF soundness.
+
 ### BUG-2026-07-26-002
 - Status: Resolved
 - Priority: High

@@ -215,7 +215,6 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
             dropTrivialSchemeEdges
                 finalConstraint
                 rawEdgeArtifacts
-        edgeTraces = eaEdgeTraces edgeArtifacts
         nonTrivialEdgeKeys =
             IntSet.fromList
                 [ getEdgeId (instEdgeId edge)
@@ -233,9 +232,16 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
         canonical = chaseRedirectsStable redirects
     when (not (null missingArtifacts)) $
         Left (MissingEdgeArtifacts missingArtifacts)
-    forM_ (IntMap.toList edgeTraces) $ \(eid, tr) ->
-        when (IntSet.member eid nonTrivialEdgeKeys) $ do
-            validateReplayMapTraceContract canonical constraint finalConstraint eid tr
+    forM_ (IntSet.toList nonTrivialEdgeKeys) $ \eid ->
+        case lookupEdgeArtifact (EdgeId eid) edgeArtifacts of
+            Nothing -> Left (MissingEdgeArtifacts [EdgeId eid])
+            Just artifact ->
+                validateReplayMapTraceContract
+                    canonical
+                    constraint
+                    finalConstraint
+                    eid
+                    (edgeArtifactTrace artifact)
 
     let presolvedConstraint = toPresolvedConstraint finalConstraint
 
@@ -500,7 +506,6 @@ rewriteConstraint mapping = do
     (c, canonicalUf) <- getConstraintAndCanonical
     st <- getPresolutionState
     let edgeExecutionArtifacts0 = psEdgeExecutionArtifacts st
-        edgeTraces0 = psEdgeTraces st
         allNodes0 = NodeAccess.allNodes c
 
     -- If an identity `TyExp` wrapper is unified away (i.e. it is not the UF root),
@@ -599,8 +604,8 @@ rewriteConstraint mapping = do
 
     let expansionArgs =
             [ arg
-            | trace <- IntMap.elems edgeTraces0
-            , (_binder, arg) <- etBinderArgs trace
+            | artifacts <- IntMap.elems edgeExecutionArtifacts0
+            , (_binder, arg) <- etBinderArgs (eeaTrace artifacts)
             ]
         addExpansionArgDestination
             :: IntMap IntSet.IntSet
@@ -693,26 +698,15 @@ rewriteConstraint mapping = do
 
 mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic
 mkInitialPresolutionState constraint =
-    PresolutionStateInternal
-        { psConstraint = constraint
-        , psPresolution = Presolution IntMap.empty
-        , psUnionFind = IntMap.empty
-        , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
-        , psPendingWeakens = IntSet.empty
-        , psPendingWeakenOwners = IntMap.empty
-        , psWeakenReplayCertificates = IntMap.empty
-        , psBinderCache = IntMap.empty
-        , psGraphVersion = 0
-        , psUnionFindVersion = 0
-        , psBindParentsVersion = 0
-        , psBindingModelCache = Nothing
-        , psEdgeLocalSnapshot = Nothing
-        , psBindingRepairCache = Nothing
-        , psBindingRepairDirty = Just dirtyAllBindingRepair
-        , psCachedRootGen = Nothing
-        , psExpansionResults = emptyExpansionResultMap
-        , psEdgeExecutionArtifacts = IntMap.empty
-        }
+    mkPresolutionState
+        constraint
+        (Presolution IntMap.empty)
+        IntMap.empty
+        (maxNodeIdKeyOr0 constraint + 1)
+        IntSet.empty
+        IntMap.empty
+        IntMap.empty
+        IntMap.empty
 
 tyExpNodeIds :: Constraint p -> [NodeId]
 tyExpNodeIds c =
