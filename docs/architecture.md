@@ -670,8 +670,10 @@ semantics that are not represented elsewhere just as explicitly.”
   embedded witness `EdgeId` are checked before empty auxiliary test authority
   can be synthesized.
 - `EdgeWitness.ewForallIntros` stores the number of quantifier introductions
-  needed for the O phase, and `EdgeWitness.ewWitness` stores the Ω-only instance
-  operations (`OpGraft`, `OpMerge`, `OpRaise`, `OpWeaken`, `OpRaiseMerge`).
+  needed for the O phase as a `Natural`, and `EdgeWitness.ewWitness` stores the
+  Ω-only instance operations (`OpGraft`, `OpMerge`, `OpRaise`, `OpWeaken`,
+  `OpRaiseMerge`). Final witness construction is therefore total: a negative O
+  count is not representable.
 - `EdgeTrace` is the per-instantiation-edge provenance record consumed by Φ. It
   tracks the expansion root, binder→argument pairs, exact interior `I(r)`,
   replay contract, replay-domain binder map, replay-domain binders, and copy-map
@@ -693,6 +695,14 @@ semantics that are not represented elsewhere just as explicitly.”
   derives read-only compatibility projections from it. Production therefore
   cannot represent a witness-only, trace-only, expansion-only, or
   construction-only edge.
+- Witness normalization itself returns an opaque `NormalizedEdgeArtifacts`
+  publication token. Pure and timed finalization must thread this token into
+  result construction, which cannot rebuild the aggregate from mutable
+  presolution state. Normalization transforms and publishes complete
+  `EdgeExecutionArtifacts` packets directly, without splitting normalized
+  witnesses and traces into parallel maps and rejoining them by key.
+  `MLF.Constraint.Presolution.Witness` and the normalization token owner are
+  implementation-only; low-level tests use the dedicated test-support façade.
 - Per-edge consumers—including Φ replay, application computation,
   identity-topology recovery, and root-`RaiseMerge` authority—select a packet
   once and project all required fields from that value. Bulk result-type

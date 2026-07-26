@@ -30,8 +30,13 @@ import MLF.Constraint.Presolution
   )
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
+    OmegaNormalizeEnv (..),
+    OmegaNormalizeError,
     PresolutionState (..),
+    coalesceRaiseMergeWithEnv,
+    normalizeInstanceOpsFull,
     psEdgeTraces,
+    reorderWeakenWithEnv,
     decideMinimalExpansion,
     sourceInteriorFromList,
     instantiateScheme,
@@ -40,15 +45,8 @@ import MLF.Constraint.Presolution.TestSupport
     processInstEdge,
     runPresolutionM,
     unifyAcyclic,
-    validateTranslatablePresolution,
-  )
-import MLF.Constraint.Presolution.Witness
-  ( OmegaNormalizeEnv (..),
-    OmegaNormalizeError,
-    coalesceRaiseMergeWithEnv,
-    normalizeInstanceOpsFull,
-    reorderWeakenWithEnv,
     validateNormalizedWitness,
+    validateTranslatablePresolution,
   )
 import MLF.Constraint.Solve (frWith)
 import MLF.Constraint.Solve.TestSupport (SolveResult (..))

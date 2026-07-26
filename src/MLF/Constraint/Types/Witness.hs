@@ -31,7 +31,6 @@ module MLF.Constraint.Types.Witness (
     ewForallIntros,
     ewWitness,
     mkEdgeWitness,
-    WitnessError(..),
     ReplayContract(..),
     classifyReplayContract,
     isStrictReplayContract

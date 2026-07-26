@@ -55,6 +55,7 @@ import qualified Data.IntSet as IntSet
 import Data.List (findIndex)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Numeric.Natural (Natural)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
@@ -234,7 +235,7 @@ phiWithSchemeOmega ::
   IntSet.IntSet ->
   SchemeInfo ->
   -- | forall intro count (O phase)
-  Int ->
+  Natural ->
   -- | omega ops
   [InstanceOp] ->
   Either ElabError Instantiation
@@ -253,7 +254,7 @@ phiWithSchemeOmegaOccurrence ::
   IntSet.IntSet ->
   SchemeInfo ->
   -- | forall intro count (O phase)
-  Int ->
+  Natural ->
   -- | omega ops
   [InstanceOp] ->
   Either ElabError OccurrenceComputation
@@ -763,7 +764,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
       (sigma, ty1, ids1) <- reorderBindersByPrec ty0 ids0
       -- Phase O: apply all quantifier introductions up front.
       (ty2, ids2) <- applyIntros introCount ty1 ids1
-      let phiIntro = instMany (replicate introCount InstIntro)
+      let phiIntro = instMany (introInstantiations introCount)
       -- Phase Ω: replay witness operations on the intro-extended type.
       let vs2 = mkVSpine ty2 ids2
       phiOmega <- go binderKeys namedSet vs2 [] omegaOps lookupBinder
@@ -788,11 +789,15 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
         Right
 
     -- \| Apply n quantifier introductions, prepending Nothing to ids each time.
-    applyIntros :: Int -> ElabType -> [Maybe NodeId] -> Either ElabError (ElabType, [Maybe NodeId])
+    applyIntros :: Natural -> ElabType -> [Maybe NodeId] -> Either ElabError (ElabType, [Maybe NodeId])
     applyIntros 0 ty ids = Right (ty, ids)
     applyIntros n ty ids = do
       ty' <- applyInst "applyIntros" ty InstIntro
       applyIntros (n - 1) ty' (Nothing : ids)
+
+    introInstantiations :: Natural -> [Instantiation]
+    introInstantiations 0 = []
+    introInstantiations n = InstIntro : introInstantiations (n - 1)
 
     applyInst :: String -> ElabType -> Instantiation -> Either ElabError ElabType
     applyInst label ty0 inst = case applyInstantiation ty0 inst of

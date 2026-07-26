@@ -87,6 +87,40 @@ spec = describe "Repository guardrails" $ do
     annotationSource
       `shouldContain` "EdgeArtifacts -> AnnExpr -> Either ElabError AnnExpr"
 
+  it "normalized witness publication is construction-closed" $ do
+    cabalSrc <- readFileStrict "mlf2.cabal"
+    driverSource <- readFileStrict "src/MLF/Constraint/Presolution/Driver.hs"
+    witnessSource <- readFileStrict "src/MLF/Constraint/Types/Witness/Internal.hs"
+    witnessNormSource <-
+      readFileStrict "src/MLF/Constraint/Presolution/WitnessNorm.hs"
+    rewriteSource <- readFileStrict "src/MLF/Constraint/Presolution/Rewrite.hs"
+    let internalLibrarySrc =
+          extractNamedLibraryStanza "library mlf2-internal" cabalSrc
+        internalExposedModules =
+          listedModules (extractCabalField "exposed-modules" internalLibrarySrc)
+        internalOtherModules =
+          listedModules (extractCabalField "other-modules" internalLibrarySrc)
+    internalExposedModules
+      `shouldSatisfy` notElem "MLF.Constraint.Presolution.Witness"
+    internalOtherModules
+      `shouldSatisfy` elem "MLF.Constraint.Presolution.Witness"
+    witnessNormSource
+      `shouldContain` "normalizeEdgeWitnessesM :: PresolutionM p NormalizedEdgeArtifacts"
+    driverSource
+      `shouldContain` "-> NormalizedEdgeArtifacts"
+    driverSource
+      `shouldNotContain` "edgeArtifactsFromExecutionArtifacts"
+    driverSource
+      `shouldNotContain` "psEdgeExecutionArtifacts finalState"
+    witnessSource
+      `shouldContain` "ewForallIntros :: Natural"
+    witnessSource `shouldNotContain` "NegativeForallIntros"
+    witnessSource `shouldNotContain` "data WitnessError"
+    witnessNormSource
+      `shouldNotContain` "normalizeEdgeWitnessesM rebuilt invalid witness"
+    rewriteSource
+      `shouldNotContain` "canonicalizeWitness rebuilt invalid witness"
+
   it "split child modules stay implementation-only in Cabal" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc

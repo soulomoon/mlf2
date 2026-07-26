@@ -28,7 +28,6 @@ module MLF.Constraint.Types.Witness.Internal (
     mkUncheckedInstanceWitness,
     EdgeWitness(..),
     mkEdgeWitness,
-    WitnessError(..),
     ReplayContract(..),
     classifyReplayContract,
     isStrictReplayContract
@@ -36,6 +35,7 @@ module MLF.Constraint.Types.Witness.Internal (
 
 import Data.Functor.Foldable (Base, Corecursive(..), Recursive(..))
 import Data.List.NonEmpty (NonEmpty)
+import Numeric.Natural (Natural)
 
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 
@@ -187,15 +187,10 @@ data EdgeWitness = EdgeWitness
     , ewLeft :: NodeId
     , ewRight :: NodeId
     , ewRoot :: NodeId
-    , ewForallIntros :: Int
+    , ewForallIntros :: Natural
         -- ^ Number of quantifier introductions (O phase, thesis Def. 15.3.4).
     , ewWitness :: InstanceWitness
     }
-    deriving (Eq, Show)
-
--- | Errors from witness smart constructors.
-data WitnessError
-    = NegativeForallIntros Int
     deriving (Eq, Show)
 
 -- | Owner-internal sealing primitive for the witness validator.
@@ -215,27 +210,27 @@ mkInstanceWitness (ValidatedInstanceOps ops) = InstanceWitness ops
 mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness
 mkUncheckedInstanceWitness = InstanceWitness
 
--- | Smart constructor for `EdgeWitness`.
--- Validates that `ewForallIntros` is non-negative.
+-- | Total smart constructor for `EdgeWitness`.
+--
+-- The thesis O phase counts quantifier introductions, so the count is
+-- non-negative by construction rather than checked after assembly.
 mkEdgeWitness
     :: EdgeId
     -> NodeId
     -> NodeId
     -> NodeId
-    -> Int
+    -> Natural
     -> InstanceWitness
-    -> Either WitnessError EdgeWitness
-mkEdgeWitness eid left right root intros iw
-    | intros < 0 = Left (NegativeForallIntros intros)
-    | otherwise =
-        Right EdgeWitness
-            { ewEdgeId = eid
-            , ewLeft = left
-            , ewRight = right
-            , ewRoot = root
-            , ewForallIntros = intros
-            , ewWitness = iw
-            }
+    -> EdgeWitness
+mkEdgeWitness eid left right root intros iw =
+    EdgeWitness
+        { ewEdgeId = eid
+        , ewLeft = left
+        , ewRight = right
+        , ewRoot = root
+        , ewForallIntros = intros
+        , ewWitness = iw
+        }
 
 -- | Producer/consumer replay-map contract mode.
 --

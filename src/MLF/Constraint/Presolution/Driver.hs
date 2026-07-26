@@ -71,7 +71,11 @@ import MLF.Constraint.Presolution.Validation (
     validateTranslatablePresolution,
     rigidifyTranslatablePresolutionM
     )
-import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
+import MLF.Constraint.Presolution.WitnessNorm
+    ( NormalizedEdgeArtifacts
+    , normalizeEdgeWitnessesM
+    , normalizedEdgeArtifacts
+    )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Expansion (getExpansion)
 import MLF.Constraint.Presolution.Materialization (
@@ -119,10 +123,10 @@ computePresolutionWithRootOwnership traceCfg rootOwnership acyclicityResult cons
     --  2) rewrite/canonicalize to remove TyExp
     --  3) rigidify for translatability construction
     --  4) normalize witnesses
-    (redirects, finalState) <- runPresolutionM traceCfg presState $ do
+    ((redirects, normalizedArtifacts), finalState) <- runPresolutionM traceCfg presState $ do
         runFinalizationStage
 
-    finishPresolutionResult traceCfg constraint redirects finalState
+    finishPresolutionResult traceCfg constraint redirects normalizedArtifacts finalState
 
 computePresolutionWithTiming
     :: TimingConfig
@@ -177,20 +181,21 @@ computePresolutionWithTimingAndRootOwnership timing label traceCfg rootOwnership
                                 rootOwnership
                                 (arSortedEdges acyclicityResult)
                                 initialState
-                (redirects, finalState) <-
+                ((redirects, normalizedArtifacts), finalState) <-
                     ExceptT $
                         runFinalizationStageWithTiming timing (label ++ ".finalize") traceCfg presState
                 ExceptT $
                     timeProgramOperationIO timing (label ++ ".post_validate") $
-                        evaluate (finishPresolutionResult traceCfg constraint redirects finalState)
+                        evaluate (finishPresolutionResult traceCfg constraint redirects normalizedArtifacts finalState)
 
 finishPresolutionResult
     :: TraceConfig
     -> Constraint 'Acyclic
     -> IntMap NodeId
+    -> NormalizedEdgeArtifacts
     -> PresolutionState 'Acyclic
     -> Either PresolutionError PresolutionResult
-finishPresolutionResult traceCfg constraint redirects finalState = do
+finishPresolutionResult traceCfg constraint redirects normalizedArtifacts finalState = do
     let finalConstraint = psConstraint finalState
     when (not (null (cUnifyEdges finalConstraint))) $
         Left (ResidualUnifyEdges (cUnifyEdges finalConstraint))
@@ -202,15 +207,7 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
         Left (ResidualTyExpNodes residualTyExpNodes)
     validateTranslatablePresolution finalConstraint
 
-    rawEdgeArtifacts <-
-        case
-            edgeArtifactsFromExecutionArtifacts
-                (psEdgeExecutionArtifacts finalState)
-                IntSet.empty
-        of
-            Left err -> Left (InvalidEdgeArtifacts err)
-            Right artifacts -> Right artifacts
-    let
+    let rawEdgeArtifacts = normalizedEdgeArtifacts normalizedArtifacts
         edgeArtifacts =
             dropTrivialSchemeEdges
                 finalConstraint
@@ -258,7 +255,11 @@ runFinalizationStageWithTiming
     -> String
     -> TraceConfig
     -> PresolutionState 'Acyclic
-    -> IO (Either PresolutionError (IntMap NodeId, PresolutionState 'Acyclic))
+    -> IO
+        ( Either
+            PresolutionError
+            ((IntMap NodeId, NormalizedEdgeArtifacts), PresolutionState 'Acyclic)
+        )
 runFinalizationStageWithTiming timing label traceCfg st0 =
     runExceptT $ do
         ((), st1) <-
@@ -287,13 +288,13 @@ runFinalizationStageWithTiming timing label traceCfg st0 =
                 case validateTranslatablePresolution cRigid of
                     Left err -> throwError err
                     Right () -> pure ()
-        ((), st8) <-
+        (normalizedArtifacts, st8) <-
             timedStage st7 "normalize_witnesses" $
                 normalizeEdgeWitnessesM
         ((), st9) <-
             timedStage st8 "post_witness_validate" $ do
                 assertFinalizationBoundary "post-witness-normalization"
-        pure (redirects, st9)
+        pure ((redirects, normalizedArtifacts), st9)
   where
     timedStage
         :: PresolutionState p
@@ -315,7 +316,8 @@ runPresolutionStageWithTiming timing label traceCfg st action =
     timeProgramOperationIO timing label $
         evaluate (runPresolutionM traceCfg st action)
 
-runFinalizationStage :: PresolutionM 'Acyclic (IntMap NodeId)
+runFinalizationStage
+    :: PresolutionM 'Acyclic (IntMap NodeId, NormalizedEdgeArtifacts)
 runFinalizationStage = do
     assertFinalizationBoundary "pre-materialization"
     mapping <- materializeExpansions
@@ -329,9 +331,9 @@ runFinalizationStage = do
     case validateTranslatablePresolution cRigid of
         Left err -> throwError err
         Right () -> pure ()
-    normalizeEdgeWitnessesM
+    normalizedArtifacts <- normalizeEdgeWitnessesM
     assertFinalizationBoundary "post-witness-normalization"
-    pure redirects
+    pure (redirects, normalizedArtifacts)
 
 assertFinalizationBoundary :: String -> PresolutionM 'Acyclic ()
 assertFinalizationBoundary phase = do

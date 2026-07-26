@@ -45,6 +45,7 @@ import qualified Data.IntSet as IntSet
 import Data.List (mapAccumL, partition, sortOn)
 import qualified Data.List.NonEmpty as NE
 import Data.Ord (Down (..))
+import Numeric.Natural (Natural)
 import MLF.Constraint.Presolution.Base (CopyMap, EdgeSourceInterior (..), EdgeTrace (..), EdgeWitnessNonSourceOrigin (..), PresolutionError (..), PresolutionM, instantiationBindersM, lookupCopy)
 import MLF.Constraint.Presolution.Ops (getCanonicalNode, lookupVarBound)
 import MLF.Constraint.Presolution.WitnessCanon
@@ -76,7 +77,7 @@ import MLF.Util.RecursionSchemes (cataM)
 
 -- | Precompute the base forall-intro count and ops for a witness.
 data EdgeWitnessPlan = EdgeWitnessPlan
-  { ewpForallIntros :: Int,
+  { ewpForallIntros :: Natural,
     ewpBaseOps :: [EdgeWitnessOp]
   }
 
@@ -119,7 +120,7 @@ data EdgeWitnessInput = EdgeWitnessInput
     -- TyExp body's administrative node.
     ewiRoot :: NodeId,
     -- | Nesting depth for forall-intro tracking
-    ewiDepth :: Int
+    ewiDepth :: Natural
   }
 
 edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p EdgeWitnessPlan
@@ -155,9 +156,7 @@ buildEdgeWitness input baseOps extraOps = do
         integrateTaggedEdgeWitnessOps root baseOps extraOps
       intros = introCount
   let iw = WitnessInternal.mkUncheckedInstanceWitness ops
-  case mkEdgeWitness eid left right root intros iw of
-    Left err -> throwError (InternalError ("buildEdgeWitness: " ++ show err))
-    Right w -> pure (w, nonSourceOpOrigins)
+  pure (mkEdgeWitness eid left right root intros iw, nonSourceOpOrigins)
 
 -- | Integrate source-domain expansion ops with execution-emitted ops while
 -- keeping destination-domain indices aligned with the final reordered list.
@@ -261,7 +260,7 @@ binderArgsFromKnownBinders context binders expn =
           pure (zip binders args)
 
 -- | Convert a presolution expansion recipe into a forall-intro count and omega ops.
-witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p (Int, [InstanceOp])
+witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p (Natural, [InstanceOp])
 witnessFromExpansion gid _root leftRaw expn = do
   boundVars <-
     if expansionHasInstantiate expn
@@ -274,7 +273,7 @@ witnessFromExpansion gid _root leftRaw expn = do
   (introCount, taggedOps) <- witnessOpsFromExpansionWithBinders boundVars expn
   pure (introCount, map edgeWitnessInstanceOp taggedOps)
 
-witnessOpsFromExpansionWithBinders :: [NodeId] -> Expansion -> PresolutionM p (Int, [EdgeWitnessOp])
+witnessOpsFromExpansionWithBinders :: [NodeId] -> Expansion -> PresolutionM p (Natural, [EdgeWitnessOp])
 witnessOpsFromExpansionWithBinders boundVars expn = do
   let (_hasForall, stepper) = cata witnessAlg expn
   steps <- stepper
@@ -283,13 +282,13 @@ witnessOpsFromExpansionWithBinders boundVars expn = do
   pure (introCount, ops)
   where
     witnessAlg ::
-      ExpansionF (Bool, PresolutionM p (Int, [EdgeWitnessOp])) ->
-      (Bool, PresolutionM p (Int, [EdgeWitnessOp]))
+      ExpansionF (Bool, PresolutionM p (Natural, [EdgeWitnessOp])) ->
+      (Bool, PresolutionM p (Natural, [EdgeWitnessOp]))
     witnessAlg layer = case layer of
       ExpIdentityF ->
         (False, pure (0, []))
       ExpForallF ls ->
-        let count = sum (map forallSpecBinderCount (NE.toList ls))
+        let count = sum (map (fromIntegral . forallSpecBinderCount) (NE.toList ls))
          in (True, pure (count, []))
       ExpInstantiateF args ->
         ( False,
@@ -505,6 +504,6 @@ integratePhase2OpsBy mbRoot project baseOps extraOps =
 
 -- | Integrate phase-2 ops into a witness. The intro count passes through
 -- unchanged; phase-2 ops are merged into the ops list.
-integratePhase2Steps :: (Int, [InstanceOp]) -> [InstanceOp] -> (Int, [InstanceOp])
+integratePhase2Steps :: (Natural, [InstanceOp]) -> [InstanceOp] -> (Natural, [InstanceOp])
 integratePhase2Steps (introCount, baseOps) extraOps =
   (introCount, integratePhase2Ops baseOps extraOps)

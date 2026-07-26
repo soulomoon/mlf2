@@ -27,7 +27,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..))
+import MLF.Constraint.Presolution.TestSupport (OmegaNormalizeEnv(..))
 import qualified MLF.Util.Order as Order
 import SpecUtil
     ( bindParentsFromPairs

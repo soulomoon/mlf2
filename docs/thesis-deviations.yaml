@@ -8,12 +8,15 @@ deviations:
     description: >
       Witness normalization is construction-closed and tested but not backed
       by a mechanized proof of Lemma 11.5.3. Successful normalization returns
-      an opaque ValidatedInstanceOps token; source-identity restoration must
-      consume destination-validation evidence and prove its final operand
-      domain plus terminal root-transition authority before sealing. The
-      implementation follows the thesis conditions (weaken-last, no delayed
-      weaken, coalescing), but the universal semantic argument remains
-      executable evidence rather than a proof assistant theorem.
+      opaque ValidatedInstanceOps and NormalizedEdgeArtifacts tokens;
+      source-identity restoration must consume destination-validation evidence
+      and prove its final operand domain plus terminal root-transition
+      authority before sealing, while result publication must consume the
+      normalization-owned complete aggregate rather than reread mutable state.
+      The O-phase introduction count is Natural. The implementation follows
+      the thesis conditions (weaken-last, no delayed weaken, coalescing), but
+      the universal semantic argument remains executable evidence rather than
+      a proof assistant theorem.
     impact: semantic-neutral
     rationale: >
       Variable-size executable properties, negative authority regressions, and

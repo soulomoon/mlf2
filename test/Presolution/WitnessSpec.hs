@@ -18,22 +18,6 @@ import MLF.Constraint.Types.Witness
     , getValidatedInstanceOps
     )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
-import MLF.Constraint.Presolution.Witness
-    ( EdgeWitnessOp(..)
-    , EdgeWitnessPlan(..)
-    , EdgeWitnessNonSourceOrigin(..)
-    , OmegaNormalizeEnv(..)
-    , OmegaNormalizeError(..)
-    , assertNoStandaloneGrafts
-    , coalesceRaiseMergeWithEnv
-    , edgeWitnessPlanFromBinders
-    , integrateEdgeWitnessOps
-    , integratePhase2Ops
-    , normalizeInstanceOpsFull
-    , reorderWeakenWithEnv
-    , validateNormalizedWitness
-    , witnessFromExpansion
-    )
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
@@ -47,6 +31,20 @@ import MLF.Constraint.Presolution.Construction
     )
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
+    , EdgeWitnessOp(..)
+    , EdgeWitnessPlan(..)
+    , EdgeWitnessNonSourceOrigin(..)
+    , OmegaNormalizeEnv(..)
+    , OmegaNormalizeError(..)
+    , assertNoStandaloneGrafts
+    , coalesceRaiseMergeWithEnv
+    , edgeWitnessPlanFromBinders
+    , integrateEdgeWitnessOps
+    , integratePhase2Ops
+    , normalizeInstanceOpsFull
+    , reorderWeakenWithEnv
+    , validateNormalizedWitness
+    , witnessFromExpansion
     , EdgeExecutionArtifacts(..)
     , emptyPresolutionStateForTest
     , psEdgeExecutionArtifacts

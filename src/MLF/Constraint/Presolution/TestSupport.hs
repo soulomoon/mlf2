@@ -3,6 +3,18 @@
 
 module MLF.Constraint.Presolution.TestSupport (
     EdgeWitnessOp(..),
+    EdgeWitnessPlan(..),
+    Witness.OmegaNormalizeEnv(..),
+    OmegaNormalizeError(..),
+    assertNoStandaloneGrafts,
+    coalesceRaiseMergeWithEnv,
+    edgeWitnessPlanFromBinders,
+    integrateEdgeWitnessOps,
+    integratePhase2Ops,
+    normalizeInstanceOpsFull,
+    reorderWeakenWithEnv,
+    validateNormalizedWitness,
+    witnessFromExpansion,
     EdgeArtifact,
     EdgeArtifacts,
     EdgeArtifactsError(..),
@@ -244,8 +256,22 @@ import MLF.Constraint.Presolution.Validation
     , translatableWeakenedNodes
     , validateTranslatablePresolution
     )
-import MLF.Constraint.Presolution.WitnessNorm (normalizeEdgeWitnessesM)
-import MLF.Constraint.Presolution.Witness (EdgeWitnessOp(..))
+import qualified MLF.Constraint.Presolution.WitnessNorm as WitnessNorm
+import MLF.Constraint.Presolution.Witness
+    ( EdgeWitnessOp(..)
+    , EdgeWitnessPlan(..)
+    , OmegaNormalizeError(..)
+    , assertNoStandaloneGrafts
+    , coalesceRaiseMergeWithEnv
+    , edgeWitnessPlanFromBinders
+    , integrateEdgeWitnessOps
+    , integratePhase2Ops
+    , normalizeInstanceOpsFull
+    , reorderWeakenWithEnv
+    , validateNormalizedWitness
+    , witnessFromExpansion
+    )
+import qualified MLF.Constraint.Presolution.Witness as Witness
 import qualified MLF.Constraint.Presolution.WitnessValidation as WitnessValidation
 import MLF.Constraint.Presolution.WitnessCanon
     ( ProvenancedInstanceOp(..)
@@ -283,6 +309,12 @@ psEdgeExpansions =
 psEdgeWitnesses :: PresolutionState p -> IntMap EdgeWitness
 psEdgeWitnesses =
     IntMap.map eeaWitness . psEdgeExecutionArtifacts
+
+-- | Run production witness normalization while keeping its publication token
+-- behind the production-only finalization boundary.
+normalizeEdgeWitnessesM :: PresolutionM p ()
+normalizeEdgeWitnessesM =
+    void WitnessNorm.normalizeEdgeWitnessesM
 
 psEdgeRaiseAuthorityNodes :: PresolutionState p -> IntMap IntSet.IntSet
 psEdgeRaiseAuthorityNodes =

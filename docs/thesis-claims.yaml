@@ -104,7 +104,7 @@ claims:
     deviations:
       - DEV-WITNESS-NORM-NO-PROOF
     status: defended
-    notes: "Validated witness values are construction-closed in production; the remaining deviation is specifically the absence of a mechanized proof of Lemma 11.5.3."
+    notes: "Validated witness values and their published edge aggregate are construction-closed in production: normalization returns an opaque publication token, final result construction must consume it, and O-phase counts are Natural. The remaining deviation is specifically the absence of a mechanized proof of Lemma 11.5.3."
 
   # ── Ch. 12 — Global Algorithm ──────────────────────────────────────────
 
@@ -405,7 +405,7 @@ claims:
         - src/MLF/Elab/Elaborate/Annotation.hs#validateElaborationEdgeAuthority
     deviations: []
     status: defended
-    notes: "EdgeArtifacts is an opaque map of complete expansion/witness/trace/construction packets published directly from construction-closed edge execution artifacts. The Base owner module and PresolutionResult constructor are hidden; component-map builders exist only in TestSupport and prove identical keys plus embedded EdgeId agreement. PresolutionState is constructed from the same complete packets, while its legacy component-map fixture and projections are test-only. Phi, Omega, and application-site preparation consume the aggregate by one edge lookup; a missing site packet is valid only with explicit identity-edge authority."
+    notes: "EdgeArtifacts is an opaque map of complete expansion/witness/trace/construction packets published through a normalization-owned opaque token from construction-closed edge execution artifacts. Final result construction cannot reread mutable edge state. The Base owner module, PresolutionResult constructor, and witness-assembly implementation module are hidden; component-map builders exist only in TestSupport and prove identical keys plus embedded EdgeId agreement. PresolutionState is constructed from the same complete packets, while its legacy component-map fixture and projections are test-only. Phi, Omega, and application-site preparation consume the aggregate by one edge lookup; a missing site packet is valid only with explicit identity-edge authority."
 
   - id: CLM-SIGMA-REORDER
     type: definition

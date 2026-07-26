@@ -1,3 +1,27 @@
+## 2026-07-26 - Normalization-owned witness publication
+
+- `normalizeEdgeWitnessesM` now returns an opaque
+  `NormalizedEdgeArtifacts` value containing the complete consumer-facing
+  edge aggregate. Both timed and pure presolution finalization retain this
+  value and pass it to result construction; result construction no longer
+  projects mutable `psEdgeExecutionArtifacts` and assumes normalization ran
+  earlier.
+- Witness normalization transforms each `EdgeExecutionArtifacts` packet in
+  place as one value, then publishes the aggregate from exactly those packets.
+  This removes the intermediate witness map, trace map, key rejoin, and the two
+  theoretically unreachable reconstruction errors.
+- `EdgeWitness.ewForallIntros`, expansion-derived introduction counts, and the
+  Φ O-phase input use `Natural`. `mkEdgeWitness` is consequently total, matching
+  the paper's interpretation of O as a count rather than a signed value with a
+  later validation step.
+- `MLF.Constraint.Presolution.Witness` is now implementation-only in Cabal.
+  Low-level normalization fixtures use
+  `MLF.Constraint.Presolution.TestSupport`, whose wrapper deliberately discards
+  the production publication token.
+- This closes an executable construction gap but does not mechanize thesis
+  Lemma 11.5.3; that universal proof obligation remains recorded as
+  `DEV-WITNESS-NORM-NO-PROOF`.
+
 ## 2026-07-26 - Sealed presolution result and application-site authority
 
 - `MLF.Constraint.Presolution.Base` moved from the internal library's exposed

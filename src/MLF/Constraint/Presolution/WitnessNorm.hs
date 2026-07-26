@@ -9,7 +9,9 @@
 -- This module handles normalization of edge witnesses against the finalized
 -- presolution constraint.
 module MLF.Constraint.Presolution.WitnessNorm
-  ( normalizeEdgeWitnessesM,
+  ( NormalizedEdgeArtifacts,
+    normalizedEdgeArtifacts,
+    normalizeEdgeWitnessesM,
   )
 where
 
@@ -64,6 +66,14 @@ data WitnessNormCache = WitnessNormCache
     wncInteriorExact :: IntMap.IntMap IntSet.IntSet,
     wncOrderKeys :: IntMap.IntMap (IntMap.IntMap Order.OrderKey),
     wncAbstractBoundShapes :: IntMap.IntMap Bool
+  }
+
+-- | Consumer-ready edge artifacts produced only by witness normalization.
+--
+-- Keeping the constructor private makes final presolution publication consume
+-- normalization evidence instead of depending on a preceding state mutation.
+newtype NormalizedEdgeArtifacts = NormalizedEdgeArtifacts
+  { normalizedEdgeArtifacts :: EdgeArtifacts
   }
 
 data OperandAuthorityDomain
@@ -434,7 +444,7 @@ precomputedDescendantsForOps snapshot ops =
         OpRaiseMerge n m -> [n, m]
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
-normalizeEdgeWitnessesM :: PresolutionM p ()
+normalizeEdgeWitnessesM :: PresolutionM p NormalizedEdgeArtifacts
 normalizeEdgeWitnessesM = do
   snapshot <- getBindingSnapshot
   let c0 = pbsConstraint snapshot
@@ -480,18 +490,15 @@ normalizeEdgeWitnessesM = do
         IntSet.union weakenedOps weakenedByTranslatability
   witnessResults <- evalStateT (forM (IntMap.toList artifacts0) $ \(eid, artifacts) -> do
     let w0 = eeaWitness artifacts
-        mbTrace = Just (eeaTrace artifacts)
+        trace0 = eeaTrace artifacts
         (sourceRoot, resultRoot, copyMap, binderArgs0, traceInterior, producerReplayBinders) =
-          case mbTrace of
-            Nothing -> (ewRoot w0, ewRoot w0, mempty, [], mempty, [])
-            Just tr ->
-              ( etRoot tr,
-                etResultRoot tr,
-                etCopyMap tr,
-                etBinderArgs tr,
-                etInterior tr,
-                etReplayDomainBinders tr
-              )
+          ( etRoot trace0,
+            etResultRoot trace0,
+            etCopyMap trace0,
+            etBinderArgs trace0,
+            etInterior trace0,
+            etReplayDomainBinders trace0
+          )
         rewriteNode = rewriteNodeWith copyMap
         binderArgEntries =
           [ ( getNodeId (canonical (rewriteNode bv)),
@@ -1159,24 +1166,21 @@ normalizeEdgeWitnessesM = do
         isInSourceInterior target =
           IntSet.member (getNodeId (checkedSource target)) traceInteriorKeys
         traceProvesRootRaiseMergeNoReplay operated other =
-          case mbTrace of
-            Just tr ->
-              checkedSource operated == sourceRoot
-                && sourceRoot == etRoot tr
-                && IntSet.size (operandSourceCandidates (pnProvenance operated)) == 1
-                && IntSet.size (operandSourceCandidates (pnProvenance other)) == 1
-                && isInSourceInterior operated
-                && not (isInSourceInterior other)
-                && null (etBinderArgs tr)
-                && IntMap.null (etBinderReplayMap tr)
-                && null (etReplayDomainBinders tr)
-                && etReplayContract tr == ReplayContractNone
-            Nothing -> False
+          checkedSource operated == sourceRoot
+            && sourceRoot == etRoot trace0
+            && IntSet.size (operandSourceCandidates (pnProvenance operated)) == 1
+            && IntSet.size (operandSourceCandidates (pnProvenance other)) == 1
+            && isInSourceInterior operated
+            && not (isInSourceInterior other)
+            && null (etBinderArgs trace0)
+            && IntMap.null (etBinderReplayMap trace0)
+            && null (etReplayDomainBinders trace0)
+            && etReplayContract trace0 == ReplayContractNone
         traceProvesRootWeakenRaiseMerge operated other =
-          maybe
-            False
-            (rootWeakenRaiseMergeTraceAuthority (checkedSource operated) (checkedSource other))
-            mbTrace
+          rootWeakenRaiseMergeTraceAuthority
+            (checkedSource operated)
+            (checkedSource other)
+            trace0
         interiorContainsTyMu =
           any
             (`IntSet.member` tyMuNodeKeys)
@@ -1360,13 +1364,10 @@ normalizeEdgeWitnessesM = do
                 disallowedNoReplayProvenanced
                 opsNormFinalizedWithProvenance
         traceProvesNoReplay =
-          case mbTrace of
-            Just tr ->
-              null (etBinderArgs tr)
-                && IntMap.null (etBinderReplayMap tr)
-                && null (etReplayDomainBinders tr)
-                && etReplayContract tr == ReplayContractNone
-            Nothing -> False
+          null (etBinderArgs trace0)
+            && IntMap.null (etBinderReplayMap trace0)
+            && null (etReplayDomainBinders trace0)
+            && etReplayContract trace0 == ReplayContractNone
         residualNoReplayOp =
           forgetInstanceOpProvenance <$> residualNoReplayOpWithProvenance
         strictNoReplayContract =
@@ -1698,23 +1699,19 @@ normalizeEdgeWitnessesM = do
               retainedDestinationDomain
             ]
         trace' =
-          fmap
-            ( \tr ->
-                tr
-                  { -- The binder/argument bridge is frozen producer
-                    -- provenance.  In particular, an argument may now have a
-                    -- different final representative; solved-graph consumers
-                    -- canonicalize it locally instead of erasing the node
-                    -- chosen while constructing chi_e.
-                    etReplayContract = replayContract,
-                    etBinderReplayMap = replayMapSourceFinal,
-                    etReplayDomainBinders =
-                      if strictReplayContract
-                        then replayBindersWithBoundedGrafts
-                        else []
-                  }
-            )
-            mbTrace
+          trace0
+            { -- The binder/argument bridge is frozen producer provenance.  In
+              -- particular, an argument may now have a different final
+              -- representative; solved-graph consumers canonicalize it
+              -- locally instead of erasing the node chosen while constructing
+              -- chi_e.
+              etReplayContract = replayContract,
+              etBinderReplayMap = replayMapSourceFinal,
+              etReplayDomainBinders =
+                if strictReplayContract
+                  then replayBindersWithBoundedGrafts
+                  else []
+            }
     validatedOps <-
       case
           certifyRestoredInstanceOps
@@ -1722,16 +1719,10 @@ normalizeEdgeWitnessesM = do
             finalSourceReplayDomain
             sourceRoot
             (\operated exterior ->
-                maybe
-                  False
-                  (rootRaiseMergeTraceAuthority operated exterior)
-                  trace'
+                rootRaiseMergeTraceAuthority operated exterior trace'
             )
             (\operated exterior ->
-                maybe
-                  False
-                  (rootWeakenRaiseMergeTraceAuthority operated exterior)
-                  trace'
+                rootWeakenRaiseMergeTraceAuthority operated exterior trace'
             )
             restoredOps
         of
@@ -1741,36 +1732,32 @@ normalizeEdgeWitnessesM = do
           Right certifiedOps -> pure certifiedOps
     let iw = mkInstanceWitness validatedOps
         witness' =
-            case mkEdgeWitness (ewEdgeId w0) (ewLeft w0) (ewRight w0) (ewRoot w0) (ewForallIntros w0) iw of
-                Left err ->
-                    error ("normalizeEdgeWitnessesM rebuilt invalid witness: " ++ show err)
-                Right witness ->
-                    witness
-    pure (eid, witness', trace')
+          mkEdgeWitness
+            (ewEdgeId w0)
+            (ewLeft w0)
+            (ewRight w0)
+            (ewRoot w0)
+            (ewForallIntros w0)
+            iw
+    pure
+      ( eid,
+        artifacts
+          { eeaWitness = witness',
+            eeaTrace = trace'
+          }
+      )
     ) emptyWitnessNormCache
-  let witnessMap =
-        IntMap.fromList
-          [ (eid, witness)
-            | (eid, witness, _mbTrace) <- witnessResults
-          ]
-      traceUpdates =
-        IntMap.fromList
-          [ (eid, tr)
-            | (eid, _witness, Just tr) <- witnessResults
-          ]
+  let normalizedExecutionArtifacts = IntMap.fromList witnessResults
+  publishedArtifacts <-
+    case
+        edgeArtifactsFromExecutionArtifacts
+          normalizedExecutionArtifacts
+          IntSet.empty
+      of
+        Left err -> throwError (InvalidEdgeArtifacts err)
+        Right artifacts -> pure artifacts
   modify' $ \st ->
     st
-      { psEdgeExecutionArtifacts =
-          IntMap.mapWithKey
-            (\eid artifacts ->
-              case (IntMap.lookup eid witnessMap, IntMap.lookup eid traceUpdates) of
-                (Just witness, Just trace) ->
-                  artifacts {eeaWitness = witness, eeaTrace = trace}
-                _ ->
-                  error
-                    ( "normalizeEdgeWitnessesM lost a complete artifact for edge "
-                        ++ show (EdgeId eid)
-                    )
-            )
-            (psEdgeExecutionArtifacts st)
+      { psEdgeExecutionArtifacts = normalizedExecutionArtifacts
       }
+  pure (NormalizedEdgeArtifacts publishedArtifacts)

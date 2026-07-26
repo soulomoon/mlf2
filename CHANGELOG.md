@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Made final witness publication depend on normalization by construction.
+  `normalizeEdgeWitnessesM` now returns an opaque
+  `NormalizedEdgeArtifacts` token, and the presolution driver must consume
+  that token instead of rebuilding public artifacts from mutable state after
+  the fact. Normalization updates each complete execution packet directly,
+  removing the witness/trace split-and-rejoin path and its impossible partial
+  lookup failures. The thesis O-phase introduction count is now `Natural`, so
+  finalized `EdgeWitness` construction is total rather than accepting a signed
+  count and rejecting negatives afterward. The witness assembly owner is
+  implementation-only; tests reach its low-level helpers through the dedicated
+  test-support façade.
 - Sealed the public Phase 4 proof-packet boundary. The
   `MLF.Constraint.Presolution.Base` implementation module is no longer exposed,
   the production façade exports `PresolutionResult` abstractly, and

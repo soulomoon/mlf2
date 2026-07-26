@@ -8,6 +8,46 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-005
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: Final presolution publication still depended on the call order of a
+  state-mutating witness normalizer, and the thesis O-phase count used a signed
+  `Int` that required post-construction rejection.
+- Expected vs actual:
+  - Expected: result construction can receive edge artifacts only from
+    successful witness normalization, and a quantifier-introduction count is
+    non-negative by construction.
+  - Actual before fix: `normalizeEdgeWitnessesM` returned `()`, rewrote mutable
+    state through separately rebuilt witness and trace maps, and
+    `finishPresolutionResult` later rebuilt public artifacts from that state.
+    `mkEdgeWitness` accepted `Int`, returned `Either`, and internal callers
+    handled impossible negative counts with partial `error` branches.
+- Fix:
+  - Made normalization return an opaque `NormalizedEdgeArtifacts` token and
+    required both pure and timed finalization to pass it into result
+    construction.
+  - Normalized each complete `EdgeExecutionArtifacts` packet directly and
+    published the aggregate from that exact map, removing split/rejoin lookup
+    failures.
+  - Changed the O-phase count to `Natural` throughout expansion planning,
+    witnesses, and Φ interpretation, making `mkEdgeWitness` total.
+  - Made `MLF.Constraint.Presolution.Witness` implementation-only and routed
+    low-level tests through `Presolution.TestSupport`.
+- Regression tests:
+  - `test/RepoGuardSpec.hs` (`normalized witness publication is construction-closed`)
+  - `test/Presolution/WitnessSpec.hs` (`O11-WITNESS`, witness normalization)
+  - `test/Phi/AlignmentSpec.hs` (`Phi alignment`)
+  - `test/Thesis/ObligationPropertySpec.hs` (`Thesis fixed annotation evidence`)
+  - `cabal build all -j1 && cabal test -j1` (3707 examples)
+- Thesis impact:
+  - Encodes the normalization-before-publication and non-negative O-phase
+    preconditions in construction APIs. This strengthens executable evidence
+    for Lemma 11.5.3 and Definition 15.3.4 but is not a mechanized universal
+    proof.
+
 ### BUG-2026-07-26-004
 - Status: Resolved
 - Priority: High
