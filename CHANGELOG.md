@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Made Φ quantifier reordering use the destination expansion root
+  `EdgeTrace.etResultRoot`, the thesis `sc` that owns `Typexp`, while Ω keeps
+  using the frozen source witness root `etRoot`. Removed the binding-LCA root
+  switch, missing-`<P` positional fallback, and bound-cycle positional
+  linearization. Σ(g) now validates complete order-key authority and acyclic
+  bound dependencies before constructing the reorder computation.
 - Aligned Raise permission with the paper's restricted/locked distinction:
   own-rigid nodes remain raisable, while flex-bound nodes below a strict rigid
   ancestor are rejected. Presolution now checks bound scope against a

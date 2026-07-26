@@ -5555,6 +5555,101 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         canonType out `shouldBe` canonType (Elab.schemeToType scheme)
 
+      it "derives Σ(g) order from the destination expansion root, not the source witness root" $ do
+        let sourceRoot = NodeId 5600
+            resultRoot = NodeId 5601
+            binderA = NodeId 5602
+            binderB = NodeId 5603
+            sourceGen = GenNodeId 5600
+            resultGen = GenNodeId 5601
+            constraint =
+              emptyConstraint
+                { cNodes =
+                    nodeMapFromList
+                      [ (getNodeId sourceRoot, TyArrow sourceRoot binderA binderA)
+                      , (getNodeId resultRoot, TyArrow resultRoot binderA binderB)
+                      , (getNodeId binderA, TyVar {tnId = binderA, tnBound = Nothing})
+                      , (getNodeId binderB, TyVar {tnId = binderB, tnBound = Nothing})
+                      ]
+                , cBindParents =
+                    IntMap.fromList
+                      [ (nodeRefKey (typeRef sourceRoot), (genRef sourceGen, BindFlex))
+                      , (nodeRefKey (genRef resultGen), (genRef sourceGen, BindFlex))
+                      , (nodeRefKey (typeRef resultRoot), (genRef resultGen, BindFlex))
+                      , (nodeRefKey (typeRef binderA), (genRef sourceGen, BindFlex))
+                      , (nodeRefKey (typeRef binderB), (genRef resultGen, BindFlex))
+                      ]
+                , cGenNodes =
+                    fromListGen
+                      [ (sourceGen, GenNode sourceGen [sourceRoot])
+                      , (resultGen, GenNode resultGen [resultRoot])
+                      ]
+                }
+            solved = mkSolved constraint IntMap.empty
+            scheme =
+              Elab.schemeFromType
+                ( testTForall
+                    "b"
+                    Nothing
+                    ( testTForall
+                        "a"
+                        Nothing
+                        (Elab.TArrow (testTVar "a") (testTVar "b"))
+                    )
+                )
+            si =
+              mkSchemeInfoFromNodeNames
+                scheme
+                ( IntMap.fromList
+                    [ (getNodeId binderA, "a")
+                    , (getNodeId binderB, "b")
+                    ]
+                )
+            trace =
+              EdgeTrace
+                { etRoot = sourceRoot
+                , etResultRoot = resultRoot
+                , etBinderArgs = []
+                , etInterior = sourceInteriorFromList [sourceRoot, binderA]
+                , etBinderReplayMap = mempty
+                , etReplayDomainBinders = []
+                , etCopyMap = mempty
+                , etReplayContract = ReplayContractNone
+                }
+            witness =
+              EdgeWitness
+                { ewEdgeId = EdgeId 5600
+                , ewLeft = sourceRoot
+                , ewRight = resultRoot
+                , ewRoot = sourceRoot
+                , ewForallIntros = 0
+                , ewWitness = InstanceWitness []
+                }
+
+        phi <-
+          requireRight
+            ( Elab.phiFromEdgeWitnessWithTrace
+                defaultTraceConfig
+                (generalizeAtWithActive solved)
+                (presolutionViewFromSolved solved)
+                Nothing
+                (Just si)
+                (Just trace)
+                witness
+            )
+        phi `shouldNotBe` Elab.InstId
+        out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
+        let expected =
+              testTForall
+                "a"
+                Nothing
+                ( testTForall
+                    "b"
+                    Nothing
+                    (Elab.TArrow (testTVar "a") (testTVar "b"))
+                )
+        canonType out `shouldBe` canonType expected
+
       it "missing <P order key for a binder fails Σ(g) reordering" $ do
         -- Create a constraint where a binder node is NOT reachable from the root
         -- (so it won't have an order key). Σ(g) must fail fast.
@@ -5626,6 +5721,98 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             expectationFailure ("Expected PhiReorder missing-order-key or binding-tree failure, got " ++ show other)
           Right inst ->
             expectationFailure ("Expected PhiReorder failure, got " ++ Elab.pretty inst)
+
+      it "does not recover a missing <P key from the current spine position" $ do
+        let scheme =
+              Elab.schemeFromType
+                ( testTForall
+                    "a"
+                    Nothing
+                    (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
+                )
+        (refA, boundA, refB, boundB) <-
+          case Elab.schemeBinderRefs scheme of
+            [(refA0, boundA0), (refB0, boundB0)] ->
+              pure (refA0, boundA0, refB0, boundB0)
+            binders ->
+              expectationFailure
+                ("expected two forall binders, got " ++ show binders)
+                >> fail "forall binder setup failed"
+        let
+            nodeA = NodeId 5710
+            nodeB = NodeId 5711
+            orderKeys =
+              IntMap.singleton
+                (getNodeId nodeA)
+                Order.OrderKey
+                  { Order.okDepth = 1
+                  , Order.okPath = [0]
+                  }
+            binders =
+              [ (refA, boundA, Just nodeA)
+              , (refB, boundB, Just nodeB)
+              ]
+
+        case
+            PhiTestSupport.orderPhiBindersByPrecForTest
+              orderKeys
+              (IntSet.fromList [getNodeId nodeA, getNodeId nodeB])
+              binders
+          of
+            Left (Elab.PhiInvariantError message) ->
+              message `shouldSatisfy` isInfixOf "PhiReorder: missing order key"
+            other ->
+              expectationFailure
+                ("expected missing-order-key rejection, got " ++ show other)
+
+      it "does not linearize a cyclic forall-bound dependency by position" $ do
+        let scheme =
+              Elab.schemeFromType
+                ( testTForall
+                    "a"
+                    Nothing
+                    (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
+                )
+        (refA, refB) <-
+          case Elab.schemeBinderRefs scheme of
+            [(refA0, _), (refB0, _)] ->
+              pure (refA0, refB0)
+            binders ->
+              expectationFailure
+                ("expected two forall binders, got " ++ show binders)
+                >> fail "forall binder setup failed"
+        let
+            nodeA = NodeId 5720
+            nodeB = NodeId 5721
+            boundA = Elab.TArrow (ElabTypes.tVarWithRef refB) (TestElab.tBase (BaseTy "Int"))
+            boundB = Elab.TArrow (ElabTypes.tVarWithRef refA) (TestElab.tBase (BaseTy "Int"))
+            orderKeys =
+              IntMap.fromList
+                [ ( getNodeId nodeA
+                  , Order.OrderKey
+                      { Order.okDepth = 1
+                      , Order.okPath = [0]
+                      }
+                  )
+                , ( getNodeId nodeB
+                  , Order.OrderKey
+                      { Order.okDepth = 1
+                      , Order.okPath = [1]
+                      }
+                  )
+                ]
+            binders =
+              [ (refA, Just boundA, Just nodeA)
+              , (refB, Just boundB, Just nodeB)
+              ]
+
+        PhiTestSupport.orderPhiBindersByPrecForTest
+          orderKeys
+          (IntSet.fromList [getNodeId nodeA, getNodeId nodeB])
+          binders
+          `shouldBe`
+            Left
+              (Elab.InstantiationError "PhiReorder: cycle in bound dependencies")
 
     describe "Φ translation soundness" $ do
       let runToSolved :: SurfaceExpr -> Either String (Solved.Solved, IntMap.IntMap EdgeWitness, IntMap.IntMap EdgeTrace)

@@ -8,6 +8,38 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-001
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: Φ/Σ derived `Typexp` binder order from the frozen source witness
+  root and silently used current quantifier positions when `<P` evidence was
+  missing or forall-bound dependencies were cyclic.
+- Expected vs actual:
+  - Expected: thesis Definitions 15.3.3 and 15.3.4 order Σ(g) from the
+    destination expansion root `sc`; every participating binder has a valid
+    `<P` key, and its bound-dependency graph is acyclic before construction.
+  - Actual before fix: `etRoot` was shared by Ω and Σ, a binding-LCA retry
+    could switch roots after missing coverage, missing keys compared by current
+    spine position, and dependency cycles were discarded and linearized by
+    position.
+- Fix:
+  - Kept Ω in the frozen source domain rooted at `etRoot`.
+  - Derived Σ(g) order keys once from the construction-owned
+    `etResultRoot`, which represents `sc`.
+  - Removed LCA/root retry and both positional recovery paths.
+  - Validated complete order-key relations and bound dependencies before
+    constructing the reorder computation.
+- Regression tests:
+  - `test/ElaborationSpec.hs` (`derives Σ(g) order from the destination expansion root, not the source witness root`)
+  - `test/ElaborationSpec.hs` (`does not recover a missing <P key from the current spine position`)
+  - `test/ElaborationSpec.hs` (`does not linearize a cyclic forall-bound dependency by position`)
+  - `test/ElaborationSpec.hs` (`transports only the strict-replay-covered producer quantifiers`)
+- Thesis impact:
+  - Restores the `Typ(a') <= Typexp(a')` construction boundary from thesis
+    sections 15.3.3-15.3.5 without post-hoc root or position repair.
+
 ### BUG-2026-07-25-001
 - Status: Resolved
 - Priority: High

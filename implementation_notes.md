@@ -1,3 +1,24 @@
+## 2026-07-26 - Destination-owned Sigma ordering
+
+- Thesis Definitions 15.3.3 and 15.3.4 define `Typexp(a')` as `S'(sc)`, where
+  `sc` is the root of the expansion at the edge destination. Φ now derives the
+  Σ(g) leftmost-lowermost order from the construction-owned
+  `EdgeTrace.etResultRoot`. The frozen source root `etRoot` remains the
+  authority for interpreting Ω operations; the two roots no longer share one
+  local value.
+- The prior binding-LCA root switch was both unnecessary and semantically
+  wrong for an edge whose source and destination expansion roots expose
+  different binder sets. Missing `<P` keys no longer preserve the current
+  quantifier position, and a cyclic forall-bound dependency no longer drops
+  the dependency graph and sorts by position. Both conditions fail before a
+  reorder computation is constructed.
+- Focused regressions distinguish source and destination roots, require missing
+  order-key rejection independent of the current spine order, reject cyclic
+  bound dependencies, and retain producer quantifiers outside a strict replay
+  subset. The complete 128-example `Witness translation` slice is green. The
+  final serial gate passes `cabal build all -j1` and all 3695 tests under
+  `cabal test -j1`.
+
 ## 2026-07-26 - Mixed annotation publication and bounded self-application
 
 - The §12.3.2 source pseudo-type `exists beta. forall alpha.

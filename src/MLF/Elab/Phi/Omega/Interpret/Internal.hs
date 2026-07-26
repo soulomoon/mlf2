@@ -14,6 +14,7 @@
 module MLF.Elab.Phi.Omega.Interpret.Internal
   ( phiWithSchemeOmega,
     phiWithSchemeOmegaOccurrence,
+    orderPhiBindersByPrec,
   )
 where
 
@@ -48,10 +49,10 @@ Paper references:
 -}
 
 import Control.Applicative ((<|>))
-import Control.Monad (foldM, unless, when)
+import Control.Monad (unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (findIndex, sortBy)
+import Data.List (findIndex)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified MLF.Binding.Tree as Binding
@@ -121,6 +122,112 @@ data TypeArgKey
 typeArgKeyForRef :: TypeBinderRef -> TypeArgKey
 typeArgKeyForRef =
   TypeArgIdentity . typeBinderRefIdentity
+
+-- | Order one virtual quantifier spine by the paper's leftmost-lowermost
+-- relation.  The caller supplies the exact identity domain that belongs to
+-- the published scheme; other virtual entries retain their current order.
+--
+-- Kept top-level so the test-support facade can exercise missing-order and
+-- dependency-cycle behavior without manufacturing an entire presolution.
+orderPhiBindersByPrec ::
+  (NodeId -> NodeId) ->
+  (NodeId -> Bool) ->
+  IntMap.IntMap Order.OrderKey ->
+  [(TypeBinderRef, Maybe BoundType, Maybe NodeId)] ->
+  Either ElabError [Maybe NodeId]
+orderPhiBindersByPrec canonicalNode isOrderedBinder orderKeysActive binders = do
+  let refs = [ref | (ref, _, _) <- binders]
+      binderMap = IntMap.fromList (zip [0 ..] binders)
+      refIndex ref = findIndex (typeBinderRefsSameIdentity ref) refs
+      schemeNodesByIndex =
+        [ (index, canonicalNode nodeId)
+        | (index, (_, _, Just nodeId)) <- IntMap.toList binderMap
+        , isOrderedBinder nodeId
+        ]
+
+  schemeOrderEntries <-
+    mapM
+      ( \(index, nodeId) ->
+          case IntMap.lookup (getNodeId nodeId) orderKeysActive of
+            Just orderKey -> Right (index, orderKey)
+            Nothing ->
+              Left $
+                PhiInvariantError $
+                  "PhiReorder: missing order key for binder "
+                    ++ show nodeId
+                    ++ "; available keys="
+                    ++ show (IntMap.keys orderKeysActive)
+                    ++ "; spine="
+                    ++ show binders
+      )
+      schemeNodesByIndex
+  let schemeOrderKeysByIndex = IntMap.fromList schemeOrderEntries
+  mapM_
+    ( \((_, leftNode), (_, rightNode)) ->
+        case
+          Order.compareNodesByOrderKey
+            orderKeysActive
+            leftNode
+            rightNode
+          of
+            Right _ -> Right ()
+            Left err ->
+              Left $
+                PhiInvariantError $
+                  "PhiReorder: invalid order-key relation: "
+                    ++ show err
+    )
+    [ (left, right)
+    | (leftIndex, left) <- zip [(0 :: Int) ..] schemeNodesByIndex
+    , right <- drop (leftIndex + 1) schemeNodesByIndex
+    ]
+
+  let
+      -- Bound dependencies: if a occurs free in b's bound, then a must appear
+      -- before b.
+      depsFor :: Int -> [Int]
+      depsFor i =
+        case (IntMap.lookup i binderMap, listToMaybe (drop i refs)) of
+          (Just (_binderRef, Just bnd, _), Just binderRef) ->
+            [ j
+            | ref <- freeTypeVarRefsList bnd
+            , not (typeBinderRefsSameIdentity ref binderRef)
+            , Just j <- [refIndex ref]
+            ]
+          _ -> []
+
+      cmpIdx :: Int -> Int -> Ordering
+      cmpIdx i j =
+        case
+          ( IntMap.lookup i schemeOrderKeysByIndex
+          , IntMap.lookup j schemeOrderKeysByIndex
+          )
+          of
+            (Just leftKey, Just rightKey) ->
+              case Order.compareOrderKey leftKey rightKey of
+                EQ -> compare i j
+                ordering -> ordering
+            _ -> compare i j
+      indices = [0 .. length binders - 1]
+
+  idxs <-
+    topoSortBy
+      "PhiReorder: cycle in bound dependencies"
+      cmpIdx
+      depsFor
+      indices
+  mapM
+    ( \i ->
+        case IntMap.lookup i binderMap of
+          Just (_, _, mid) -> Right mid
+          Nothing ->
+            Left $
+              PhiInvariantError $
+                "PhiReorder: binder index "
+                  ++ show i
+                  ++ " out of range during reorder"
+    )
+    idxs
 
 phiWithSchemeOmega ::
   OmegaContext p ->
@@ -285,13 +392,23 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
       maybe False (rootRaiseMergeTraceAuthority operated other) mTrace
 
     orderRoot :: NodeId
-    -- Paper root `r` for Phi/Sigma is the expansion root (TyExp body), not the TyExp
-    -- wrapper itself. When a trace is available, prefer its root to stay in
-    -- the same node space as witness operations.
+    -- Omega operations are frozen in the source witness domain, whose root is
+    -- `etRoot`.  Keep this authority distinct from `sigmaOrderRoot`: the paper's
+    -- quantifier reordering targets Typexp and therefore uses the destination
+    -- expansion root `sc` instead.
     orderRoot =
       case mTrace of
         Nothing -> edgeRoot
         Just tr -> etRoot tr
+
+    sigmaOrderRoot :: NodeId
+    -- Thesis Def. 15.3.3/15.3.4: Typexp is S'(sc), where sc is the root of the
+    -- expansion at the edge destination.  `etResultRoot` is the construction
+    -- authority for exactly that root.
+    sigmaOrderRoot =
+      case mTrace of
+        Nothing -> edgeRight
+        Just tr -> etResultRoot tr
 
     nodes = cNodes constraint
 
@@ -348,33 +465,11 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
           extraChildren nid = boundKids nid ++ bindKids rootC nid
        in OrderKey.orderKeysFromRootWithExtra canonicalNode nodes extraChildren root Nothing
 
-    lcaRootForBinders binders =
-      case map (TypeRef . canonicalNode) binders of
-        [] -> orderRoot
-        (r0 : rs) ->
-          case foldM (Binding.bindingLCA constraint) r0 rs of
-            Left _ -> orderRoot
-            Right (TypeRef nid) -> canonicalNode nid
-            Right (GenRef gid) ->
-              fromMaybe orderRoot $ do
-                gen <- NodeAccess.lookupGenNode constraint gid
-                listToMaybe (gnSchemes gen)
-
     orderKeys :: IntMap.IntMap Order.OrderKey
-    -- Order keys are used to compare binder positions (≺) for Σ(g) / ϕR (thesis Def. 15.3.4).
-    -- The natural "paper root" for Φ/Σ is the expansion root `r` (often a TyExp body), but `r`
-    -- might not reach the scheme binders via the binding tree when `r` is strictly *under* a
-    -- TyForall wrapper. In that situation, compute order keys from the binding-tree LCA of the
-    -- scheme binders instead, so every binder identity has a key.
-    orderKeys = orderKeysFromRoot orderKeysRoot
-
-    orderKeysRoot :: NodeId
-    orderKeysRoot = lcaRootForBinders [NodeId k | k <- schemeInfoBinderIdentityKeys si]
-
-    orderKeysForBinders binders =
-      case binders of
-        [] -> orderKeys
-        _ -> orderKeysFromRoot (lcaRootForBinders binders)
+    -- Order keys compare the quantifiers in Typexp (thesis Def. 15.3.4), so
+    -- derive them once from the exact destination expansion root.  Missing
+    -- coverage is an invalid construction, not a reason to switch roots.
+    orderKeys = orderKeysFromRoot sigmaOrderRoot
 
     schemeBinderKeys :: IntSet.IntSet
     schemeBinderKeys = schemeInfoBinderIdentityKeySet si
@@ -738,23 +833,11 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
           if length missingIdPositions == schemeArity
             then Right (InstId, ty, ids)
             else do
-              let sourceBinders = [canonicalNode nid | Just nid <- ids, isSchemeBinder nid]
-                  orderKeysActive = orderKeysForBinders sourceBinders
-                  missingKeyBinders =
-                    [ nid
-                      | Just nid <- ids,
-                        isSchemeBinder nid,
-                        not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
-                    ]
               unless (null missingIdPositions) $
                 Left $
                   PhiInvariantError $
                     "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
-              let orderKeysForSort =
-                    if null missingKeyBinders
-                      then orderKeysActive
-                      else orderKeys
-              desired <- desiredBinderOrder orderKeysForSort vs0
+              desired <- desiredBinderOrder orderKeys vs0
               reorderTo vs0 ty ids desired
       where
         schemeBinders = schemeBinderRefs (siScheme si)
@@ -773,58 +856,30 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
     desiredBinderOrder orderKeysActive vs0 = do
       let n = vSpineLength vs0
       binders <- mapM (vSpineBinderAt vs0) [0 .. n - 1]
-      let refs = vSpineBinderRefs vs0
-          binderMap = IntMap.fromList (zip [0 ..] binders)
-          refIndex ref = findIndex (typeBinderRefsSameIdentity ref) refs
-
-          -- Bound dependencies: if a occurs free in b's bound, then a must appear before b.
-          depsFor :: Int -> [Int]
-          depsFor i =
-            case (IntMap.lookup i binderMap, listToMaybe (drop i refs)) of
-              (Just (_binderName, Just bnd, _), Just binderRef) ->
-                [ j
-                  | ref <- freeTypeVarRefsList bnd,
-                    not (typeBinderRefsSameIdentity ref binderRef),
-                    Just j <- [refIndex ref]
-                ]
-              _ -> []
-
-          cmpIdx :: Int -> Int -> Ordering
-          cmpIdx i j =
-            case (IntMap.lookup i binderMap, IntMap.lookup j binderMap) of
-              (Just (_, _, Just a), Just (_, _, Just b))
-                | not (isSchemeBinder a) || not (isSchemeBinder b) ->
-                    compare i j
-              (Just (_, _, Just a), Just (_, _, Just b)) ->
-                let ca = canonicalNode a
-                    cb = canonicalNode b
-                 in case Order.compareNodesByOrderKey orderKeysActive ca cb of
-                      Right ord -> ord
-                      Left _ -> compare i j -- fallback if missing key
-              (Just (_, _, Just _), _) -> LT
-              (_, Just (_, _, Just _)) -> GT
-              _ -> compare i j
-          indices = [0 .. n - 1]
-
-      idxs <-
-        case topoSortBy
-          "PhiReorder: cycle in bound dependencies"
-          cmpIdx
-          depsFor
-          indices of
-          Right ordered -> Right ordered
-          Left (InstantiationError "PhiReorder: cycle in bound dependencies") ->
-            Right (sortBy cmpIdx indices)
-          Left err -> Left err
-      mapM
-        (\i -> case IntMap.lookup i binderMap of
-            Just (_, _, mid) -> Right mid
-            Nothing ->
-              Left $
-                PhiInvariantError $
-                  "PhiReorder: binder index " ++ show i ++ " out of range during reorder"
-        )
-        idxs
+      case
+          orderPhiBindersByPrec
+            canonicalNode
+            isSchemeBinder
+            orderKeysActive
+            binders
+        of
+          Left (PhiInvariantError message) ->
+            Left $
+              PhiInvariantError $
+                message
+                  ++ "; sigma order root="
+                  ++ show sigmaOrderRoot
+                  ++ "; binder canonicalization="
+                  ++ show
+                    [ (nodeId, canonicalNode nodeId)
+                    | (_, _, Just nodeId) <- binders
+                    ]
+                  ++ "; bind parents="
+                  ++ show
+                    [ (nodeId, lookupBindParent (typeRef (canonicalNode nodeId)))
+                    | (_, _, Just nodeId) <- binders
+                    ]
+          other -> other
 
     reorderTo :: VSpine -> ElabType -> [Maybe NodeId] -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderTo _vs0 ty ids desired = bubbleReorderTo "reorderBindersByPrec" ty ids desired

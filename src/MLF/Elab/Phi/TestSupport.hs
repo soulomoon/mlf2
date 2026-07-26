@@ -2,6 +2,7 @@ module MLF.Elab.Phi.TestSupport (
     VSpine,
     mkVSpine,
     reorderSpineRefsTo,
+    orderPhiBindersByPrecForTest,
     assertSpineSync,
     vSpineBinderAt,
     vSpineBinderRefs,
@@ -18,7 +19,7 @@ import MLF.Constraint.Presolution.Base
     , PresolutionPlanBuilder
     )
 import MLF.Constraint.Presolution.View (PresolutionView(..))
-import MLF.Constraint.Types.Graph (EdgeId)
+import MLF.Constraint.Types.Graph (EdgeId, NodeId(..), getNodeId)
 import MLF.Elab.Elaborate.Annotation
     ( AnnotationContext(..)
     , reifyInstFromSourceScheme
@@ -41,6 +42,9 @@ import MLF.Elab.Types
     , TypeBinderRef
     )
 import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
+import MLF.Elab.Phi.Omega.Interpret.Internal
+    ( orderPhiBindersByPrec
+    )
 import MLF.Elab.Phi.VSpine
     ( VSpine
     , assertSpineSync
@@ -51,6 +55,7 @@ import MLF.Elab.Phi.VSpine
     )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr)
 import MLF.Util.Trace (TraceConfig)
+import qualified MLF.Util.Order as Order
 
 reorderSpineRefsTo
     :: Eq a
@@ -60,6 +65,17 @@ reorderSpineRefsTo
     -> [a]
     -> Either ElabError (Instantiation, [(TypeBinderRef, Maybe BoundType)], [a])
 reorderSpineRefsTo = Sigma.bubbleReorderToFromSpineRefs
+
+orderPhiBindersByPrecForTest
+    :: IntMap.IntMap Order.OrderKey
+    -> IntSet.IntSet
+    -> [(TypeBinderRef, Maybe BoundType, Maybe NodeId)]
+    -> Either ElabError [Maybe NodeId]
+orderPhiBindersByPrecForTest orderKeys orderedBinderKeys =
+    orderPhiBindersByPrec
+        id
+        (\nodeId -> IntSet.member (getNodeId nodeId) orderedBinderKeys)
+        orderKeys
 
 -- | Exercise the edge-local @[phi_R; T(e)]@ computation without running the
 -- elaboration algebra.  The caller supplies the source scheme, while edge
