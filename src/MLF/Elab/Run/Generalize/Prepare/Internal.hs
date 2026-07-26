@@ -89,11 +89,11 @@ import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionPlanBuilder(..)
-    , PresolutionResult(..)
     )
 import MLF.Constraint.Presolution.Base
     ( EdgeArtifacts
     , EdgeArtifactsError
+    , PresolutionResult(..)
     , edgeArtifactExpansion
     , edgeArtifactTrace
     , edgeArtifactWitness
@@ -3656,10 +3656,24 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
                 SolvedToBaseMapped baseNode -> baseNode
                 SolvedToBaseSameDomain baseNode -> baseNode
                 SolvedToBaseMissing -> annNodeCanonical node
-        prepareAnn =
-            alignAnnInstantiationSites (eaEdgeWitnesses edgeArtifacts)
-                . redirectAndCanonicalizeAnn annNodeCanonical (prRedirects pres)
-        annCanons = map prepareAnn anns
+        prepareAnn ann =
+            alignAnnInstantiationSites
+                edgeArtifacts
+                ( redirectAndCanonicalizeAnn
+                    annNodeCanonical
+                    (prRedirects pres)
+                    ann
+                )
+    annCanons <-
+        first
+            ( \err ->
+                Solve.ValidationFailed
+                    [ "application instantiation-site preparation failed"
+                    , "  cause: " ++ show err
+                    ]
+            )
+            (traverse prepareAnn anns)
+    let
         annCanon =
             case annCanons of
                 firstAnn : _ -> firstAnn
@@ -5160,10 +5174,13 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
 preparedAnnotated :: PreparedGeneralizationArtifact -> AnnExpr
 preparedAnnotated = pgaAnnotated
 
-canonicalizePreparedAnn :: PreparedGeneralizationArtifact -> AnnExpr -> AnnExpr
+canonicalizePreparedAnn
+    :: PreparedGeneralizationArtifact
+    -> AnnExpr
+    -> Either ElabError AnnExpr
 canonicalizePreparedAnn artifact =
     alignAnnInstantiationSites
-        (eaEdgeWitnesses (pgaEdgeArtifacts artifact))
+        (pgaEdgeArtifacts artifact)
         . redirectAndCanonicalizeAnn
             (pgaAnnNodeCanonical artifact)
             (pgaRedirects artifact)

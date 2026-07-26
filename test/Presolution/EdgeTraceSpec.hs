@@ -22,11 +22,9 @@ import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
-    , PresolutionResult(..)
+    , prConstraint
+    , prRedirects
     , prEdgeTraces
-    )
-import MLF.Constraint.Presolution.Base
-    ( EdgeWitnessNonSourceOrigin(..)
     )
 import MLF.Constraint.Presolution.Construction
     ( combineRawExpansionConstructions
@@ -38,6 +36,7 @@ import MLF.Constraint.Presolution.Construction
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , EdgeExecutionArtifacts(..)
+    , EdgeWitnessNonSourceOrigin(..)
     , psEdgeExecutionArtifacts
     , psEdgeExpansionConstructions
     , psEdgeExpansions

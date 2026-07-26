@@ -8,6 +8,43 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-004
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: Complete Phase 4 edge packets could still be bypassed through the
+  exposed presolution implementation module, and application-site preparation
+  silently retained stale endpoints when an edge had neither a packet nor
+  identity-edge authority.
+- Expected vs actual:
+  - Expected: production callers can observe an abstract `PresolutionResult`
+    but cannot manufacture one or join component maps; every application site
+    is prepared from its complete edge packet or an explicit identity-edge
+    certificate.
+  - Actual before fix: `MLF.Constraint.Presolution.Base` exposed
+    `mkEdgeArtifacts`, empty/insert/filter mutation helpers, and the
+    `PresolutionResult` constructor. `alignAnnInstantiationSites` accepted only
+    a witness map and treated every missing entry as identity.
+- Fix:
+  - Made `MLF.Constraint.Presolution.Base` implementation-only in Cabal and
+    removed component-map and mutation builders from its export list.
+  - Made the `PresolutionResult` constructor abstract on the production façade;
+    tests use read-only selectors and the dedicated test-support seam.
+  - Made application-site preparation consume the complete `EdgeArtifacts`
+    aggregate. Missing packets are accepted only for an `eaIdentityEdges`
+    member; every other missing edge produces `PhiInvariantError`.
+- Regression tests:
+  - `test/RepoGuardSpec.hs` (`presolution proof packets stay behind owner and test-support seams`)
+  - `test/PipelineSpec.hs` (`fails closed unless each site has a complete packet or identity-edge authority`)
+  - `test/Thesis/ObligationPropertySpec.hs` (`Thesis fixed annotation evidence`)
+  - `test/Phi/AlignmentSpec.hs` (`Phi alignment`)
+- Thesis impact:
+  - Prevents a stale application endpoint from bypassing the propagation
+    witness used by Definitions 15.3.4-15.3.6. Identity is now an explicit
+    producer classification rather than the default interpretation of missing
+    evidence.
+
 ### BUG-2026-07-26-003
 - Status: Resolved
 - Priority: High

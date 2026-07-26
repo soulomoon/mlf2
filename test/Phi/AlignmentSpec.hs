@@ -12,21 +12,19 @@ import Test.Hspec
 
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionResult(..)
+    , EdgeSourceInterior(..)
     , PresolutionView(..)
     , prEdgeExpansions
     , prEdgeTraces
     , prEdgeWitnesses
     , prIdentityEdges
-    )
-import MLF.Constraint.Presolution.Base
-    ( EdgeSourceInterior(..)
-    , InteriorNodes(..)
+    , prPlanBuilder
     )
 import qualified MLF.Constraint.Finalize.TestSupport as Finalize
 import MLF.Constraint.Presolution.TestSupport
     ( defaultPlanBuilder
     , edgeArtifactsForTest
+    , InteriorNodes(..)
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), EdgeId(..), NodeId(..), cBindParents, cNodes, toListNode)
 import MLF.Constraint.Types.Witness

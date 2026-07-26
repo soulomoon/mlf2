@@ -24,9 +24,9 @@ import MLF.Constraint.Inert qualified as Inert
 import MLF.Constraint.Presolution
   ( EdgeTrace (..),
     PresolutionError (..),
-    PresolutionResult (..),
     PresolutionView (..),
     prEdgeWitnesses,
+    prConstraint,
   )
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
@@ -1090,8 +1090,8 @@ propReifyNames _size =
 propBindMono :: Int -> Property
 propBindMono _size =
   case runPipelineArtifactsDefault Set.empty (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) of
-    Right PipelineArtifacts {paPresolution = PresolutionResult {prConstraint = c}} ->
-      Binding.checkBindingTree c === Right ()
+    Right PipelineArtifacts {paPresolution = presolution} ->
+      Binding.checkBindingTree (prConstraint presolution) === Right ()
     Left err -> counterexample err False
 
 propSynToGraph :: Int -> Property
@@ -2402,8 +2402,9 @@ propPropSolve _size =
 propPropWitness :: Int -> Property
 propPropWitness _size =
   case runToPresolutionDefault Set.empty letIdAppExpr of
-    Right presolution@PresolutionResult {prConstraint = c} ->
-      let entries = IntMap.toList (prEdgeWitnesses presolution)
+    Right presolution ->
+      let c = prConstraint presolution
+          entries = IntMap.toList (prEdgeWitnesses presolution)
        in conjoin
             [ counterexample (show entries) (not (null entries)),
               counterexample (show entries) $
@@ -2838,11 +2839,12 @@ typeCheckShouldMatch actual expected =
 propPresolutionClearsEdges :: Surf.SurfaceExpr -> Property
 propPresolutionClearsEdges expr =
   case runToPresolutionDefault Set.empty expr of
-    Right PresolutionResult {prConstraint = c} ->
-      conjoin
-        [ Binding.checkBindingTree c === Right (),
-          cInstEdges c === []
-        ]
+    Right presolution ->
+      let c = prConstraint presolution
+       in conjoin
+            [ Binding.checkBindingTree c === Right (),
+              cInstEdges c === []
+            ]
     Left err -> counterexample err False
 
 propEdgeWitnessOps :: Surf.SurfaceExpr -> ([EdgeWitness] -> Bool) -> Property

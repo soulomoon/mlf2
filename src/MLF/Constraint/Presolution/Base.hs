@@ -18,15 +18,10 @@ module MLF.Constraint.Presolution.Base (
     edgeArtifactExpansionConstruction,
     EdgeArtifacts,
     EdgeArtifactsError(..),
-    mkEdgeArtifacts,
     edgeArtifactsFromExecutionArtifacts,
-    emptyEdgeArtifacts,
     lookupEdgeArtifact,
     edgeArtifactKeys,
-    insertEdgeArtifact,
-    filterEdgeArtifacts,
     mapEdgeArtifacts,
-    setEdgeArtifactsIdentityEdges,
     eaEdgeExpansions,
     eaEdgeWitnesses,
     eaEdgeTraces,
@@ -293,70 +288,6 @@ data EdgeArtifactsError
         }
     deriving (Eq, Show)
 
-mkEdgeArtifacts
-    :: IntMap Expansion
-    -> IntMap EdgeWitness
-    -> IntMap EdgeTrace
-    -> IntMap RawExpansionConstruction
-    -> IntSet.IntSet
-    -> Either EdgeArtifactsError EdgeArtifacts
-mkEdgeArtifacts expansions witnesses traces constructions identityEdges
-    | expansionKeys /= witnessKeys
-        || witnessKeys /= traceKeys
-        || traceKeys /= constructionKeys =
-        Left
-            EdgeArtifactKeyMismatch
-                { edgeArtifactExpansionKeys = expansionKeys
-                , edgeArtifactWitnessKeys = witnessKeys
-                , edgeArtifactTraceKeys = traceKeys
-                , edgeArtifactExpansionConstructionKeys = constructionKeys
-                }
-    | otherwise = do
-        artifacts <-
-            IntMap.traverseWithKey
-                (\edgeKey expansion ->
-                    case
-                        ( IntMap.lookup edgeKey witnesses
-                        , IntMap.lookup edgeKey traces
-                        , IntMap.lookup edgeKey constructions
-                        )
-                    of
-                        (Just witness, Just traceInfo, Just construction) ->
-                            mkEdgeArtifact
-                                edgeKey
-                                expansion
-                                witness
-                                traceInfo
-                                construction
-                        _ ->
-                            Left
-                                EdgeArtifactKeyMismatch
-                                    { edgeArtifactExpansionKeys = expansionKeys
-                                    , edgeArtifactWitnessKeys = witnessKeys
-                                    , edgeArtifactTraceKeys = traceKeys
-                                    , edgeArtifactExpansionConstructionKeys =
-                                        constructionKeys
-                                    }
-                )
-                expansions
-        pure
-            EdgeArtifactsInternal
-                { edgeArtifactsByEdge = artifacts
-                , eaIdentityEdges = identityEdges
-                }
-  where
-    expansionKeys = IntSet.fromAscList (IntMap.keys expansions)
-    witnessKeys = IntSet.fromAscList (IntMap.keys witnesses)
-    traceKeys = IntSet.fromAscList (IntMap.keys traces)
-    constructionKeys = IntSet.fromAscList (IntMap.keys constructions)
-
-emptyEdgeArtifacts :: EdgeArtifacts
-emptyEdgeArtifacts =
-    EdgeArtifactsInternal
-        { edgeArtifactsByEdge = IntMap.empty
-        , eaIdentityEdges = IntSet.empty
-        }
-
 lookupEdgeArtifact :: EdgeId -> EdgeArtifacts -> Maybe EdgeArtifact
 lookupEdgeArtifact edgeId =
     IntMap.lookup (getEdgeId edgeId) . edgeArtifactsByEdge
@@ -364,31 +295,6 @@ lookupEdgeArtifact edgeId =
 edgeArtifactKeys :: EdgeArtifacts -> IntSet.IntSet
 edgeArtifactKeys =
     IntMap.keysSet . edgeArtifactsByEdge
-
-insertEdgeArtifact
-    :: EdgeId
-    -> Expansion
-    -> EdgeWitness
-    -> EdgeTrace
-    -> RawExpansionConstruction
-    -> EdgeArtifacts
-    -> Either EdgeArtifactsError EdgeArtifacts
-insertEdgeArtifact edgeId expansion witness traceInfo construction edgeArtifacts = do
-    artifact <-
-        mkEdgeArtifact
-            (getEdgeId edgeId)
-            expansion
-            witness
-            traceInfo
-            construction
-    pure
-        edgeArtifacts
-            { edgeArtifactsByEdge =
-                IntMap.insert
-                    (getEdgeId edgeId)
-                    artifact
-                    (edgeArtifactsByEdge edgeArtifacts)
-            }
 
 filterEdgeArtifacts
     :: (EdgeId -> Bool)

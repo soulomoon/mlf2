@@ -13,13 +13,15 @@ import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionResult(..)
+    , PresolutionError(..)
+    , prConstraint
     , prEdgeTraces
     , prEdgeWitnesses
     )
-import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
-    ( PresolutionState(..)
+    ( PresolutionUf(..)
+    , prUnionFind
+    , PresolutionState(..)
     , getEdgeSourceInterior
     , runPresolutionM
     , toListInterior

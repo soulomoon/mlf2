@@ -2755,7 +2755,14 @@ finishPreparedPipelineRootWithTiming ::
   AnnExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
 finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode traceCfg identityGenerator extPrepared prepared elabConfig elabEnv annPre =
-  runExceptT $
+  runExceptT $ do
+    annCanon <-
+      ExceptT
+        ( pure
+            ( fromElabError
+                (canonicalizePreparedAnn prepared annPre)
+            )
+        )
     finishPreparedPipelineRootStage
       timing
       label
@@ -2767,7 +2774,7 @@ finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode
       prepared
       elabConfig
       elabEnv
-      (canonicalizePreparedAnn prepared annPre)
+      annCanon
       annPre
 
 finishPreparedPipelineRootStage ::

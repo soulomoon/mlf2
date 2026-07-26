@@ -682,18 +682,26 @@ semantics that are not represented elsewhere just as explicitly.”
   per-edge packets. Each packet owns its expansion, normalized witness, frozen
   replay trace, and exact `RawExpansionConstruction`. Presolution publishes it
   directly from the complete `EdgeExecutionArtifacts` map; no production
-  boundary splits and recombines parallel maps. `mkEdgeArtifacts` proves
-  identical component key sets for test fixtures and agreement between the
-  selected key and `EdgeWitness.ewEdgeId`; aggregate map/filter/insert
-  operations preserve those facts. `PresolutionResult` owns only this
-  aggregate and derives compatibility projections from it. Production
-  therefore cannot represent a witness-only, trace-only, expansion-only, or
+  boundary splits and recombines parallel maps.
+  `MLF.Constraint.Presolution.Base` is implementation-only, and the production
+  façade exposes `PresolutionResult` without its constructor. The parallel-map
+  `mkEdgeArtifacts` fixture lives only in
+  `MLF.Constraint.Presolution.TestSupport`, where it proves identical component
+  key sets and agreement between the selected key and
+  `EdgeWitness.ewEdgeId`; owner-local canonicalization and Var-Let filtering
+  preserve those facts. `PresolutionResult` owns only this aggregate and
+  derives read-only compatibility projections from it. Production therefore
+  cannot represent a witness-only, trace-only, expansion-only, or
   construction-only edge.
 - Per-edge consumers—including Φ replay, application computation,
   identity-topology recovery, and root-`RaiseMerge` authority—select a packet
   once and project all required fields from that value. Bulk result-type
   indexes may derive read-only witness or trace views from the aggregate, but
   no production API accepts independently supplied component maps.
+- Prepared application sites also select their canonical replay endpoints from
+  that aggregate. A site without a packet is retained only when its `EdgeId`
+  belongs to the producer-owned identity-edge set; otherwise preparation fails
+  closed rather than interpreting missing witness data as identity.
 - Φ/Ω consumes one of those packets through the opaque
   `PhiReplayCertificate`. `AnnotationContext`, annotation/result-type
   validation, identity-edge recognition, root-`RaiseMerge` authority, and

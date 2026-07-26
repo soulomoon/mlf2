@@ -45,7 +45,7 @@ import GHC.Stack (HasCallStack)
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity qualified as Acyc
 import MLF.Constraint.Normalize qualified as CNormalize
-import MLF.Constraint.Presolution (PresolutionError, PresolutionResult (..), computePresolution)
+import MLF.Constraint.Presolution (PresolutionError, PresolutionResult, computePresolution)
 import MLF.Constraint.Solve (SolveError)
 import MLF.Constraint.Solve.TestSupport (SolveResult, solveUnifyResult)
 import MLF.Constraint.Solved qualified as Solved

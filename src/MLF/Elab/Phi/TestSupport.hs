@@ -17,10 +17,9 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import MLF.Constraint.Presolution (EdgeTrace)
-import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
+import MLF.Constraint.Presolution.TestSupport
     ( EdgeArtifacts
-    , PresolutionPlanBuilder
     , emptyRawExpansionConstruction
     , mkEdgeArtifacts
     )

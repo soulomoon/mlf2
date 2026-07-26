@@ -13,7 +13,7 @@ import MLF.Constraint.Types.Witness (InstanceOp(..))
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionResult(..)
+    , prConstraint
     , prEdgeTraces
     , prEdgeWitnesses
     )

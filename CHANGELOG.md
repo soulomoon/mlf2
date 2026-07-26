@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Sealed the public Phase 4 proof-packet boundary. The
+  `MLF.Constraint.Presolution.Base` implementation module is no longer exposed,
+  the production façade exports `PresolutionResult` abstractly, and
+  component-map/empty/insert/filter builders are unavailable outside the
+  owner. Test fixtures rebuild complete packets only through
+  `MLF.Constraint.Presolution.TestSupport`. Application instantiation-site
+  preparation now consumes the complete `EdgeArtifacts` aggregate and accepts
+  a missing packet only when the producer explicitly classified that edge as
+  identity; any other missing authority fails with `PhiInvariantError` instead
+  of retaining stale endpoints.
 - Closed the remaining mutable-state loophole beneath construction-closed edge
   artifacts. `PresolutionState` now has an abstract constructor and is created
   by `mkPresolutionState` from one map of complete

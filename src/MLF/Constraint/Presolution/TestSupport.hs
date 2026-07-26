@@ -49,6 +49,9 @@ module MLF.Constraint.Presolution.TestSupport (
         , psEdgeExecutionArtifacts
         ),
     EdgeExecutionArtifacts(..),
+    EdgeWitnessNonSourceOrigin(..),
+    PresolutionUf(..),
+    prUnionFind,
     emptyPresolutionStateForTest,
     psEdgeExpansions,
     psEdgeWitnesses,
@@ -121,6 +124,8 @@ module MLF.Constraint.Presolution.TestSupport (
     normalizeInstanceOpsCoreWithProvenance,
     assertNoStandaloneGraftsWithProvenance,
     validateTerminalRootRaiseMergeForTest,
+    rootRaiseMergeTraceAuthority,
+    rootWeakenRaiseMergeTraceAuthority,
     validateTranslatablePresolution,
     structuralInterior,
     translatableWeakenedNodes
@@ -138,7 +143,9 @@ import MLF.Constraint.Presolution.Base
     , EdgeArtifacts
     , EdgeArtifactsError(..)
     , EdgeExecutionArtifacts(..)
-    , EdgeWitnessNonSourceOrigin
+    , EdgeWitnessNonSourceOrigin(..)
+    , PresolutionUf(..)
+    , prUnionFind
     , edgeArtifactExpansion
     , edgeArtifactWitness
     , edgeArtifactTrace
@@ -148,12 +155,8 @@ import MLF.Constraint.Presolution.Base
     , eaEdgeTraces
     , eaEdgeExpansionConstructions
     , eaIdentityEdges
-    , mkEdgeArtifacts
-    , emptyEdgeArtifacts
     , lookupEdgeArtifact
-    , insertEdgeArtifact
-    , filterEdgeArtifacts
-    , setEdgeArtifactsIdentityEdges
+    , edgeArtifactsFromExecutionArtifacts
     , EdgeTrace
     , ExpansionResultMap(..)
     , InteriorNodes(..)
@@ -186,6 +189,8 @@ import MLF.Constraint.Presolution.Base
     , sourceInteriorFromList
     , sourceInteriorFromSet
     , toListInterior
+    , rootRaiseMergeTraceAuthority
+    , rootWeakenRaiseMergeTraceAuthority
     )
 import MLF.Constraint.Presolution.Copy
     ( copyForallBoundProjectionAtBinder
@@ -455,6 +460,76 @@ legacyEdgeExecutionArtifactsForTest expansions witnesses traces
 defaultPlanBuilder :: TraceConfig -> PresolutionPlanBuilder
 defaultPlanBuilder traceCfg = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
 
+-- | Test-only component-map fixture. Production publishes one complete
+-- 'EdgeExecutionArtifacts' packet per edge and never exposes this join.
+mkEdgeArtifacts
+    :: IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> IntMap RawExpansionConstruction
+    -> IntSet.IntSet
+    -> Either EdgeArtifactsError EdgeArtifacts
+mkEdgeArtifacts expansions witnesses traces constructions identityEdges
+    | expansionKeys /= witnessKeys
+        || witnessKeys /= traceKeys
+        || traceKeys /= constructionKeys =
+        Left keyMismatch
+    | otherwise = do
+        executionArtifacts <-
+            IntMap.traverseWithKey
+                (\edgeKey expansion ->
+                    case
+                        ( IntMap.lookup edgeKey witnesses
+                        , IntMap.lookup edgeKey traces
+                        , IntMap.lookup edgeKey constructions
+                        )
+                    of
+                        (Just witness, Just traceInfo, Just construction) ->
+                            Right
+                                EdgeExecutionArtifacts
+                                    { eeaExpansion = expansion
+                                    , eeaWitness = witness
+                                    , eeaRaiseAuthorityNodes = IntSet.empty
+                                    , eeaNonSourceOpOrigins = IntMap.empty
+                                    , eeaExpansionConstruction = construction
+                                    , eeaTrace = traceInfo
+                                    }
+                        _ -> Left keyMismatch
+                )
+                expansions
+        edgeArtifactsFromExecutionArtifacts executionArtifacts identityEdges
+  where
+    expansionKeys = IntMap.keysSet expansions
+    witnessKeys = IntMap.keysSet witnesses
+    traceKeys = IntMap.keysSet traces
+    constructionKeys = IntMap.keysSet constructions
+    keyMismatch =
+        EdgeArtifactKeyMismatch
+            { edgeArtifactExpansionKeys = expansionKeys
+            , edgeArtifactWitnessKeys = witnessKeys
+            , edgeArtifactTraceKeys = traceKeys
+            , edgeArtifactExpansionConstructionKeys = constructionKeys
+            }
+
+emptyEdgeArtifacts :: EdgeArtifacts
+emptyEdgeArtifacts =
+    expectEdgeArtifacts
+        (edgeArtifactsFromExecutionArtifacts IntMap.empty IntSet.empty)
+
+setEdgeArtifactsIdentityEdges
+    :: IntSet.IntSet
+    -> EdgeArtifacts
+    -> EdgeArtifacts
+setEdgeArtifactsIdentityEdges identityEdges edgeArtifacts =
+    expectEdgeArtifacts
+        ( mkEdgeArtifacts
+            (eaEdgeExpansions edgeArtifacts)
+            (eaEdgeWitnesses edgeArtifacts)
+            (eaEdgeTraces edgeArtifacts)
+            (eaEdgeExpansionConstructions edgeArtifacts)
+            identityEdges
+        )
+
 edgeArtifactsForTest
     :: IntMap Expansion
     -> IntMap EdgeWitness
@@ -494,14 +569,21 @@ insertEdgeArtifactWithConstructionForTest
     -> RawExpansionConstruction
     -> EdgeArtifacts
     -> EdgeArtifacts
-insertEdgeArtifactWithConstructionForTest edgeId expansion witness traceInfo construction =
+insertEdgeArtifactWithConstructionForTest edgeId expansion witness traceInfo construction edgeArtifacts =
     expectEdgeArtifacts
-        . insertEdgeArtifact
-            edgeId
-            expansion
-            witness
-            traceInfo
-            construction
+        ( mkEdgeArtifacts
+            (IntMap.insert edgeKey expansion (eaEdgeExpansions edgeArtifacts))
+            (IntMap.insert edgeKey witness (eaEdgeWitnesses edgeArtifacts))
+            (IntMap.insert edgeKey traceInfo (eaEdgeTraces edgeArtifacts))
+            ( IntMap.insert
+                edgeKey
+                construction
+                (eaEdgeExpansionConstructions edgeArtifacts)
+            )
+            (eaIdentityEdges edgeArtifacts)
+        )
+  where
+    edgeKey = getEdgeId edgeId
 
 setEdgeArtifactExpansionForTest
     :: EdgeId
@@ -567,8 +649,17 @@ setEdgeArtifactTraceForTest edgeId traceInfo edgeArtifacts =
                 edgeArtifacts
 
 deleteEdgeArtifactForTest :: EdgeId -> EdgeArtifacts -> EdgeArtifacts
-deleteEdgeArtifactForTest edgeId =
-    filterEdgeArtifacts (/= edgeId)
+deleteEdgeArtifactForTest edgeId edgeArtifacts =
+    expectEdgeArtifacts
+        ( mkEdgeArtifacts
+            (IntMap.delete edgeKey (eaEdgeExpansions edgeArtifacts))
+            (IntMap.delete edgeKey (eaEdgeWitnesses edgeArtifacts))
+            (IntMap.delete edgeKey (eaEdgeTraces edgeArtifacts))
+            (IntMap.delete edgeKey (eaEdgeExpansionConstructions edgeArtifacts))
+            (eaIdentityEdges edgeArtifacts)
+        )
+  where
+    edgeKey = getEdgeId edgeId
 
 expectEdgeArtifacts
     :: Either EdgeArtifactsError EdgeArtifacts

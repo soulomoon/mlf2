@@ -50,6 +50,7 @@ import MLF.Constraint.Presolution.TestSupport
     lookupEdgeArtifact,
     setEdgeArtifactTraceForTest,
     setEdgeArtifactWitnessForTest,
+    setEdgeArtifactsIdentityEdges,
     sourceInteriorFromList,
     toListInterior,
   )
@@ -124,6 +125,7 @@ import MLF.Elab.Run.Generalize.Prepare
     prepareGeneralizationArtifact,
     preparedAnnotated,
   )
+import MLF.Elab.Run.Annotation (alignAnnInstantiationSites)
 import MLF.Elab.Run.Generalize.Prepare.TestSupport
   ( PreparedGeneralizationArtifactTestView (..),
     alignSourceExpectedOperatedTypeForTest,
@@ -592,6 +594,33 @@ resultTypeInputsForArtifacts
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
+  describe "prepared application-site authority" $ do
+    it "fails closed unless each site has a complete packet or identity-edge authority" $ do
+      let funEdge = EdgeId 990001
+          argEdge = EdgeId 990002
+          funSite =
+            mkInstantiationSite funEdge (NodeId 990003) (NodeId 990004)
+          argSite =
+            mkInstantiationSite argEdge (NodeId 990005) (NodeId 990006)
+          ann =
+            AApp
+              (ALit (LInt 1) (NodeId 990003))
+              (ALit (LInt 2) (NodeId 990005))
+              funSite
+              argSite
+              (NodeId 990007)
+          identityArtifacts =
+            setEdgeArtifactsIdentityEdges
+              (IntSet.fromList [getEdgeId funEdge, getEdgeId argEdge])
+              emptyEdgeArtifacts
+      case alignAnnInstantiationSites emptyEdgeArtifacts ann of
+        Left (PhiInvariantError message) ->
+          message `shouldSatisfy` ("neither a complete edge artifact" `isInfixOf`)
+        other ->
+          expectationFailure
+            ("expected missing application-site authority, got " ++ show other)
+      alignAnnInstantiationSites identityArtifacts ann `shouldBe` Right ann
+
   describe "External binding validation" $ do
     it "accepts variable-headed external env types" $ do
       let extEnv = Map.singleton "x" (STVarApp "f" (STVar "a" :| []))
@@ -12553,8 +12582,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       case runToPresolutionWithAnnDefault defaultPolySyms expr of
         Left err -> expectationFailure ("Pipeline failed: " ++ err)
-        Right (presolution@PresolutionResult {prConstraint = cPres}, _ann) -> do
-          let exps = prEdgeExpansions presolution
+        Right (presolution, _ann) -> do
+          let cPres = prConstraint presolution
+              exps = prEdgeExpansions presolution
               ews = prEdgeWitnesses presolution
               annEdges = IntSet.toList (cAnnEdges cPres)
           annEdges `shouldSatisfy` (not . null)

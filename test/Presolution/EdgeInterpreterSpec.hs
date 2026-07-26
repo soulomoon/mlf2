@@ -31,15 +31,16 @@ import MLF.Constraint.Presolution.TestSupport
     , runPresolutionM
     , runPresolutionLoopWithOperationTimingForTest
     , sourceWitnessNodeWithCopyMapForTest
+    , InteriorNodes(..)
     )
 import MLF.Constraint.Presolution
-    ( EdgeTrace(..)
+    ( EdgeSourceInterior(..)
+    , EdgeTrace(..)
     , PresolutionError(..)
     , prEdgeExpansions
     , prEdgeTraces
     , prEdgeWitnesses
     )
-import MLF.Constraint.Presolution.Base (EdgeSourceInterior(..), InteriorNodes(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Interpreter
     ( EdgeExecutionDecision(..)
     , executeEdgePlan

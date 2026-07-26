@@ -12,7 +12,7 @@ import qualified Data.Set as Set
 import qualified MLF.Constraint.Presolution as Presolution
 import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution (prConstraint)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve.TestSupport
     ( SolveOutput(..)

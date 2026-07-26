@@ -57,6 +57,36 @@ spec = describe "Repository guardrails" $ do
     edgeUnifyStateSource `shouldNotContain` "psEdgeWitnesses"
     edgeUnifyStateSource `shouldNotContain` "psEdgeTraces"
 
+  it "presolution proof packets stay behind owner and test-support seams" $ do
+    cabalSrc <- readFileStrict "mlf2.cabal"
+    presolutionSource <- readFileStrict "src/MLF/Constraint/Presolution.hs"
+    baseSource <- readFileStrict "src/MLF/Constraint/Presolution/Base.hs"
+    annotationSource <- readFileStrict "src/MLF/Elab/Run/Annotation.hs"
+    let internalLibrarySrc =
+          extractNamedLibraryStanza "library mlf2-internal" cabalSrc
+        internalExposedModules =
+          listedModules (extractCabalField "exposed-modules" internalLibrarySrc)
+        internalOtherModules =
+          listedModules (extractCabalField "other-modules" internalLibrarySrc)
+        presolutionExports =
+          unlines (takeWhile (/= ") where") (lines presolutionSource))
+        baseExports =
+          unlines (takeWhile (/= ") where") (lines baseSource))
+    internalExposedModules
+      `shouldSatisfy` notElem "MLF.Constraint.Presolution.Base"
+    internalOtherModules
+      `shouldSatisfy` elem "MLF.Constraint.Presolution.Base"
+    presolutionExports `shouldNotContain` "PresolutionResult(..)"
+    baseExports `shouldNotContain` "mkEdgeArtifacts,"
+    baseExports `shouldNotContain` "emptyEdgeArtifacts,"
+    baseExports `shouldNotContain` "insertEdgeArtifact,"
+    baseExports `shouldNotContain` "filterEdgeArtifacts,"
+    baseExports `shouldNotContain` "setEdgeArtifactsIdentityEdges,"
+    annotationSource
+      `shouldNotContain` "IntMap.IntMap EdgeWitness -> AnnExpr -> AnnExpr"
+    annotationSource
+      `shouldContain` "EdgeArtifacts -> AnnExpr -> Either ElabError AnnExpr"
+
   it "split child modules stay implementation-only in Cabal" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
@@ -351,6 +381,37 @@ extractPublicLibraryStanza src =
           "benchmark ",
           "foreign-library "
         ]
+
+extractNamedLibraryStanza :: String -> String -> String
+extractNamedLibraryStanza stanzaHeader src =
+  unlines (takeWhile (not . isNextStanza) (drop 1 afterLibrary))
+  where
+    afterLibrary = dropWhile (/= stanzaHeader) (lines src)
+    isNextStanza line =
+      any
+        (`isPrefixOf` trim line)
+        [ "library ",
+          "executable ",
+          "test-suite ",
+          "benchmark ",
+          "foreign-library "
+        ]
+
+extractCabalField :: String -> String -> String
+extractCabalField fieldName src =
+  case dropWhile (not . isFieldStart) (lines src) of
+    [] -> ""
+    fieldLine : rest ->
+      unlines
+        ( fieldLine
+            : takeWhile
+              (\line -> null (trim line) || indentation line > indentation fieldLine)
+              rest
+        )
+  where
+    isFieldStart line =
+      (fieldName ++ ":") `isPrefixOf` trim line
+    indentation = length . takeWhile (== ' ')
 
 isPrefixOf :: (Eq a) => [a] -> [a] -> Bool
 isPrefixOf [] _ = True

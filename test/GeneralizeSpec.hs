@@ -19,7 +19,7 @@ import ElabTermTestSupport
     , testTForall
     , testTVar
     )
-import MLF.Constraint.Presolution.Base
+import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     )
 import MLF.Constraint.Presolution.Plan.Requirements

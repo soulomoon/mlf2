@@ -14,7 +14,7 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Binding.Tree (boundFlexChildren, checkBindingTree, isUnderRigidBinder, lookupBindParent, nodeKind, NodeKind(..))
-import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution (prConstraint)
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
 import MLF.Constraint.Types.Graph hiding (lookupNode)

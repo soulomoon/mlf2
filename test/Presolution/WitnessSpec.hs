@@ -42,10 +42,6 @@ import MLF.Constraint.Presolution
     , prEdgeExpansions
     , prEdgeWitnesses
     )
-import MLF.Constraint.Presolution.Base
-    ( rootRaiseMergeTraceAuthority
-    , rootWeakenRaiseMergeTraceAuthority
-    )
 import MLF.Constraint.Presolution.Construction
     ( rawExpansionConstructionSemanticMetaKeys
     )
@@ -63,6 +59,8 @@ import MLF.Constraint.Presolution.TestSupport
     , normalizeEdgeWitnessesM
     , ProvenancedInstanceOp(..)
     , ProvenancedNode(..)
+    , rootRaiseMergeTraceAuthority
+    , rootWeakenRaiseMergeTraceAuthority
     , assertNoStandaloneGraftsWithProvenance
     , normalizeInstanceOpsCoreWithProvenance
     , sourceInteriorFromList

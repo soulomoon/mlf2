@@ -1,3 +1,26 @@
+## 2026-07-26 - Sealed presolution result and application-site authority
+
+- `MLF.Constraint.Presolution.Base` moved from the internal library's exposed
+  modules to `other-modules`. The production
+  `MLF.Constraint.Presolution` façade now exports `PresolutionResult`
+  abstractly with read-only selectors; callers cannot construct a result with
+  unrelated constraint, redirect, union-find, and edge-artifact state.
+- Removed component-map `mkEdgeArtifacts`, empty/insert/filter mutation
+  builders, and identity-set replacement from the Base export surface.
+  `MLF.Constraint.Presolution.TestSupport` owns the legacy fixture join and
+  rebuilds a complete `EdgeExecutionArtifacts` packet per key before entering
+  the production aggregate constructor.
+- `alignAnnInstantiationSites` now consumes `EdgeArtifacts`, not
+  `IntMap EdgeWitness`. It selects prepared endpoints from one complete packet,
+  preserves redirected endpoints only for explicitly certified identity
+  edges, and reports `PhiInvariantError` for every other missing edge. Both
+  initial multi-root preparation and later root canonicalization propagate the
+  failure rather than treating missing evidence as identity.
+- The new semantic regression proves the missing-packet rejection and the
+  identity-edge success path; repository guards keep the owner module,
+  constructor, and component builders hidden. The nine fixed annotation
+  examples, including paper `g g`, and all eleven Phi-alignment examples pass.
+
 ## 2026-07-26 - Construction-closed presolution state
 
 - `PresolutionState` no longer exports either its internal constructor or the
@@ -34,9 +57,10 @@
   producer packet into component maps and reassembles it afterward.
   `mkEdgeArtifacts` remains a checked test-support boundary and rejects unequal
   expansion/witness/trace/construction key sets plus a witness whose embedded
-  `EdgeId` disagrees with the selected map key. `mapEdgeArtifacts`,
-  `filterEdgeArtifacts`, and `insertEdgeArtifact` preserve the invariant, so
-  canonicalization and Var-Let filtering cannot create partial packets.
+  `EdgeId` disagrees with the selected map key. Production
+  `mapEdgeArtifacts` and owner-local Var-Let filtering preserve the invariant;
+  test mutation helpers rebuild the complete aggregate, so no operation can
+  create a partial packet.
 - `PresolutionResult` stores only the aggregate; its compatibility projections
   derive expansion, witness, trace, construction, and identity views from that
   value. Generalization preparation consumes the aggregate directly and

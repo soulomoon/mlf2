@@ -21,12 +21,14 @@ import MLF.Constraint.Finalize.TestSupport qualified as Finalize
 import MLF.Constraint.Presolution
   ( EdgeTrace (..),
     PresolutionPlanBuilder (..),
-    PresolutionResult (..),
     PresolutionView (..),
     prEdgeExpansions,
     prEdgeTraces,
     prEdgeWitnesses,
     prIdentityEdges,
+    prConstraint,
+    prPlanBuilder,
+    prRedirects,
   )
 import MLF.Constraint.Presolution.Plan.Context
   ( GaBindParents (..),

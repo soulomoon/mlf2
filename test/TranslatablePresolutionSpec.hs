@@ -5,7 +5,7 @@ module TranslatablePresolutionSpec (spec) where
 import qualified Data.Set as Set
 import Test.Hspec
 
-import MLF.Constraint.Presolution (PresolutionResult(..))
+import MLF.Constraint.Presolution (prConstraint)
 import MLF.Constraint.Presolution.TestSupport (validateTranslatablePresolution)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
 import SpecUtil (runToPresolutionDefault)

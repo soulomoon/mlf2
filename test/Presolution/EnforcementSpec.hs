@@ -10,7 +10,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
-    , PresolutionResult(..)
+    , prConstraint
     )
 import MLF.Constraint.Presolution.TestSupport
     ( TranslatabilityIssue(..)
