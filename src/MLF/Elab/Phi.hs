@@ -19,24 +19,13 @@ module MLF.Elab.Phi (
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints,
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor,
     phiOccurrenceFromEdgeWitnessWithTrace,
-    phiOccurrenceFromEdgeWitnessWithTraceReadModel,
-    -- * Phi environment
-    PhiEnv(..),
-    PhiM,
-    askCanonical,
-    askCopyMap,
-    askGaParents,
-    askTrace,
-    -- * Shared helper
-    canonicalNodeM
+    phiOccurrenceFromEdgeWitnessWithTraceReadModel
 ) where
 
 import MLF.Elab.Phi.Context (contextToNodeBound)
-import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askTrace)
 import MLF.Elab.Phi.Translate
     ( PhiEndpointShapeAuthority(..)
     , PhiOccurrenceRole(..)
-    , canonicalNodeM
     , phiFromEdgeWitnessWithTrace
     , phiFromEdgeWitnessWithTraceReadModel
     , phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints

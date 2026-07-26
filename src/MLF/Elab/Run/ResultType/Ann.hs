@@ -30,7 +30,7 @@ import MLF.Reify.TypeOps
     , inlineBaseBoundsType
     , resolveBoundBodyConstraint
     )
-import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
+import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs, instInsideFromArgsWithBoundsRefs)
 import MLF.Elab.Run.Scope
@@ -54,6 +54,14 @@ import MLF.Elab.Run.ResultType.Types
     , rtcEdgeWitnesses
     )
 import qualified MLF.Elab.Run.ResultType.View as View
+
+-- | The only two construction outcomes for an annotation result.  A witness
+-- computation is applied only when one of the construction rules selected it;
+-- otherwise the annotation target itself is generalized.  There is no state
+-- in which a translated computation can be rewritten after selection.
+data AnnotationResultConstruction
+    = ApplyAnnotationInstantiation Instantiation
+    | GeneralizeAnnotationTarget
 
 computeResultTypeFromAnnWithView
     :: ResultTypeInputs p
@@ -114,7 +122,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
             | scopeRoot' == scopeRoot && target' == targetC = Right (sch0, subst0)
             | otherwise = View.rtvGeneralizeTarget view scopeRoot' target'
     readModel <- View.rtvReadModel view
-    phi0 <- phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel (Just bindParentsGa) (Just schemeInfo) mTrace ew
+    phi0 <- phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel bindParentsGa (Just schemeInfo) mTrace ew
     let namedSetSolved = ermNamedNodes readModel
     let annBound = View.rtvLookupVarBound view annNodeId
         annTargetNode0 =
@@ -234,22 +242,13 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                         (schemeBinderRefs sch)
                         (map (inlineBoundVarsTypeForBound presolutionViewForGen) args)
                 _ -> Nothing
-        phi =
-            if annotationExplicit
-                then
-                    case phiFromTarget of
-                        Just inst -> inst
-                        Nothing ->
-                            if targetHasBoundForall
-                                then phi0
-                                else InstId
-                else
-                    case phiFromTarget of
-                        Just inst -> inst
-                        Nothing ->
-                            if targetHasBoundForall
-                                then phi0
-                                else adjustAnnotationInst phi0
+        resultConstruction =
+            case phiFromTarget of
+                Just inst -> ApplyAnnotationInstantiation inst
+                Nothing
+                    | not annotationExplicit && targetHasBoundForall ->
+                        ApplyAnnotationInstantiation phi0
+                    | otherwise -> GeneralizeAnnotationTarget
     debugWhenM traceCfg
         ("runPipelineElab: ann targetTy="
             ++ show targetTyMatchM
@@ -265,31 +264,22 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
             ++ pretty srcTy
             ++ " phi0="
             ++ pretty phi0
-            ++ " phi="
-            ++ pretty phi
+            ++ " resultConstruction="
+            ++ case resultConstruction of
+                ApplyAnnotationInstantiation phi -> pretty phi
+                GeneralizeAnnotationTarget -> "<generalize-target>"
         )
-    case phiFromTarget of
-        Just _ -> do
+    case resultConstruction of
+        ApplyAnnotationInstantiation phi -> do
             ty0 <- applyInstantiation srcTy phi
             pure (simplifyAnnotationType ty0)
-        Nothing ->
-            if annotationExplicit
-                then do
-                    -- For explicit annotations, report the (generalized) target type itself.
-                    -- This preserves explicit bounds (including nested foralls) rather than
-                    -- re-deriving a type solely from the witness-derived instantiation.
-                    annScopeRoot <-
-                        View.rtvResolveCanonicalScope view annTargetNode
-                    (annSch, _substAnn) <-
-                        generalizeTargetCached annScopeRoot annTargetNode
-                    pure (simplifyAnnotationType (schemeToType annSch))
-                else if targetHasBoundForall
-                    then do
-                        ty0 <- applyInstantiation srcTy phi
-                        pure (simplifyAnnotationType ty0)
-                    else do
-                        annScopeRoot <-
-                            View.rtvResolveCanonicalScope view annTargetNode
-                        (annSch, _substAnn) <-
-                            generalizeTargetCached annScopeRoot annTargetNode
-                        pure (simplifyAnnotationType (schemeToType annSch))
+        GeneralizeAnnotationTarget -> do
+            -- When there is no construction-backed instantiation to apply,
+            -- report the generalized annotation target itself.  In
+            -- particular, preserving explicit bounds does not require
+            -- rewriting the witness computation after Φ has produced it.
+            annScopeRoot <-
+                View.rtvResolveCanonicalScope view annTargetNode
+            (annSch, _substAnn) <-
+                generalizeTargetCached annScopeRoot annTargetNode
+            pure (simplifyAnnotationType (schemeToType annSch))

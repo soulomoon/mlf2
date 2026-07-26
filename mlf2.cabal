@@ -289,7 +289,6 @@ library mlf2-internal
                       MLF.Elab.Elaborate.Scope,
                       MLF.Elab.Phi,
                       MLF.Elab.Phi.Context,
-                      MLF.Elab.Phi.Env,
                       MLF.Elab.Phi.Omega,
                       MLF.Elab.Phi.Omega.Domain,
                       MLF.Elab.Phi.Omega.Interpret,

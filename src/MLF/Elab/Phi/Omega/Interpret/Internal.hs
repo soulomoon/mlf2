@@ -500,19 +500,19 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
 
     sourceBinderBound :: NodeId -> Either ElabError ElabType
     sourceBinderBound binder =
-      case ocGaParents ctx of
-        Just ga ->
-          case NodeAccess.lookupNode (gaBaseConstraint ga) binder of
-            Just TyVar {tnBound = Just _} ->
-              -- Reify from the binder, not directly from its bound node.  The
-              -- bound node may be the body below a TyForall wrapper; starting
-              -- at the binder lets bound reification recover that wrapper.
-              reifyBoundWithRefsOnConstraint (gaBaseConstraint ga) IntMap.empty binder
-            _ -> sourceBinderBoundFromSolved binder
-        Nothing -> sourceBinderBoundFromSolved binder
+      case NodeAccess.lookupNode sourceConstraint binder of
+        Just TyVar {tnBound = Just _} ->
+          -- Reify from the binder, not directly from its bound node.  The
+          -- bound node may be the body below a TyForall wrapper; starting
+          -- at the binder lets bound reification recover that wrapper.
+          reifyBoundWithRefsOnConstraint sourceConstraint IntMap.empty binder
+        _ -> sourceBinderBoundFromFinalConstraint binder
 
-    sourceBinderBoundFromSolved :: NodeId -> Either ElabError ElabType
-    sourceBinderBoundFromSolved binder =
+    -- Some operation nodes are created after the frozen Gamma snapshot.  Only
+    -- absence from that snapshot admits the final constraint as their owner;
+    -- an existing source node never has its bound replaced by finalized state.
+    sourceBinderBoundFromFinalConstraint :: NodeId -> Either ElabError ElabType
+    sourceBinderBoundFromFinalConstraint binder =
       case NodeAccess.lookupNode constraint binder of
         Just TyVar {tnBound = Just _} -> reifyBoundWithRefsAt IntMap.empty binder
         _ -> Left (PhiInvariantError ("trace binder has no explicit source bound: " ++ show binder))
@@ -520,23 +520,21 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
     -- OpRaise is classified in the witness's frozen source domain.  The
     -- finalized graph may already mark its replay representative rigid as the
     -- result of executing this very operation; consulting that state would
-    -- erase the non-identity Raise computation after construction.  Tests
-    -- without preserved source provenance retain the legacy final-view seam.
-    sourceRaiseBindParent sourceNode finalNode =
-      case ocGaParents ctx of
-        Just ga ->
-          NodeAccess.lookupBindParent
-            (gaBaseConstraint ga)
-            (typeRef sourceNode)
-        Nothing -> lookupBindParent (typeRef finalNode)
+    -- erase the non-identity Raise computation after construction.
+    sourceRaiseBindParent sourceNode =
+      NodeAccess.lookupBindParent
+        sourceConstraint
+        (typeRef sourceNode)
 
     sourceWeakenedOperationType :: NodeId -> Either ElabError ElabType
     sourceWeakenedOperationType operated =
-      case ocGaParents ctx of
-        Just ga
-          | Just node <- NodeAccess.lookupNode (gaBaseConstraint ga) operated ->
-              operationTypeOn (gaBaseConstraint ga) node
-        _ ->
+      case NodeAccess.lookupNode sourceConstraint operated of
+        Just node ->
+          operationTypeOn sourceConstraint node
+        -- Expansion/solve may have constructed this operation node after
+        -- Gamma was frozen.  Final-state lookup is admissible only when the
+        -- source certificate proves that no source-domain node existed.
+        Nothing ->
           case NodeAccess.lookupNode constraint operated of
             Just node -> operationTypeOn constraint node
             Nothing ->
@@ -545,16 +543,18 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                     ("Weaken/RaiseMerge operated source is absent: " ++ show operated)
                 )
       where
-        operationTypeOn sourceConstraint node =
+        operationTypeOn operationConstraint node =
           case node of
             TyVar {tnBound = Just _} ->
-              reifyBoundWithRefsOnConstraint sourceConstraint IntMap.empty operated
+              reifyBoundWithRefsOnConstraint operationConstraint IntMap.empty operated
             TyVar {tnBound = Nothing} -> Right TBottom
             _ ->
               reifyTypeWithRefsNoFallbackOnConstraint
-                sourceConstraint
+                operationConstraint
                 IntMap.empty
                 operated
+
+    sourceConstraint = gaBaseConstraint (ocGaParents ctx)
 
     traceArgMap :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     traceArgMap namedSet' =
@@ -1097,7 +1097,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                 Just TyExp {tnBody = body} -> pure (canonicalNode body)
                 _ -> pure nC
             let shouldRigidSkip =
-                  case sourceRaiseBindParent nSource nC of
+                  case sourceRaiseBindParent nSource of
                     Just (_, BindRigid) -> True
                     _ -> False
             if shouldRigidSkip

@@ -36,8 +36,6 @@ import MLF.Elab.Pipeline
     , applyInstantiation
     , defaultTraceConfig
     , generalizeAtWithBuilder
-    , phiFromEdgeWitnessWithTrace
-    , phiOccurrenceFromEdgeWitnessWithTrace
     , reifyType
     , runPipelineElab
     , typeBinderRefsSameIdentity
@@ -53,6 +51,7 @@ import MLF.Elab.Phi.Computation
     , quantifierReorderingTarget
     )
 import MLF.Elab.Phi.TestSupport (reifyInstWithSourceScheme)
+import qualified MLF.Elab.Phi.TestSupport as PhiTestSupport
 import MLF.Elab.Types
     ( ResolvedVar(..)
     , resolvedVarSameIdentity
@@ -264,7 +263,7 @@ spec = describe "Phi alignment" $ do
                         (IntMap.lookup edgeKey (prEdgeTraces presolution))
                 occurrence <-
                     requireRight
-                        ( phiOccurrenceFromEdgeWitnessWithTrace
+                        ( PhiTestSupport.phiOccurrenceFromEdgeWitnessWithTraceForTest
                             defaultTraceConfig
                             generalizeAt
                             view
@@ -275,7 +274,7 @@ spec = describe "Phi alignment" $ do
                         )
                 compatibilityInst <-
                     requireRight
-                        ( phiFromEdgeWitnessWithTrace
+                        ( PhiTestSupport.phiFromEdgeWitnessWithTraceForTest
                             defaultTraceConfig
                             generalizeAt
                             view
@@ -353,7 +352,7 @@ spec = describe "Phi alignment" $ do
                             (IntMap.lookup edgeKey (prEdgeTraces presolution))
                     phi <-
                         requireRight
-                            ( phiFromEdgeWitnessWithTrace
+                            ( PhiTestSupport.phiFromEdgeWitnessWithTraceForTest
                                 defaultTraceConfig
                                 generalizeAt
                                 view

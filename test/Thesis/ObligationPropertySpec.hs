@@ -51,6 +51,7 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import ElabTermTestSupport (generatedResolvedLocal, mkTestDeferredVar, mkTestLocalLam, mkTestLocalLet, mkTestTyAbs, testTForall, testTVar)
 import MLF.Elab.Pipeline qualified as Elab
+import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
 import MLF.Elab.Types qualified as ElabTypes
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Program.Builtins qualified as Builtins
@@ -1905,7 +1906,7 @@ assertNodeAliasTranslation size mkOp =
           (Elab.TArrow (Elab.TVarRef refA) (Elab.TVarRef refA))
       generalizeAt _ _ _ =
         Left (Elab.InstantiationError "assertNodeAliasTranslation: unexpected generalization")
-   in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
+   in case PhiTestSupport.phiFromEdgeWitnessWithTraceForTest defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
         Left err -> counterexample (show err) False
         Right phi ->
           case Elab.applyInstantiation (Elab.schemeToType scheme) phi of

@@ -1,3 +1,27 @@
+## 2026-07-26 - Construction-closed annotation and Phi authority
+
+- Annotation source selection is now represented by
+  `AnnotationSourceConstruction`. A direct semantic reference can select
+  witness replay; every composite producer must complete its exact checked
+  construction (or the independently checked annotated-lambda construction)
+  and preserves the original construction error otherwise.
+- All production Φ entry points require the frozen `GaBindParents`
+  certificate. Ω reads `OpRaise` source rigidity from
+  `gaBaseConstraint`; only an operation node proved absent from that source
+  snapshot may use its later constructed graph node for type recovery. The old
+  optional-Γ fixture behavior is confined to `MLF.Elab.Phi.TestSupport`, and
+  the unused `MLF.Elab.Phi.Env` state abstraction is deleted.
+- Annotation elaboration retains the selected construction computation instead
+  of synthesizing a replacement after closing and rechecking the term.
+  Result-type reconstruction likewise selects one closed outcome:
+  `ApplyAnnotationInstantiation` or `GeneralizeAnnotationTarget`.
+  `adjustAnnotationInst` and the closed-term recomputation path are retired.
+- Focused validation covers exact-source selection, the 21-example eMLF source
+  annotation slice, explicit forall-bound preservation, 128 witness
+  translations, 11 Φ-alignment examples, and 60 O15 obligations. The final
+  serial gate passes `cabal build all -j1` without warnings and all 3696 tests
+  under `cabal test -j1`.
+
 ## 2026-07-26 - Destination-owned Sigma ordering
 
 - Thesis Definitions 15.3.3 and 15.3.4 define `Typexp(a')` as `S'(sc)`, where

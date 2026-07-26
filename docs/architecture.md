@@ -357,6 +357,12 @@ runtime invariants as compile-time types:
   scope/target queries, and target generalization. `ResultType.Fallback.*`
   should select policy paths through this adapter rather than patching
   `PresolutionView` records or rebuilding base-map inputs locally.
+- Annotation result reconstruction has two closed outcomes: apply an
+  instantiation selected by exact target construction or frozen witness
+  translation, or generalize the annotation target. It does not rewrite a Φ
+  computation after selection. Composite annotation sources likewise must
+  inhabit `ConstructedAnnotationSource`; only a direct semantic occurrence key
+  can inhabit `WitnessAnnotationSource`.
 
 ## Typed backend IR and lowering boundary
 
@@ -677,6 +683,13 @@ semantics that are not represented elsewhere just as explicitly.”
   alpha-equivalent endpoints; the composition seam requires exact
   identity-bearing `ElabType` equality, so two alpha-equivalent forall trees
   with different binder identities cannot be silently joined.
+- Every production Φ entry point requires the frozen pre-solve
+  `GaBindParents` certificate. Ω classifies source `OpRaise` rigidity from
+  `gaBaseConstraint`, never from the finalized replay representative. A later
+  graph node may supply an operation type only when the source certificate
+  proves that node did not yet exist. Provenance-free low-level fixtures mint
+  an identity certificate only behind `MLF.Elab.Phi.TestSupport`; there is no
+  production optional-Γ or `Phi.Env` state seam.
 - `ElabReadModel` is the general read-only graph projection. Φ translation can
   consume it only after `buildPhiReadModel` has produced a `PhiReadModel`
   capability proving binding-tree integrity and the absence of Gen fallback;

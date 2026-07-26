@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Made annotation/coercion selection closed by construction. Composite
+  annotation producers must complete exact checked construction or retain that
+  error; only a direct identity-bearing occurrence can select witness replay.
+  Production Φ APIs now require the frozen `GaBindParents` certificate, and
+  `OpRaise` rigidity comes from its `gaBaseConstraint` source domain.
+  Provenance-free legacy fixtures are isolated in `MLF.Elab.Phi.TestSupport`,
+  while the unused `MLF.Elab.Phi.Env` abstraction has been removed. Annotation
+  elaboration no longer adjusts or reconstructs a computation after it was
+  selected. Result-type reconstruction instead has a closed choice between
+  applying the construction-backed instantiation and generalizing the
+  annotation target.
 - Made Φ quantifier reordering use the destination expansion root
   `EdgeTrace.etResultRoot`, the thesis `sc` that owns `Typexp`, while Ω keeps
   using the frozen source witness root `etRoot`. Removed the binding-LCA root

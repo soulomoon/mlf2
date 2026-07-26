@@ -95,7 +95,9 @@ import MLF.Elab.Generalize
   )
 import MLF.Elab.Inst (applyInstantiation, composeInst, instForLeadingTypeArgument, schemeToType)
 import MLF.Elab.Elaborate.Annotation.Construction
-  ( checkedOccurrenceSchemeInfo,
+  ( AnnotationSourceConstruction (..),
+    checkedOccurrenceSchemeInfo,
+    selectAnnotationSourceConstruction,
     scopedAnnotationConstructionBinderRenames,
     strictReplayCheckedSchemeInfo,
   )
@@ -107,7 +109,7 @@ import MLF.Elab.Phi
 import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
 import qualified MLF.Elab.Reduce as Reduce
 import qualified MLF.Elab.Sigma as Sigma
-import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
+import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Scope (generalizeTargetNode)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeWithContext)
@@ -2072,30 +2074,6 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
       exprFresh =
         freshenTermTypeAbsAgainstEnv tcEnv
           (renameTermTypeVars sourceTermConstructionRenames sourceTerm0)
-      sourceTermConstruction =
-        checkedCompositeConstruction
-          <|> annotatedLambdaParamConstruction
-      checkedCompositeConstruction =
-        case annExprReferenceKey exprAnn of
-          Just _ -> Nothing
-          Nothing -> do
-            sourceTy <-
-              either
-                (const Nothing)
-                Just
-                (TypeCheck.typeCheckWithEnv tcEnv exprFresh)
-            constructed <-
-              either
-                (const Nothing)
-                Just
-                ( constructExactAnnotationTermFor
-                    boundaryRole
-                    tcEnv
-                    sourceTy
-                    (schemeToType expectedSourceScheme)
-                    exprFresh
-                )
-            pure (constructed, InstId)
       annotatedLambdaParamConstruction = do
         closed <-
           closeAnnotatedLambdaParam
@@ -2114,15 +2092,41 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
             closedTy
             (schemeToType expectedSourceScheme)
         pure (closed, closedInst)
+      exactCompositeConstruction = do
+        sourceTy <-
+          case TypeCheck.typeCheckWithEnv tcEnv exprFresh of
+            Left tcError ->
+              Left
+                ( PhiInvariantError
+                    ( "composite annotation producer is not typable before exact construction for edge "
+                        ++ show eid
+                        ++ ": "
+                        ++ show tcError
+                    )
+                )
+            Right ty -> pure ty
+        constructed <-
+          constructExactAnnotationTermFor
+            boundaryRole
+            tcEnv
+            sourceTy
+            (schemeToType expectedSourceScheme)
+            exprFresh
+        pure (constructed, InstId)
+  sourceConstruction <-
+    selectAnnotationSourceConstruction
+      (annExprReferenceKey exprAnn)
+      annotatedLambdaParamConstruction
+      exactCompositeConstruction
   sourceSchemeInfo0 <-
-    case sourceTermConstruction of
+    case sourceConstruction of
       -- A checked composite source term is the construction authority for
       -- its complete abstraction/parameter spine.  Once that spine admits a
       -- preserving computation to the annotation type, do not independently
       -- generalize the same source and reconstruct its locally owned Gamma a
       -- second time from the graph edge.
-      Just _ -> pure Nothing
-      Nothing ->
+      ConstructedAnnotationSource {} -> pure Nothing
+      WitnessAnnotationSource ->
         schemeInfoForAnnotationSource
           annotationContext
           namedSetReify
@@ -2205,17 +2209,11 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
           boundaryRole
           (schemeToType (siScheme schemeInfo))
           (schemeToType expectedSourceScheme)
-      preparedTermMatchesAnnotation =
-        case (annExprReferenceKey exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprPrepared) of
-          (Nothing, Right ty) ->
-            alphaEqType ty (schemeToType expectedSourceScheme)
-              || churchAwareEqType ty (schemeToType expectedSourceScheme)
-          _ -> False
   instAuthority <-
-    case sourceTermConstruction of
-      Just (_, closedInst) ->
+    case sourceConstruction of
+      ConstructedAnnotationSource _ closedInst ->
         pure (ConstructedAnnotationInstantiation closedInst)
-      Nothing ->
+      WitnessAnnotationSource ->
         case preservingAnnotationInst of
           -- Section 15.3.8 gives source annotations their own preserving
           -- coercion construction.  Select it before translating the generic
@@ -2225,7 +2223,7 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
           Just preservingInst ->
             pure (ConstructedAnnotationInstantiation preservingInst)
           Nothing ->
-            if preparedTermMatchesAnnotation || canReuseSourceScheme
+            if canReuseSourceScheme
               then
                 -- The term has already been constructed at the annotation type.
                 -- Preserve that equality as the authority for InstId instead of
@@ -2261,27 +2259,11 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                           ]
                       )
           _ -> pure edgeInst
-  let preservesForalls =
-        not (null (schemeBinderRefs expectedSourceScheme))
-      instAdjusted =
-        case sourceTermConstruction of
-          Just (_, closedInst) -> normalizeInst closedInst
-          Nothing ->
-            case preservingAnnotationInst of
-              Just preservingInst -> normalizeInst preservingInst
-              Nothing ->
-                if preservesForalls
-                  then normalizeInst (adjustAnnotationInst inst)
-                  -- A monomorphic annotation consumes the witness's complete
-                  -- quantifier spine.  In particular, a bounded vacuous
-                  -- prefix contributes N before a later inferred InstApp;
-                  -- erasing all eliminations would apply that argument to the
-                  -- prefix bound instead of to the remaining binder.
-                  else normalizeInst inst
+  let instAdjusted = normalizeInst inst
   exprClosed0 <-
-    case sourceTermConstruction of
-      Just (closed, _) -> pure closed
-      Nothing ->
+    case sourceConstruction of
+      ConstructedAnnotationSource closed _ -> pure closed
+      WitnessAnnotationSource ->
         if instAdjusted == InstId
           then
             if canReuseSourceScheme && sourceAnnIsPolymorphicResolved resolvedLookup exprAnn
@@ -2314,32 +2296,12 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                     InstSeq a b -> instHasUnder a || instHasUnder b
                     InstInside a -> instHasUnder a
                     _ -> False
-                instLooksLikeApp inst0 =
-                  case inst0 of
-                    InstApp {} -> True
-                    InstInside (InstBot _) -> True
-                    InstInside (InstApp _) -> True
-                    InstSeq (InstInside (InstBot _)) InstElim -> True
-                    InstSeq (InstInside (InstApp _)) InstElim -> True
-                    _ -> False
              in if sourceAnnIsPolymorphicResolved resolvedLookup exprAnn
                   then pure exprPrepared
                   else
-                    if instLooksLikeApp instAdjusted
-                      then case (annExprReferenceKey exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprPrepared) of
-                        (Nothing, Right TForallRef {}) ->
-                          if instHasUnder instAdjusted
-                            then pure (closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (freshenSchemeAgainstEnv expectedSourceScheme) exprPrepared)
-                            else pure (closeTermForAnnotation exprPrepared)
-                        (Nothing, Right _) -> pure exprPrepared
-                        _ ->
-                          if instHasUnder instAdjusted
-                            then pure (closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (freshenSchemeAgainstEnv expectedSourceScheme) exprPrepared)
-                            else pure (closeTermForAnnotation exprPrepared)
-                      else
-                        if instHasUnder instAdjusted
-                          then pure (closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (freshenSchemeAgainstEnv expectedSourceScheme) exprPrepared)
-                          else pure (closeTermForAnnotation exprPrepared)
+                    if instHasUnder instAdjusted
+                      then pure (closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (freshenSchemeAgainstEnv expectedSourceScheme) exprPrepared)
+                      else pure (closeTermForAnnotation exprPrepared)
   let exprClosed =
         -- A source annotation owns an ordered forall/abstraction spine.
         -- Even a vacuous binder remains observable to positional xMLF
@@ -2365,23 +2327,9 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
           )
       Right tyExpr -> pure tyExpr
   let expectedAnnotationTy = schemeToType expectedSourceScheme
-      -- Closing the source term is part of constructing the annotation
-      -- producer, so its checked type is the final authority for the
-      -- annotation computation.  Reconstruct the complete positional
-      -- computation from that type before emitting it.  In particular, a
-      -- monomorphic target can require @N ; InstApp tau@: replacing that
-      -- sequence with its final application changes which source binder the
-      -- argument consumes.
-      closedPreservingAnnotationInst =
-        normalizeInst
-          <$> inferPreservingAnnotationInstFor
-            boundaryRole
-            sourceClosedTy
-            expectedAnnotationTy
       instFinal
         | alphaEqType sourceClosedTy expectedAnnotationTy
             || churchAwareEqType sourceClosedTy expectedAnnotationTy = InstId
-        | Just constructedInst <- closedPreservingAnnotationInst = constructedInst
         | otherwise = instAdjusted
       annotatedTerm =
         case instFinal of
@@ -2406,8 +2354,6 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                   ++ show (fmap (schemeToType . siScheme) sourceSchemeInfo)
                   ++ "; preserving computation="
                   ++ show preservingAnnotationInst
-                  ++ "; closed preserving computation="
-                  ++ show closedPreservingAnnotationInst
                   ++ "; edge computation="
                   ++ show inst
               )
@@ -2437,8 +2383,6 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                 ++ show (fmap (schemeToType . siScheme) sourceSchemeInfo)
                 ++ " and preserving computation "
                 ++ show preservingAnnotationInst
-                ++ " and closed preserving computation "
-                ++ show closedPreservingAnnotationInst
                 ++ " has type "
                 ++ show annotatedTy
                 ++ " instead of its source annotation "
@@ -3246,7 +3190,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         traceCfg
                         generalizeAtWith
                         (scReadModel scopeContext)
-                        (Just gaParents)
+                        gaParents
                         mSchemeInfo
                         frozenEndpointTypes
                         mTrace
@@ -3256,7 +3200,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         traceCfg
                         generalizeAtWith
                         (scReadModel scopeContext)
-                        (Just gaParents)
+                        gaParents
                         mSchemeInfo
                         frozenEndpointTypes
                         authority

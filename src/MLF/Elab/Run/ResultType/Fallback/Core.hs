@@ -212,7 +212,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
           instAppBasesFromWitness funEid =
             case (phiReadModel, IntMap.lookup (getEdgeId funEid) edgeWitnesses) of
               (Right readModel, Just ew) ->
-                case phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+                case phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel bindParentsGa Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                   Right inst ->
                     IntSet.fromList
                       [ getNodeId nid

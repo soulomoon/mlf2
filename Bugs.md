@@ -8,6 +8,49 @@ Canonical bug tracker for implementation defects and thesis-faithfulness gaps.
 
 ## Resolved
 
+### BUG-2026-07-26-002
+- Status: Resolved
+- Priority: High
+- Discovered: 2026-07-26
+- Resolved: 2026-07-26
+- Summary: Annotation elaboration and Φ still admitted three post-construction
+  recovery paths: a failed exact composite producer could fall through to
+  generic witness replay, production Φ could run without frozen Γ provenance,
+  and completed annotation computations could be rewritten after selection.
+- Expected vs actual:
+  - Expected: a composite annotation producer is constructed exactly or
+    rejected; only a direct identity-bearing occurrence may select edge-witness
+    replay. Production Φ always receives the pre-solve `GaBindParents`
+    certificate, and result reconstruction chooses between applying a
+    construction-backed computation and generalizing the annotation target.
+  - Actual before fix: exact construction errors were erased through
+    `either (const Nothing)`, Φ accepted `Maybe (GaBindParents p)` and could
+    consult finalized rigidity, and `adjustAnnotationInst` plus a second
+    closed-term computation rebuilt already-selected coercions.
+- Fix:
+  - Introduced the closed `AnnotationSourceConstruction` sum. A semantic
+    occurrence key is the sole constructor for witness-owned source replay;
+    composite exact-construction failure is preserved.
+  - Made every production Φ entry point and `OmegaContext` require
+    `GaBindParents`. `OpRaise` rigidity is read from
+    `gaBaseConstraint`; old provenance-free fixtures are isolated behind
+    `MLF.Elab.Phi.TestSupport`.
+  - Removed the unused `MLF.Elab.Phi.Env` abstraction and its broad façade
+    exports.
+  - Removed post-hoc annotation-instantiation adjustment/reconstruction.
+    Result-type reconstruction now uses the closed
+    `ApplyAnnotationInstantiation | GeneralizeAnnotationTarget` decision.
+- Regression tests:
+  - `test/ElaborationSpec.hs` (`allows only a direct identity-bearing occurrence to bypass exact source construction`)
+  - `test/ElaborationSpec.hs` (`explicit forall annotation preserves foralls in bounds`)
+  - `test/Phi/AlignmentSpec.hs` (`Phi alignment`)
+  - `test/Thesis/ObligationPropertySpec.hs` (`O15-`)
+  - `cabal build all -j1 && cabal test -j1` (3696 examples)
+- Thesis impact:
+  - Keeps the annotation/coercion and Φ paths aligned with sections 15.3.4 and
+    15.3.8 by making source construction and frozen Γ evidence inputs to the
+    computation, rather than facts inferred or repaired after translation.
+
 ### BUG-2026-07-26-001
 - Status: Resolved
 - Priority: High

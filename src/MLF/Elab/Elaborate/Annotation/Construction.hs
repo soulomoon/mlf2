@@ -1,6 +1,8 @@
 module MLF.Elab.Elaborate.Annotation.Construction
-  ( checkedArgumentClosedTopology,
+  ( AnnotationSourceConstruction (..),
+    checkedArgumentClosedTopology,
     checkedOccurrenceSchemeInfo,
+    selectAnnotationSourceConstruction,
     scopedAnnotationConstructionBinderRenames,
     strictReplayCheckedSchemeInfo,
   )
@@ -18,20 +20,62 @@ import MLF.Elab.SourceBinder
     typeBinderDeclarationRefs,
   )
 import MLF.Elab.Types
-  ( ElabType,
+  ( ElabError,
+    ElabType,
+    Instantiation,
     SchemeInfo (..),
     Ty (..),
     TypeBinderRef,
+    XmlfTerm,
     schemeBinderRefs,
     schemeBody,
     schemeFromType,
     typeBinderRefsSameIdentity,
   )
+import MLF.Frontend.ConstraintGen.Types (BindingKey)
 import MLF.Reify.TypeOps
   ( alphaEqType,
     freeTypeVarRefsType,
     splitForallsRefs,
   )
+
+-- | An annotation source is either an exact checked construction or a direct
+-- occurrence whose propagation witness still owns the computation.  Keeping
+-- this as a closed sum prevents a composite producer from silently falling
+-- through to occurrence replay after exact construction has failed.
+data AnnotationSourceConstruction
+  = ConstructedAnnotationSource XmlfTerm Instantiation
+  | WitnessAnnotationSource
+  deriving (Eq, Show)
+
+-- | Select the construction authority for one annotation source.  A semantic
+-- reference key is the only way to enter witness replay.  Composite producers
+-- must either use their exact construction or the independently checked
+-- annotated-lambda construction; the original exact-construction error is
+-- otherwise preserved.
+selectAnnotationSourceConstruction ::
+  Maybe BindingKey ->
+  Maybe (XmlfTerm, Instantiation) ->
+  Either ElabError (XmlfTerm, Instantiation) ->
+  Either ElabError AnnotationSourceConstruction
+selectAnnotationSourceConstruction mbReference annotatedLambdaConstruction exactCompositeConstruction =
+  case mbReference of
+    Just _ ->
+      pure
+        ( case annotatedLambdaConstruction of
+            Just (constructed, inst) ->
+              ConstructedAnnotationSource constructed inst
+            Nothing -> WitnessAnnotationSource
+        )
+    Nothing ->
+      case exactCompositeConstruction of
+        Right (constructed, inst) ->
+          pure (ConstructedAnnotationSource constructed inst)
+        Left constructionError ->
+          case annotatedLambdaConstruction of
+            Just (constructed, inst) ->
+              pure (ConstructedAnnotationSource constructed inst)
+            Nothing -> Left constructionError
 
 -- | Close an application argument topology with the exact scheme constructed
 -- by that checked occurrence.  Constraint replay can expose the body of a

@@ -41,7 +41,7 @@ data OmegaContext (p :: Phase) = OmegaContext
     , ocReifyBoundWithRefs :: IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
     , ocReifyTypeWithNamedSetRefsNoFallback :: IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
-    , ocGaParents :: Maybe (GaBindParents p)
+    , ocGaParents :: GaBindParents p
     , ocTrace :: Maybe EdgeTrace
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet

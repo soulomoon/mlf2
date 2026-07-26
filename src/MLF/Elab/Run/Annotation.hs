@@ -7,16 +7,14 @@ module MLF.Elab.Run.Annotation
     canonicalizeAnn,
     redirectAndCanonicalizeAnn,
     annNode,
-    adjustAnnotationInst,
   )
 where
 
-import Data.Functor.Foldable (Recursive (project), cata)
+import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Types.Graph (NodeId (..), getEdgeId)
 import MLF.Constraint.Types.Witness (EdgeWitness, ewLeft, ewRight)
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Types (Instantiation (..), InstantiationF (..), instAbstrWithRef, instUnderWithRef)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Frontend.ConstraintGen.Types
   ( AnnExprF (..),
@@ -87,29 +85,3 @@ annNode = cata alg
       AAnnF _ nid _ -> nid
       ALetScopeF _ nid _ -> nid
       AUnfoldF _ nid _ -> nid
-
--- | Annotation instantiation should preserve quantifiers by updating bounds
--- rather than eliminating binders. Drop eliminations and treat applications
--- as inside-bound updates.
--- See Note [Annotation instantiation preserves foralls] in
--- docs/notes/2026-01-27-elab-changes.md.
-adjustAnnotationInst :: Instantiation -> Instantiation
-adjustAnnotationInst inst =
-  case inst of
-    InstSeq (InstInside (InstBot ty)) InstElim -> InstInside (InstBot ty)
-    _ -> case project inst of
-      InstElimF -> InstId
-      InstAppF ty -> InstInside (InstBot ty)
-      InstBotF ty -> InstInside (InstBot ty)
-      InstSeqF a b ->
-        let a' = adjustAnnotationInst a
-            b' = adjustAnnotationInst b
-         in case (a', b') of
-              (InstId, x) -> x
-              (x, InstId) -> x
-              _ -> InstSeq a' b'
-      InstInsideF a -> InstInside (adjustAnnotationInst a)
-      InstUnderFRef ref a -> instUnderWithRef ref (adjustAnnotationInst a)
-      InstAbstrFRef ref -> instAbstrWithRef ref
-      InstIdF -> InstId
-      InstIntroF -> InstIntro

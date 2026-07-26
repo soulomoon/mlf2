@@ -8,24 +8,39 @@ module MLF.Elab.Phi.TestSupport (
     vSpineBinderRefs,
     vSpineNameAt,
     normalizeInst,
+    phiFromEdgeWitnessWithTraceForTest,
+    phiOccurrenceFromEdgeWitnessWithTraceForTest,
     reifyInstWithSourceScheme,
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
+import MLF.Constraint.Presolution (EdgeTrace)
 import MLF.Constraint.Presolution.Base
     ( EdgeArtifacts(..)
     , PresolutionPlanBuilder
     )
+import MLF.Constraint.Presolution.Plan.Context
+    ( GaBindParents(..)
+    , emptyExpansionConstructionPlacements
+    )
 import MLF.Constraint.Presolution.View (PresolutionView(..))
-import MLF.Constraint.Types.Graph (EdgeId, NodeId(..), getNodeId)
+import MLF.Constraint.Types.Graph
+    ( Constraint(..)
+    , EdgeId
+    , NodeId(..)
+    , NodeRef
+    , getNodeId
+    , toListNode
+    )
+import MLF.Constraint.Types.Witness (EdgeWitness)
 import MLF.Elab.Elaborate.Annotation
     ( AnnotationContext(..)
     , reifyInstFromSourceScheme
     )
 import MLF.Elab.Elaborate.Scope (ScopeContext(..))
-import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.ReadModel (buildElabReadModel, ermNamedNodes)
 import MLF.Elab.Run.Generalize
     ( generalizeAtWithBuilder
@@ -36,6 +51,7 @@ import MLF.Elab.Run.TypeOps (mkInlineBoundVarsContextWithReadModel)
 import qualified MLF.Elab.Sigma as Sigma
 import MLF.Elab.Types
     ( BoundType
+    , ElabScheme
     , ElabError
     , Instantiation
     , SchemeInfo
@@ -45,6 +61,8 @@ import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
 import MLF.Elab.Phi.Omega.Interpret.Internal
     ( orderPhiBindersByPrec
     )
+import MLF.Elab.Phi.Computation (OccurrenceComputation)
+import qualified MLF.Elab.Phi.Translate as Translate
 import MLF.Elab.Phi.VSpine
     ( VSpine
     , assertSpineSync
@@ -76,6 +94,60 @@ orderPhiBindersByPrecForTest orderKeys orderedBinderKeys =
         id
         (\nodeId -> IntSet.member (getNodeId nodeId) orderedBinderKeys)
         orderKeys
+
+phiFromEdgeWitnessWithTraceForTest
+    :: TraceConfig
+    -> (Maybe (GaBindParents p) -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef))
+    -> PresolutionView p
+    -> Maybe (GaBindParents p)
+    -> Maybe SchemeInfo
+    -> Maybe EdgeTrace
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents =
+    Translate.phiFromEdgeWitnessWithTrace
+        traceCfg
+        generalizeAt
+        presolutionView
+        (fromMaybe (gaBindParentsFromView presolutionView) mbGaParents)
+
+phiOccurrenceFromEdgeWitnessWithTraceForTest
+    :: TraceConfig
+    -> (Maybe (GaBindParents p) -> NodeRef -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef))
+    -> PresolutionView p
+    -> Maybe (GaBindParents p)
+    -> Maybe SchemeInfo
+    -> Maybe EdgeTrace
+    -> EdgeWitness
+    -> Either ElabError OccurrenceComputation
+phiOccurrenceFromEdgeWitnessWithTraceForTest traceCfg generalizeAt presolutionView mbGaParents =
+    Translate.phiOccurrenceFromEdgeWitnessWithTrace
+        traceCfg
+        generalizeAt
+        presolutionView
+        (fromMaybe (gaBindParentsFromView presolutionView) mbGaParents)
+
+-- | Low-level Phi fixtures that predate preserved source provenance receive a
+-- complete identity certificate over their own graph.  This seam is test-only;
+-- production translation must supply the actual pre-solve certificate.
+gaBindParentsFromView :: PresolutionView p -> GaBindParents p
+gaBindParentsFromView presolutionView =
+    GaBindParents
+        { gaBindParentsBase = cBindParents constraint
+        , gaBaseConstraint = constraint
+        , gaBaseToSolved = identityMap
+        , gaSolvedToBase = identityMap
+        , gaRestoredSchemeRootTargets = IntMap.empty
+        , gaExpansionConstructionPlacements =
+            emptyExpansionConstructionPlacements
+        }
+  where
+    constraint = pvConstraint presolutionView
+    identityMap =
+        IntMap.fromList
+            [ (getNodeId nodeId, nodeId)
+            | (nodeId, _) <- toListNode (cNodes constraint)
+            ]
 
 -- | Exercise the edge-local @[phi_R; T(e)]@ computation without running the
 -- elaboration algebra.  The caller supplies the source scheme, while edge

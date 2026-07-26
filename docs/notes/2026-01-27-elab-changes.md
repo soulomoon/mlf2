@@ -41,15 +41,21 @@ Affected code:
 - MLF.Elab.Elaborate: `expansionToInst` uses `sanitizeArg`
 - MLF.Elab.Run.Annotation: `sanitizeBoundTop`
 
-## Note [Annotation instantiation preserves foralls]
+## Note [Annotation instantiation preserves foralls] (superseded 2026-07-26)
 
-Explicit annotations should not eliminate binders; they should update bounds
-instead. We therefore interpret annotation instantiation as an inside-bound
-update (`InstInside (InstBot ...)`) and drop `InstElim`. This preserves nested
-quantifiers in explicit annotations.
+The original implementation preserved explicit quantifiers by rewriting an
+already-translated instantiation through `adjustAnnotationInst`. That repair
+has been retired. Exact annotation construction now owns its preserving
+computation, while result-type reconstruction either applies a
+construction-backed instantiation or generalizes the annotation target.
+Nested explicit forall bounds remain covered by the original regression
+without post-hoc computation rewriting.
 
-Affected code:
-- MLF.Elab.Run.Annotation: `adjustAnnotationInst`
+Current owning code:
+- MLF.Elab.Elaborate.Annotation.Construction:
+  `AnnotationSourceConstruction`
+- MLF.Elab.Run.ResultType.Ann:
+  `AnnotationResultConstruction`
 
 ## Note [Skip target-derived instantiation when bounds include foralls]
 
@@ -58,7 +64,7 @@ building instantiation arguments from the target type because doing so erases
 explicit bounds. In that case we keep the witness-derived instantiation.
 
 Affected code:
-- MLF.Elab.Run.Pipeline: `targetHasBoundForall` and `phiFromTarget`
+- MLF.Elab.Run.ResultType.Ann: `targetHasBoundForall` and `phiFromTarget`
 
 ## Note [Verification]
 

@@ -1,6 +1,8 @@
 module MLF.Elab.Elaborate.Annotation.TestSupport
-  ( checkedArgumentClosedTopologyForTest,
+  ( AnnotationSourceConstruction (..),
+    checkedArgumentClosedTopologyForTest,
     checkedOccurrenceSchemeInfoForTest,
+    selectAnnotationSourceConstructionForTest,
     scopedAnnotationConstructionBinderRenamesForTest,
     strictReplayCheckedSchemeInfoForTest,
   )
@@ -10,12 +12,22 @@ import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution.Base (EdgeTrace)
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Elab.Elaborate.Annotation.Construction
-  ( checkedArgumentClosedTopology,
+  ( AnnotationSourceConstruction (..),
+    checkedArgumentClosedTopology,
     checkedOccurrenceSchemeInfo,
+    selectAnnotationSourceConstruction,
     scopedAnnotationConstructionBinderRenames,
     strictReplayCheckedSchemeInfo,
   )
-import MLF.Elab.Types (ElabType, SchemeInfo, TypeBinderRef)
+import MLF.Elab.Types
+  ( ElabError,
+    ElabType,
+    Instantiation,
+    SchemeInfo,
+    TypeBinderRef,
+    XmlfTerm,
+  )
+import MLF.Frontend.ConstraintGen.Types (BindingKey)
 
 checkedArgumentClosedTopologyForTest ::
   Maybe SchemeInfo ->
@@ -31,6 +43,14 @@ checkedOccurrenceSchemeInfoForTest ::
   Either String SchemeInfo
 checkedOccurrenceSchemeInfoForTest =
   checkedOccurrenceSchemeInfo
+
+selectAnnotationSourceConstructionForTest ::
+  Maybe BindingKey ->
+  Maybe (XmlfTerm, Instantiation) ->
+  Either ElabError (XmlfTerm, Instantiation) ->
+  Either ElabError AnnotationSourceConstruction
+selectAnnotationSourceConstructionForTest =
+  selectAnnotationSourceConstruction
 
 scopedAnnotationConstructionBinderRenamesForTest ::
   (NodeId -> NodeId) ->

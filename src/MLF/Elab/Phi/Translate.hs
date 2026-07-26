@@ -41,8 +41,7 @@ module MLF.Elab.Phi.Translate (
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor,
     -- * Paper-shaped occurrence computation
     phiOccurrenceFromEdgeWitnessWithTrace,
-    phiOccurrenceFromEdgeWitnessWithTraceReadModel,
-    canonicalNodeM
+    phiOccurrenceFromEdgeWitnessWithTraceReadModel
 ) where
 
 import Control.Applicative ((<|>))
@@ -79,7 +78,6 @@ import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), EdgeSourceInterior(..), InteriorNodes(..), copiedNodes)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Elab.Phi.Env (PhiM, askCanonical)
 import MLF.Elab.Phi.Computation
     ( OccurrenceComputation
     , occurrenceComputationInstantiation
@@ -90,12 +88,6 @@ import MLF.Elab.Phi.Omega
     )
 import MLF.Util.Trace (TraceConfig(..), traceGeneralize)
 import MLF.Elab.Run.Scope (schemeBodyTarget)
-
--- | Canonicalize a node id using the union-find from the solve result.
-canonicalNodeM :: NodeId -> PhiM p NodeId
-canonicalNodeM nid = do
-    canonicalNode <- askCanonical
-    pure (canonicalNode nid)
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith (p :: Phase) =
@@ -136,18 +128,18 @@ phiFromEdgeWitnessWithTrace
     :: TraceConfig
     -> GeneralizeAtWith p
     -> PresolutionView p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo mTrace ew =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTrace
             traceCfg
             generalizeAtWith
             presolutionView
-            mbGaParents
+            gaParents
             mSchemeInfo
             mTrace
             ew
@@ -158,12 +150,12 @@ phiOccurrenceFromEdgeWitnessWithTrace
     :: TraceConfig
     -> GeneralizeAtWith p
     -> PresolutionView p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew =
+phiOccurrenceFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView gaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ -> do
@@ -172,7 +164,7 @@ phiOccurrenceFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView 
                 traceCfg
                 generalizeAtWith
                 readModel
-                mbGaParents
+                gaParents
                 mSchemeInfo
                 mTrace
                 ew
@@ -181,17 +173,17 @@ phiFromEdgeWitnessWithTraceReadModel
     :: TraceConfig
     -> GeneralizeAtWith p
     -> ElabReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew =
+phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo mTrace ew =
     phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
         traceCfg
         generalizeAtWith
         readModel
-        mbGaParents
+        gaParents
         mSchemeInfo
         IntMap.empty
         mTrace
@@ -204,19 +196,19 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     :: TraceConfig
     -> GeneralizeAtWith p
     -> ElabReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo frozenEndpointTypes mTrace ew =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes mTrace ew =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
             generalizeAtWith
             readModel
-            mbGaParents
+            gaParents
             mSchemeInfo
             frozenEndpointTypes
             Nothing
@@ -230,20 +222,20 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor
     :: TraceConfig
     -> GeneralizeAtWith p
     -> ElabReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> PhiEndpointShapeAuthority
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
             generalizeAtWith
             readModel
-            mbGaParents
+            gaParents
             mSchemeInfo
             frozenEndpointTypes
             (Just endpointShapeAuthority)
@@ -255,17 +247,17 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModel
     :: TraceConfig
     -> GeneralizeAtWith p
     -> ElabReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew =
+phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParents mSchemeInfo mTrace ew =
     phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
         traceCfg
         generalizeAtWith
         readModel
-        mbGaParents
+        gaParents
         mSchemeInfo
         IntMap.empty
         Nothing
@@ -276,19 +268,19 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     :: TraceConfig
     -> GeneralizeAtWith p
     -> ElabReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
+phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ -> do
             phiReadModel <- buildPhiReadModel readModel
-            phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew
+            phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -303,14 +295,14 @@ phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith p
     -> PhiReadModel p
-    -> Maybe (GaBindParents p)
+    -> GaBindParents p
     -> Maybe SchemeInfo
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError OccurrenceComputation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority mTrace ew = do
     let namedSet0 = ermNamedNodes readModel
     case if tcGeneralize traceCfg
         then
@@ -577,7 +569,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
             , ocReifyBoundWithRefs = reifyBoundWithRefsAt
             , ocReifyTypeWithNamedSetRefsNoFallback = reifyTypeWithNamedSetRefsNoFallbackAt
             , ocCopyMap = copyMap
-            , ocGaParents = mbGaParents
+            , ocGaParents = gaParents
             , ocTrace = mTrace
             , ocSchemeInfo = mSchemeInfoCtx
             , ocTraceBinderSources = traceBinderSources
@@ -780,9 +772,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
                             Nothing -> schemeBodyTarget presolutionView root0
                 scopeRoot <- instScopeRoot root0
                 (sch, subst) <-
-                    case mbGaParents of
-                        Nothing -> generalizeAtWith Nothing scopeRoot targetNode
-                        Just ga -> generalizeAtWith (Just ga) scopeRoot targetNode
+                    generalizeAtWith (Just gaParents) scopeRoot targetNode
                 pure (schemeInfoFromRefSubst sch subst)
 
     producerReplayDomain :: SchemeInfo -> EdgeTrace -> Maybe [NodeId]
@@ -875,8 +865,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
             (producerBinder, sourceBinder, argument)
 
         retainedProducerEntries traceEntries producerBinder =
-            case (mbGaParents, producerBaseIdentity producerBinder) of
-                (Just _, Just producerBase) ->
+            case producerBaseIdentity producerBinder of
+                Just producerBase ->
                     let baseEntries =
                             [ entry
                             | entry@(sourceBinder, _argument) <- traceEntries
@@ -899,14 +889,13 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
                                 (getNodeId sourceBinder)
                                 (sameBaseMergeEliminatedSources producerBase)
                             ]
-                _ -> []
+                Nothing -> []
 
         producerBaseIdentity binder = do
-            ga <- mbGaParents
-            case IntMap.lookup (getNodeId binder) (gaSolvedToBase ga) of
+            case IntMap.lookup (getNodeId binder) (gaSolvedToBase gaParents) of
                 Just baseBinder -> Just baseBinder
                 Nothing ->
-                    case NodeAccess.lookupNode (gaBaseConstraint ga) binder of
+                    case NodeAccess.lookupNode (gaBaseConstraint gaParents) binder of
                         Just _ -> Just binder
                         Nothing -> Nothing
 
@@ -919,8 +908,9 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
                 ]
 
         producerBaseSource producerBinder = do
-            ga <- mbGaParents
-            IntMap.lookup (getNodeId producerBinder) (gaSolvedToBase ga)
+            IntMap.lookup
+                (getNodeId producerBinder)
+                (gaSolvedToBase gaParents)
 
         uniqueTraceEntries = go IntMap.empty []
           where
@@ -1136,42 +1126,30 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel mbGaParents mSchem
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef
     instScopeRoot root0 =
-        case mbGaParents of
-            Nothing ->
-                let rootC = canonicalNode root0
-                    owners =
-                        [ gnId gen
-                        | gen <- NodeAccess.allGenNodes constraint
-                        , any (\root -> canonicalNode root == rootC) (gnSchemes gen)
-                        ]
-                in case owners of
-                    gid:_ -> Right (genRef gid)
-                    [] -> goScope IntSet.empty (typeRef rootC)
-            Just ga ->
-                let rootC = canonicalNode root0
-                    baseFromTrace =
-                        case mTrace of
-                            Nothing -> Nothing
-                            Just tr ->
-                                let traceCopyMap = getCopyMapping (etCopyMap tr)
-                                    revMatches =
-                                        [ NodeId k
-                                        | (k, v) <- IntMap.toList traceCopyMap
-                                        , canonicalNode v == rootC
-                                        ]
-                                in listToMaybe revMatches
-                    baseRep =
-                        IntMap.lookup (getNodeId rootC) (gaSolvedToBase ga)
-                            <|> baseFromTrace
-                in case baseRep of
-                    Nothing -> goScope IntSet.empty (typeRef rootC)
-                    Just baseN ->
-                        case bindingPathToRootLocal (gaBindParentsBase ga) (typeRef baseN) of
-                            Left _ -> goScope IntSet.empty (typeRef rootC)
-                            Right path ->
-                                case listToMaybe [gid | GenRef gid <- drop 1 path] of
-                                    Just gid -> Right (genRef gid)
-                                    Nothing -> goScope IntSet.empty (typeRef rootC)
+        let rootC = canonicalNode root0
+            baseFromTrace =
+                case mTrace of
+                    Nothing -> Nothing
+                    Just tr ->
+                        let traceCopyMap = getCopyMapping (etCopyMap tr)
+                            revMatches =
+                                [ NodeId k
+                                | (k, v) <- IntMap.toList traceCopyMap
+                                , canonicalNode v == rootC
+                                ]
+                        in listToMaybe revMatches
+            baseRep =
+                IntMap.lookup (getNodeId rootC) (gaSolvedToBase gaParents)
+                    <|> baseFromTrace
+        in case baseRep of
+            Nothing -> goScope IntSet.empty (typeRef rootC)
+            Just baseN ->
+                case bindingPathToRootLocal (gaBindParentsBase gaParents) (typeRef baseN) of
+                    Left _ -> goScope IntSet.empty (typeRef rootC)
+                    Right path ->
+                        case listToMaybe [gid | GenRef gid <- drop 1 path] of
+                            Just gid -> Right (genRef gid)
+                            Nothing -> goScope IntSet.empty (typeRef rootC)
       where
         goScope visited ref
             | IntSet.member (nodeRefKey ref) visited =
