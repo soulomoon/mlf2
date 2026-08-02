@@ -2992,12 +2992,22 @@ compileNullaryMethodUseWithView scope mbExpected methodInfo =
   case mbExpected of
     Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
     Just expectedView -> do
-      mbLocal <- resolveLocalNullaryMethodUse scope Nothing methodInfo expectedView
+      let mbClassArgViews =
+            (:| []) <$> inferNullaryMethodClassArgView scope methodInfo expectedView
+      mbLocal <-
+        resolveLocalNullaryMethodUse
+          scope
+          mbClassArgViews
+          methodInfo
+          expectedView
       case mbLocal of
         Just localUse -> pure localUse
         Nothing
           | NE.length (methodParamNames methodInfo) > 1 ->
               throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+          | Just classArgViews <- mbClassArgViews,
+            shouldResolveNullaryMethodBeforeInferenceViews scope methodInfo classArgViews ->
+              resolveResolvedMethodHeadExprInfo scope [] methodInfo classArgViews
           | Just resolvedView <- nullaryMethodExpectedResultView scope mbExpected methodInfo ->
               deferNullaryMethodCall scope methodInfo resolvedView
           | otherwise ->
@@ -3653,6 +3663,15 @@ shouldResolveMethodBeforeInferenceViews scope methodInfo classArgViews =
             Right _ -> True
             Left _ -> False
     Nothing -> False
+
+shouldResolveNullaryMethodBeforeInferenceViews :: ElaborateScope -> MethodInfo -> NonEmpty TypeView -> Bool
+shouldResolveNullaryMethodBeforeInferenceViews scope methodInfo classArgViews
+  | typeViewsAreIdentityGround classArgViews =
+      case resolveMethodInstanceInfoByTypeViews scope methodInfo classArgViews of
+        Right _ -> True
+        Left _ -> False
+  | otherwise =
+      shouldResolveMethodBeforeInferenceViews scope methodInfo classArgViews
 
 resolveConstraintEvidenceExpr :: ElaborateScope -> [ClassApplicationKey] -> ConstraintInfo -> ElaborateM [ResolvedSurfaceExpr]
 resolveConstraintEvidenceExpr scope seen constraint =

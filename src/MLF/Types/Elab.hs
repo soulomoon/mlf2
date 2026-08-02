@@ -58,7 +58,13 @@ module MLF.Types.Elab (
     mkElabSchemeWithRefs,
     schemeBinderRefs,
     schemeBody,
-    SchemeInfo(SchemeInfo, siScheme, siSubstRefs),
+    SchemeInfo
+        ( SchemeInfo,
+          siScheme,
+          siSubstRefs,
+          siSourceBinderOrderRefs,
+          siConstructionBinderOrderRefs
+        ),
     TypeBinderIdentity,
     typeBinderIdentityFromNode,
     typeBinderIdentityNode,
@@ -84,6 +90,7 @@ module MLF.Types.Elab (
     schemeInfoBinderIdentityKeys,
     schemeInfoBinderIdentityKeySet,
     schemeInfoFromRefSubst,
+    rebuildSchemeInfoFromRefSubst,
     schemeInfoBinderRefSubst,
     ResolvedVar(..),
     ResolvedTermIdentityKey,
@@ -99,6 +106,9 @@ module MLF.Types.Elab (
     mkLocalRecursiveLetWithRef,
     identityGeneratorAfterType,
     generatedIdentitiesInType,
+    identityGeneratorAfterSchemeInfo,
+    generatedIdentitiesInScheme,
+    generatedIdentitiesInSchemeInfo,
     generatedIdentitiesInInstantiation,
     eTyAbsWithRef,
     identityGeneratorAfterTerm,
@@ -439,6 +449,16 @@ instance Show (Scheme 'BindFlex) where
 data SchemeInfo = SchemeInfo
     { siScheme :: ElabScheme
     , siSubstRefs :: IntMap TypeBinderRef
+    -- | Exact graph-key/source-identity pairs whose lexical order is already
+    -- fixed by source binder projection.  Phi may retain the key for witness
+    -- replay, but must not require that source declaration to have a current
+    -- graph @<P@ order key.
+    , siSourceBinderOrderRefs :: IntMap TypeBinderRef
+    -- | Exact graph-key/binder-identity pairs whose order is owned by a
+    -- prepared construction packet.  These declarations may include a
+    -- vacuous bounded binder with no current 'BindParent'; Phi must preserve
+    -- the packet spine rather than trying to rediscover its order from @<P@.
+    , siConstructionBinderOrderRefs :: IntMap TypeBinderRef
     } deriving (Eq, Show)
 
 data TypeBinderRef = TypeBinderRef
@@ -522,7 +542,9 @@ freshTypeBinderRefFromNames used generator =
 
 schemeInfoFromRefSubst :: ElabScheme -> IntMap TypeBinderRef -> SchemeInfo
 schemeInfoFromRefSubst scheme refs =
-    let scheme' = attachBinderRefsToScheme refs scheme
+    let scheme' =
+            quotientAttachedOuterBinders
+                (attachBinderRefsToScheme refs scheme)
         identityRefs =
             IntMap.fromList
                 [ (getNodeId node, ref)
@@ -532,7 +554,83 @@ schemeInfoFromRefSubst scheme refs =
     in SchemeInfo
         { siScheme = scheme'
         , siSubstRefs = IntMap.union refs identityRefs
+        , siSourceBinderOrderRefs = IntMap.empty
+        , siConstructionBinderOrderRefs = IntMap.empty
         }
+
+-- | Attaching exact occurrence routes can identify two provisional graph
+-- declarations as one semantic source binder.  Form that quotient while the
+-- scheme is constructed: one identity owns one outer declaration, and an
+-- independently known bound dominates an unbounded duplicate.  Conflicting
+-- concrete bounds remain separate so the checked construction boundary can
+-- report the inconsistency instead of silently choosing one.
+quotientAttachedOuterBinders :: ElabScheme -> ElabScheme
+quotientAttachedOuterBinders (Scheme binds body) =
+    Scheme (go [] binds) body
+  where
+    go retained [] = retained
+    go retained (binder@(FlexBinder ref incomingBound) : rest) =
+        case break (sameBinderIdentity ref) retained of
+            (_, []) -> go (retained ++ [binder]) rest
+            (before, FlexBinder retainedRef retainedBound : after) ->
+                case mergeCompatibleBounds retainedBound incomingBound of
+                    Just mergedBound ->
+                        go
+                            ( before
+                                ++ ( FlexBinder retainedRef mergedBound
+                                       : after
+                                   )
+                            )
+                            rest
+                    Nothing -> go (retained ++ [binder]) rest
+
+    sameBinderIdentity sought (FlexBinder candidate _) =
+        typeBinderRefsSameIdentity sought candidate
+
+    mergeCompatibleBounds Nothing Nothing = Just Nothing
+    mergeCompatibleBounds (Just retainedBound) Nothing =
+        Just (Just retainedBound)
+    mergeCompatibleBounds Nothing (Just incomingBound) =
+        Just (Just incomingBound)
+    mergeCompatibleBounds (Just retainedBound) (Just incomingBound)
+        | retainedBound == incomingBound = Just (Just retainedBound)
+        | otherwise = Nothing
+
+-- | Rebuild a scheme after a shape-preserving transformation without
+-- discarding exact source-order authority already attached to its occurrence
+-- routes.  A route survives only when the same key still denotes the same
+-- semantic binder identity; the rebuilt substitution supplies its current
+-- presentation name.
+rebuildSchemeInfoFromRefSubst
+    :: SchemeInfo
+    -> ElabScheme
+    -> IntMap TypeBinderRef
+    -> SchemeInfo
+rebuildSchemeInfoFromRefSubst previous scheme refs =
+    rebuilt
+        { siSourceBinderOrderRefs =
+            IntMap.mapMaybeWithKey retainSourceOrder
+                (siSourceBinderOrderRefs previous)
+        , siConstructionBinderOrderRefs =
+            IntMap.mapMaybeWithKey retainConstructionOrder
+                (siConstructionBinderOrderRefs previous)
+        }
+  where
+    rebuilt = schemeInfoFromRefSubst scheme refs
+
+    retainSourceOrder nodeKey sourceRef =
+        case IntMap.lookup nodeKey (siSubstRefs rebuilt) of
+            Just rebuiltRef
+                | typeBinderRefsSameIdentity sourceRef rebuiltRef ->
+                    Just rebuiltRef
+            _ -> Nothing
+
+    retainConstructionOrder nodeKey constructionRef =
+        case IntMap.lookup nodeKey (siSubstRefs rebuilt) of
+            Just rebuiltRef
+                | typeBinderRefsSameIdentity constructionRef rebuiltRef ->
+                    Just rebuiltRef
+            _ -> Nothing
 
 schemeInfoBinderIdentityKeys :: SchemeInfo -> [Int]
 schemeInfoBinderIdentityKeys schemeInfo =
@@ -874,6 +972,15 @@ identityGeneratorAfterTerm :: XmlfTerm -> IdentityGenerator
 identityGeneratorAfterTerm =
     identityGeneratorAfter . generatedIdentitiesInTerm
 
+-- | Start after every identity represented by a scheme and its construction
+-- sidecars.  The sidecars are semantic provenance, not caches: a source
+-- binder may occur only there while a graph identity occupies the displayed
+-- scheme.  Ignoring it would allow a later copied binder to reuse the exact
+-- same generated identity.
+identityGeneratorAfterSchemeInfo :: SchemeInfo -> IdentityGenerator
+identityGeneratorAfterSchemeInfo =
+    identityGeneratorAfter . generatedIdentitiesInSchemeInfo
+
 generatedIdentitiesInType :: Ty v -> [UniqueIdentity]
 generatedIdentitiesInType ty =
     case ty of
@@ -898,6 +1005,15 @@ generatedIdentitiesInScheme (Scheme binds body) =
   where
     generatedIdentitiesInBinder (FlexBinder ref mb) =
         generatedIdentitiesInTypeBinderRef ref ++ maybe [] generatedIdentitiesInType mb
+
+generatedIdentitiesInSchemeInfo :: SchemeInfo -> [UniqueIdentity]
+generatedIdentitiesInSchemeInfo schemeInfo =
+    generatedIdentitiesInScheme (siScheme schemeInfo)
+        ++ foldMap generatedIdentitiesInTypeBinderRef
+            ( IntMap.elems (siSubstRefs schemeInfo)
+                ++ IntMap.elems (siSourceBinderOrderRefs schemeInfo)
+                ++ IntMap.elems (siConstructionBinderOrderRefs schemeInfo)
+            )
 
 generatedIdentitiesInTypeBinderRef :: TypeBinderRef -> [UniqueIdentity]
 generatedIdentitiesInTypeBinderRef =

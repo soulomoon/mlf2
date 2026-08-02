@@ -461,6 +461,7 @@ spec = describe "Phi alignment" $ do
                     GaBindParents
                         { gaBindParentsBase = cBindParents baseConstraint
                         , gaBaseConstraint = baseConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = baseToSolved
                         , gaSolvedToBase = solvedToBase
                         , gaRestoredSchemeRootTargets = IntMap.empty

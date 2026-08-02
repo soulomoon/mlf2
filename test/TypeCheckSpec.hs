@@ -52,6 +52,7 @@ import MLF.Elab.TermClosure
     ( alignTermTypeVarsToScheme
     , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
+    , constructTermWithSchemeSubstRefsAtPublication
     , constructTermWithSchemeSubstRefsByBinderRoutes
     , substInTermRefs
     )
@@ -1716,6 +1717,80 @@ spec = describe "Phase 7 typecheck" $ do
             `shouldBe` expected
         typeCheck expected `shouldBe` Right (schemeToType scheme)
 
+    it "publishes a vacuous prefix before rebinding a computed forall result" $ do
+        let methodGhostRef = typeRef 6640 "method-ghost"
+            methodValueRef = typeRef 6641 "method-value"
+            localGhostRef = typeRef 6642 "local-ghost"
+            localValueRef = typeRef 6643 "local-value"
+            localSchemeTy =
+                tForallWithRef
+                    localGhostRef
+                    Nothing
+                    ( tForallWithRef
+                        localValueRef
+                        Nothing
+                        ( TArrow
+                            boolTy
+                            ( TArrow
+                                (tVarWithRef localValueRef)
+                                (tVarWithRef localValueRef)
+                            )
+                        )
+                    )
+            producer =
+                ResolvedVar
+                    { resolvedVarType = localSchemeTy
+                    , resolvedVarDetails = EnvId (fixtureExternalEnvRef "method-producer")
+                    }
+            computedForall =
+                ETyInst
+                    (EVarNode producer)
+                    ( instUnderWithRef
+                        localGhostRef
+                        (InstApp (tVarWithRef localGhostRef))
+                    )
+            principal =
+                eTyAbsWithRef
+                    methodValueRef
+                    Nothing
+                    computedForall
+            targetScheme =
+                mkElabSchemeWithRefs
+                    [(methodGhostRef, Nothing), (methodValueRef, Nothing)]
+                    ( TArrow
+                        boolTy
+                        ( TArrow
+                            (tVarWithRef methodValueRef)
+                            (tVarWithRef methodValueRef)
+                        )
+                    )
+            expected =
+                eTyAbsWithRef
+                    methodGhostRef
+                    Nothing
+                    ( eTyAbsWithRef
+                        methodValueRef
+                        Nothing
+                        ( ETyInst
+                            (EVarNode producer)
+                            ( InstSeq
+                                InstElim
+                                (InstApp (tVarWithRef methodValueRef))
+                            )
+                        )
+                    )
+            closed =
+                closeTermWithSchemeSubstRefsIfNeeded
+                    IntMap.empty
+                    targetScheme
+                    principal
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    [(producer, localSchemeTy)]
+                    Map.empty
+        closed `shouldBe` expected
+        typeCheckWithEnv env closed `shouldBe` Right (schemeToType targetScheme)
+
     it "keeps an unrelated local Gamma inside an exact root binder" $ do
         let rootRef = typeRef 664 "a"
             localRef = typeRef 665 "e"
@@ -1775,6 +1850,72 @@ spec = describe "Phase 7 typecheck" $ do
             sourceTerm
             `shouldBe` expected
         typeCheck expected `shouldBe` Right (schemeToType scheme)
+
+    it "inserts a missing scheme binder after an exact existing prefix" $ do
+        let outerRef = typeRef 668 "outer"
+            innerRef = typeRef 669 "inner"
+            term = eTyAbsWithRef outerRef Nothing (ELit (LInt 1))
+            scheme =
+                mkElabSchemeWithRefs
+                    [(outerRef, Nothing), (innerRef, Nothing)]
+                    builtinIntTy
+            expected =
+                eTyAbsWithRef
+                    outerRef
+                    Nothing
+                    (eTyAbsWithRef innerRef Nothing (ELit (LInt 1)))
+        constructTermWithSchemeSubstRefsByBinderRoutes
+            []
+            IntMap.empty
+            scheme
+            term
+            `shouldBe` expected
+        typeCheck expected `shouldBe` Right (schemeToType scheme)
+
+    it "publishes a computed forall without redeclaring its binder identity" $ do
+        let outerRef = typeRef 670 "outer"
+            innerRef = typeRef 671 "inner"
+            ignored = generatedResolvedLocal 672 "$ignored#0" "ignored" builtinIntTy
+            returned = generatedResolvedLocal 673 "$returned#0" "returned" (tVarWithRef outerRef)
+            producer =
+                EApp
+                    ( ELam
+                        ignored
+                        ( eTyAbsWithRef
+                            outerRef
+                            Nothing
+                            (ELam returned (EVarNode returned))
+                        )
+                    )
+                    (ELit (LInt 0))
+            scheme =
+                mkElabSchemeWithRefs
+                    [(outerRef, Nothing), (innerRef, Nothing)]
+                    (TArrow (tVarWithRef outerRef) (tVarWithRef outerRef))
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+            published =
+                constructTermWithSchemeSubstRefsAtPublication
+                    emptyTcEnv
+                    IntMap.empty
+                    scheme
+                    producer
+        typeCheckWithEnv emptyTcEnv published
+            `shouldBe` Right (schemeToType scheme)
+        case published of
+            ETyAbsRef publishedOuter _
+                (ETyAbsRef publishedInner _
+                    (ETyInst
+                        (EApp (ELam _ (ETyAbsRef producerRef _ _)) _)
+                        (InstApp (TVarRef instantiatedRef)))) -> do
+                    ElabTypes.typeBinderRefsSameIdentity publishedOuter outerRef
+                        `shouldBe` True
+                    ElabTypes.typeBinderRefsSameIdentity publishedInner innerRef
+                        `shouldBe` True
+                    ElabTypes.typeBinderRefsSameIdentity instantiatedRef outerRef
+                        `shouldBe` True
+                    ElabTypes.typeBinderRefsSameIdentity producerRef outerRef
+                        `shouldBe` False
+            _ -> expectationFailure ("unexpected publication term: " ++ show published)
 
     it "constructs a missing bounded forall after an existing abstraction prefix" $ do
         let sourceOuter = typeRef 649 "source-a"

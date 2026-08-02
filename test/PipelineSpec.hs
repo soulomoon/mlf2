@@ -5,7 +5,7 @@ module PipelineSpec (spec) where
 
 import IdentityTestSupport
 import qualified ElabTypeTestSupport as TestElab
-import Control.Monad (foldM, forM_, replicateM, unless, when)
+import Control.Monad (forM_, replicateM, unless, when)
 import Data.Either (isLeft, isRight)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
@@ -95,6 +95,7 @@ import MLF.Elab.Elaborate.Algebra.TestSupport
     bodyConsumerRouteProjectionProvenanceForTest,
     constructionBoundAfterScopeExtensionForTest,
     directAmbientGammaAuthorityProvenanceForTest,
+    finalizeBodyConsumerBoundRefinementsForTest,
     inheritNestedApplicationResidualAuthorityForTest,
     inheritNestedApplicationResidualReplayAuthorityForTest,
     inheritNestedApplicationZeroLocalResidualAuthorityForTest,
@@ -154,9 +155,11 @@ import MLF.Elab.Run.Generalize.Prepare.TestSupport
     applicationCertificateOwnsRootRequirementForTest,
     applicationCertificateOwnsAmbientRootRequirementForTest,
     applicationCertificateDirectClaimOwnsPlanningRequirementForTest,
+    applicationCertificateCompletesExactResultRequirementForTest,
     applicationCertificateCompletesProvisionalResultRequirementForTest,
     applicationCertificateTransfersRootRequirementOwnershipForTest,
     applicationCertificateDischargesRootClosureForTest,
+    applicationCertificateDischargesLocalGammaClosureForTest,
     rootRequirementOwnershipAllowsLocalGammaClosureForTest,
     validateLocalApplicationCertificatesForTest,
     unclaimedEdgesOutsideLocalGammaClosuresForTest,
@@ -572,6 +575,7 @@ resultTypeInputsForArtifacts
           GaBindParents
             { gaBindParentsBase = cBindParents c1,
               gaBaseConstraint = c1,
+              gaAnnotationNodeRedirects = IntMap.empty,
               gaBaseToSolved = baseToSolved,
               gaSolvedToBase = solvedToBase,
               gaRestoredSchemeRootTargets = IntMap.empty,
@@ -992,6 +996,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       ],
                     grSourceBinderRefs = IntMap.singleton (getNodeId exterior) exteriorRef,
                     grAmbientBinderRefs = [],
+                    grTermUsedRootBinderRefs = [],
                     grAmbientGammaAuthorities = IntMap.empty,
                     grLocallyClosedGammaNodes = mempty
                   }
@@ -999,6 +1004,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 GaBindParents
                   { gaBindParentsBase = baseParents,
                     gaBaseConstraint = baseConstraint,
+                    gaAnnotationNodeRedirects = IntMap.empty,
                     gaBaseToSolved =
                       IntMap.fromList
                         [ (getNodeId exterior, resultRoot),
@@ -1110,6 +1116,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 grSourceBinderRefs =
                   IntMap.singleton (getNodeId exterior) exteriorRef,
                 grAmbientBinderRefs = [],
+                grTermUsedRootBinderRefs = [],
                 grAmbientGammaAuthorities = IntMap.empty,
                 grLocallyClosedGammaNodes = mempty
               }
@@ -1117,6 +1124,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             GaBindParents
               { gaBindParentsBase = baseParents,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.fromList
                     [ (getNodeId exterior, liveForallBinder),
@@ -1276,6 +1284,48 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         Left err ->
           expectationFailure
             ("required Gamma/source metadata separation failed: " ++ show err)
+        Right (scheme, substRefs) -> do
+          case IntMap.lookup (getNodeId resultRoot) substRefs of
+            Nothing -> expectationFailure "required Gamma result root was absent from the substitution"
+            Just resultRef ->
+              typeBinderRefsSameIdentity resultRef exteriorRef `shouldBe` True
+          let exteriorBounds =
+                [ mbBound
+                | (binderRef, mbBound) <- schemeBinderRefs scheme,
+                  typeBinderRefsSameIdentity binderRef exteriorRef
+                ]
+          exteriorBounds `shouldBe` [Just (TestElab.tBase intBase)]
+          case schemeBody scheme of
+            TArrow (TVarRef domRef) (TVarRef codRef) -> do
+              typeBinderRefsSameIdentity domRef exteriorRef `shouldBe` True
+              typeBinderRefsSameIdentity codRef exteriorRef `shouldBe` True
+            body ->
+              expectationFailure
+                ("expected required Gamma body to retain exterior identity, got " ++ show body)
+
+    it "keeps required Gamma authoritative over unrelated generated source metadata" $ do
+      let (scopeGen, resultRoot, targetRoot, intBase, exteriorRef, requirements0, ga, view) =
+            fixture (Just (genRef (GenNodeId 0), BindFlex))
+          unrelatedSourceRef =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromUnique (UniqueIdentity 991009))
+              "unrelatedSource"
+          requirements =
+            requirements0
+              { grSourceBinderRefs =
+                  IntMap.insert
+                    (getNodeId resultRoot)
+                    unrelatedSourceRef
+                    ( IntMap.insert
+                        1
+                        unrelatedSourceRef
+                        (grSourceBinderRefs requirements0)
+                    )
+              }
+      case generalizeRequired scopeGen targetRoot requirements ga view of
+        Left err ->
+          expectationFailure
+            ("required Gamma/generated source separation failed: " ++ show err)
         Right (scheme, substRefs) -> do
           case IntMap.lookup (getNodeId resultRoot) substRefs of
             Nothing -> expectationFailure "required Gamma result root was absent from the substitution"
@@ -1603,6 +1653,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             ga0
               { gaBindParentsBase = cBindParents base,
                 gaBaseConstraint = base,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.insert
                     (getNodeId sourceVar)
@@ -1763,6 +1814,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             ga0
               { gaBindParentsBase = baseParents,
                 gaBaseConstraint = base,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.insert (getNodeId sourceVar) sourceLive (gaBaseToSolved ga0),
                 gaSolvedToBase =
@@ -1952,6 +2004,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               { grRequiredGammaBinders = [requirement],
                 grSourceBinderRefs = IntMap.empty,
                 grAmbientBinderRefs = [],
+                grTermUsedRootBinderRefs = [],
                 grAmbientGammaAuthorities = IntMap.empty,
                 grLocallyClosedGammaNodes = IntSet.empty
               }
@@ -1971,6 +2024,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             (siblingRoot, GenNode siblingRoot [])
                           ]
                     },
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.empty,
                 gaSolvedToBase = IntMap.empty,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -2167,6 +2221,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             LocalGammaClosure
               { lgcEdgeIds = pendingEdges
               , lgcDirectApplicationEdgeIds = []
+              , lgcForwardedResultEdgeIds = []
               , lgcExteriorNode = pendingExterior
               , lgcConsumerIdentity =
                   typeBinderIdentityFromNode pendingExterior
@@ -2620,6 +2675,34 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           )
           `shouldBe` DirectAmbientEstablished
 
+      it "completes an identity-coincident provisional slot only from its exact local emission" $ do
+        let coincidentRoute =
+              ordinaryBodyRoute
+                { bcrtvConstructionRef = pendingRef
+                }
+            provisionalAmbientBindings =
+              Map.singleton pendingRef TBottom
+        bodyConsumerRouteProjectionProvenanceForTest
+          []
+          bodyOwner
+          ordinaryBodyClosures
+          bodyRequirement
+          coincidentRoute
+          completedBodyBound
+          provisionalAmbientBindings
+          `shouldBe` DirectAmbientEstablished
+        bodyConsumerLocallyEmittedRouteProjectionProvenanceForTest
+          []
+          bodyOwner
+          ordinaryBodyClosures
+          bodyRequirement
+          pendingRef
+          completedBodyBound
+          coincidentRoute
+          completedBodyBound
+          provisionalAmbientBindings
+          `shouldBe` DirectAmbientProvisionalNestedResult
+
       it "does not nominate an ordinary body exterior by type shape or a wrong identity" $ do
         let sameShapedPeerBindings =
               Map.fromList
@@ -2870,6 +2953,28 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           completeChurchType
           `shouldBe` False
 
+      it "does not identify a reordered forall spine by reused binder identities" $ do
+        let betaIdentity = typeBinderIdentityFromNode (NodeId 991799)
+            alphaIdentity = typeBinderIdentityFromNode (NodeId 991800)
+            sourceBeta = typeBinderRefFromIdentity betaIdentity "beta"
+            sourceAlpha = typeBinderRefFromIdentity alphaIdentity "alpha"
+            targetAlpha = typeBinderRefFromIdentity alphaIdentity "a"
+            targetBeta = typeBinderRefFromIdentity betaIdentity "b"
+            sourceType =
+              TForallRef sourceBeta Nothing $
+                TForallRef sourceAlpha Nothing $
+                  TArrow
+                    (TVarRef sourceBeta)
+                    (TArrow (TVarRef sourceAlpha) (TVarRef sourceAlpha))
+            targetType =
+              TForallRef targetAlpha Nothing $
+                TForallRef targetBeta Nothing $
+                  TArrow
+                    (TVarRef targetBeta)
+                    (TArrow (TVarRef targetAlpha) (TVarRef targetAlpha))
+        operationalEndpointTypesAgreeForTest sourceType targetType
+          `shouldBe` False
+
       it "finds a Church representation transition below a preserved recursive binder" $ do
         let outerSourceSelf =
               typeBinderRefFromIdentity
@@ -3035,7 +3140,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (getNodeId (NodeId 991787), secondEmittedRef)
                       ],
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             outerRequirement =
               RequiredGammaBinder
@@ -3059,6 +3166,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { grRequiredGammaBinders = [outerRequirement],
                   grSourceBinderRefs = IntMap.empty,
                   grAmbientBinderRefs = [outerRef],
+                  grTermUsedRootBinderRefs = [],
                   grAmbientGammaAuthorities =
                     IntMap.fromList
                       [ (getNodeId nestedResult, provisionalAuthority),
@@ -3251,6 +3359,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = descendantEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = descendantExterior,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode descendantExterior,
@@ -3261,6 +3370,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = unrelatedEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = descendantExterior,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode descendantExterior,
@@ -3292,6 +3402,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { grRequiredGammaBinders = [currentRequirement],
                   grSourceBinderRefs = IntMap.empty,
                   grAmbientBinderRefs = [],
+                  grTermUsedRootBinderRefs = [],
                   grAmbientGammaAuthorities = IntMap.empty,
                   grLocallyClosedGammaNodes = IntSet.empty
                 }
@@ -3408,6 +3519,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = localEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = exterior,
                   lgcConsumerIdentity = typeBinderIdentityFromNode exterior,
                   lgcOwner = owner,
@@ -3442,6 +3554,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   gaBaseConstraint =
                     toPresolvedConstraint
                       (toAcyclicConstraint (toNormalizedConstraint emptyConstraint)),
+                  gaAnnotationNodeRedirects = IntMap.empty,
                   gaBaseToSolved = IntMap.empty,
                   gaSolvedToBase = IntMap.empty,
                   gaRestoredSchemeRootTargets = IntMap.empty,
@@ -3544,6 +3657,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = rootEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = exterior,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode exterior,
@@ -3569,6 +3683,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   rgbOperatedRoot = NodeId 991844,
                   rgbResultRoots = lgoTermNode owner :| [],
                   rgbOperatedType = TBottom
+                }
+            exactResultRequirement =
+              provisionalResultRequirement
+                { rgbEdgeIds = rootEdge :| [EdgeId 991839],
+                  rgbOperatedRoot = lgoTermNode owner,
+                  rgbOperatedType = operatedType
                 }
             ambientExterior = NodeId 991846
             ambientOperated = NodeId 991847
@@ -3607,7 +3727,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (getNodeId operated, emittedRef)
                       ],
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             directClaim =
               DirectApplicationGammaClaim
@@ -3667,7 +3789,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     [AmbientGammaAuthority ambientRef operatedType],
                   lgccLocalBinderRoutes = IntMap.empty,
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             consumedCertificate =
               certificate
@@ -3780,6 +3904,69 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           resultCertificate
           provisionalResultRequirement
           `shouldBe` True
+        let mixedProvisionalResultRequirement =
+              provisionalResultRequirement
+                { rgbEdgeIds = rootEdge :| [EdgeId 991839]
+                , rgbOperatedRoot = alternateResult
+                }
+        applicationCertificateCompletesProvisionalResultRequirementForTest
+          resultCertificate
+          mixedProvisionalResultRequirement
+          `shouldBe` True
+        applicationCertificateCompletesProvisionalResultRequirementForTest
+          ( resultCertificate
+              { lgccLocalBinderRoutes =
+                  IntMap.delete
+                    (getNodeId alternateResult)
+                    (lgccLocalBinderRoutes resultCertificate)
+              }
+          )
+          mixedProvisionalResultRequirement
+          `shouldBe` False
+        applicationCertificateCompletesProvisionalResultRequirementForTest
+          resultCertificate
+          ( mixedProvisionalResultRequirement
+              { rgbEdgeIds = applicationEdge :| [EdgeId 991839]
+              }
+          )
+          `shouldBe` False
+        applicationCertificateCompletesExactResultRequirementForTest
+          ownerScope
+          resultCertificate
+          exactResultRequirement
+          `shouldBe` True
+        applicationCertificateCompletesExactResultRequirementForTest
+          foreignRootScope
+          resultCertificate
+          exactResultRequirement
+          `shouldBe` False
+        applicationCertificateCompletesExactResultRequirementForTest
+          ownerScope
+          ( resultCertificate
+              { lgccLocalBinderRoutes =
+                  IntMap.delete
+                    (getNodeId (lgoTermNode owner))
+                    (lgccLocalBinderRoutes resultCertificate)
+              }
+          )
+          exactResultRequirement
+          `shouldBe` False
+        applicationCertificateCompletesExactResultRequirementForTest
+          ownerScope
+          resultCertificate
+          ( exactResultRequirement
+              { rgbResultRoots = alternateResult :| []
+              }
+          )
+          `shouldBe` False
+        applicationCertificateCompletesExactResultRequirementForTest
+          ownerScope
+          resultCertificate
+          ( exactResultRequirement
+              { rgbOperatedType = TestElab.tBase (BaseTy "Bool")
+              }
+          )
+          `shouldBe` False
         applicationCertificateCompletesProvisionalResultRequirementForTest
           resultCertificate
           ( provisionalResultRequirement
@@ -4073,6 +4260,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   gaBaseConstraint =
                     toPresolvedConstraint
                       (toAcyclicConstraint (toNormalizedConstraint emptyConstraint)),
+                  gaAnnotationNodeRedirects = IntMap.empty,
                   gaBaseToSolved = IntMap.empty,
                   gaSolvedToBase = IntMap.empty,
                   gaRestoredSchemeRootTargets = IntMap.empty,
@@ -4100,6 +4288,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = applicationEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = exterior,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode exterior,
@@ -4133,7 +4322,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     [AmbientGammaAuthority ambientRef operatedType],
                   lgccLocalBinderRoutes = IntMap.empty,
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = [dependencyRef]
+                  lgccUsedAmbientBinderRefs = [dependencyRef],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             wrongBoundCertificate =
               ambientCertificate
@@ -4261,6 +4452,28 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           structuralClosure
           ambientCertificate
           `shouldBe` False
+        let directApplicationClosure =
+              structuralClosure
+                { lgcEdgeIds =
+                    applicationEdge :| [siblingEdge]
+                , lgcDirectApplicationEdgeIds =
+                    [applicationEdge]
+                , lgcForwardedResultEdgeIds =
+                    [siblingEdge]
+                , lgcOwner = applicationOwner
+                }
+        applicationCertificateDischargesLocalGammaClosureForTest
+          directApplicationClosure
+          ambientCertificate
+          `shouldBe` True
+        applicationCertificateDischargesLocalGammaClosureForTest
+          ( directApplicationClosure
+              { lgcDirectApplicationEdgeIds =
+                  [siblingEdge]
+              }
+          )
+          ambientCertificate
+          `shouldBe` False
         rootRequirementOwnershipAllowsLocalGammaClosureForTest
           ga
           applicationScope
@@ -4313,6 +4526,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             LocalGammaClosure
               { lgcEdgeIds = edgeId :| [],
                 lgcDirectApplicationEdgeIds = [],
+                lgcForwardedResultEdgeIds = [],
                 lgcExteriorNode = exteriorNode,
                 lgcConsumerIdentity = typeBinderIdentityFromNode exteriorNode,
                 lgcOwner = owner,
@@ -4325,13 +4539,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           certificate =
             OwnerFinalConstruction
               { ofcOwner = owner,
+                ofcTransparentResultOwners = [],
                 ofcConstructedType = constructedType,
-                ofcLocallyEmittedBinderRefs = [emittedLocalRef],
+                ofcLocallyEmittedBinders =
+                  [(emittedLocalRef, Nothing)],
                 ofcLocalBinderRoutes =
                   IntMap.singleton
                     (getNodeId plannedLocalNode)
                     emittedLocalRef,
                 ofcUsedAmbientBinderRefs = [],
+                ofcUsedSourceBinderAuthorities = IntMap.empty,
+                ofcAmbientDeclarationAuthorities = [],
+                ofcAuthoritativeAmbientDeclarations = [],
+                ofcLambdaParamBoundaryCertificates = [],
                 ofcBodyConsumerBoundRefinements = []
               }
           expectCertificateFailure label result =
@@ -4424,6 +4644,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { grRequiredGammaBinders = [required],
                   grSourceBinderRefs = IntMap.empty,
                   grAmbientBinderRefs = [],
+                  grTermUsedRootBinderRefs = [],
                   grAmbientGammaAuthorities = IntMap.empty,
                   grLocallyClosedGammaNodes = IntSet.empty
                 }
@@ -4439,6 +4660,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { gaBindParentsBase = parents,
                   gaBaseConstraint =
                     baseConstraint {cBindParents = parents},
+                  gaAnnotationNodeRedirects = IntMap.empty,
                   gaBaseToSolved = IntMap.empty,
                   gaSolvedToBase = IntMap.empty,
                   gaRestoredSchemeRootTargets = IntMap.empty,
@@ -4625,28 +4847,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isLeft
         selectLocalGammaEdgeOwnership
           directOwners
+          IntMap.empty
           argumentEdge
           [applicationOwner, lambdaOwner]
           ownsOnlyLambda
-          `shouldBe` Just
-            (DirectApplicationEdgeOwnership applicationOwner)
+          `shouldBe` Right
+            (Just (DirectApplicationEdgeOwnership applicationOwner))
         -- The operand wrapper revisits the same edge without carrying the
         -- AApp as its current frame owner.  The precomputed edge map keeps
         -- direct precedence sticky and blocks the enclosing lambda.
         selectLocalGammaEdgeOwnership
           directOwners
+          IntMap.empty
           argumentEdge
           [lambdaOwner]
           ownsOnlyLambda
-          `shouldBe` Just
-            (DirectApplicationEdgeOwnership applicationOwner)
+          `shouldBe` Right
+            (Just (DirectApplicationEdgeOwnership applicationOwner))
         selectLocalGammaEdgeOwnership
           directOwners
+          IntMap.empty
           lambdaEdge
           [lambdaOwner]
           ownsOnlyLambda
-          `shouldBe` Just
-            (FlexibleExteriorEdgeOwnership lambdaOwner)
+          `shouldBe` Right
+            (Just (FlexibleExteriorEdgeOwnership lambdaOwner))
 
       it "closes an argument requirement from its direct application-edge provenance" $ do
         let functionEdge = EdgeId 991900
@@ -4676,6 +4901,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = argumentEdge :| [],
                   lgcDirectApplicationEdgeIds = [argumentEdge],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = exterior,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode exterior,
@@ -4704,6 +4930,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { grRequiredGammaBinders = [requirement],
                   grSourceBinderRefs = IntMap.empty,
                   grAmbientBinderRefs = [],
+                  grTermUsedRootBinderRefs = [],
                   grAmbientGammaAuthorities = IntMap.empty,
                   grLocallyClosedGammaNodes = IntSet.empty
                 }
@@ -4721,6 +4948,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               GaBindParents
                 { gaBindParentsBase = IntMap.empty,
                   gaBaseConstraint = baseConstraint,
+                  gaAnnotationNodeRedirects = IntMap.empty,
                   gaBaseToSolved = IntMap.empty,
                   gaSolvedToBase = IntMap.empty,
                   gaRestoredSchemeRootTargets = IntMap.empty,
@@ -4907,6 +5135,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             dependencyCertificate =
               certificate
                 { ofcConstructedType = dependentConstructedType,
+                  ofcLocallyEmittedBinders =
+                    [(emittedLocalRef, Just dependencyBound)],
                   ofcUsedAmbientBinderRefs = [dependencyRef]
                 }
         closed <-
@@ -4959,6 +5189,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             dependencyCertificate =
               certificate
                 { ofcConstructedType = dependentConstructedType,
+                  ofcLocallyEmittedBinders =
+                    [(emittedLocalRef, Just dependencyBound)],
                   ofcUsedAmbientBinderRefs = [dependencyRef]
                 }
         (projectedAmbientRefs, projectedScheme) <-
@@ -5035,7 +5267,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     [AmbientGammaAuthority ambientClaimRef ambientType],
                   lgccLocalBinderRoutes = IntMap.empty,
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             completedBound =
               TArrow
@@ -5049,6 +5283,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               LocalGammaClosure
                 { lgcEdgeIds = refinementEdge :| [],
                   lgcDirectApplicationEdgeIds = [],
+                  lgcForwardedResultEdgeIds = [],
                   lgcExteriorNode = NodeId 991883,
                   lgcConsumerIdentity =
                     typeBinderIdentityFromNode (NodeId 991883),
@@ -5086,12 +5321,21 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             refinementOwnerCertificate =
               OwnerFinalConstruction
                 { ofcOwner = refinementOwner,
+                  ofcTransparentResultOwners = [],
                   ofcConstructedType = refinementConstructedType,
-                  ofcLocallyEmittedBinderRefs = [semanticRef],
+                  ofcLocallyEmittedBinders =
+                    [(semanticRef, Nothing)],
                   ofcLocalBinderRoutes =
                     IntMap.singleton 991883 semanticRef,
                   ofcUsedAmbientBinderRefs =
                     [dependencyRef, provisionalRef],
+                  ofcUsedSourceBinderAuthorities = IntMap.empty,
+                  ofcAmbientDeclarationAuthorities =
+                    [ AmbientGammaAuthority dependencyRef TBottom,
+                      AmbientGammaAuthority provisionalRef completedBound
+                    ],
+                  ofcAuthoritativeAmbientDeclarations = [],
+                  ofcLambdaParamBoundaryCertificates = [],
                   ofcBodyConsumerBoundRefinements = []
                 }
             refinementSubst =
@@ -5133,6 +5377,75 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             )
         binderBoundFor provisionalRef refinedClosure
           `shouldBe` [Just completedBoundTy]
+        conflictingBoundTy <-
+          requireRight
+            (elabToBound (TestElab.tBase (BaseTy "ConflictingPlannerBound")))
+        let conflictingPlannerScheme =
+              mkElabSchemeWithRefs
+                [ (provisionalRef, Just conflictingBoundTy),
+                  (dependencyRef, Nothing),
+                  (semanticRef, Nothing)
+                ]
+                ( TArrow
+                    (tVarWithRef dependencyRef)
+                    (tVarWithRef semanticRef)
+                )
+            finalizedRefinedCertificate =
+              finalizeBodyConsumerBoundRefinementsForTest
+                refinementOwner
+                [provisionalRef]
+                [dependencyRef]
+                refinedCertificate
+        authorityOrderedClosure <-
+          requireRight
+            ( prepareRootClosureSchemeWithOwnerFinalAndApplicationsForTest
+                [refinementClosure]
+                [ambientApplicationCertificate]
+                refinementSubst
+                conflictingPlannerScheme
+                finalizedRefinedCertificate
+            )
+        schemeBinderRefs authorityOrderedClosure
+          `shouldBe`
+            [ (dependencyRef, Nothing),
+              (provisionalRef, Just completedBoundTy)
+            ]
+        let projectedAmbientRef =
+              typeBinderRefFromIdentity
+                ( typeBinderIdentityFromStructural
+                    (UniqueIdentity 991893)
+                    StructuralSelfBinder
+                )
+                "$projected_self"
+            finalizedEnclosingCertificate =
+              finalizeBodyConsumerBoundRefinementsForTest
+                refinementOwner
+                []
+                [dependencyRef, provisionalRef]
+                refinedCertificate
+            projectedPlannerScheme =
+              mkElabSchemeWithRefs
+                [ (dependencyRef, Nothing),
+                  (projectedAmbientRef, Just completedBoundTy),
+                  (semanticRef, Nothing)
+                ]
+                ( TArrow
+                    (tVarWithRef dependencyRef)
+                    (tVarWithRef semanticRef)
+                )
+        projectedEnclosingClosure <-
+          requireRight
+            ( prepareRootClosureSchemeWithOwnerFinalAndApplicationsForTest
+                []
+                []
+                (IntMap.singleton 991882 projectedAmbientRef)
+                projectedPlannerScheme
+                finalizedEnclosingCertificate
+            )
+        binderBoundFor projectedAmbientRef projectedEnclosingClosure
+          `shouldBe` [Just completedBoundTy]
+        binderBoundFor provisionalRef projectedEnclosingClosure
+          `shouldBe` []
         attachBodyConsumerBoundRefinementForTest
           DirectAmbientEstablished
           [(provisionalRef, Just completedBoundTy)]
@@ -5164,7 +5477,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             dischargedCertificate =
               certificate
                 { ofcConstructedType = exactType,
-                  ofcLocallyEmittedBinderRefs = [],
+                  ofcLocallyEmittedBinders = [],
                   ofcLocalBinderRoutes = IntMap.empty,
                   ofcUsedAmbientBinderRefs = []
                 }
@@ -5179,6 +5492,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         schemeBinderRefs closed `shouldBe` []
         schemeBody closed `shouldBe` exactType
 
+      it "keeps an independent owner-emitted binder local while discharging another Gamma slot" $ do
+        closed <-
+          requireRight
+            ( prepareRootClosureSchemeWithOwnerFinalForTest
+                [closure]
+                IntMap.empty
+                (Elab.schemeFromType constructedType)
+                certificate
+            )
+        schemeBinderRefs closed `shouldBe` []
+        schemeBody closed `shouldBe` constructedType
+
       it "does not discharge a local Gamma slot still used by the exact owner" $ do
         expectCertificateFailure
           "used local Gamma slot"
@@ -5188,7 +5513,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               (Elab.schemeFromType (tVarWithRef consumerRef))
               certificate
                 { ofcConstructedType = tVarWithRef consumerRef,
-                  ofcLocallyEmittedBinderRefs = [],
+                  ofcLocallyEmittedBinders = [],
                   ofcLocalBinderRoutes = IntMap.empty,
                   ofcUsedAmbientBinderRefs = [consumerRef]
                 }
@@ -5338,7 +5663,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             applicationCertificate =
               LocalGammaConstructionCertificate
                 { lgccOwner = applicationOwner,
-                  lgccConstructedType = tVarWithRef emittedLocalRef,
+                  lgccConstructedType =
+                    TForallRef
+                      emittedLocalRef
+                      (Just consumerBound)
+                      (tVarWithRef emittedLocalRef),
                   lgccConstruction =
                     LocalGammaEmitted
                       ((emittedLocalRef, Just consumerBound) :| [])
@@ -5351,7 +5680,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     IntMap.singleton localRouteKey emittedLocalRef,
                   lgccSourceBinderAuthorities =
                     IntMap.singleton localRouteKey emittedLocalRef,
-                  lgccUsedAmbientBinderRefs = [ambientRef]
+                  lgccUsedAmbientBinderRefs = [ambientRef],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
         (constructionBinders, constructionAliases) <-
           requireRight
@@ -5387,7 +5718,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       (getNodeId exteriorNode)
                       consumedRef,
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             monomorphicScheme =
               mkElabSchemeWithRefs
@@ -5426,7 +5759,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       (getNodeId plannedLocalNode)
                       emittedLocalRef,
                   lgccSourceBinderAuthorities = IntMap.empty,
-                  lgccUsedAmbientBinderRefs = []
+                  lgccUsedAmbientBinderRefs = [],
+                  lgccEnclosingTypeAbsBinders = [],
+                  lgccUsedSourceBinderAuthorities = IntMap.empty
                 }
             monomorphicScheme =
               mkElabSchemeWithRefs
@@ -5876,6 +6211,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       reconcileRootSourceBinderAliasesForTest
         [graphRef]
         [sourceRef]
+        IntMap.empty
         sourceRefs
         staleAliases
         `shouldBe` Right (IntMap.singleton routeKey sourceRef)
@@ -5895,6 +6231,29 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       reconcileRootSourceBinderAliasesForTest
         [graphRef]
         [sourceRef, graphRef]
+        IntMap.empty
+        sourceRefs
+        staleAliases
+        `shouldBe` Right (IntMap.singleton routeKey sourceRef)
+
+    it "uses a prepared substitution route when its quotient binder survives projection" $ do
+      let routeKey = 993120
+          representativeNode = NodeId 993121
+          representativeRef =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode representativeNode)
+              "representative"
+          sourceRef =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromUnique (UniqueIdentity 993122))
+              "source"
+          originalSubst = IntMap.singleton routeKey representativeRef
+          sourceRefs = IntMap.singleton routeKey sourceRef
+          staleAliases = IntMap.singleton routeKey representativeRef
+      reconcileRootSourceBinderAliasesForTest
+        [representativeRef]
+        [sourceRef, representativeRef]
+        originalSubst
         sourceRefs
         staleAliases
         `shouldBe` Right (IntMap.singleton routeKey sourceRef)
@@ -5916,6 +6275,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           reconcileRootSourceBinderAliasesForTest
             [unrelatedGraphRef]
             [sourceRef, unrelatedGraphRef]
+            IntMap.empty
             sourceRefs
             conflictingAliases
         of
@@ -6025,7 +6385,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         existingSubst
         `shouldBe` Right existingSubst
 
-    it "lets only a direct source declaration replace a root graph placeholder" $ do
+    it "lets an exact free-term route replace an unprotected root graph placeholder" $ do
       let sourceNode = NodeId 992100
           sourceNodeKey = getNodeId sourceNode
           rootGraphRef =
@@ -6040,6 +6400,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           rootSubst = IntMap.singleton sourceNodeKey rootGraphRef
           alias = (sourceNodeKey, sourceRef)
       insertPreparedTermSourceBinderAliasForTest
+        Set.empty
         (IntSet.singleton sourceNodeKey)
         sourceRefs
         rootSubst
@@ -6047,21 +6408,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         `shouldBe` Right (IntMap.singleton sourceNodeKey sourceRef)
       case
           insertPreparedTermSourceBinderAliasForTest
+            Set.empty
             IntSet.empty
             sourceRefs
             rootSubst
             alias
         of
-        Left (ValidationFailed messages) ->
-          messages
-            `shouldSatisfy` any
-              (isInfixOf "prepared root and source-binder substitutions disagree")
+        Right projected ->
+          projected `shouldBe` IntMap.singleton sourceNodeKey sourceRef
         Left err ->
           expectationFailure
-            ("expected expanded-only source alias rejection, got " ++ show err)
-        Right projected ->
-          expectationFailure
-            ("expected expanded-only source alias rejection, got " ++ show projected)
+            ("expected exact free-term source projection, got " ++ show err)
+      insertPreparedTermSourceBinderAliasForTest
+        (Set.singleton (typeBinderRefIdentity rootGraphRef))
+        IntSet.empty
+        sourceRefs
+        rootSubst
+        alias
+        `shouldBe` Right rootSubst
 
     it "projects every existing route in a shared source alias class" $ do
       let graphNode = NodeId 161
@@ -6533,6 +6897,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents baseConstraint,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.fromList [(getNodeId baseRootN, rootN), (getNodeId baseIntN, intN)],
                 gaSolvedToBase = IntMap.fromList [(getNodeId rootN, baseRootN), (getNodeId intN, baseIntN)],
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -11164,7 +11529,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         { crConstraint = c0,
           crAnnotated = ann,
           crIdentityGenerator = packetIdentityGenerator,
-          crAnnSourceTypes = annSourceTypes,
+          crAnnExpectedTypes = annExpectedTypes,
           crExactProducerTypes = exactProducerTypes,
           crSourceTypeBinderIdentities = sourceTypeBinderIdentities
         } <-
@@ -11174,30 +11539,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         requireRight (firstShowE (Acyc.breakCyclesAndCheckAcyclicity cNorm))
       pres <-
         requireRight (firstShowE (computePresolution defaultTraceConfig acyc cAcyclic))
-      (annExpectedTypes, preparationIdentityGenerator) <-
-        requireRight
-          ( foldM
-              ( \(expectedTypes, generator) (nodeKey, sourceType) -> do
-                  (expectedType, generator') <-
-                    sourceTypeToElabTypeWithIdentitiesFromSupply
-                      generator
-                      Map.empty
-                      Map.empty
-                      sourceType
-                  pure
-                    ( IntMap.insert nodeKey expectedType expectedTypes,
-                      generator'
-                    )
-              )
-              (IntMap.empty, packetIdentityGenerator)
-              (IntMap.toAscList annSourceTypes)
-          )
       artifact <-
         requireRight
           ( firstShowE
               ( prepareGeneralizationArtifact
                   defaultTraceConfig
-                  preparationIdentityGenerator
+                  packetIdentityGenerator
                   exactProducerTypes
                   annExpectedTypes
                   sourceTypeBinderIdentities
@@ -12425,13 +12772,27 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           case Elab.schemeToType c1Scheme of
             TForallRef schemeBinderRef Nothing _ -> do
               typeBinderRefsSameIdentity schemeBinderRef resultBinderRef `shouldBe` True
-              containsIdentityLinkedConstructionBridge c1Rhs `shouldBe` True
+              unless
+                (containsIdentityLinkedConstructionBridge c1Rhs)
+                ( expectationFailure
+                    ( "Expected c1 construction to retain an identity-linked abstraction/instantiation bridge: "
+                        ++ show c1Rhs
+                    )
+                )
               case typeBinderRefNode resultBinderRef of
                 Just binderNode ->
-                  IntMap.member
-                    (getNodeId binderNode)
-                    semanticMetaParents
-                    `shouldBe` True
+                  unless
+                    ( IntMap.member
+                        (getNodeId binderNode)
+                        semanticMetaParents
+                    )
+                    ( expectationFailure
+                        ( "Expected c1 result binder to be an expansion semantic meta; binder="
+                            ++ show binderNode
+                            ++ "; semantic metas="
+                            ++ show (IntMap.keys semanticMetaParents)
+                        )
+                    )
                 Nothing ->
                   expectationFailure
                     ("Expected c1 result binder to retain its graph construction identity: "
@@ -12522,6 +12883,28 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (EApp (EVar "id") (EVar "y"))
             )
 
+        applicationReturningAnnotatedIdentityExpr :: SurfaceExpr
+        applicationReturningAnnotatedIdentityExpr =
+          EApp
+            ( ELamAnn
+                "innerUnused"
+                (STBase "Int")
+                ( EApp
+                    ( ELam
+                        "ignored"
+                        ( EAnn
+                            (ELam "x" (EVar "x"))
+                            ( mkForalls
+                                [("a", Nothing)]
+                                (STArrow (STVar "a") (STVar "a"))
+                            )
+                        )
+                    )
+                    (ELit (LBool False))
+                )
+            )
+            (ELit (LInt 8))
+
         expectForallIdentityArrow :: ElabType -> Expectation
         expectForallIdentityArrow ty =
           case ty of
@@ -12574,6 +12957,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of
         Left err -> expectationFailure ("pipeline failed: " ++ renderPipelineError err)
         Right (_term, ty) -> expectForallIdentityArrow ty
+
+    it "gate: application preserves the polymorphic result constructed by its function body" $ do
+      ty <-
+        expectCanonicalPipelineSuccessType
+          applicationReturningAnnotatedIdentityExpr
+      expectForallIdentityArrow ty
 
   describe "Phase 4 regression matrix" $ do
     it "preserves thesis-exact OpWeaken on annotation edges and expansion assignments" $ do

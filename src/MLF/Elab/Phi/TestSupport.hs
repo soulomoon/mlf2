@@ -100,6 +100,7 @@ orderPhiBindersByPrecForTest orderKeys orderedBinderKeys =
     orderPhiBindersByPrec
         id
         (\nodeId -> IntSet.member (getNodeId nodeId) orderedBinderKeys)
+        (\_ _ -> False)
         orderKeys
 
 phiFromEdgeWitnessWithTraceForTest
@@ -181,6 +182,7 @@ gaBindParentsFromView presolutionView =
     GaBindParents
         { gaBindParentsBase = cBindParents constraint
         , gaBaseConstraint = constraint
+        , gaAnnotationNodeRedirects = IntMap.empty
         , gaBaseToSolved = identityMap
         , gaSolvedToBase = identityMap
         , gaRestoredSchemeRootTargets = IntMap.empty

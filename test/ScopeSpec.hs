@@ -86,6 +86,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = cBindParents constraint
                         , gaBaseConstraint = constraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = IntMap.empty
                         , gaSolvedToBase = IntMap.empty
                         , gaRestoredSchemeRootTargets = IntMap.empty
@@ -140,6 +141,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = cBindParents constraint
                         , gaBaseConstraint = constraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = IntMap.empty
                         , gaSolvedToBase = IntMap.empty
                         , gaRestoredSchemeRootTargets = IntMap.empty

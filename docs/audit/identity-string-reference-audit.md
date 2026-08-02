@@ -1,7 +1,7 @@
 # Identity/String Reference Audit
 
 - **Created:** 2026-07-05
-- **Last reviewed:** 2026-07-25
+- **Last reviewed:** 2026-07-27
 - **Status:** Implemented in the current working tree
 - **Canonical decisions:**
   `docs/adr/2026-06-18-resolved-xmlf-identity-ir.md` and
@@ -30,6 +30,7 @@ fallback that repairs missing identity from a spelling.
 | Surface expressions | `Expr` is indexed by `RawTermReferences` or `ResolvedTermReferences`; resolved nodes can only contain `ResolvedTermReference IdDetails name`. |
 | Checked xMLF | Every executable occurrence and lambda/let binder in `XmlfTerm` contains `ResolvedVar`; no unresolved constructor alternative exists. |
 | Source type views | Abstract `TypeView` stores one node tree whose semantic heads and binders carry `SymbolIdentity` or `TypeBinderIdentity`; missing payloads fail construction. |
+| eMLF source annotations | `MLF.Elab.SourceType` converts normalized annotations from carried head/binder identities. A missing head or binder fails at the boundary; free existentials receive fresh flexible identities, while lexical `forall`/`mu` binders retain their resolved identities. |
 | Constraints and evidence | `ConstraintInfo`, `ClassApplicationKey`, `EvidenceMethodKey`, and `EvidenceMethod` carry class, type, method, and executable identities directly. |
 | Lowered and checked bindings | `LoweredBinding` requires source and expected `TypeView`s plus a closed `LoweredBindingIdentity` (`top-level`, `constructor`, or `method`); local, environment, and deferred identities cannot be constructed as module bindings. `CheckedBinding` requires `ResolvedVar`, `TypeView`, `ElabType`, and `XmlfTerm`. |
 | Backend IR | Every constructible module, data, constructor, binding, term reference, lexical binder, pattern binder, type head, and type binder carries identity. Identity-erasing patterns are match-only views. |
@@ -115,6 +116,32 @@ and shape. `TypeViewSubst` and `TypeBinderSubst` are both direct
 `Map TypeBinderIdentity TypeView` views. The former string-alias sidecar and
 string-shaped substitution adapter were deleted. Display alias maps exist only
 for source-shaped lookup boundaries; ambiguous aliases are omitted.
+
+### eMLF source annotations and owner publication
+
+`MLF.Elab.SourceType` is the source-annotation conversion boundary used by
+constraint generation, preparation, and elaboration. It consumes the
+resolver-owned head and binder identity maps and constructs `ElabType`
+directly. It does not allocate a rigid root when a binder lookup fails, and it
+does not recover a head or binder by matching its spelling. A genuinely free
+source variable is allocated once as a flexible existential; a lexical
+`forall` or `mu` enters its carried source identity.
+
+Compiler-exact preparation keeps strict merging for identities established in
+the same source-binder domain. When preparation enters a nested exact
+annotation, it uses an explicit left-biased lexical operation so the inner
+source binder shadows the outer route for that subtree. This is not conflict
+recovery: each domain has already proved its own one-to-one
+source-to-construction quotient, and a same-layer disagreement still fails.
+
+Owner-final let publication distinguishes an exact ambient Gamma declaration
+from a graph alias that is merely reachable in the type environment. Ambient
+use is retained only when the enclosing environment owns the exact identity
+and the construction certificate or an enclosing authoritative term scheme
+proves the declaration. A construction-local bounded declaration instead
+produces the matching type substitution and explicit `Lambda`/`N`
+specialization together. The published term and scheme therefore agree by
+construction; no later closure pass invents or repairs a binder.
 
 ### Backend IR and structural matching
 
@@ -236,12 +263,18 @@ Presolution tests cover atomic packet conflict rejection, composed χₑ role
 evidence, quotient-projected construction placement, collapsed same-source
 placement, and retained cross-source placement. Pipeline and program tests
 cover the exact paper `g g` term together with ambient-Γ, locally closed Γ,
-and explicit positional-forall regressions. The required completion gate is:
+explicit positional-forall regressions, nested owner chains, source-owned
+application Gamma, bounded owner-final publication, principal identity-argument
+selection over provisional results, and certificate-driven ambient re-entry at
+both let checking boundaries. Generated Chapter-15 properties independently
+exercise the same construction families over randomized graph identities and
+shapes. The required completion gate is:
 
 ```sh
 cabal build all && cabal test
 ```
 
 The final serialized completion result is recorded in `implementation_notes.md`
-with the change that closes this audit. Until that fresh gate is recorded, the
-working-tree implementation is complete but its completion evidence is pending.
+with the change that closes this audit. Passing these executable checks
+establishes implementation completeness for the compiler's supported language;
+it is not a mechanized proof of every eMLF metatheorem.

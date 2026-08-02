@@ -23,10 +23,15 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Graph
+import MLF.Elab.Types (ElabType)
 import MLF.Frontend.ConstraintGen.Types (Binding, BindingKey, ConstraintError (UnknownTypeHead))
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (NormSrcType, ResolvedSrcType)
-import MLF.Types.Identity (TypeBinderIdentity)
+import MLF.Types.Identity
+  ( IdentityGenerator,
+    TypeBinderIdentity,
+    initialIdentityGenerator,
+  )
 
 data ScopeFrame = ScopeFrame
   { sfNodes :: !IntSet.IntSet
@@ -45,6 +50,10 @@ data BuildState = BuildState
     bsTypeHeadIdentities :: !(Map.Map String SymbolIdentity),
     -- | Resolved source type binders available while translating annotations.
     bsTypeBinderIdentities :: !(Map.Map String TypeBinderIdentity),
+    -- | Program-wide supply after identities allocated during constraint
+    -- construction. Source annotation binders are allocated here so their
+    -- graph nodes and expected elaboration type agree by construction.
+    bsIdentityGenerator :: !IdentityGenerator,
     -- | One graph node per source binder and definition root.
     bsTypeBinderNodes :: !(Map.Map (GenNodeId, TypeBinderIdentity) NodeId),
     -- | Source identity carried by each graph node allocated for, or proven by
@@ -85,6 +94,9 @@ data BuildState = BuildState
     -- retain binder identities and types that presolution may strip (e.g.
     -- TForall inside a μ body).
     bsAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
+    -- | Identity-bearing expected types constructed together with the
+    -- corresponding annotation graph.
+    bsAnnExpectedTypes :: !(IntMap.IntMap ElabType),
     -- | External assumptions materialized selectively for referenced free
     -- variables.  The initial environment keeps compact lazy entries; once a
     -- variable is needed, its graph binding is cached here so later
@@ -116,6 +128,7 @@ mkInitialStateWithPolySyms polySyms =
       bsNextEdge = 0,
       bsTypeHeadIdentities = Map.empty,
       bsTypeBinderIdentities = Map.empty,
+      bsIdentityGenerator = initialIdentityGenerator,
       bsTypeBinderNodes = Map.empty,
       bsTypeBinderNodeIdentities = IntMap.empty,
       bsTypeBinderRoot = Nothing,
@@ -130,6 +143,7 @@ mkInitialStateWithPolySyms polySyms =
       bsExactProducerTypes = IntMap.empty,
       bsTyConArity = Map.empty,
       bsAnnSourceTypes = IntMap.empty,
+      bsAnnExpectedTypes = IntMap.empty,
       bsExternalBindingCache = Map.empty,
       bsCurrentRootOwner = Nothing,
       bsRootOwnership = emptyRootOwnershipIndex

@@ -873,9 +873,23 @@ spec = do
                     Elab.ETyInst
                         (Elab.eTyAbsWithRef binderRef Nothing literal)
                         Elab.InstElim
+                secondBinderRef =
+                    Elab.typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 992224))
+                        "b"
+                composedElimination =
+                    Elab.ETyInst
+                        ( Elab.eTyAbsWithRef
+                            binderRef
+                            Nothing
+                            (Elab.eTyAbsWithRef secondBinderRef Nothing literal)
+                        )
+                        (Elab.InstSeq Elab.InstElim Elab.InstElim)
                 introduction =
                     Elab.ETyInst literal Elab.InstIntro
             normalizeCheckedTypeRedexesForTest elimination
+                `shouldBe` literal
+            normalizeCheckedTypeRedexesForTest composedElimination
                 `shouldBe` literal
             normalizeCheckedTypeRedexesForTest introduction
                 `shouldBe` introduction

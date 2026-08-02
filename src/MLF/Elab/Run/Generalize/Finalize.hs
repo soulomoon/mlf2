@@ -116,6 +116,35 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
                         )
                         bindParentsFinalAligned'
                         instCopyMap
+                restoreLexicalTypeParents acc =
+                    IntMap.foldlWithKey'
+                        (\acc' childKey (parentRef, flag) ->
+                            case (nodeRefFromKey childKey, parentRef) of
+                                (TypeRef childBase, TypeRef parentBase)
+                                    | Just parentNode <-
+                                        NodeAccess.lookupNode base parentBase
+                                    , case parentNode of
+                                        Types.TyForall {} -> True
+                                        Types.TyMu {} -> True
+                                        _ -> False ->
+                                        case
+                                            ( mapBaseRef (typeRef childBase)
+                                            , mapBaseRef parentRef
+                                            )
+                                        of
+                                            (Just childRef', Just parentRef') ->
+                                                applyBindParent
+                                                    allowBindEdge
+                                                    Override
+                                                    childRef'
+                                                    parentRef'
+                                                    flag
+                                                    acc'
+                                            _ -> acc'
+                                _ -> acc'
+                        )
+                        acc
+                        bindParentsBase
                 solvedSource node =
                     let canonicalKey = getNodeId (canonical node)
                         rawKey = getNodeId node
@@ -197,7 +226,9 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
                         expansionConstructionParents
                 bindParentsAuthoritative =
                     restoreMissingExpansionConstructionParents
-                        (restoreSolvedParents bindParentsFinalAligned'')
+                        ( restoreLexicalTypeParents
+                            (restoreSolvedParents bindParentsFinalAligned'')
+                        )
                 genMergedOwned =
                     Types.GenNodeMap $
                         IntMap.map
@@ -280,6 +311,7 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
             , GaBindParents
                 { gaBindParentsBase = bindParentsBase
                 , gaBaseConstraint = base
+                , gaAnnotationNodeRedirects = geRedirects env
                 , gaBaseToSolved = mapBaseToSolved alignedMapping
                 , gaSolvedToBase = mapSolvedToBase alignedMapping
                 , gaRestoredSchemeRootTargets = p1RestoredSchemeRootTargets phase1

@@ -280,13 +280,7 @@ hasOwnResultAbstraction = go
     go current =
       case current of
         Elab.ETyAbsRef resultRef (Just _) body ->
-          case body of
-            Elab.ELam _ _ ->
-              any
-                (ElabTypes.typeBinderRefsSameIdentity resultRef)
-                (instAbstractionRefs body)
-                || go body
-            _ -> go body
+          resultPathConsumes resultRef body || go body
         Elab.ETyAbsRef _ Nothing body -> go body
         Elab.ELam _ body -> go body
         Elab.EApp function argument -> go function || go argument
@@ -296,6 +290,21 @@ hasOwnResultAbstraction = go
         Elab.EUnroll body -> go body
         Elab.EVarNode _ -> False
         Elab.ELit _ -> False
+
+    -- Top-level let-bound helpers are transparent to the returned value.
+    -- Follow only the let body so an unrelated coercion in a helper RHS
+    -- cannot satisfy the assertion for the root result binder.
+    resultPathConsumes resultRef current =
+      case current of
+        Elab.ELet _ _ _ body ->
+          resultPathConsumes resultRef body
+        Elab.ETyAbsRef _ _ body ->
+          resultPathConsumes resultRef body
+        Elab.ELam _ body ->
+          any
+            (ElabTypes.typeBinderRefsSameIdentity resultRef)
+            (instAbstractionRefs body)
+        _ -> False
 
 instAbstractionRefs :: Elab.XmlfTerm -> [ElabTypes.TypeBinderRef]
 instAbstractionRefs current =
@@ -587,6 +596,7 @@ sourceDomainRaiseFixture sourceFlag replayFlag = do
       GaBindParents
         { gaBindParentsBase = cBindParents baseConstraint,
           gaBaseConstraint = baseConstraint,
+          gaAnnotationNodeRedirects = IntMap.empty,
           gaBaseToSolved =
             IntMap.fromList
               [ (getNodeId root, root),
@@ -716,6 +726,7 @@ resultTypeInputsForArtifacts
           GaBindParents
             { gaBindParentsBase = cBindParents c1,
               gaBaseConstraint = c1,
+              gaAnnotationNodeRedirects = IntMap.empty,
               gaBaseToSolved = baseToSolved,
               gaSolvedToBase = solvedToBase,
               gaRestoredSchemeRootTargets = IntMap.empty,
@@ -1712,6 +1723,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents solvedConstraint,
                 gaBaseConstraint = solvedConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.fromList
                     [ (getNodeId baseMappedRoot, solvedRoot),
@@ -1771,6 +1783,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents baseConstraint,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.fromList
                     [ (getNodeId sharedRoot, sharedRoot),
@@ -1831,6 +1844,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents baseConstraint,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.singleton (getNodeId baseRoot) liveRoot,
                 gaSolvedToBase = IntMap.singleton (getNodeId liveRoot) baseRoot,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -1885,6 +1899,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents baseConstraint,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved =
                   IntMap.fromList
                     [ (getNodeId baseRoot, liveRoot),
@@ -2092,6 +2107,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents constraint,
                 gaBaseConstraint = constraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.singleton (getNodeId root) root,
                 gaSolvedToBase = IntMap.singleton (getNodeId root) root,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -2118,6 +2134,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents constraint,
                 gaBaseConstraint = constraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.singleton (getNodeId root) root,
                 gaSolvedToBase = IntMap.singleton (getNodeId root) root,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -3747,6 +3764,66 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           producerTerm = Elab.EVarNode producer
           env = Elab.mkTypeCheckEnvWithResolvedTerms [(producer, sourceTy)] Map.empty
           expectedInst = Elab.InstSeq Elab.InstElim Elab.InstElim
+      constructed <-
+        requireRight
+          (Annotation.constructExactTermAtType env sourceTy targetTy producerTerm)
+      constructed `shouldBe` Elab.ETyInst producerTerm expectedInst
+      Elab.typeCheckWithEnv env constructed `shouldBe` Right targetTy
+
+    it "infers multiple prefix applications before eliminating a vacuous bounded suffix" $ do
+      let domainRef = graphTypeBinderRef 992091 "domain"
+          codomainRef = graphTypeBinderRef 992092 "codomain"
+          vacuousRef = graphTypeBinderRef 992093 "vacuous"
+          ambientRef = graphTypeBinderRef 992094 "ambient"
+          polymorphicRef = graphTypeBinderRef 992095 "polymorphic"
+          boolTy = TestElab.tBase (BaseTy "Bool")
+          intTy = TestElab.tBase (BaseTy "Int")
+          ambientTy = ElabTypes.tVarWithRef ambientRef
+          polymorphicTy =
+            ElabTypes.tForallWithRef
+              polymorphicRef
+              Nothing
+              ( Elab.TArrow
+                  (ElabTypes.tVarWithRef polymorphicRef)
+                  (ElabTypes.tVarWithRef polymorphicRef)
+              )
+          codomainTy = Elab.TArrow polymorphicTy intTy
+          sourceTy =
+            ElabTypes.tForallWithRef
+              domainRef
+              Nothing
+              ( ElabTypes.tForallWithRef
+                  codomainRef
+                  Nothing
+                  ( ElabTypes.tForallWithRef
+                      vacuousRef
+                      (Just (boundFromType boolTy))
+                      ( Elab.TArrow
+                          (ElabTypes.tVarWithRef domainRef)
+                          (ElabTypes.tVarWithRef codomainRef)
+                      )
+                  )
+              )
+          targetTy = Elab.TArrow ambientTy codomainTy
+          producer =
+            ResolvedVar
+              { resolvedVarType = sourceTy
+              , resolvedVarDetails =
+                  DeferredId
+                    (generatedDeferredRefForName "multi-prefix-producer")
+              }
+          producerTerm = Elab.EVarNode producer
+          env =
+            Elab.mkTypeCheckEnvWithResolvedTerms
+              [(producer, sourceTy)]
+              (Map.singleton ambientRef Elab.TBottom)
+          expectedInst =
+            Elab.InstSeq
+              (Elab.InstApp ambientTy)
+              ( Elab.InstSeq
+                  (Elab.InstApp codomainTy)
+                  Elab.InstElim
+              )
       constructed <-
         requireRight
           (Annotation.constructExactTermAtType env sourceTy targetTy producerTerm)
@@ -7511,6 +7588,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         compatible sourceRef Nothing Nothing `shouldBe` True
         compatible otherRef Nothing Nothing `shouldBe` False
 
+      it "rejects a fresh construction route between incompatible materialized bounds" $ do
+        let graphRef = graphTypeBinderRef 7 "graph"
+            outwardRef = graphTypeBinderRef 8 "outward"
+            intTy = TestElab.tBase (BaseTy "Int")
+            boolTy = TestElab.tBase (BaseTy "Bool")
+            compatible =
+              AlgebraTestSupport.constructionRouteBoundCompatibleForTest
+                []
+                graphRef
+                outwardRef
+        compatible (Just intTy) (Just intTy) `shouldBe` True
+        compatible (Just intTy) (Just boolTy) `shouldBe` False
+
       it "subtracts a construction identity whose final route is an exact ambient Gamma identity" $ do
         let graphRef = graphTypeBinderRef 169 "consumer"
             ambientRef =
@@ -7978,6 +8068,34 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (ElabTypes.typeBinderRefIdentity classParamRef)
               , IntMap.empty
               , bindings
+              )
+
+      it "completes a source-exact parameter's own pending graph root" $ do
+        let paramNode = NodeId 992147
+            pendingParamRef = graphTypeBinderRef 992147 "pending"
+            exactParamRef =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992148))
+                "a"
+            exactParamTy = ElabTypes.tVarWithRef exactParamRef
+            aliases =
+              IntMap.singleton
+                (getNodeId paramNode)
+                pendingParamRef
+
+        AlgebraTestSupport.installExactLambdaParamBoundaryForTest
+          paramNode
+          exactParamTy
+          (Just (ElabTypes.tVarWithRef pendingParamRef))
+          aliases
+          Map.empty
+          `shouldBe`
+            Right
+              ( exactParamTy
+              , Set.singleton
+                  (ElabTypes.typeBinderRefIdentity exactParamRef)
+              , IntMap.empty
+              , Map.empty
               )
 
       it "keeps method-local forall and class identities at a polymorphic evidence boundary" $ do
@@ -8788,6 +8906,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               GaBindParents
                 { gaBindParentsBase = cBindParents c,
                   gaBaseConstraint = c,
+                  gaAnnotationNodeRedirects = IntMap.empty,
                   gaBaseToSolved = identityNodeMap,
                   gaSolvedToBase = identityNodeMap,
                   gaRestoredSchemeRootTargets = IntMap.empty,
@@ -11768,6 +11887,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = cBindParents base,
                 gaBaseConstraint = base,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.empty,
                 gaSolvedToBase = IntMap.empty,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -11986,6 +12106,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = IntMap.empty,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.empty,
                 gaSolvedToBase = IntMap.singleton (getNodeId mappedSolved) mappedBase,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -12022,6 +12143,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = baseBindParents,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.singleton (getNodeId baseN) solvedN,
                 gaSolvedToBase = IntMap.singleton (getNodeId solvedN) baseN,
                 gaRestoredSchemeRootTargets = IntMap.empty,
@@ -12079,6 +12201,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             GaBindParents
               { gaBindParentsBase = baseBindParents,
                 gaBaseConstraint = baseConstraint,
+                gaAnnotationNodeRedirects = IntMap.empty,
                 gaBaseToSolved = IntMap.singleton (getNodeId baseN) solvedN,
                 gaSolvedToBase = IntMap.singleton (getNodeId solvedN) baseN,
                 gaRestoredSchemeRootTargets = IntMap.empty,

@@ -34,6 +34,10 @@ data TypeRootPlanInput p = TypeRootPlanInput
     , trpiTargetIsTyVar :: Bool
     , trpiTargetBoundUnderOtherGen :: Bool
     , trpiNamedUnderGaSet :: IntSet.IntSet
+    -- | Edge-result variables whose exact declarations are owned by the
+    -- required Gamma plan.  Their bound is S'(operated), but the generalized
+    -- body remains the result variable itself: @forall (a >= S'(n)). a@.
+    , trpiRequiredGammaKeys :: IntSet.IntSet
     , trpiTypeRoot0 :: NodeId
     , trpiTypeRootFromBoundVar :: Maybe NodeId
     , trpiTypeRootHasNamedOutsideGamma :: Bool
@@ -84,6 +88,7 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         targetIsTyVar = trpiTargetIsTyVar
         targetBoundUnderOtherGen = trpiTargetBoundUnderOtherGen
         namedUnderGaSet = trpiNamedUnderGaSet
+        requiredGammaKeys = trpiRequiredGammaKeys
         typeRoot0 = trpiTypeRoot0
         typeRootFromBoundVar = trpiTypeRootFromBoundVar
         typeRootHasNamedOutsideGamma = trpiTypeRootHasNamedOutsideGamma
@@ -109,31 +114,33 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                         Nothing -> False
                 _ -> False
         useBoundTypeRootLocal =
-            restoredSchemeRootUsesBound
-                || ( (not targetIsSchemeRootForScope || targetBoundUnderOtherGen)
-                        && case targetBound of
-                            Just bnd ->
-                                let bndC = canonical bnd
-                                    boundIsSchemeBody =
-                                        IntMap.member (getNodeId bndC) schemeRootByBody
-                                    -- A result wrapper owned by a nested root is not a
-                                    -- binder of the enclosing scheme.  When that wrapper
-                                    -- owns a complete structural bound, the bound is its
-                                    -- authoritative result type; reifying the wrapper
-                                    -- itself would manufacture a free type variable and
-                                    -- make the real binders look vacuous.  Locally named
-                                    -- Gamma variables remain flexible and therefore keep
-                                    -- the wrapper as their type root.
-                                    targetOwnsStructuralBound =
-                                        targetBoundUnderOtherGen
-                                            && not targetInGammaLocal
-                                            && case IntMap.lookup (nodeRefKey (typeRef bndC)) bindParents of
-                                                Just (TypeRef owner, _) ->
-                                                    canonical owner == canonical target0
-                                                        && isStructuralNode bndC
-                                                _ -> False
-                                in boundIsSchemeBody || targetOwnsStructuralBound
-                            Nothing -> False
+            not targetIsRequiredGamma
+                && ( restoredSchemeRootUsesBound
+                        || ( (not targetIsSchemeRootForScope || targetBoundUnderOtherGen)
+                                && case targetBound of
+                                    Just bnd ->
+                                        let bndC = canonical bnd
+                                            boundIsSchemeBody =
+                                                IntMap.member (getNodeId bndC) schemeRootByBody
+                                            -- A result wrapper owned by a nested root is not a
+                                            -- binder of the enclosing scheme.  When that wrapper
+                                            -- owns a complete structural bound, the bound is its
+                                            -- authoritative result type; reifying the wrapper
+                                            -- itself would manufacture a free type variable and
+                                            -- make the real binders look vacuous.  Locally named
+                                            -- Gamma variables remain flexible and therefore keep
+                                            -- the wrapper as their type root.
+                                            targetOwnsStructuralBound =
+                                                targetBoundUnderOtherGen
+                                                    && not targetInGammaLocal
+                                                    && case IntMap.lookup (nodeRefKey (typeRef bndC)) bindParents of
+                                                        Just (TypeRef owner, _) ->
+                                                            canonical owner == canonical target0
+                                                                && isStructuralNode bndC
+                                                        _ -> False
+                                        in boundIsSchemeBody || targetOwnsStructuralBound
+                                    Nothing -> False
+                           )
                    )
         schemeBodyRootLocal =
             case targetBound of
@@ -145,6 +152,8 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 Nothing -> typeRoot0
         targetInGammaLocal =
             IntSet.member (canonKey target0) namedUnderGaSet
+        targetIsRequiredGamma =
+            IntSet.member (canonKey target0) requiredGammaKeys
         targetIsBaseLikeLocal =
             isBaseLikeKey (canonKey target0)
         schemeBodyChildUnderGenLocal =
@@ -216,8 +225,13 @@ buildTypeRootPlan TypeRootPlanInput{..} =
             if baseRootIsStructuralSource baseRoot
                 then Just baseRoot
                 else Nothing
+        baseRootNeedsLiveRefinement =
+            case baseStructuralSource of
+                Just baseRoot -> baseRootHasRefinedLiveVariable baseRoot
+                Nothing -> False
         reifyRootSourceLocal =
             if requiresLiveRefinements
+                || baseRootNeedsLiveRefinement
                 then liveSource
                 else
                     case baseStructuralSource of
@@ -245,6 +259,60 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 Just TyVar{} -> False
                 Just TyBase{} -> False
                 Just TyBottom{} -> False
+                Just _ -> True
+                Nothing -> False
+        -- A base structural root is not a faithful reification source when
+        -- one of its variable slots has acquired structure in the live
+        -- presolution.  Reifying the base root would leave that old variable
+        -- free, while BinderPlan quite correctly plans only the live
+        -- declaration tree.  Select the live root here, while both graph
+        -- domains and their projection are still available.
+        baseRootHasRefinedLiveVariable baseRoot =
+            case bindParentsGa of
+                Nothing -> False
+                Just ga ->
+                    any
+                        (baseVariableHasLiveRefinement ga)
+                        (baseReachableNodes ga baseRoot)
+        baseReachableNodes ga root = go IntSet.empty [root]
+          where
+            baseNodes = cNodes (gbiBaseConstraint ga)
+
+            go seen [] = IntSet.toList seen
+            go seen (node : rest)
+                | IntSet.member key seen = go seen rest
+                | otherwise =
+                    let children =
+                            case lookupNodeIn baseNodes node of
+                                Just tyNode -> structuralChildrenWithBounds tyNode
+                                Nothing -> []
+                    in go (IntSet.insert key seen) (children ++ rest)
+              where
+                key = getNodeId node
+        baseVariableHasLiveRefinement ga baseKey =
+            case
+                lookupNodeIn
+                    (cNodes (gbiBaseConstraint ga))
+                    (NodeId baseKey)
+            of
+                Just TyVar{} ->
+                    any liveNodeIsRefined (liveCandidatesForBase ga baseKey)
+                _ -> False
+        liveCandidatesForBase ga baseKey =
+            directCandidate ++ reverseCandidates
+          where
+            directCandidate =
+                case IntMap.lookup baseKey (gbiBaseToSolved ga) of
+                    Just liveNode -> [canonical liveNode]
+                    Nothing -> []
+            reverseCandidates =
+                [ canonical (NodeId liveKey)
+                | (liveKey, baseNode) <- IntMap.toList solvedToBasePref
+                , getNodeId baseNode == baseKey
+                ]
+        liveNodeIsRefined liveNode =
+            case IntMap.lookup (canonKey liveNode) nodes of
+                Just TyVar{tnBound = Nothing} -> False
                 Just _ -> True
                 Nothing -> False
         baseRootReturnsToLiveRoot baseRoot =

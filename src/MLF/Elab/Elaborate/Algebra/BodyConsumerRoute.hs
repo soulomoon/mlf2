@@ -38,6 +38,7 @@ import MLF.Elab.Types
     SchemeInfo (..),
     Ty (TVarRef),
   )
+import MLF.Elab.SourceBinder (typeBinderDeclarationRefs)
 import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
 import MLF.Types.Elab
   ( TypeBinderRef,
@@ -162,6 +163,7 @@ selectBodyConsumerRouteWithPacket owner edgeId mbPacket requirements constructio
                               (rgbExteriorNode requirement)
                               constructionRef
                               mbPacket
+                              (rgbExactOperatedOccurrenceRef requirement)
                               (rgbOperatedType requirement)
                               constructionAliases
                           )
@@ -284,6 +286,7 @@ validateBodyConsumerRoute owner edgeId packet constructionAliases route = do
       (bcrExteriorNode route)
       (bcrConstructionRef route)
       (Just packet)
+      Nothing
       (bcrOperatedType route)
       constructionAliases
   unless
@@ -318,14 +321,21 @@ constructionAliasesForOperatedPacket
   -> NodeId
   -> TypeBinderRef
   -> Maybe PreparedSubtermGeneralization
+  -> Maybe TypeBinderRef
   -> ElabType
   -> IntMap.IntMap TypeBinderRef
   -> Either ElabError (IntMap.IntMap TypeBinderRef)
-constructionAliasesForOperatedPacket owner edgeId exterior constructionRef mbPacket operatedType aliases =
+constructionAliasesForOperatedPacket owner edgeId exterior constructionRef mbPacket mbExactOperatedOccurrence operatedType aliases =
   case mbPacket of
     Nothing ->
       case operatedType of
         TVarRef operatedRef
+          | Just exactRef <- mbExactOperatedOccurrence
+          , typeBinderRefsSameIdentity exactRef operatedRef ->
+              -- The requirement itself carries the occurrence-level source
+              -- authority. The exact source endpoint remains unchanged; the
+              -- exterior alias separately identifies the Gamma declaration.
+              pure aliases
           | not (operatedRefAlreadyRouted operatedRef) ->
               packetFailure
                 ( "bare operated occurrence has no exact packet: "
@@ -433,9 +443,16 @@ alignOperatedType consumerRef aliases ty0 =
           | not (bareOperatedOccurrence ty0)
           , typeBinderRefsSameIdentity constructionRef consumerRef ->
               ty
+        Just constructionRef
+          | any
+              (typeBinderRefsSameIdentity constructionRef)
+              lexicalDeclarationRefs ->
+              ty
         Just constructionRef ->
           substTypeCaptureRef ref (TVarRef constructionRef) ty
         Nothing -> ty
+
+    lexicalDeclarationRefs = typeBinderDeclarationRefs ty0
 
     bareOperatedOccurrence ty =
       case ty of

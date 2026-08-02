@@ -18,10 +18,16 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
+import MLF.Elab.SourceType
+  ( sourceTypeHeadNames,
+    sourceTypeToElabTypeWithIdentitiesFromSupply,
+  )
+import qualified MLF.Elab.Types as X
 import MLF.Frontend.ConstraintGen.Emit
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame, resolveTypeHeadIdentity, withModuleRootOwner)
 import MLF.Frontend.ConstraintGen.Types
+import MLF.Frontend.Program.Types (resolvedSourceTypeToElabType)
 import MLF.Frontend.Syntax
 import MLF.Types.Identity
   ( IdDetails,
@@ -238,8 +244,8 @@ withWrappedNode ::
   Bool ->
   GenNodeId ->
   NodeId ->
-  SharedEnv ->
-  ConstraintM (NodeId, SharedEnv)
+  Map key NodeId ->
+  ConstraintM (NodeId, Map key NodeId)
 withWrappedNode bindFlag wrap currentGen innerNode shared =
   if wrap
     then do
@@ -261,7 +267,7 @@ rebindStructuralChildren ::
   BindFlag ->
   NodeId ->
   GenNodeId ->
-  SharedEnv ->
+  Map key NodeId ->
   [NodeId] ->
   ConstraintM ()
 rebindStructuralChildren bindFlag parent currentGen shared children =
@@ -275,7 +281,7 @@ rebindStructuralChildren bindFlag parent currentGen shared children =
         (\child -> unlessShared shared child (attachUnder (typeRef child) (typeRef parent) BindFlex))
         children
 
-unlessShared :: SharedEnv -> NodeId -> ConstraintM () -> ConstraintM ()
+unlessShared :: Map key NodeId -> NodeId -> ConstraintM () -> ConstraintM ()
 unlessShared shared node action =
   if node `elem` Map.elems shared
     then pure ()
@@ -503,7 +509,25 @@ recordAnnotatedLambdaParameterSourceIdentity bindingKey argNode body =
           identities <- gets bsTypeBinderIdentities
           case lookupTypeBinderIdentityAlias identities alias of
             Just identity -> recordSourceTypeBinderIdentity argNode identity
-            Nothing -> pure ()
+            Nothing -> do
+              expected <- allocateSourceTypeAuthority (STVar alias)
+              case expected of
+                X.TVarRef ref -> do
+                  let identity = X.typeBinderRefIdentity ref
+                  modify' $ \st ->
+                    st
+                      { bsTypeBinderIdentities =
+                          Map.insert
+                            alias
+                            identity
+                            (bsTypeBinderIdentities st)
+                      }
+                  recordSourceTypeBinderIdentity argNode identity
+                _ ->
+                  throwError
+                    ( InternalConstraintError
+                        "source lambda parameter identity allocation did not produce a type variable"
+                    )
     _ -> pure ()
 
 -- | Build a compiler-owned lambda whose parameter type is authoritative.
@@ -512,8 +536,9 @@ recordAnnotatedLambdaParameterSourceIdentity bindingKey argNode body =
 -- exact argument of the runtime function.
 buildExactLambda :: Env -> GenNodeId -> BindingKey -> IdDetails -> VarName -> NormSrcType -> ResolvedNormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExactLambda env scopeRoot bindingKey binderDetails param paramTy body = do
+  expectedParamTy <- allocateSourceTypeAuthority paramTy
   (argNode, _) <-
-    internalizeCoercionCopy
+    internalizeExactCoercionCopy
       BindFlex
       True
       scopeRoot
@@ -521,10 +546,16 @@ buildExactLambda env scopeRoot bindingKey binderDetails param paramTy body = do
       Map.empty
       Map.empty
       paramTy
+      expectedParamTy
   modify' $ \st ->
     st
       { bsAnnSourceTypes =
           IntMap.insert (getNodeId argNode) paramTy (bsAnnSourceTypes st)
+      , bsAnnExpectedTypes =
+          IntMap.insert
+            (getNodeId argNode)
+            expectedParamTy
+            (bsAnnExpectedTypes st)
       }
   let env' = Map.insert bindingKey (Binding argNode Nothing binderDetails) env
   (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
@@ -669,12 +700,13 @@ allocRigidEdgeDestination owner target = do
 buildCoerce :: Env -> GenNodeId -> NormSrcType -> ResolvedNormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildCoerce env scopeRoot annTy annotatedExpr = do
   (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
+  expectedTy <- allocateSourceTypeAuthority annTy
   annGen <- allocChildGenUnder scopeRoot
   copies <-
     withScopedRebind
       (genRef annGen)
       coercionFlexibleCodomain
-      (internalizeCoercionType annGen annTy)
+      (internalizeCoercionType annGen annTy expectedTy)
   let domainNode = coercionRigidDomain copies
       codomainNode = coercionFlexibleCodomain copies
   -- The scoped rebind discovers every disconnected annotation component as a
@@ -702,7 +734,18 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
   -- Preserve the original source annotation type so elaboration can recover
   -- types that presolution strips (e.g. TForall inside a μ body).
   modify' $ \st ->
-    st {bsAnnSourceTypes = IntMap.insert (getNodeId codomainNode) annTy (bsAnnSourceTypes st)}
+    st
+      { bsAnnSourceTypes =
+          IntMap.insert
+            (getNodeId codomainNode)
+            annTy
+            (bsAnnSourceTypes st)
+      , bsAnnExpectedTypes =
+          IntMap.insert
+            (getNodeId codomainNode)
+            expectedTy
+            (bsAnnExpectedTypes st)
+      }
   pure (codomainNode, AAnn exprAnn codomainNode eid)
 
 -- | Translate a compiler-owned exact annotation from its authoritative
@@ -712,6 +755,16 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
 buildExactCoerce :: Env -> GenNodeId -> NormSrcType -> ResolvedSrcType -> ResolvedNormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExactCoerce env scopeRoot annTy exactTy annotatedExpr = do
   (exprNode, exprAnn) <- buildExpr env scopeRoot annotatedExpr
+  exactGraphTy <-
+    case resolvedSourceTypeToElabType exactTy of
+      Left err ->
+        throwError
+          ( InternalConstraintError
+              ( "compiler exact type cannot be internalized: "
+                  ++ err
+              )
+          )
+      Right ty -> pure ty
   -- Compiler authority is an equality check in the current RHS scope, not the
   -- source-language kappa-sigma coercion form.  Giving it a child gen would put
   -- the rigid target in a sibling scope of the producer.  Installing the
@@ -722,7 +775,7 @@ buildExactCoerce env scopeRoot annTy exactTy annotatedExpr = do
   -- source type variable is a shared semantic binder: keep the owner installed
   -- by 'internalizeCoercionCopy' rather than stealing it as an annotation root.
   (targetBody, shared) <-
-    internalizeCoercionCopy
+    internalizeExactCoercionCopy
       BindRigid
       False
       scopeRoot
@@ -730,6 +783,7 @@ buildExactCoerce env scopeRoot annTy exactTy annotatedExpr = do
       Map.empty
       Map.empty
       annTy
+      exactGraphTy
   targetNode <-
     if targetBody `elem` Map.elems shared
       then do
@@ -760,6 +814,11 @@ buildExactCoerce env scopeRoot annTy exactTy annotatedExpr = do
     st
       { bsAnnSourceTypes =
           IntMap.insert (getNodeId targetNode) annTy (bsAnnSourceTypes st),
+        bsAnnExpectedTypes =
+          IntMap.insert
+            (getNodeId targetNode)
+            exactGraphTy
+            (bsAnnExpectedTypes st),
         bsExactProducerTypes =
           IntMap.insert (getEdgeId eid) exactTy (bsExactProducerTypes st)
       }
@@ -1028,6 +1087,44 @@ lookupSchemeOwnerForRoot root = do
           root `elem` gnSchemes gen
       ]
 
+-- | Allocate one identity-bearing source type before constructing its graph.
+-- The returned type and the advanced supply are stored in the same build
+-- state as the graph, so packet preparation never has to replay binder
+-- allocation from an identity-free syntax tree.
+allocateSourceTypeAuthority :: NormSrcType -> ConstraintM X.ElabType
+allocateSourceTypeAuthority sourceTy = do
+  generator <- gets bsIdentityGenerator
+  resolvedHeadIdentities <-
+    fmap Map.fromList
+      ( traverse
+          ( \name -> do
+              identity <- resolveTypeHeadIdentity name
+              pure (name, identity)
+          )
+          (Set.toList (sourceTypeHeadNames sourceTy))
+      )
+  availableHeadIdentities <- gets bsTypeHeadIdentities
+  binderIdentities <- gets bsTypeBinderIdentities
+  let headIdentities =
+        resolvedHeadIdentities `Map.union` availableHeadIdentities
+  case
+      sourceTypeToElabTypeWithIdentitiesFromSupply
+        generator
+        headIdentities
+        binderIdentities
+        sourceTy
+    of
+      Left err ->
+        throwError
+          ( InternalConstraintError
+              ( "source type identity allocation failed: "
+                  ++ show err
+              )
+          )
+      Right (expectedTy, generator') -> do
+        modify' $ \st -> st {bsIdentityGenerator = generator'}
+        pure expectedTy
+
 -- | Type variable environment for internalizing source types.
 type TyEnv = Map VarName NodeId
 
@@ -1046,13 +1143,33 @@ data CoercionTypeCopies = CoercionTypeCopies
 
 -- | Internalize a coercion type κ as a rigid domain and flexible codomain,
 -- sharing existential (free) variables across both copies.
-internalizeCoercionType :: GenNodeId -> NormSrcType -> ConstraintM CoercionTypeCopies
-internalizeCoercionType coerceGen ty = do
+internalizeCoercionType ::
+  GenNodeId ->
+  NormSrcType ->
+  X.ElabType ->
+  ConstraintM CoercionTypeCopies
+internalizeCoercionType coerceGen sourceTy expectedTy = do
   (domainNode, shared1) <-
-    internalizeCoercionCopy BindRigid False coerceGen coerceGen Map.empty Map.empty ty
+    internalizeExactCoercionCopy
+      BindRigid
+      False
+      coerceGen
+      coerceGen
+      Map.empty
+      Map.empty
+      sourceTy
+      expectedTy
   bindCoercionOwnedRoot BindRigid coerceGen shared1 domainNode
   (codomainNode, shared2) <-
-    internalizeCoercionCopy BindFlex False coerceGen coerceGen Map.empty shared1 ty
+    internalizeExactCoercionCopy
+      BindFlex
+      False
+      coerceGen
+      coerceGen
+      Map.empty
+      shared1
+      sourceTy
+      expectedTy
   bindCoercionOwnedRoot BindFlex coerceGen shared2 codomainNode
   pure
     CoercionTypeCopies
@@ -1067,7 +1184,7 @@ internalizeCoercionType coerceGen ty = do
 bindCoercionOwnedRoot ::
   BindFlag ->
   GenNodeId ->
-  SharedEnv ->
+  Map key NodeId ->
   NodeId ->
   ConstraintM ()
 bindCoercionOwnedRoot bindFlag coerceGen shared root =
@@ -1342,6 +1459,346 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
           Just (_, StructuralResultBinder) -> GraphicBinderNested
           Nothing -> graphicBinderUse name body
           Just _ -> graphicBinderUse name body
+
+-- | Internalize a compiler-owned exact type from its resolved binder and type
+-- head identities.
+--
+-- The normalized source type still owns Figure 8.2.3's graphic shape, while
+-- the resolved exact type owns every semantic identity placed in that shape.
+-- Keeping those authorities paired during allocation prevents a later
+-- instantiation trace from mistaking a source forall binder for a fresh graph
+-- binder and then generalizing that copy at an enclosing Gamma.
+internalizeExactCoercionCopy ::
+  BindFlag ->
+  Bool ->
+  GenNodeId ->
+  GenNodeId ->
+  Map TypeBinderIdentity NodeId ->
+  Map TypeBinderIdentity NodeId ->
+  NormSrcType ->
+  X.ElabType ->
+  ConstraintM (NodeId, Map TypeBinderIdentity NodeId)
+internalizeExactCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared sourceType exactType =
+  case (sourceType, exactType) of
+    (STVar sourceName, X.TVarRef ref) ->
+      internalizeExactTypeVariable sourceName ref shared
+    (STArrow sourceDomain sourceCodomain, X.TArrow exactDomain exactCodomain) -> do
+      (domainNode, shared1) <-
+        internalizeExactCoercionCopy
+          bindFlag
+          wrap
+          coerceGen
+          currentGen
+          tyEnv
+          shared
+          sourceDomain
+          exactDomain
+      (codomainNode, shared2) <-
+        internalizeExactCoercionCopy
+          bindFlag
+          wrap
+          coerceGen
+          currentGen
+          tyEnv
+          shared1
+          sourceCodomain
+          exactCodomain
+      arrowNode <- allocArrow domainNode codomainNode
+      rebindStructuralChildren
+        bindFlag
+        arrowNode
+        currentGen
+        shared2
+        [domainNode, codomainNode]
+      withWrappedNode bindFlag wrap currentGen arrowNode shared2
+    (STBase _, X.TBaseWithIdentity identity base) -> do
+      registerTyConArity base 0
+      baseNode <- allocBase identity base
+      withWrappedNode bindFlag wrap currentGen baseNode shared
+    (STCon _ sourceArgs, X.TConWithIdentity identity base exactArgs) -> do
+      let arity = NE.length sourceArgs
+      when (arity /= NE.length exactArgs) exactShapeMismatch
+      registerTyConArity base arity
+      (argNodes, sharedFinal) <-
+        internalizeExactArgs shared sourceArgs exactArgs
+      conNode <- allocCon identity base argNodes
+      rebindStructuralChildren
+        bindFlag
+        conNode
+        currentGen
+        sharedFinal
+        (NE.toList argNodes)
+      withWrappedNode bindFlag wrap currentGen conNode sharedFinal
+    (STVarApp sourceName sourceArgs, X.TVarAppRef ref exactArgs) -> do
+      when (NE.length sourceArgs /= NE.length exactArgs) exactShapeMismatch
+      (headNode, shared1) <-
+        internalizeExactTypeVariable sourceName ref shared
+      (argNodes, sharedFinal) <-
+        internalizeExactArgs shared1 sourceArgs exactArgs
+      varAppNode <- allocVarApp headNode argNodes
+      rebindStructuralChildren
+        bindFlag
+        varAppNode
+        currentGen
+        sharedFinal
+        (headNode : NE.toList argNodes)
+      withWrappedNode bindFlag wrap currentGen varAppNode sharedFinal
+    (STForall sourceName sourceBound sourceBody, X.TForallRef exactRef exactBound exactBody) -> do
+      when
+        ( maybe
+            False
+            (Set.member sourceName . structBoundFreeVars . unNormBound)
+            sourceBound
+        )
+        (throwError (ForallBoundMentionsBinder sourceName))
+      let binderUse =
+            case
+                typeBinderIdentityStructural
+                  (X.typeBinderRefIdentity exactRef)
+              of
+                Just (_, StructuralResultBinder) -> GraphicBinderNested
+                _ -> graphicBinderUse sourceName sourceBody
+      case binderUse of
+        GraphicBinderAtRoot ->
+          case sourceBound of
+            Nothing ->
+              internalizeExactCoercionCopy
+                bindFlag
+                wrap
+                coerceGen
+                currentGen
+                tyEnv
+                shared
+                STBottom
+                X.TBottom
+            Just bound ->
+              internalizeExactCoercionCopy
+                bindFlag
+                wrap
+                coerceGen
+                currentGen
+                tyEnv
+                shared
+                (structBoundToNormSrcType (unNormBound bound))
+                (maybe X.TBottom X.tyToElab exactBound)
+        GraphicBinderAbsent ->
+          internalizeExactCoercionCopy
+            bindFlag
+            wrap
+            coerceGen
+            currentGen
+            tyEnv
+            shared
+            sourceBody
+            exactBody
+        GraphicBinderNested -> do
+          ((varNode, bodyNode, shared2), scopeFrame) <- withScopedBuild $ do
+            varNode <- allocVar
+            recordSourceTypeBinderIdentity
+              varNode
+              (X.typeBinderRefIdentity exactRef)
+            let tyEnv' =
+                  Map.insert
+                    (X.typeBinderRefIdentity exactRef)
+                    varNode
+                    tyEnv
+            (mbBoundNode, shared1) <-
+              case sourceBound of
+                Nothing -> pure (Nothing, shared)
+                Just bound -> do
+                  (boundNode, sharedAfterBound) <-
+                    internalizeExactCoercionCopy
+                      bindFlag
+                      False
+                      coerceGen
+                      currentGen
+                      tyEnv'
+                      shared
+                      (structBoundToNormSrcType (unNormBound bound))
+                      (maybe X.TBottom X.tyToElab exactBound)
+                  pure (Just boundNode, sharedAfterBound)
+            setVarBound varNode mbBoundNode
+            (bodyNode, sharedAfterBody) <-
+              internalizeExactCoercionCopy
+                bindFlag
+                False
+                coerceGen
+                currentGen
+                tyEnv'
+                shared1
+                sourceBody
+                exactBody
+            pure (varNode, bodyNode, sharedAfterBody)
+          forallNode <- allocForall bodyNode
+          recordSourceTypeBinderIdentity
+            forallNode
+            (X.typeBinderRefIdentity exactRef)
+          rebindScopeRoot (typeRef forallNode) bodyNode scopeFrame
+          attachUnder (typeRef varNode) (typeRef forallNode) bindFlag
+          unlessShared shared2 bodyNode $
+            attachUnder (typeRef bodyNode) (typeRef forallNode) bindFlag
+          withWrappedNode bindFlag wrap currentGen forallNode shared2
+    (STMu sourceName sourceBody, X.TMuRef exactRef exactBody) -> do
+      let binderIsLive = graphicBinderOccursFree sourceName sourceBody
+      ((varNode, bodyNode, shared1), scopeFrame) <- withScopedBuild $ do
+        varNode <- allocVar
+        recordSourceTypeBinderIdentity
+          varNode
+          (X.typeBinderRefIdentity exactRef)
+        let bodyEnv
+              | binderIsLive =
+                  Map.insert
+                    (X.typeBinderRefIdentity exactRef)
+                    varNode
+                    tyEnv
+              | otherwise = tyEnv
+        (bodyNode, sharedAfterBody) <-
+          internalizeExactCoercionCopy
+            bindFlag
+            False
+            coerceGen
+            currentGen
+            bodyEnv
+            shared
+            sourceBody
+            exactBody
+        pure (varNode, bodyNode, sharedAfterBody)
+      muNode <- allocMu bodyNode
+      recordSourceTypeBinderIdentity
+        muNode
+        (X.typeBinderRefIdentity exactRef)
+      rebindScopeRoot (typeRef muNode) bodyNode scopeFrame
+      let lexicalOwner
+            | binderIsLive = typeRef muNode
+            | otherwise = genRef currentGen
+      attachUnder (typeRef varNode) lexicalOwner bindFlag
+      withWrappedNode bindFlag wrap currentGen muNode shared1
+    (STBottom, X.TBottom) -> do
+      varNode <- allocVar
+      pure (varNode, shared)
+    _ -> exactShapeMismatch
+  where
+    internalizeExactTypeVariable sourceName ref shared0 =
+      let identity = X.typeBinderRefIdentity ref
+       in case Map.lookup identity tyEnv of
+            Just node -> pure (node, shared0)
+            Nothing -> do
+              mbSourceNode <- lookupSourceTypeBinderNodeByIdentity identity
+              case mbSourceNode of
+                Just node ->
+                  pure (node, Map.insert identity node shared0)
+                Nothing ->
+                  case Map.lookup identity shared0 of
+                    Just node -> pure (node, shared0)
+                    Nothing -> do
+                      node <- allocVar
+                      setBindParentOverride
+                        (typeRef node)
+                        (genRef coerceGen)
+                        BindFlex
+                      recordExactFreeBinder sourceName identity node
+                      pure (node, Map.insert identity node shared0)
+
+    internalizeExactArgs shared0 (sourceArg :| sourceRest) (exactArg :| exactRest) = do
+      (firstNode, shared1) <-
+        internalizeExactCoercionCopy
+          bindFlag
+          wrap
+          coerceGen
+          currentGen
+          tyEnv
+          shared0
+          sourceArg
+          exactArg
+      (restNodes, sharedFinal) <-
+        foldM
+          ( \(nodes, currentShared) (nextSource, nextExact) -> do
+              (nextNode, nextShared) <-
+                internalizeExactCoercionCopy
+                  bindFlag
+                  wrap
+                  coerceGen
+                  currentGen
+                  tyEnv
+                  currentShared
+                  nextSource
+                  nextExact
+              pure (nodes ++ [nextNode], nextShared)
+          )
+          ([], shared1)
+          (zip sourceRest exactRest)
+      pure (firstNode :| restNodes, sharedFinal)
+
+    exactShapeMismatch :: ConstraintM a
+    exactShapeMismatch =
+      throwError
+        ( InternalConstraintError
+            ( "compiler exact type disagrees with its normalized graph shape"
+                ++ "; normalized="
+                ++ show sourceType
+                ++ "; exact="
+                ++ show exactType
+            )
+        )
+
+    recordExactFreeBinder sourceName identity node = do
+      aliases <- gets bsTypeBinderIdentities
+      case lookupTypeBinderIdentityAlias aliases sourceName of
+        Just existing
+          | existing /= identity ->
+              throwError
+                ( InternalConstraintError
+                    ( "source type variable identity conflicts with its construction authority"
+                        ++ "; source variable="
+                        ++ sourceName
+                        ++ "; existing="
+                        ++ show existing
+                        ++ "; construction="
+                        ++ show identity
+                    )
+                )
+        _ -> pure ()
+      mbRoot <- gets bsTypeBinderRoot
+      modify' $ \st ->
+        st
+          { bsTypeBinderIdentities =
+              Map.insert
+                sourceName
+                identity
+                (bsTypeBinderIdentities st)
+          , bsTypeBinderNodes =
+              maybe
+                (bsTypeBinderNodes st)
+                ( \root ->
+                    Map.insert
+                      (root, identity)
+                      node
+                      (bsTypeBinderNodes st)
+                )
+                mbRoot
+          }
+      recordSourceTypeBinderIdentity node identity
+
+-- | Reuse an already-published ambient source binder.
+--
+-- Absence is meaningful: a free binder first encountered inside a coercion is
+-- owned by that coercion's shared existential domain and must be constructed
+-- flexibly there.  Manufacturing a rigid definition-root node on lookup
+-- failure would make the coercion graph incorrect by construction.
+lookupSourceTypeBinderNodeByIdentity ::
+  TypeBinderIdentity ->
+  ConstraintM (Maybe NodeId)
+lookupSourceTypeBinderNodeByIdentity identity = do
+  mbRoot <- gets bsTypeBinderRoot
+  case mbRoot of
+    Nothing -> pure Nothing
+    Just root -> do
+      nodes <- gets bsTypeBinderNodes
+      case Map.lookup (root, identity) nodes of
+        Nothing -> pure Nothing
+        Just node -> do
+          recordSourceTypeBinderIdentity node identity
+          pure (Just node)
 
 -- | An expansion occurrence is another graph representative of its source
 -- scheme.  Publish that source identity when it exists so presolution can

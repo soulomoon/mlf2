@@ -215,6 +215,7 @@ resultTypeInputsForArtifacts
             GaBindParents
                 { gaBindParentsBase = cBindParents c1
                 , gaBaseConstraint = c1
+                , gaAnnotationNodeRedirects = IntMap.empty
                 , gaBaseToSolved = baseToSolved
                 , gaSolvedToBase = solvedToBase
                 , gaRestoredSchemeRootTargets = IntMap.empty

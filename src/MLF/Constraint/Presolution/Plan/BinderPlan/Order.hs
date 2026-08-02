@@ -15,7 +15,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.Plan.Requirements (ExpansionConstructionPlacements)
 import MLF.Constraint.Types.Graph
-import MLF.Util.ElabError (ElabError)
+import MLF.Util.ElabError (ElabError(..))
 import MLF.Util.Graph (topoSortBy)
 import qualified MLF.Util.Order as Order
 import MLF.Util.Trace (traceWhen)
@@ -66,7 +66,29 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
             pure (k, filterDeps k deps)
         let depsFor k = IntMap.findWithDefault [] k (IntMap.fromList depsList)
 
-        topoSortBy "generalizeAt: cycle in binder bound dependencies" cmpReady depsFor candidates'
+        case
+            topoSortBy
+                "generalizeAt: cycle in binder bound dependencies"
+                cmpReady
+                depsFor
+                candidates' of
+            Right ordered -> pure ordered
+            Left cause ->
+                Left
+                    (ValidationFailed
+                        [ "generalizeAt: cycle in binder bound dependencies"
+                        , "  candidates/dependencies: " ++ show depsList
+                        , "  solved candidates: "
+                            ++ show
+                                [ ( k
+                                  , lookupNodeIn
+                                        (cNodes constraint)
+                                        (NodeId k)
+                                  )
+                                | k <- candidates'
+                                ]
+                        , "  cause: " ++ show cause
+                        ])
 
     orderBinderCandidatesBase ga keysSolved rootBase' candidates' depsForE' = do
         let baseConstraint = gbiBaseConstraint ga
@@ -106,4 +128,37 @@ orderBinderCandidates debugEnabled mbBindParentsGa canonical constraint root roo
             pure (k, filterDeps k deps)
         let depsFor k = IntMap.findWithDefault [] k (IntMap.fromList depsList)
 
-        topoSortBy "generalizeAt: cycle in binder bound dependencies" cmpReady depsFor candidates'
+        case
+            topoSortBy
+                "generalizeAt: cycle in binder bound dependencies"
+                cmpReady
+                depsFor
+                candidates' of
+            Right ordered -> pure ordered
+            Left cause ->
+                Left
+                    (ValidationFailed
+                        [ "generalizeAt: cycle in binder bound dependencies"
+                        , "  candidates/dependencies: " ++ show depsList
+                        , "  solved candidates: "
+                            ++ show
+                                [ ( k
+                                  , lookupNodeIn
+                                        (cNodes constraint)
+                                        (NodeId k)
+                                  )
+                                | k <- candidates'
+                                ]
+                        , "  base candidates: "
+                            ++ show
+                                [ ( k
+                                  , toBase k
+                                      >>= \baseNode ->
+                                        lookupNodeIn
+                                            (cNodes baseConstraint)
+                                            baseNode
+                                  )
+                                | k <- candidates'
+                                ]
+                        , "  cause: " ++ show cause
+                        ])

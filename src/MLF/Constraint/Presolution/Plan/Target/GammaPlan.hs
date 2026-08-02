@@ -412,20 +412,75 @@ buildGammaPlan GammaPlanInput{..} = do
                         pickIdentity baseKey
                             | IntMap.member baseKey nodes = Just baseKey
                             | otherwise = Nothing
+                        liveUnboundedBinder solvedKey =
+                            case IntMap.lookup solvedKey nodes of
+                                Just TyVar{} ->
+                                    VarStore.lookupVarBound
+                                        constraint
+                                        (NodeId solvedKey)
+                                        == Nothing
+                                _ -> False
+                        pickUnboundedMapped baseKey =
+                            case lookupNodeIn baseNodes (NodeId baseKey) of
+                                Just TyVar{}
+                                    | VarStore.lookupVarBound
+                                        baseConstraint
+                                        (NodeId baseKey)
+                                        == Nothing ->
+                                        let mappedKeys =
+                                                IntMap.findWithDefault
+                                                    []
+                                                    baseKey
+                                                    solvedByBasePref
+                                            directKeys =
+                                                case IntMap.lookup
+                                                    baseKey
+                                                    baseToSolved of
+                                                    Just solved ->
+                                                        [ getNodeId
+                                                            (canonical solved)
+                                                        ]
+                                                    Nothing -> []
+                                            unboundedKeys =
+                                                filter
+                                                    liveUnboundedBinder
+                                                    (mappedKeys ++ directKeys)
+                                            underScopeKeys =
+                                                filter
+                                                    solvedUnderScope
+                                                    unboundedKeys
+                                            preferredKeys =
+                                                case underScopeKeys of
+                                                    [] -> unboundedKeys
+                                                    _ -> underScopeKeys
+                                        in listToMaybe
+                                            ( sortByKeys
+                                                keysSolved
+                                                preferredKeys
+                                            )
+                                _ -> Nothing
                         pickSolved baseKey =
-                            case IntMap.lookup baseKey baseToSolved of
-                                Just solvedNid ->
-                                    let solvedKey = getNodeId (canonical solvedNid)
-                                    in if solvedUnderScope solvedKey
-                                        then Just solvedKey
-                                        else
-                                            case pickMappedFallback baseKey of
-                                                Just fallbackKey -> Just fallbackKey
-                                                Nothing -> pickIdentity baseKey
+                            case pickUnboundedMapped baseKey of
+                                Just solvedKey -> Just solvedKey
                                 Nothing ->
-                                    case pickMappedFallback baseKey of
-                                        Just fallbackKey -> Just fallbackKey
-                                        Nothing -> pickIdentity baseKey
+                                    case IntMap.lookup baseKey baseToSolved of
+                                        Just solvedNid ->
+                                            let solvedKey =
+                                                    getNodeId
+                                                        (canonical solvedNid)
+                                            in if solvedUnderScope solvedKey
+                                                then Just solvedKey
+                                                else
+                                                    case pickMappedFallback baseKey of
+                                                        Just fallbackKey ->
+                                                            Just fallbackKey
+                                                        Nothing ->
+                                                            pickIdentity baseKey
+                                        Nothing ->
+                                            case pickMappedFallback baseKey of
+                                                Just fallbackKey ->
+                                                    Just fallbackKey
+                                                Nothing -> pickIdentity baseKey
                         baseGammaRepLocal =
                             IntMap.fromList
                                 [ (baseKey, solvedKey)
@@ -986,6 +1041,9 @@ buildGammaPlan GammaPlanInput{..} = do
                                         owner
                                         exterior
                                         requirement
+                                    || constructionScopeContainsCurrentTargetScope
+                                        bindParentsBase
+                                        owner
                             (RequiredGammaAtNestedScope owner, Just _) ->
                                 -- Nested placement is positive evidence
                                 -- constructed by 'placeNestedRootRequirements':
@@ -1187,6 +1245,29 @@ buildGammaPlan GammaPlanInput{..} = do
                     (nodeRefKey (typeRef exterior))
                     bindParents
                 && exterior `elem` rgbResultRoots requirement
+
+    -- An exact construction placement records the source constructor that
+    -- emits Gamma even when its result was copied or unwrapped to a deeper
+    -- target scope for Gen(Gamma, S(result)).  In that case the frozen
+    -- exterior can still follow an enclosing graph path unrelated to either
+    -- scope.  The source placement is valid precisely when it lexically
+    -- contains the current target scope; sibling and descendant claims remain
+    -- invalid.  Constructor-side planning separately validates the exact
+    -- LocalGammaClosure before emitting the binder.
+    constructionScopeContainsCurrentTargetScope bindParents constructionOwner =
+        case gpiScopeGen of
+            Nothing -> False
+            Just currentScope ->
+                let currentOwner = GenRef currentScope
+                in constructionOwner == currentOwner
+                    || case
+                        Binding.bindingPathToRootLocal
+                            bindParents
+                            currentOwner
+                    of
+                        Right (_ : ancestors) ->
+                            constructionOwner `elem` ancestors
+                        _ -> False
 
     -- A nested source constructor can share the same gen node as its
     -- enclosing constructor; 'LocalGammaOwner' distinguishes those lexical

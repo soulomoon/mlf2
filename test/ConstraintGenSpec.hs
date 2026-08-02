@@ -329,7 +329,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                         `shouldBe` Just identity
                 other -> expectationFailure ("Expected annotated lambda, saw " ++ show other)
 
-        it "keeps a bare ambient annotation binder restricted under the enclosing Gamma" $ do
+        it "constructs a bare free annotation binder flexibly under the enclosing Gamma" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991854)
                 expr = EAnn (ELit (LInt 1)) (STVar "ambient")
             result <-
@@ -349,7 +349,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             IntMap.lookup (getNodeId root) (crSourceTypeBinderIdentities result)
                 `shouldBe` Just identity
             nodeKind constraint (typeRef root)
-                `shouldBe` Right NodeRestricted
+                `shouldBe` Right NodeInstantiable
 
         it "propagates a source binder identity to polymorphic occurrence expansions" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991853)
@@ -1611,7 +1611,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 AAnn {} -> pure ()
                 other -> expectationFailure ("Expected source annotation, saw " ++ show other)
 
-        it "compiler exact root variables use a rigid proxy without stealing the shared identity binder" $ do
+        it "compiler exact root variables keep a flexible shared identity behind a rigid proxy" $ do
             let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991852)
                 binderRef = resolvedTypeBinderRefFromIdentity binderIdentity "a"
                 ann = STVar "a"
@@ -1643,7 +1643,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             lookupBindParent constraint (typeRef resultProxy)
                 `shouldBe` Just (genRef rootGen, BindRigid)
             lookupBindParent constraint (typeRef shared)
-                `shouldBe` Just (genRef rootGen, BindRigid)
+                `shouldBe` Just (genRef rootGen, BindFlex)
             IntMap.lookup (getNodeId shared) (crSourceTypeBinderIdentities exactResult)
                 `shouldBe` Just binderIdentity
             IntMap.toList (crSourceTypeBinderIdentities exactResult)
@@ -1662,7 +1662,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 AExactAnn _ _ annNode _ -> annNode `shouldBe` resultProxy
                 other -> expectationFailure ("Expected exact variable authority, saw " ++ show other)
 
-        it "keeps a nested exact root variable's shared identity at the definition owner" $ do
+        it "keeps a nested exact root variable's shared identity flexible at its scheme owner" $ do
             let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991853)
                 binderRef = resolvedTypeBinderRefFromIdentity binderIdentity "a"
                 ann = STVar "a"
@@ -1712,7 +1712,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 Just (parent, _) -> parent `shouldBe` genRef schemeGen
                 Nothing -> expectationFailure "Missing nested exact proxy owner"
             lookupBindParent constraint (typeRef shared)
-                `shouldBe` Just (genRef rootGen, BindRigid)
+                `shouldBe` Just (genRef schemeGen, BindFlex)
             IntMap.toList (crSourceTypeBinderIdentities exactResult)
                 `shouldBe` [(getNodeId shared, binderIdentity)]
             checkBindingTree constraint `shouldBe` Right ()

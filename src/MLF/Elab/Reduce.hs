@@ -4,6 +4,7 @@ module MLF.Elab.Reduce
   ( step,
     normalize,
     reduceLeadingTypeInstantiationRedexes,
+    freeResolvedTermVars,
     collectApplicationSpineThroughHeadTypeRedexes,
     freeTypeVarRefsTerm,
     isValue,
@@ -318,7 +319,8 @@ freeResolvedTermVars =
         EApp fun arg ->
           go bound fun ++ go bound arg
         ELet resolved _ rhs body ->
-          go bound rhs ++ go (resolved : bound) body
+          let bound' = resolved : bound
+           in go bound' rhs ++ go bound' body
         ETyAbsRef _ _ body ->
           go bound body
         ETyInst inner _ ->

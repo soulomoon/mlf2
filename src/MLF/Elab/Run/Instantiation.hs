@@ -2,8 +2,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.Instantiation (
+    ExactBinderSpinePlan,
+    exactBinderSpineRenames,
+    exactBinderSpineInstantiation,
+    planExactBinderSpine,
     inferInstAppArgsFromSchemeRefs,
     inferInstAppArgsFromSchemeRefsExact,
+    constructExactInstantiation,
     resolvedSourceApplicationArgumentEndpoint,
     sourceSchemeConstructsExactEndpoint,
     residualTopologyAgreesExact,
@@ -19,7 +24,16 @@ import qualified Data.Map.Strict as Map
 
 import Data.List (find)
 
-import MLF.Elab.Inst (applyInstantiation, schemeToType)
+import MLF.Elab.Inst
+    ( applyInstantiation
+    , composeInst
+    , instForLeadingTypeArgument
+    , schemeToType
+    )
+import MLF.Elab.TermClosure
+    ( renameBoundTypeBinderRefPayloads
+    , renameTypeBinderRefPayloads
+    )
 import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Reify.TypeOps
@@ -33,6 +47,172 @@ import MLF.Reify.TypeOps
     )
 newtype SubstFun (i :: TopVar) =
     SubstFun { runSubstFun :: [TypeBinderRef] -> Ty i }
+
+-- | A checked construction that changes only a leading forall spine.
+-- Binder renames retain target quantifiers by exact identity; the
+-- instantiation consumes source-only quantifiers, using 'InstUnderRef' when
+-- that work occurs below a retained declaration.
+data ExactBinderSpinePlan = ExactBinderSpinePlan
+    { exactBinderSpineRenames :: [(TypeBinderRef, TypeBinderRef)]
+    , exactBinderSpineInstantiation :: Instantiation
+    }
+    deriving (Eq, Show)
+
+-- | Construct one source forall spine at an exact target.  Retaining the next
+-- target binder is attempted first.  If its complete bound/body cannot reach
+-- the target, the next source binder must instead be consumed by an inferred
+-- type application or by the canonical N computation at its bound.
+--
+-- Position only proposes a retained binder correspondence.  The returned
+-- plan is accepted only after applying every rename and the complete xMLF
+-- instantiation reproduces the target under the caller's endpoint equality.
+planExactBinderSpine
+    :: (ElabType -> ElabType -> Bool)
+    -> ElabType
+    -> ElabType
+    -> Maybe ExactBinderSpinePlan
+planExactBinderSpine typesAgree sourceTy targetTy = do
+    (renames, instantiation) <- go sourceTy targetTy
+    completedTy <-
+        either
+            (const Nothing)
+            Just
+            ( applyInstantiation
+                (renameTypeBinderRefPayloads renames sourceTy)
+                instantiation
+            )
+    guard (typesAgree completedTy targetTy)
+    pure
+        ExactBinderSpinePlan
+            { exactBinderSpineRenames = renames
+            , exactBinderSpineInstantiation = instantiation
+            }
+  where
+    go source target =
+        introduceExactFlexibleEndpoint source target
+            <|> case source of
+                TForallRef sourceRef sourceBound sourceBody ->
+                    retainLeadingBinder
+                        sourceRef
+                        sourceBound
+                        sourceBody
+                        target
+                        <|> specializeLeadingBinder
+                            sourceRef
+                            sourceBound
+                            sourceBody
+                            source
+                            target
+                TBottom
+                    | not (typesAgree TBottom target) ->
+                        Just ([], InstBot target)
+                _
+                    | typesAgree source target -> Just ([], InstId)
+                    | otherwise -> Nothing
+
+    -- Root RaiseMerge may publish the checked source as the exact bound of a
+    -- fresh flexible result, @forall (alpha > source). alpha@.  Construct
+    -- that endpoint directly with the xMLF Intro/Inside/Hyp rules.  Treating
+    -- the target binder as though it corresponded positionally to the
+    -- source's first forall loses the complete source scheme when @source@
+    -- is itself polymorphic.
+    introduceExactFlexibleEndpoint source target =
+        case target of
+            TForallRef targetRef (Just targetBound) (TVarRef bodyRef)
+                | typeBinderRefsSameIdentity targetRef bodyRef
+                , let boundTy = tyToElab targetBound
+                , typesAgree source boundTy ->
+                    Just
+                        ( []
+                        , composeInst
+                            InstIntro
+                            ( composeInst
+                                (InstInside (InstBot boundTy))
+                                ( instUnderWithRef
+                                    targetRef
+                                    (InstAbstrRef targetRef)
+                                )
+                            )
+                        )
+            _ -> Nothing
+
+    retainLeadingBinder sourceRef sourceBound sourceBody target =
+        case target of
+            TForallRef targetRef targetBound targetBody -> do
+                let binderRename =
+                        if typeBinderRefsSameIdentity sourceRef targetRef
+                            then []
+                            else [(sourceRef, targetRef)]
+                    alignType =
+                        renameTypeBinderRefPayloads binderRename
+                (boundRenames, boundInstantiation) <-
+                    alignRetainedBound
+                        ( fmap
+                            (renameBoundTypeBinderRefPayloads binderRename)
+                            sourceBound
+                        )
+                        targetBound
+                (innerRenames, innerInstantiation) <-
+                    go (alignType sourceBody) targetBody
+                let insideInstantiation =
+                        case boundInstantiation of
+                            InstId -> InstId
+                            _ -> InstInside boundInstantiation
+                let underInstantiation =
+                        case innerInstantiation of
+                            InstId -> InstId
+                            _ -> instUnderWithRef targetRef innerInstantiation
+                pure
+                    ( binderRename ++ boundRenames ++ innerRenames
+                    , composeInst insideInstantiation underInstantiation
+                    )
+            _ -> Nothing
+
+    specializeLeadingBinder sourceRef sourceBound sourceBody source target =
+        inferSpecialization <|> eliminateAtBound
+      where
+        inferSpecialization = do
+            [argumentTy] <-
+                inferInstAppArgsFromSchemeRefsExact
+                    [(sourceRef, sourceBound)]
+                    -- Later source-only binders are constructed by the
+                    -- recursive spine plan.  They must not hide the current
+                    -- binder's structural occurrence while its exact
+                    -- argument is inferred.  This is proposal-only: every
+                    -- skipped binder is still consumed or retained below,
+                    -- and the completed plan is accepted only when applying
+                    -- it reproduces the exact target.
+                    (stripForallsType sourceBody)
+                    target
+            -- The binder being eliminated is not in scope at its own type
+            -- application site.  A target that merely exposes the source
+            -- body can otherwise infer the escaping argument @a@ for
+            -- @forall a. ...@ and masquerade as a real specialization.
+            guard
+                ( not
+                    ( any
+                        (typeBinderRefsSameIdentity sourceRef)
+                        (freeTypeVarRefsType argumentTy)
+                    )
+                )
+            continueWith
+                (instForLeadingTypeArgument source argumentTy)
+
+        eliminateAtBound = continueWith InstElim
+
+        continueWith step = do
+            specializedTy <-
+                either (const Nothing) Just
+                    (applyInstantiation source step)
+            (renames, rest) <- go specializedTy target
+            pure (renames, composeInst step rest)
+
+    alignRetainedBound Nothing Nothing = Just ([], InstId)
+    alignRetainedBound Nothing (Just targetBound) =
+        go TBottom (tyToElab targetBound)
+    alignRetainedBound (Just sourceBound) (Just targetBound) =
+        go (tyToElab sourceBound) (tyToElab targetBound)
+    alignRetainedBound (Just _) Nothing = Nothing
 
 inferInstAppArgsFromSchemeRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
 inferInstAppArgsFromSchemeRefs binds body targetTy =
@@ -116,6 +296,152 @@ sourceSchemeConstructsExactEndpoint typeEnv endpoint schemeInfo = do
             (const Nothing)
             Just
             (TypeCheck.checkInstantiation typeEnv currentTy instantiation)
+
+-- | Construct the complete xMLF computation from one checked source type to
+-- an exact endpoint.  Target foralls are built with M/I before source
+-- specialization is attempted; bounded applications recursively construct
+-- their type argument from the declared bound before applying N.  Every
+-- candidate is checked from the original source and must reproduce the exact
+-- endpoint, so this constructs the occurrence-boundary computation rather
+-- than repairing a mismatched term after type checking.
+constructExactInstantiation
+    :: TypeCheck.Env
+    -> (ElabType -> ElabType -> Bool)
+    -> ElabType
+    -> ElabType
+    -> Maybe Instantiation
+constructExactInstantiation typeEnv typesAgree source target = do
+    instantiation <- go typeEnv source target
+    constructed <-
+        either
+            (const Nothing)
+            Just
+            (TypeCheck.checkInstantiation typeEnv source instantiation)
+    guard (typesAgree constructed target)
+    pure instantiation
+  where
+    go env sourceTy targetTy
+        | typesAgree sourceTy targetTy = Just InstId
+        | TVarRef targetRef <- targetTy
+        , Just targetBound <- TypeCheck.lookupTypeBindingRef targetRef env
+        , typesAgree sourceTy targetBound =
+            Just (InstAbstrRef targetRef)
+        | TBottom <- sourceTy = Just (InstBot targetTy)
+        | TForallRef targetRef mbTargetBound targetBody <- targetTy =
+            introduceTargetForall
+                env
+                sourceTy
+                targetRef
+                mbTargetBound
+                targetBody
+                <|> specializeSource env sourceTy targetTy
+        | otherwise = specializeSource env sourceTy targetTy
+
+    introduceTargetForall
+        env
+        sourceTy
+        targetRef
+        mbTargetBound
+        targetBody = do
+            let targetBound = maybe TBottom tyToElab mbTargetBound
+                bodyEnv =
+                    TypeCheck.insertTypeBindingRef
+                        targetRef
+                        targetBound
+                        env
+                refineIntroducedBound =
+                    case mbTargetBound of
+                        Nothing -> InstId
+                        Just bound -> InstInside (InstBot (tyToElab bound))
+            bodyInstantiation <- go bodyEnv sourceTy targetBody
+            pure
+                ( composeInst
+                    InstIntro
+                    ( composeInst
+                        refineIntroducedBound
+                        (InstUnderRef targetRef bodyInstantiation)
+                    )
+                )
+
+    specializeSource env sourceTy targetTy = do
+        arguments <-
+            inferExactTransportArguments
+                (schemeFromType sourceTy)
+                targetTy
+        (prefix, applied) <-
+            foldM (applyArgument env) (InstId, sourceTy) arguments
+        (completed, completedTy) <-
+            eliminateVacuousForalls env targetTy prefix applied
+        guard (typesAgree completedTy targetTy)
+        pure completed
+
+    inferExactTransportArguments sourceScheme endpoint =
+        if vacuousPrefixReachesEndpoint (schemeToType sourceScheme)
+            then Just []
+            else
+                inferInstAppArgsFromSchemeRefsExact
+                    binders
+                    body
+                    endpoint
+                    <|> inferFromArrowDomain
+      where
+        binders = schemeBinderRefs sourceScheme
+        body = schemeBody sourceScheme
+        inferFromArrowDomain =
+            case (body, endpoint) of
+                (TArrow sourceDomain _, TArrow targetDomain _) ->
+                    inferInstAppArgsFromSchemeRefsExact
+                        binders
+                        sourceDomain
+                        targetDomain
+                _ -> Nothing
+        vacuousPrefixReachesEndpoint current
+            | typesAgree current endpoint = True
+            | TForallRef ref _ bodyTy <- current
+            , not
+                ( any
+                    (typeBinderRefsSameIdentity ref)
+                    (freeTypeVarRefsType bodyTy)
+                ) =
+                vacuousPrefixReachesEndpoint bodyTy
+            | otherwise = False
+
+    applyArgument env (prefix, current) argument = do
+        step <-
+            case current of
+                TForallRef _ Nothing _ -> Just (InstApp argument)
+                TForallRef _ (Just bound) _
+                    | let boundTy = tyToElab bound
+                    , typesAgree argument boundTy ->
+                        Just InstElim
+                    | otherwise -> do
+                        inside <- go env (tyToElab bound) argument
+                        pure (composeInst (InstInside inside) InstElim)
+                _ -> Nothing
+        current' <-
+            either
+                (const Nothing)
+                Just
+                (TypeCheck.checkInstantiation env current step)
+        pure (composeInst prefix step, current')
+
+    eliminateVacuousForalls env endpoint = advance
+      where
+        advance prefix current
+            | typesAgree current endpoint = Just (prefix, current)
+            | TForallRef ref _ body <- current
+            , not
+                ( any
+                    (typeBinderRefsSameIdentity ref)
+                    (freeTypeVarRefsType body)
+                ) = do
+                next <-
+                    either
+                        (const Nothing)
+                        Just
+                        (TypeCheck.checkInstantiation env current InstElim)
+                advance (composeInst prefix InstElim) next
+            | otherwise = Just (prefix, current)
 
 -- | Compare a fully specialized residual function with the application
 -- topology that justified its arguments.  A graph endpoint may retain a

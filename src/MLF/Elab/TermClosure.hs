@@ -3,6 +3,9 @@
 module MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
     constructTermWithSchemeSubstRefs,
+    constructTermWithInterleavedSchemeSubstRefsAtPublication,
+    constructTermWithSchemeSubstRefsAtPublication,
+    constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
     etaExpandTermToSchemeSubstRefs,
     alignTopTyAbsToScheme,
@@ -10,10 +13,14 @@ module MLF.Elab.TermClosure
     alignTermTypeVarsToTopTyAbs,
     preserveRetainedChildAuthoritativeResult,
     refreshLocalResolvedVarType,
+    freshenTypeAbsIdentitiesAgainstEnv,
+    renameTypeVarInTermAgainstEnv,
     renameTermTypeBinderRefPayloads,
+    renameBoundTypeBinderRefPayloads,
     renameTypeBinderRefPayloads,
     renameTermTypeVars,
     substInTermRefs,
+    typeCheckConstructedOpenTermWithBaseEnv,
   )
 where
 
@@ -22,15 +29,219 @@ import Data.Either (isRight)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (find)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId(..))
-import MLF.Elab.Inst (schemeToType)
+import MLF.Elab.Inst (applyInstantiation, composeInst, schemeToType)
+import qualified MLF.Elab.Reduce as Reduce
 import MLF.Elab.TypeCheck (Env, emptyEnv, emptyResolvedTermEnv, insertResolvedTermBinding, insertResolvedTermEnv, insertTypeBindingRef, mkTypeCheckEnvWithResolvedTerms, typeCheckWithEnv, typeCheckWithResolvedEnv)
+import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Frontend.Syntax (Lit (LInt))
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef, substTypeSimpleRef)
 
 type TypeVarRename = (TypeBinderRef, TypeBinderRef)
+
+-- | Alpha-rename type abstractions that would capture an exact type identity
+-- already visible in the checking environment.  This is needed when a child
+-- value with a complete forall spine is moved beneath an enclosing
+-- construction Gamma that opens the source binder used to specialize that
+-- value.  The child retains a fresh local identity; the ambient identity
+-- remains available to the explicit Inside(Hyp);N computation.
+freshenTypeAbsIdentitiesAgainstEnv
+  :: TypeCheck.Env
+  -> XmlfTerm
+  -> XmlfTerm
+freshenTypeAbsIdentitiesAgainstEnv initialEnv term0 =
+  fst (go generator0 visibleRefs initialEnv term0)
+  where
+    visibleRefs =
+      foldr insertRef (Map.keys (TypeCheck.typeEnv initialEnv))
+        ( concatMap
+            (freeTypeVarRefsType . snd)
+            ( TypeCheck.resolvedTermEnvEntries
+                (TypeCheck.resolvedTermEnv initialEnv)
+            )
+            ++ concatMap
+              freeTypeVarRefsType
+              (Map.elems (TypeCheck.typeEnv initialEnv))
+        )
+    seedTerm =
+      foldr
+        (\ref body -> ETyAbsRef ref Nothing body)
+        term0
+        visibleRefs
+    generator0 = identityGeneratorAfterTerm seedTerm
+
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
+    go generator visible tcEnv term =
+      case project term of
+        EVarNodeF {} -> (term, generator)
+        ELitF {} -> (term, generator)
+        ELamF resolved body ->
+          let tcEnv' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved
+                  (resolvedVarType resolved)
+                  tcEnv
+              (body', generator') =
+                go generator visible tcEnv' body
+           in (ELam resolved body', generator')
+        EAppF function argument ->
+          let (function', generator') =
+                go generator visible tcEnv function
+              (argument', generator'') =
+                go generator' visible tcEnv argument
+           in (EApp function' argument', generator'')
+        ELetF resolved scheme rhs body ->
+          let schemeTy = schemeToType scheme
+              tcEnv' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved
+                  schemeTy
+                  tcEnv
+              (rhs', generator') =
+                go generator visible tcEnv' rhs
+              (body', generator'') =
+                go generator' visible tcEnv' body
+           in (ELet resolved scheme rhs' body', generator'')
+        ETyAbsFRef ref mbBound body ->
+          let collision =
+                any (typeBinderRefsSameIdentity ref) visible
+              (ref', bodyForRef, generator') =
+                if collision
+                  then
+                    let (freshRef, nextGenerator) =
+                          freshTypeBinderRef
+                            (typeBinderRefName ref)
+                            generator
+                     in
+                      ( freshRef
+                      , renameTypeVarInTermAgainstEnv
+                          tcEnv
+                          ref
+                          freshRef
+                          body
+                      , nextGenerator
+                      )
+                  else (ref, body, generator)
+              visible' = insertRef ref' visible
+              tcEnv' =
+                TypeCheck.insertTypeBindingRef
+                  ref'
+                  (maybe TBottom tyToElab mbBound)
+                  tcEnv
+              (body', generator'') =
+                go generator' visible' tcEnv' bodyForRef
+           in (ETyAbsRef ref' mbBound body', generator'')
+        ETyInstF inner instantiation ->
+          let (inner', generator') =
+                go generator visible tcEnv inner
+           in (ETyInst inner' instantiation, generator')
+        ERollF ty body ->
+          let (body', generator') =
+                go generator visible tcEnv body
+           in (ERoll ty body', generator')
+        EUnrollF body ->
+          let (body', generator') =
+                go generator visible tcEnv body
+           in (EUnroll body', generator')
+
+-- | Rename occurrences of one type binder in a term body while preserving
+-- resolved variables supplied by the surrounding checking environment.
+-- A nested abstraction of the same identity stops the rename, as required
+-- for ordinary alpha-conversion.
+renameTypeVarInTermAgainstEnv
+  :: TypeCheck.Env
+  -> TypeBinderRef
+  -> TypeBinderRef
+  -> XmlfTerm
+  -> XmlfTerm
+renameTypeVarInTermAgainstEnv env oldRef newRef = go env
+  where
+    renameTy = substTypeCaptureRef oldRef (TVarRef newRef)
+    renameLocalBound = mapBoundType renameTy
+    renameScheme scheme =
+      schemeFromType (renameTy (schemeToType scheme))
+    renameRef ref
+      | typeBinderRefsSameIdentity ref oldRef = newRef
+      | otherwise = ref
+    renameLocalInstantiation instantiation =
+      case project instantiation of
+        InstIdF -> InstId
+        InstAppF ty -> InstApp (renameTy ty)
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstInsideF inner -> InstInside (renameLocalInstantiation inner)
+        InstSeqF first second ->
+          InstSeq
+            (renameLocalInstantiation first)
+            (renameLocalInstantiation second)
+        InstUnderFRef ref inner ->
+          instUnderWithRef
+            (renameRef ref)
+            (renameLocalInstantiation inner)
+        InstBotF ty -> InstBot (renameTy ty)
+        InstAbstrFRef ref -> instAbstrWithRef (renameRef ref)
+
+    go tcEnv term =
+      case project term of
+        EVarNodeF resolved ->
+          case
+              TypeCheck.lookupResolvedTermEnvEntry
+                (TypeCheck.resolvedTermEnv tcEnv)
+                resolved
+            of
+              Just (_, ty) ->
+                EVarNode (mapResolvedVarType (const ty) resolved)
+              Nothing ->
+                EVarNode (mapResolvedVarType renameTy resolved)
+        ELitF lit -> ELit lit
+        ELamF resolved body ->
+          let resolved' = mapResolvedVarType renameTy resolved
+              tcEnv' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved'
+                  (resolvedVarType resolved')
+                  tcEnv
+           in ELam resolved' (go tcEnv' body)
+        EAppF function argument ->
+          EApp (go tcEnv function) (go tcEnv argument)
+        ELetF resolved scheme rhs body ->
+          let scheme' = renameScheme scheme
+              schemeTy = schemeToType scheme'
+              resolved' = mapResolvedVarType (const schemeTy) resolved
+              tcEnv' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved'
+                  schemeTy
+                  tcEnv
+           in
+            ELet
+              resolved'
+              scheme'
+              (go tcEnv' rhs)
+              (go tcEnv' body)
+        ETyAbsFRef ref mbBound body
+          | typeBinderRefsSameIdentity ref oldRef ->
+              ETyAbsRef ref (fmap renameLocalBound mbBound) body
+          | otherwise ->
+              let mbBound' = fmap renameLocalBound mbBound
+                  tcEnv' =
+                    TypeCheck.insertTypeBindingRef
+                      ref
+                      (maybe TBottom tyToElab mbBound')
+                      tcEnv
+               in ETyAbsRef ref mbBound' (go tcEnv' body)
+        ETyInstF inner instantiation ->
+          ETyInst
+            (go tcEnv inner)
+            (renameLocalInstantiation instantiation)
+        ERollF ty body -> ERoll (renameTy ty) (go tcEnv body)
+        EUnrollF body -> EUnroll (go tcEnv body)
 
 binderBoundsAgree :: Maybe BoundType -> Maybe BoundType -> Bool
 binderBoundsAgree Nothing Nothing = True
@@ -89,6 +300,201 @@ constructTermWithSchemeSubstRefs subst scheme term =
         freshenSchemeAndSubstAgainstTerm term subst scheme
       termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
    in wrapTermWithScheme scheme' termSubst
+
+-- | Construct a publication whose dependency-ordered forall spine combines
+-- binders already constructed by the checked producer with binders owned by
+-- the enclosing root.  The locally constructed identities are opened at
+-- their exact positions in the target spine before the missing flexible
+-- binders are abstracted.  This is the construction required for a result
+-- such as @forall a. forall b >= tau[a]. b@: moving @b@ outside the existing
+-- @a@ abstraction would leave its bound out of scope.
+constructTermWithInterleavedSchemeSubstRefsAtPublication
+  :: Env
+  -> IntMap.IntMap TypeBinderRef
+  -> [TypeBinderRef]
+  -> ElabScheme
+  -> XmlfTerm
+  -> XmlfTerm
+constructTermWithInterleavedSchemeSubstRefsAtPublication env subst localRefs scheme term =
+  case candidate of
+    Just constructed
+      | checksAgainstTarget constructed -> constructed
+    _ -> constructTermWithSchemeSubstRefsAtPublication env subst scheme term
+  where
+    schemeScopeEnv =
+      foldr
+        ( \(ref, mbBound) ->
+            insertTypeBindingRef ref (maybe TBottom tyToElab mbBound)
+        )
+        env
+        (schemeBinderRefs scheme)
+    producer = freshenTypeAbsIdentitiesAgainstEnv schemeScopeEnv term
+    (subst', scheme', renames) =
+      freshenSchemeAndSubstAgainstTerm producer subst scheme
+    producerSubst =
+      renameTermTypeVars renames (substInTermRefs subst' producer)
+    targetBinders = schemeBinderRefs scheme'
+    targetBody = schemeBody scheme'
+
+    candidate = do
+      actualTy <- either (const Nothing) Just (typeCheckWithEnv env producerSubst)
+      (openedTy, openedProducer) <-
+        openConstructedBinders targetBinders actualTy producerSubst
+      constructedBody <-
+        constructTermToType
+          PreserveLambdaResults
+          targetBinders
+          openedTy
+          targetBody
+          openedProducer
+      pure (wrapTermWithScheme scheme' constructedBody)
+
+    openConstructedBinders [] actualTy producerTerm =
+      Just (actualTy, producerTerm)
+    openConstructedBinders ((targetRef, targetBound) : rest) actualTy producerTerm
+      | any (typeBinderRefsSameIdentity targetRef) localRefs = do
+          (actualRef, actualBound, actualBody) <-
+            case actualTy of
+              TForallRef ref mbBound body -> Just (ref, mbBound, body)
+              _ -> Nothing
+          if forallBoundsCanRebind actualBound targetBound
+            then
+              let openedTy =
+                    substTypeCaptureRef
+                      actualRef
+                      (TVarRef targetRef)
+                      actualBody
+                  openedTerm =
+                    ETyInst
+                      producerTerm
+                      (forallRebindingInstantiation actualBound targetRef)
+               in openConstructedBinders rest openedTy openedTerm
+            else Nothing
+      | otherwise =
+          openConstructedBinders rest actualTy producerTerm
+
+    checksAgainstTarget constructed =
+      case typeCheckWithEnv env constructed of
+        Right constructedTy ->
+          alphaEqType constructedTy (schemeToType scheme')
+            || churchAwareEqType constructedTy (schemeToType scheme')
+        Left _ -> False
+
+    forallBoundsCanRebind Nothing _ = True
+    forallBoundsCanRebind (Just actual) (Just expected) =
+      binderBoundsAgree (Just actual) (Just expected)
+    forallBoundsCanRebind (Just _) Nothing = False
+
+    forallRebindingInstantiation Nothing expectedRef =
+      InstApp (TVarRef expectedRef)
+    forallRebindingInstantiation (Just _) expectedRef =
+      InstSeq
+        (InstInside (instAbstrWithRef expectedRef))
+        InstElim
+
+-- | Construct a let/publication boundary from its authoritative scheme.
+-- Reuse an exact leading abstraction prefix when the producer has already
+-- built it.  Otherwise, when a computation merely /returns/ a forall, first
+-- alpha-freshen colliding abstractions inside that computation, eliminate the
+-- returned forall at the publication binders, and emit the scheme spine once.
+-- This keeps binder ownership explicit without ever nesting two declarations
+-- of the same 'TypeBinderIdentity'.
+constructTermWithSchemeSubstRefsAtPublication
+  :: Env
+  -> IntMap.IntMap TypeBinderRef
+  -> ElabScheme
+  -> XmlfTerm
+  -> XmlfTerm
+constructTermWithSchemeSubstRefsAtPublication env subst scheme term =
+  let structuralCandidate =
+        constructTermWithSchemeSubstRefsByBinderRoutes
+          []
+          subst
+          scheme
+          term
+      targetTy = schemeToType scheme
+      checksAgainst target candidate =
+        case typeCheckWithEnv env candidate of
+          Right candidateTy ->
+            alphaEqType candidateTy target
+              || churchAwareEqType candidateTy target
+          Left _ -> False
+      constructsSchemeSpine candidate =
+        go (schemeBinderRefs scheme) candidate
+        where
+          go [] _ = True
+          go ((expectedRef, _) : rest) (ETyAbsRef actualRef _ body)
+            | typeBinderRefsSameIdentity expectedRef actualRef =
+                go rest body
+          go _ _ = False
+   in if constructsSchemeSpine structuralCandidate
+        && checksAgainst targetTy structuralCandidate
+        then structuralCandidate
+        else
+          let schemeScopeEnv =
+                foldr
+                  ( \(ref, mbBound) ->
+                      insertTypeBindingRef
+                        ref
+                        (maybe TBottom tyToElab mbBound)
+                  )
+                  env
+                  (schemeBinderRefs scheme)
+              producer =
+                freshenTypeAbsIdentitiesAgainstEnv
+                  schemeScopeEnv
+                  term
+              (subst', scheme', renames) =
+                freshenSchemeAndSubstAgainstTerm producer subst scheme
+              producerSubst =
+                renameTermTypeVars renames (substInTermRefs subst' producer)
+              constructedBody = do
+                actualTy <- either (const Nothing) Just (typeCheckWithEnv env producerSubst)
+                constructTermToType
+                  PreserveLambdaResults
+                  (schemeBinderRefs scheme')
+                  actualTy
+                  (schemeBody scheme')
+                  producerSubst
+              publicationCandidate =
+                wrapTermWithScheme scheme' <$> constructedBody
+           in case publicationCandidate of
+                Just candidate
+                  | checksAgainst (schemeToType scheme') candidate -> candidate
+                _ -> structuralCandidate
+
+-- | Construct a prepared root packet consumer through the term's result
+-- path.  Unlike ordinary closure, this operation may descend through value
+-- lambdas: its caller carries positive topology-packet placement provenance
+-- proving that the enclosing flexible result was created by the
+-- generalization plan.  Without that proof, lambda codomains remain owned by
+-- their Figure 15.3.5 constructors and use
+-- 'closeTermWithSchemeSubstRefsIfNeeded' instead.
+constructTermWithSchemeSubstRefsAtResult
+  :: Env
+  -> IntMap.IntMap TypeBinderRef
+  -> ElabScheme
+  -> XmlfTerm
+  -> XmlfTerm
+constructTermWithSchemeSubstRefsAtResult env subst scheme term =
+  let (subst', scheme', renames) =
+        freshenSchemeAndSubstAgainstTerm term subst scheme
+      termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
+      termConstructed =
+        case typeCheckWithEnv env termSubst of
+          Right actualTy ->
+            maybe
+              termSubst
+              id
+              ( constructTermToType
+                  ConstructLambdaResults
+                  (schemeBinderRefs scheme')
+                  actualTy
+                  (schemeBody scheme')
+                  termSubst
+              )
+          Left _ -> termSubst
+   in wrapTermWithScheme scheme' termConstructed
 
 -- | Construct a root scheme around an open producer without identifying
 -- unrelated leading abstractions by position.  A same-identity abstraction,
@@ -397,19 +803,62 @@ wrapTermWithSchemeIfMatches scheme term =
 abstractTermToSchemeBody :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
 abstractTermToSchemeBody scheme term = do
   actualTy <- either (const Nothing) Just (typeCheckOpenTerm term)
-  abstractTermToType
+  constructTermToType
+    PreserveLambdaResults
     (schemeBinderRefs scheme)
     actualTy
     (schemeBody scheme)
     term
 
-abstractTermToType :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType -> XmlfTerm -> Maybe XmlfTerm
-abstractTermToType binders actualTy expectedTy term
+data LambdaResultConstruction
+  = PreserveLambdaResults
+  | ConstructLambdaResults
+
+constructTermToType
+  :: LambdaResultConstruction
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> ElabType
+  -> ElabType
+  -> XmlfTerm
+  -> Maybe XmlfTerm
+constructTermToType lambdaResultConstruction binders actualTy expectedTy term
   | alphaEqType actualTy expectedTy || churchAwareEqType actualTy expectedTy =
       Just term
   | ELet resolved scheme rhs body <- term =
       ELet resolved scheme rhs
-        <$> abstractTermToType binders actualTy expectedTy body
+        <$> constructTermToType
+          lambdaResultConstruction
+          binders
+          actualTy
+          expectedTy
+          body
+  | ConstructLambdaResults <- lambdaResultConstruction
+  , ELam resolved body <- term
+  , TArrow actualDomain actualCodomain <- actualTy
+  , TArrow expectedDomain expectedCodomain <- expectedTy
+  , alphaEqType actualDomain expectedDomain
+      || churchAwareEqType actualDomain expectedDomain =
+      ELam resolved
+        <$> constructTermToType
+          lambdaResultConstruction
+          binders
+          actualCodomain
+          expectedCodomain
+          body
+  | ConstructLambdaResults <- lambdaResultConstruction
+  , ETyAbsRef termRef termBound body <- term
+  , TForallRef actualRef actualBound actualBody <- actualTy
+  , TForallRef expectedRef expectedBound expectedBody <- expectedTy
+  , typeBinderRefsSameIdentity termRef actualRef
+  , typeBinderRefsSameIdentity actualRef expectedRef
+  , binderBoundsAgree actualBound expectedBound =
+      eTyAbsWithRef termRef termBound
+        <$> constructTermToType
+          lambdaResultConstruction
+          binders
+          actualBody
+          expectedBody
+          body
   | TForallRef ref (Just bound) bodyTy <- actualTy,
     let boundTy = tyToElab bound
         instantiatedTy = substTypeSimpleRef ref boundTy bodyTy,
@@ -425,8 +874,11 @@ abstractTermToType binders actualTy expectedTy term
     let boundTy = maybe TBottom tyToElab mbBound,
     alphaEqType actualTy boundTy || churchAwareEqType actualTy boundTy =
       Just (ETyInst term (instAbstrWithRef expectedRef))
-  | TForallRef actualRef actualBound actualBody <- actualTy,
-    [(expectedRef, _)] <-
+  | TForallRef actualRef actualBound actualBody <- actualTy
+  , length (topTyAbsRefs term) < length binders =
+      constructFromLeadingForall actualRef actualBound actualBody
+  | TForallRef actualRef actualBound actualBody <- actualTy
+  , [(expectedRef, _)] <-
       [ (candidateRef, candidateBound)
       | (candidateRef, candidateBound) <- binders
       , let specializedBody =
@@ -445,6 +897,89 @@ abstractTermToType binders actualTy expectedTy term
         )
   | otherwise = Nothing
   where
+    -- A publication scheme can introduce binders in a different lexical
+    -- order from the producer's principal forall spine.  Consume the source
+    -- spine one checked step at a time before wrapping the target binders.
+    -- In particular, a vacuous source slot is eliminated with N before a
+    -- later target binder is used as an explicit type argument.  Treating the
+    -- two alpha-equivalent complete types as already constructed would leave
+    -- the target identity free instead of publishing its TAbs slot.
+    constructFromLeadingForall actualRef actualBound actualBody =
+      firstSuccessful
+        ( vacuousElimination
+            ++ targetApplications
+            ++ boundedElimination
+        )
+      where
+        vacuousElimination =
+          [InstElim | not (any (typeBinderRefsSameIdentity actualRef) (freeTypeVarRefsType actualBody))]
+
+        targetApplications =
+          [ forallRebindingInstantiation actualBound targetRef
+          | (targetRef, targetBound) <- binders
+          , forallBoundsCanRebind actualBound targetBound
+          ]
+
+        boundedElimination =
+          [InstElim | Just _ <- [actualBound]]
+
+        firstSuccessful [] = Nothing
+        firstSuccessful (step : rest) =
+          case constructAfter step of
+            Just constructed -> Just constructed
+            Nothing -> firstSuccessful rest
+
+        constructAfter step = do
+          appliedTy <- either (const Nothing) Just (applyInstantiation actualTy step)
+          let explicitStep =
+                fromMaybe
+                  (ETyInst term step)
+                  (canonicalVacuousPrefixComposition step)
+              steppedTerm =
+                fromMaybe
+                  explicitStep
+                  (Reduce.reduceLeadingTypeInstantiationRedexes explicitStep)
+          constructTermToType
+            lambdaResultConstruction
+            binders
+            appliedTy
+            expectedTy
+            steppedTerm
+
+        -- A producer may first retain a vacuous forall while opening its
+        -- next binder at that retained identity.  Applying the resulting
+        -- forall at a publication binder has the paper-normal form
+        -- @N ; <target>@.  Reconstruct that form only from the exact nested
+        -- computation and validate both paths from the same source type;
+        -- this is an xMLF construction equation, not a type-shape rewrite.
+        canonicalVacuousPrefixComposition step =
+          case term of
+            ETyInst inner existing@(InstUnderRef retainedRef (InstApp (TVarRef argumentRef)))
+              | typeBinderRefsSameIdentity retainedRef argumentRef -> do
+                  innerTy <- either (const Nothing) Just (typeCheckOpenTerm inner)
+                  case innerTy of
+                    TForallRef prefixRef _ prefixBody
+                      | typeBinderRefsSameIdentity prefixRef retainedRef
+                      , not
+                          ( any
+                              (typeBinderRefsSameIdentity prefixRef)
+                              (freeTypeVarRefsType prefixBody)
+                          ) -> do
+                          existingTy <- either (const Nothing) Just (applyInstantiation innerTy existing)
+                          if typesAgree existingTy actualTy
+                            then do
+                              let canonical = composeInst InstElim step
+                              canonicalTy <- either (const Nothing) Just (applyInstantiation innerTy canonical)
+                              if typesAgree canonicalTy expectedTy
+                                then Just (ETyInst inner canonical)
+                                else Nothing
+                            else Nothing
+                    _ -> Nothing
+            _ -> Nothing
+
+        typesAgree left right =
+          alphaEqType left right || churchAwareEqType left right
+
     forallBoundsCanRebind Nothing _ = True
     forallBoundsCanRebind (Just actual) (Just expected) =
       let actualTy' = tyToElab actual
@@ -601,7 +1136,7 @@ renameTermTypeBinderRefPayloads renames = renameTerm
         ETyAbsRef ref mbBound body ->
           ETyAbsRef
             (renameRef ref)
-            (fmap (mapBoundType renameType) mbBound)
+            (fmap (renameBoundTypeBinderRefPayloads renames) mbBound)
             (renameTerm body)
         ETyInst body inst ->
           ETyInst (renameTerm body) (renameInstantiation inst)
@@ -610,7 +1145,9 @@ renameTermTypeBinderRefPayloads renames = renameTerm
 
     renameScheme scheme =
       mkElabSchemeWithRefs
-        [ (renameRef ref, fmap (mapBoundType renameType) mbBound)
+        [ ( renameRef ref
+          , fmap (renameBoundTypeBinderRefPayloads renames) mbBound
+          )
         | (ref, mbBound) <- schemeBinderRefs scheme
         ]
         (renameType (schemeBody scheme))
@@ -651,9 +1188,42 @@ renameTypeBinderRefPayloads renames = renameType
         TForallRef ref mbBound body ->
           TForallRef
             (renameRef ref)
-            (fmap (mapBoundType renameType) mbBound)
+            (fmap (renameBoundTypeBinderRefPayloads renames) mbBound)
             (renameType body)
         TMuRef ref body -> TMuRef (renameRef ref) (renameType body)
+        TBottom -> TBottom
+
+-- | Rename binder references inside a bound as one lexical value.  In
+-- particular, nested forall and mu declarations must move together with
+-- their scoped occurrences.  'mapBoundType' intentionally maps only the
+-- embedded 'ElabType' positions and therefore cannot implement this atomic
+-- identity-preserving operation.
+renameBoundTypeBinderRefPayloads
+  :: [TypeVarRename]
+  -> BoundType
+  -> BoundType
+renameBoundTypeBinderRefPayloads renames = renameBoundPayload
+  where
+    renameRef = applyRefRenames renames
+    renameType = renameTypeBinderRefPayloads renames
+
+    renameBoundPayload bound =
+      case bound of
+        TArrow domain codomain ->
+          TArrow (renameType domain) (renameType codomain)
+        TConWithIdentity identity constructor args ->
+          TConWithIdentity identity constructor (fmap renameType args)
+        TVarAppRef ref args ->
+          TVarAppRef (renameRef ref) (fmap renameType args)
+        TBaseWithIdentity identity base ->
+          TBaseWithIdentity identity base
+        TForallRef ref mbBound body ->
+          TForallRef
+            (renameRef ref)
+            (fmap renameBoundPayload mbBound)
+            (renameType body)
+        TMuRef ref body ->
+          TMuRef (renameRef ref) (renameType body)
         TBottom -> TBottom
 
 alignTermTypeVarsToScheme :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
@@ -990,6 +1560,34 @@ typeCheckOpenTermWithBaseEnv baseEnv term =
         baseEnv
         (freeResolvedTermVars term)
     )
+    term
+
+-- | Check an already constructed open term in the exact occurrence context
+-- carried by that term, while retaining the caller's type-binder context.
+-- Construction may project a free resolved-variable payload through a
+-- certified graph/source quotient.  In that case the recursive result's
+-- occurrence context is the preferred term Gamma for this boundary; lexical
+-- lambda/let binders remain authoritative inside 'typeCheckWithResolvedEnv'.
+--
+-- Conflicting free occurrences of one resolved identity are not hidden:
+-- 'insertResolvedTermEnv' retains one entry, so the other occurrence still
+-- fails with 'TCResolvedVarTypeMismatch'.
+typeCheckConstructedOpenTermWithBaseEnv
+  :: Env
+  -> XmlfTerm
+  -> Either TypeCheckError ElabType
+typeCheckConstructedOpenTermWithBaseEnv baseEnv term =
+  typeCheckWithResolvedEnv
+    ( foldr
+        (\resolved ->
+          insertResolvedTermEnv
+            resolved
+            (resolvedVarType resolved)
+        )
+        emptyResolvedTermEnv
+        (freeResolvedTermVars term)
+    )
+    baseEnv
     term
 
 renameInst :: [TypeVarRename] -> Instantiation -> Instantiation

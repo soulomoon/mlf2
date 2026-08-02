@@ -44,6 +44,7 @@ module MLF.Elab.Elaborate.Algebra.TestSupport
     projectValidatedAmbientConsumerBoundForTest,
     projectBodyConsumerBoundWithCertificateForTest,
     attachBodyConsumerBoundRefinementForTest,
+    finalizeBodyConsumerBoundRefinementsForTest,
     selectBodyConsumerRouteForTest,
     selectBodyConsumerRouteWithPacketForTest,
     selectTermSourcePacketOccurrenceRenamesForTest,
@@ -92,6 +93,7 @@ import MLF.Elab.Elaborate.Algebra.ConstructionGamma
     constructionRouteBoundCompatible,
     directSourceBinderConstructionRename,
     directAmbientGammaAuthorityProvenance,
+    finalizeBodyConsumerBoundRefinementAtOwner,
     frozenEndpointCertificateTypes,
     inheritNestedApplicationResidualAuthority,
     inheritNestedApplicationResidualReplayAuthority,
@@ -462,6 +464,7 @@ classifyBodyConsumerRouteProjectionForTest renames owner closures requirement lo
       authorizeBodyConsumerDeclaration
         IntMap.empty
         []
+        []
         localBinders
         bindings
         route
@@ -798,6 +801,7 @@ projectBodyConsumerBoundWithCertificateForTest provenance localBinders routeView
     authorizeBodyConsumerDeclaration
       IntMap.empty
       []
+      []
       localBinders
       ambientBindings
       route
@@ -844,6 +848,7 @@ attachBodyConsumerBoundRefinementForTest provenance localBinders routeView proje
     authorizeBodyConsumerDeclaration
       IntMap.empty
       []
+      []
       localBinders
       ambientBindings
       route
@@ -885,6 +890,24 @@ attachBodyConsumerBoundRefinementForTest provenance localBinders routeView proje
       }
   where
     route = bodyConsumerRouteFromTestView routeView
+
+finalizeBodyConsumerBoundRefinementsForTest
+  :: LocalGammaOwner
+  -> [TypeBinderRef]
+  -> [TypeBinderRef]
+  -> OwnerFinalConstruction
+  -> OwnerFinalConstruction
+finalizeBodyConsumerBoundRefinementsForTest owner localRefs ambientRefs certificate =
+  certificate
+    { ofcBodyConsumerBoundRefinements =
+        map
+          ( finalizeBodyConsumerBoundRefinementAtOwner
+              owner
+              localRefs
+              ambientRefs
+          )
+          (ofcBodyConsumerBoundRefinements certificate)
+    }
 
 requirementNeedsLocalConstructionForTest
   :: Bool

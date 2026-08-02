@@ -99,6 +99,7 @@ planReify _ plan = do
       BinderPlan
         { bpOrderedBinders = orderedBinderEntries,
           bpBinderRefRoutes = binderRefRoutes,
+          bpInheritedRigidAliasRoutes = inheritedRigidAliasRoutes,
           bpLocallyClosedGammaKeys = locallyClosedGammaKeys,
           bpGammaAlias = gammaAliasPlan,
           bpNamedUnderGaSet = namedUnderGaSetPlan,
@@ -150,7 +151,11 @@ planReify _ plan = do
               Reify.rpiBindParentsGa = mbBindParentsGaInfo,
               Reify.rpiExtraNameStart = length orderedBinderEntries,
               Reify.rpiOrderedExtra = orderedExtra,
+              Reify.rpiOrderedBinderRefs =
+                IntMap.fromList orderedBinderEntries,
               Reify.rpiSubst0 = subst0',
+              Reify.rpiInheritedRigidAliasRoutes =
+                inheritedRigidAliasRoutes,
               Reify.rpiGammaAlias = gammaAliasPlan,
               Reify.rpiNamedUnderGaSet = namedUnderGaSetPlan,
               Reify.rpiNestedSchemeInteriorSet = nestedSchemeInteriorSetPlan,

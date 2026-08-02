@@ -65,6 +65,11 @@ import MLF.Util.Trace (traceWhen)
 data GaBindParents p = GaBindParents
   { gaBindParentsBase :: BindParents,
     gaBaseConstraint :: Constraint p,
+    -- | Exact node redirects applied to source annotations before
+    -- union-find canonicalization.  Named base nodes deliberately remain
+    -- distinct in 'gaBaseToSolved', so this is a separate construction route
+    -- rather than an overwrite of that identity-preserving bridge.
+    gaAnnotationNodeRedirects :: IntMap.IntMap NodeId,
     gaBaseToSolved :: IntMap.IntMap NodeId,
     gaSolvedToBase :: IntMap.IntMap NodeId,
     -- | Administrative alternative-let roots whose typed identity redirects

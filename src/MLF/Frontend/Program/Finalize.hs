@@ -85,7 +85,11 @@ import MLF.Elab.Run.Pipeline
     unionPreparedExternalBindings,
   )
 import MLF.Elab.SourceBinder (typeBinderDeclarationRefs)
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded, renameTermTypeVars)
+import MLF.Elab.TermClosure
+  ( closeTermWithSchemeSubstRefsIfNeeded,
+    refreshLocalResolvedVarType,
+    renameTermTypeVars,
+  )
 import MLF.Elab.Elaborate.Annotation (constructExactTermAtType)
 import MLF.Elab.Types (XmlfTerm, ElabType)
 import qualified MLF.Elab.Types as X
@@ -268,7 +272,7 @@ import MLF.Frontend.Program.Types
     insertTypeBinderSubstView,
   )
 import MLF.Frontend.Syntax (Expr (..), Lit (..), ResolvedNormSurfaceExpr, SrcBound (..), SrcTy (..), SrcType, ResolvedSurfaceExpr, TermReference (..), TermReferencePhase (ResolvedTermReferences), resolvedTermReferenceDetails, termReferenceName)
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, implicitForallClosureMatches, matchTypeRefs, splitForallsRefs, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, implicitForallClosureMatches, matchTypeRefs, splitForallsRefs, substTypeCaptureRef)
 import MLF.Types.Identity
   ( DeferredRef,
     deferredRefIdentity,
@@ -621,7 +625,7 @@ finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
         pipelineResult
   term <- finalizeOpaqueDeferredConstructors context (loweredBindingDeferredObligations lowered) tcEnv term0
   let resolvedTerm =
-        alignLeadingTypeAbsRefsToType placeholderTy
+        alignLeadingTermBindersToType placeholderTy
           . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
           $ term
       resolvedDeferredObligations =
@@ -653,7 +657,7 @@ finalizeOpaqueUncheckedBindingWithContextFromSupply generator context lowered0 p
         pipelineResult
   term <- finalizeOpaqueDeferredConstructors context (loweredBindingDeferredObligations lowered) tcEnv term0
   let resolvedTerm =
-        alignLeadingTypeAbsRefsToType placeholderTy
+        alignLeadingTermBindersToType placeholderTy
           . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
           $ term
       resolvedDeferredObligations =
@@ -1768,7 +1772,7 @@ acceptMetadataConstructorBinding context lowered term expectedTy =
     expectedTy
   where
     resolvedTerm =
-      alignLeadingTypeAbsRefsToType expectedTy
+      alignLeadingTermBindersToType expectedTy
         . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
         $ term
     resolvedDeferredObligations =
@@ -2537,12 +2541,22 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
                 IntMap.empty
                 (schemeFromType checkedTy)
                 acceptedTermForStorage
+            canonicalAcceptedTerm =
+              TypeCheck.canonicalizeResolvedTermTypes
+                (runtimeTypeCheckEnv context)
+                closedAcceptedTerm
+            initiallyAlignedAcceptedTerm =
+              alignLeadingTermBindersToType
+                checkedTy
+                canonicalAcceptedTerm
+            normalizedAcceptedTerm =
+              normalizeCheckedTypeRedexesWithEnv
+                (runtimeTypeCheckEnv context)
+                initiallyAlignedAcceptedTerm
             acceptedTermWithResolvedVars =
-              alignLeadingTypeAbsRefsToType checkedTy
-                . normalizeCheckedTypeRedexes
-                . alignLeadingTypeAbsRefsToType checkedTy
-                . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
-                $ closedAcceptedTerm
+              alignLeadingTermBindersToType
+                checkedTy
+                normalizedAcceptedTerm
         -- Deferred rewriting can leave the completed producer more general
         -- than the pipeline's projected result type (for example, a vacuous
         -- local-Gamma forall around a case computation).  The checked term is
@@ -2775,17 +2789,37 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
           | otherwise -> meaningfulForallCount body
         _ -> 0
 
-alignLeadingTypeAbsRefsToType :: ElabType -> XmlfTerm -> XmlfTerm
-alignLeadingTypeAbsRefsToType expectedTy term =
+-- | Publish the leading construction spine with the identities and endpoint
+-- types owned by the accepted binding contract.  A capture-avoiding
+-- substitution may legitimately freshen an internal recursive binder while
+-- constructing an alpha-equivalent intermediate type.  That intermediate is
+-- not authority for a source-facing evidence parameter: rebuild the leading
+-- type and value binders from the already-validated storage type and update
+-- local occurrences in the same operation.
+alignLeadingTermBindersToType :: ElabType -> XmlfTerm -> XmlfTerm
+alignLeadingTermBindersToType expectedTy term =
   case (expectedTy, term) of
     (X.TForallRef targetRef _ targetBody, X.ETyAbsRef termRef mbBound body)
       | X.typeBinderRefsSameIdentity targetRef termRef ->
-          X.ETyAbsRef termRef mbBound (alignLeadingTypeAbsRefsToType targetBody body)
+          X.ETyAbsRef termRef mbBound (alignLeadingTermBindersToType targetBody body)
       | otherwise ->
           X.ETyAbsRef
             targetRef
             mbBound
-            (alignLeadingTypeAbsRefsToType targetBody (renameTermTypeVars [(termRef, targetRef)] body))
+            (alignLeadingTermBindersToType targetBody (renameTermTypeVars [(termRef, targetRef)] body))
+    (X.TArrow targetDomain targetCodomain, X.ELam resolved body) ->
+      let resolved' =
+            X.mapResolvedVarType
+              (const targetDomain)
+              resolved
+          body' =
+            refreshLocalResolvedVarType
+              resolved
+              targetDomain
+              body
+       in X.ELam
+            resolved'
+            (alignLeadingTermBindersToType targetCodomain body')
     _ -> term
 
 validateDeferredObligationIdentities :: LoweredBindingIdentity -> DeferredObligations -> Either ProgramError ()
@@ -3900,9 +3934,14 @@ construction-local abstraction/elimination pairs.  A vacuous pair is a
 proof-only redex, not part of the source ABI, so it may be removed before the
 checked term is published.
 
-Normalize only explicit type beta-redexes, recursively.  Value-level lets and
-applications remain untouched, so CheckedBinding keeps the source evaluation
-structure while its type evidence is closed by construction.  This is also an
+Normalize type redexes recursively without changing value-level lets or
+applications, so CheckedBinding keeps the source evaluation structure while
+its type evidence is closed by construction.  Composed and context-bearing
+Phi computations (@InstSeq@/@InstUnder@/@InstInside@) may encode the binder
+topology selected by generalization.  Some reduce safely, while others would
+specialize an enclosing source binder to Bottom.  Decide that at the rewrite
+site: type-check the redex and its reduct in the exact lexical environment,
+and accept the reduct only when their types agree.  This is also an
 identity-publication boundary: retain a reduction only when it introduces no
 generated identity absent from the original redex.
 
@@ -3915,49 +3954,70 @@ may consume it after CheckedBinding has recorded the proof.
 -}
 normalizeCheckedTypeRedexes :: XmlfTerm -> XmlfTerm
 normalizeCheckedTypeRedexes =
-  reduceHere . descend
+  normalizeCheckedTypeRedexesWithEnv TypeCheck.emptyEnv
+
+normalizeCheckedTypeRedexesWithEnv :: Env -> XmlfTerm -> XmlfTerm
+normalizeCheckedTypeRedexesWithEnv =
+  go
   where
-    descend term =
+    go env =
+      reduceHere env . descend env
+
+    descend env term =
       case term of
         X.EVarNode {} -> term
         X.ELit {} -> term
         X.ELam resolved body ->
-          X.ELam resolved (normalizeCheckedTypeRedexes body)
+          let ty = X.resolvedVarType resolved
+              env' = TypeCheck.insertResolvedTermBinding resolved ty env
+           in X.ELam resolved (go env' body)
         X.EApp fun arg ->
           X.EApp
-            (normalizeCheckedTypeRedexes fun)
-            (normalizeCheckedTypeRedexes arg)
+            (go env fun)
+            (go env arg)
         X.ELet resolved scheme rhs body ->
-          X.ELet
-            resolved
-            scheme
-            (normalizeCheckedTypeRedexes rhs)
-            (normalizeCheckedTypeRedexes body)
+          let schemeTy = schemeToType scheme
+              env' = TypeCheck.insertResolvedTermBinding resolved schemeTy env
+           in X.ELet
+                resolved
+                scheme
+                (go env' rhs)
+                (go env' body)
         X.ETyAbsRef ref mbBound body ->
-          X.ETyAbsRef ref mbBound (normalizeCheckedTypeRedexes body)
+          let boundTy = maybe X.TBottom X.tyToElab mbBound
+              env' = TypeCheck.insertTypeBindingRef ref boundTy env
+           in X.ETyAbsRef ref mbBound (go env' body)
         X.ETyInst inner inst ->
-          X.ETyInst (normalizeCheckedTypeRedexes inner) inst
+          X.ETyInst (go env inner) inst
         X.ERoll ty body ->
-          X.ERoll ty (normalizeCheckedTypeRedexes body)
+          X.ERoll ty (go env body)
         X.EUnroll inner ->
-          X.EUnroll (normalizeCheckedTypeRedexes inner)
+          X.EUnroll (go env inner)
 
-    reduceHere term =
-      if checkedTypeRedexCarriesExplicitHyp term
-        then term
-        else
+    reduceHere env term
+      | checkedTypeRedexCarriesExplicitHyp term = term
+      | otherwise =
           case Reduce.reduceLeadingTypeInstantiationRedexes term of
             Just reduced
               | generatedIdentitiesIn reduced
-                  `Set.isSubsetOf` generatedIdentitiesIn term ->
-                  normalizeCheckedTypeRedexes reduced
-            Nothing ->
-              term
-            _ ->
-              term
+                  `Set.isSubsetOf` generatedIdentitiesIn term,
+                reductionPreservesType env term reduced ->
+                  go env reduced
+            _ -> term
 
     generatedIdentitiesIn =
       Set.fromList . X.generatedIdentitiesInTerm
+
+    reductionPreservesType env original reduced =
+      case
+          ( TypeCheck.typeCheckWithEnv env original,
+            TypeCheck.typeCheckWithEnv env reduced
+          )
+        of
+          (Right originalTy, Right reducedTy) ->
+            alphaEqType originalTy reducedTy
+              || churchAwareEqType originalTy reducedTy
+          _ -> False
 
 checkedTypeRedexCarriesExplicitHyp :: XmlfTerm -> Bool
 checkedTypeRedexCarriesExplicitHyp term =
@@ -6478,9 +6538,16 @@ instantiationTypes =
 freshenResolvedVarTypeAgainstInstantiations :: [ElabType] -> X.ResolvedVar -> X.ResolvedVar
 freshenResolvedVarTypeAgainstInstantiations instTys resolved
   | null instTys = resolved
-  | otherwise = X.mapResolvedVarType (const (freshenElabTypeBindersAgainstTypes instTys ty0)) resolved
+  | otherwise = X.mapResolvedVarType (const ty') resolved
   where
     ty0 = X.resolvedVarType resolved
+    generator =
+      X.identityGeneratorAfterType (foldr X.TArrow ty0 instTys)
+    (ty', _) =
+      freshenElabTypeBindersAgainstTypesFromSupply
+        generator
+        instTys
+        ty0
 
 freshenResolvedVarTypeAgainstInstantiationsFromSupply :: IdentityGenerator -> [ElabType] -> X.ResolvedVar -> (X.ResolvedVar, IdentityGenerator)
 freshenResolvedVarTypeAgainstInstantiationsFromSupply generator instTys resolved =
@@ -6488,101 +6555,6 @@ freshenResolvedVarTypeAgainstInstantiationsFromSupply generator instTys resolved
   where
     (ty', generator') =
       freshenElabTypeBindersAgainstTypesFromSupply generator instTys (X.resolvedVarType resolved)
-
-freshenElabTypeBindersAgainstTypes :: [ElabType] -> ElabType -> ElabType
-freshenElabTypeBindersAgainstTypes reservedTys ty
-  | null reservedRefs = ty
-  | otherwise = ty'
-  where
-    reservedRefs = foldMap freeTypeVarRefsType reservedTys
-    reservedNames =
-      Set.fromList (map X.typeBinderRefName reservedRefs)
-    generator0 =
-      X.identityGeneratorAfterType (foldr X.TArrow ty reservedTys)
-    (ty', _) =
-      freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 ty
-
-freshenTypeBindersAgainstRefs :: [X.TypeBinderRef] -> Set String -> IdentityGenerator -> ElabType -> (ElabType, IdentityGenerator)
-freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 =
-  go generator0
-  where
-    binderCollides ref =
-      any (X.typeBinderRefsSameIdentity ref) reservedRefs
-
-    go generator ty =
-      case ty of
-        X.TVarRef {} ->
-          (ty, generator)
-        X.TArrow dom cod ->
-          let (dom', generator1) = go generator dom
-              (cod', generator2) = go generator1 cod
-           in (X.TArrow dom' cod', generator2)
-        X.TConWithIdentity identity con args ->
-          let (args', generator') = freshenNonEmpty generator args
-           in (X.TConWithIdentity identity con args', generator')
-        X.TVarAppRef ref args ->
-          let (args', generator') = freshenNonEmpty generator args
-           in (X.TVarAppRef ref args', generator')
-        X.TBaseWithIdentity {} ->
-          (ty, generator)
-        X.TForallRef ref mbBound body ->
-          let (mbBound', generator1) =
-                freshenMaybeBound generator mbBound
-              (ref', bodyForFreshening, generator2) =
-                if binderCollides ref
-                  then
-                    let usedNames =
-                          Set.unions
-                            [ reservedNames,
-                              Set.fromList (map X.typeBinderRefName (freeTypeVarRefsType body)),
-                              maybe Set.empty (Set.fromList . map X.typeBinderRefName . freeTypeVarRefsType) mbBound,
-                              Set.singleton (X.typeBinderRefName ref)
-                            ]
-                        freshName = freshNameLike (X.typeBinderRefName ref) usedNames
-                        (freshRef, generator') = X.freshTypeBinderRef freshName generator1
-                     in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
-                  else (ref, body, generator1)
-              (body', generator3) = go generator2 bodyForFreshening
-           in (X.TForallRef ref' mbBound' body', generator3)
-        X.TMuRef ref body ->
-          let (ref', bodyForFreshening, generator1) =
-                if binderCollides ref
-                  then
-                    let usedNames =
-                          Set.unions
-                            [ reservedNames,
-                              Set.fromList (map X.typeBinderRefName (freeTypeVarRefsType body)),
-                              Set.singleton (X.typeBinderRefName ref)
-                            ]
-                        freshName = freshNameLike (X.typeBinderRefName ref) usedNames
-                        (freshRef, generator') = X.freshTypeBinderRef freshName generator
-                     in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
-                  else (ref, body, generator)
-              (body', generator2) = go generator1 bodyForFreshening
-           in (X.TMuRef ref' body', generator2)
-        X.TBottom ->
-          (ty, generator)
-
-    freshenMaybeBound generator =
-      \case
-        Nothing -> (Nothing, generator)
-        Just bound ->
-          let (bound', generator') = go generator (X.tyToElab bound)
-           in case X.elabToBound bound' of
-                Right bound'' -> (Just bound'', generator')
-                Left _ -> (Just bound, generator')
-
-    freshenNonEmpty generator (arg :| args) =
-      let (arg', generator1) = go generator arg
-          (argsRev, generator') =
-            foldl
-              ( \(acc, gen) item ->
-                  let (item', gen') = go gen item
-                   in (item' : acc, gen')
-              )
-              ([], generator1)
-              args
-       in (arg' :| reverse argsRev, generator')
 
 methodForallInstantiationsFromSourceSubst :: ElaborateScope -> TypeViewSubst -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Either ProgramError [X.Instantiation]
 methodForallInstantiationsFromSourceSubst scope subst sourceView foralls =

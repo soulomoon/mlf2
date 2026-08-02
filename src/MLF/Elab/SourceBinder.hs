@@ -9,16 +9,19 @@ module MLF.Elab.SourceBinder
     resolveConstructionSourceBindersInSchemeInfoExcept,
     typeBinderDeclarationRefs,
     orderSourceProjectedSchemeBinders,
+    publishSourceBinderOrderFromProvenance,
     resolveSourceBinderAliasesInType,
+    resolveSourceBinderAliasesInTypeExcept,
     sourceBinderAliasSubstitution,
     sourceBinderConstructionRenames,
+    sourceBinderConstructionRenamesRetainingAmbiguousSources,
   )
 where
 
 import Control.Monad (foldM)
 import Data.Foldable (toList)
 import qualified Data.IntMap.Strict as IntMap
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
 import MLF.Elab.Types
@@ -32,7 +35,7 @@ import MLF.Elab.Types
     schemeBinderRefs,
     schemeBody,
     schemeInfoBinderRefSubst,
-    schemeInfoFromRefSubst,
+    rebuildSchemeInfoFromRefSubst,
     typeBinderRefIdentity,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
@@ -76,6 +79,35 @@ typeBinderDeclarationRefs ty =
     TMuRef ref body ->
       ref : typeBinderDeclarationRefs body
 
+-- | Publish the exact occurrence routes whose quantifier order is already
+-- owned by source-binder provenance.  Generalization can retain a graph
+-- occurrence key that is not part of the current module's @<P@ order (for
+-- example a structural binder imported through a checked module interface,
+-- or a graph-backed annotation existential whose live occurrence has solved
+-- to bottom).  The source sidecar and the generalized substitution jointly
+-- prove that such a key names one of the scheme's source binders, so Phi must
+-- preserve the constructed source order instead of asking the current graph
+-- to order the binder's frozen identity key.
+publishSourceBinderOrderFromProvenance
+  :: IntMap.IntMap TypeBinderRef
+  -> SchemeInfo
+  -> SchemeInfo
+publishSourceBinderOrderFromProvenance sourceBinderRefs schemeInfo =
+  schemeInfo
+    { siSourceBinderOrderRefs =
+        IntMap.filter
+          sourceOwnsBinderOrder
+          (schemeInfoBinderRefSubst schemeInfo)
+    }
+  where
+    schemeBinderRefs0 =
+      map fst (schemeBinderRefs (siScheme schemeInfo))
+    sourceRefs = IntMap.elems sourceBinderRefs
+
+    sourceOwnsBinderOrder ref =
+      any (typeBinderRefsSameIdentity ref) schemeBinderRefs0
+        && any (typeBinderRefsSameIdentity ref) sourceRefs
+
 -- | Compose the two identity-bearing sides of a prepared construction:
 -- graph node -> source binder and graph node -> outward Gamma binder.
 --
@@ -89,31 +121,103 @@ sourceBinderConstructionRenames
   -> IntMap.IntMap TypeBinderRef
   -> Either String [(TypeBinderRef, TypeBinderRef)]
 sourceBinderConstructionRenames representative sourceBinderRefs constructionAliases =
-  foldM addRoute [] (IntMap.toList sourceBinderRefs)
+  sourceBinderConstructionRenamesWith
+    True
+    representative
+    sourceBinderRefs
+    constructionAliases
+
+-- | Select only source-to-construction quotients that have one exact outward
+-- identity. A compiler-exact packet can contain several graph occurrences of
+-- the same lexical source binder before those occurrences are joined. In
+-- that case the source identity itself remains the construction authority;
+-- choosing either graph peer would erase occurrence provenance. Ambiguity
+-- inside one graph representative remains an error.
+sourceBinderConstructionRenamesRetainingAmbiguousSources
+  :: (NodeId -> NodeId)
+  -> IntMap.IntMap TypeBinderRef
+  -> IntMap.IntMap TypeBinderRef
+  -> Either String [(TypeBinderRef, TypeBinderRef)]
+sourceBinderConstructionRenamesRetainingAmbiguousSources representative sourceBinderRefs constructionAliases =
+  sourceBinderConstructionRenamesWith
+    False
+    representative
+    sourceBinderRefs
+    constructionAliases
+
+sourceBinderConstructionRenamesWith
+  :: Bool
+  -> (NodeId -> NodeId)
+  -> IntMap.IntMap TypeBinderRef
+  -> IntMap.IntMap TypeBinderRef
+  -> Either String [(TypeBinderRef, TypeBinderRef)]
+sourceBinderConstructionRenamesWith rejectAmbiguousSource representative sourceBinderRefs constructionAliases = do
+  candidateRoutes <-
+    catMaybes
+      <$> traverse
+        sourceRoute
+        (IntMap.toList sourceBinderRefs)
+  if rejectAmbiguousSource
+    then foldM addStrictRoute [] candidateRoutes
+    else
+      fst
+        <$> foldM
+          addUnambiguousRoute
+          ([], Set.empty)
+          candidateRoutes
   where
-    addRoute routes (nodeKey, sourceRef)
+    sourceRoute (nodeKey, sourceRef)
       | not (isJust (typeBinderIdentityGeneratedUnique (typeBinderRefIdentity sourceRef))) =
-          pure routes
+          pure Nothing
       | otherwise = do
           mbOutwardRef <- constructionRoute sourceRef (NodeId nodeKey)
           case mbOutwardRef of
-            Nothing -> pure routes
+            Nothing -> pure Nothing
             Just outwardRef
-              | typeBinderRefsSameIdentity sourceRef outwardRef -> pure routes
-              | otherwise ->
-                  case findSourceRoute sourceRef routes of
-                    Nothing -> pure ((sourceRef, outwardRef) : routes)
-                    Just existing
-                      | typeBinderRefsSameIdentity existing outwardRef -> pure routes
-                      | otherwise ->
-                          Left
-                            ( "source binder construction route is ambiguous: source="
-                                ++ show sourceRef
-                                ++ ", first="
-                                ++ show existing
-                                ++ ", second="
-                                ++ show outwardRef
-                            )
+              | typeBinderRefsSameIdentity sourceRef outwardRef -> pure Nothing
+              | otherwise -> pure (Just (sourceRef, outwardRef))
+
+    addStrictRoute routes (sourceRef, outwardRef) =
+      case findSourceRoute sourceRef routes of
+        Nothing -> pure ((sourceRef, outwardRef) : routes)
+        Just existing
+          | typeBinderRefsSameIdentity existing outwardRef -> pure routes
+          | otherwise ->
+              Left
+                ( "source binder construction route is ambiguous: source="
+                    ++ show sourceRef
+                    ++ ", first="
+                    ++ show existing
+                    ++ ", second="
+                    ++ show outwardRef
+                )
+
+    addUnambiguousRoute
+      state@(routes, ambiguousSources)
+      (sourceRef, outwardRef)
+        | Set.member
+            (typeBinderRefIdentity sourceRef)
+            ambiguousSources =
+            pure state
+        | otherwise =
+            case findSourceRoute sourceRef routes of
+              Nothing ->
+                pure ((sourceRef, outwardRef) : routes, ambiguousSources)
+              Just existing
+                | typeBinderRefsSameIdentity existing outwardRef ->
+                    pure state
+                | otherwise ->
+                    pure
+                      ( filter
+                          ( not
+                              . typeBinderRefsSameIdentity sourceRef
+                              . fst
+                          )
+                          routes
+                      , Set.insert
+                          (typeBinderRefIdentity sourceRef)
+                          ambiguousSources
+                      )
 
     constructionRoute sourceRef node =
       case IntMap.lookup (getNodeId node) constructionAliases of
@@ -183,9 +287,18 @@ constructionSourceBinderRefsForSchemeInfo
 constructionSourceBinderRefsForSchemeInfo protectedIdentities representative sourceBinderRefs schemeInfo =
   foldM
     addPacketSourceRoute
-    sourceBinderRefs
+    lexicalSourceBinderRefs
     (IntMap.toList (schemeInfoBinderRefSubst schemeInfo))
   where
+    -- A declaration protected by the current exact endpoint is useful as
+    -- source-order provenance, but it is not an outward lexical alias for the
+    -- packet being constructed.  Remove it from the alias map up front so a
+    -- direct graph-key hit cannot project the packet through that declaration.
+    lexicalSourceBinderRefs =
+      IntMap.filter
+        (not . isProtectedRef)
+        sourceBinderRefs
+
     -- A packet substitution is an identity-bearing bridge: the same graph key
     -- names both the packet-local reification ref and the source sidecar ref.
     -- Join those views by key before inspecting the packet type.  Solved graph
@@ -240,11 +353,15 @@ constructionSourceBinderRefsForSchemeInfo protectedIdentities representative sou
                 )
 
     generatedSourceRef ref
-      | isJust
+      | not (isProtectedRef ref)
+      , isJust
           ( typeBinderIdentityGeneratedUnique
               (typeBinderRefIdentity ref)
           ) = Just ref
       | otherwise = Nothing
+
+    isProtectedRef =
+      (`Set.member` protectedIdentities) . typeBinderRefIdentity
 
 resolveConstructionSourceBindersInSchemeInfo
   :: (NodeId -> NodeId)
@@ -319,10 +436,19 @@ resolveConstructionSourceBindersInSchemeInfoExcept protectedIdentities represent
         orderSourceProjectedSchemeBinders
           "construction source-binder projection"
           resolvedScheme
+      let projectedSubst =
+            IntMap.map
+              projectRef
+              (schemeInfoBinderRefSubst schemeInfo)
+          projectedSchemeInfo =
+            rebuildSchemeInfoFromRefSubst
+              schemeInfo
+              orderedResolvedScheme
+              projectedSubst
       pure
-        ( schemeInfoFromRefSubst
-            orderedResolvedScheme
-            (IntMap.map projectRef (schemeInfoBinderRefSubst schemeInfo))
+        ( publishSourceBinderOrderFromProvenance
+            (IntMap.union packetSourceBinderRefs sourceBinderRefs)
+            projectedSchemeInfo
         )
   where
     outerBinderSurvives refs (ref, mbBound) =
@@ -338,12 +464,16 @@ resolveConstructionSourceBindersInSchemeInfoExcept protectedIdentities represent
       if Set.member (typeBinderRefIdentity ref) protectedIdentities
         then Nothing
         else pure ()
-      case directSourceAlias refs ref of
-        Just sourceRef -> Just sourceRef
-        Nothing ->
-          case sourceAliasFromSubstitution refs ref of
-            Just sourceRef -> Just sourceRef
-            Nothing -> exactIdentitySourceAlias refs ref
+      sourceRef <-
+        case directSourceAlias refs ref of
+          Just direct -> Just direct
+          Nothing ->
+            case sourceAliasFromSubstitution refs ref of
+              Just substituted -> Just substituted
+              Nothing -> exactIdentitySourceAlias refs ref
+      if Set.member (typeBinderRefIdentity sourceRef) protectedIdentities
+        then Nothing
+        else Just sourceRef
 
     directSourceAlias refs ref = do
       node <- typeBinderRefNode ref

@@ -194,6 +194,13 @@ data GeneralizationRequirements = GeneralizationRequirements
     -- They may remain free while constructing a nested packet, but they are
     -- never candidates for this generalization's forall spine.
     grAmbientBinderRefs :: ![TypeBinderRef],
+    -- | Exact graph binders that the checked owner construction proves belong
+    -- to its final ETyAbs spine, including owner-emitted declarations absent
+    -- from the erased result type.  Binder planning admits these identities
+    -- before dependency ordering; finalization may preserve only the
+    -- declarations selected there and never synthesizes a binder after
+    -- reification.
+    grTermUsedRootBinderRefs :: ![TypeBinderRef],
     -- | Direct live-node routes to exact declarations and bounds already in
     -- the construction Gamma.  Unlike source-binder refs, these may retain
     -- graph identities; the exact bound is the semantic authority.
@@ -245,6 +252,7 @@ emptyGeneralizationRequirements =
     { grRequiredGammaBinders = [],
       grSourceBinderRefs = IntMap.empty,
       grAmbientBinderRefs = [],
+      grTermUsedRootBinderRefs = [],
       grAmbientGammaAuthorities = IntMap.empty,
       grLocallyClosedGammaNodes = IntSet.empty
     }

@@ -1,11 +1,13 @@
 module MLF.Elab.Run.Generalize.Prepare (
     PreparedGeneralizationArtifact,
     PreparedRootGeneralization(..),
+    preparedRootCertifiedTermBinderRenames,
     PreparedRootClosure(..),
     preparedRootClosureScheme,
     PreparedRootConstructionScope,
     preparedRootConstructionScopeBinders,
     preparedRootConstructionScopeAliases,
+    preparedRootConstructionScopeBinderRenames,
     preparedRootConstructionScopeLocalGammaClosures,
     prepareGeneralizationArtifact,
     prepareGeneralizationArtifactForRoots,
@@ -38,6 +40,7 @@ module MLF.Elab.Run.Generalize.Prepare (
 import MLF.Elab.Run.Generalize.Prepare.Internal
     ( PreparedGeneralizationArtifact
     , PreparedRootGeneralization(..)
+    , preparedRootCertifiedTermBinderRenames
     , PreparedRootClosure(..)
     , preparedRootClosureScheme
     , PreparedRootConstructionScope
@@ -63,6 +66,7 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , preparedElaborationEnvWithInitialEnv
     , preparedReadContextReady
     , preparedRootConstructionScopeAliases
+    , preparedRootConstructionScopeBinderRenames
     , preparedRootConstructionScopeBinders
     , preparedRootConstructionScopeLocalGammaClosures
     , preparedResultTypeViewReady

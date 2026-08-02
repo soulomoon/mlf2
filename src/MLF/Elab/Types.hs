@@ -75,9 +75,16 @@ module MLF.Elab.Types (
     ambientSchemeClosureAuthority,
     inheritedGammaSchemeClosureAuthority,
     locallyClosedGammaSchemeClosureAuthority,
+    requiredGammaAliasSchemeClosureAuthority,
     schemeClosureFreeRefs,
     validateSchemeClosure,
-    SchemeInfo(SchemeInfo, siScheme, siSubstRefs),
+    SchemeInfo
+        ( SchemeInfo,
+          siScheme,
+          siSubstRefs,
+          siSourceBinderOrderRefs,
+          siConstructionBinderOrderRefs
+        ),
     TypeBinderIdentity,
     typeBinderIdentityFromNode,
     typeBinderIdentityNode,
@@ -103,6 +110,7 @@ module MLF.Elab.Types (
     schemeInfoBinderIdentityKeys,
     schemeInfoBinderIdentityKeySet,
     schemeInfoFromRefSubst,
+    rebuildSchemeInfoFromRefSubst,
     schemeInfoBinderRefSubst,
     ResolvedVar(..),
     ResolvedTermIdentityKey,
@@ -118,6 +126,9 @@ module MLF.Elab.Types (
     mkLocalRecursiveLetWithRef,
     identityGeneratorAfterType,
     generatedIdentitiesInType,
+    identityGeneratorAfterSchemeInfo,
+    generatedIdentitiesInScheme,
+    generatedIdentitiesInSchemeInfo,
     eTyAbsWithRef,
     identityGeneratorAfterTerm,
     generatedIdentitiesInTerm,
@@ -455,6 +466,15 @@ inheritedGammaSchemeClosureAuthority = SchemeClosureAuthority
 -- nested constructor rather than by the current scheme.
 locallyClosedGammaSchemeClosureAuthority :: [TypeBinderRef] -> SchemeClosureAuthority
 locallyClosedGammaSchemeClosureAuthority = SchemeClosureAuthority
+
+-- | Exact alias targets selected for required Gamma entries while the binder
+-- planner still owns the source-sidecar and lexical-scope evidence.  The
+-- current scheme deliberately emits no duplicate binder for these refs; their
+-- enclosing source or ambient declaration closes the resulting occurrences.
+requiredGammaAliasSchemeClosureAuthority
+    :: [TypeBinderRef]
+    -> SchemeClosureAuthority
+requiredGammaAliasSchemeClosureAuthority = SchemeClosureAuthority
 
 -- | Free identities not justified by the scheme's own forall spine or by the
 -- explicitly supplied lexical authority. 'freeTypeVarRefsType' performs the

@@ -62,7 +62,6 @@ import Control.Exception (SomeException, evaluate, throwIO, try)
 import Control.Monad (foldM)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Functor.Foldable (Recursive (project))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
@@ -129,7 +128,6 @@ import MLF.Elab.Elaborate.Annotation
   ( AuthorizedElaborationRoot,
     authorizedElaborationResultAnn,
     elaborateClosedExactAnnotationTermAtType,
-    sourceTypeToElabTypeWithIdentitiesFromSupply,
   )
 import MLF.Elab.Generalize
   ( CompilerExactResultStage (..),
@@ -154,7 +152,9 @@ import MLF.Elab.Run.Generalize.Prepare
     PreparedRootClosure (..),
     PreparedRootGeneralization (..),
     preparedRootClosureScheme,
+    preparedRootCertifiedTermBinderRenames,
     preparedRootConstructionScopeAliases,
+    preparedRootConstructionScopeBinderRenames,
     preparedRootConstructionScopeBinders,
     preparedRootConstructionScopeLocalGammaClosures,
     applyPreparedCompilerExactRootBinderIdentities,
@@ -181,9 +181,13 @@ import MLF.Elab.Run.Generalize.Prepare
   )
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
+    constructTermWithInterleavedSchemeSubstRefsAtPublication,
     constructTermWithSchemeSubstRefs,
+    constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
     preserveRetainedChildAuthoritativeResult,
+    renameTypeVarInTermAgainstEnv,
+    renameTermTypeBinderRefPayloads,
     substInTermRefs,
   )
 import MLF.Elab.TypeCheck (typeCheckWithEnv)
@@ -214,7 +218,7 @@ import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdent
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, NormSurfaceExprOf, ResolvedNormSurfaceExpr, ResolvedSrcType, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, matchTypeRefs)
 import MLF.Util.Timing
   ( TimingConfig,
     emitProgramOperationMetricIO,
@@ -424,76 +428,6 @@ preparedSourceTypeBinderIdentityCandidates ::
 preparedSourceTypeBinderIdentityCandidates =
   pebSourceTypeBinderIdentityCandidates
 
-preparedAnnotationExpectedTypesWithSourceBinderAliases
-  :: IdentityGenerator
-  -> Map.Map String TypeBinderIdentity
-  -> PreparedExternalBindings
-  -> IntMap.IntMap NormSrcType
-  -> Either ElabError (IntMap.IntMap ElabType, IdentityGenerator)
-preparedAnnotationExpectedTypesWithSourceBinderAliases identityGenerator sourceBinderAliases prepared sourceTypes =
-  -- 'IntMap.toAscList' makes lexical identity allocation independent of map
-  -- construction history while the accumulator makes distinct annotation
-  -- occurrences consume distinct identities.
-  foldM convertOne (IntMap.empty, identityGenerator) (IntMap.toAscList sourceTypes)
-  where
-    (headIdentities, binderIdentities) =
-      preparedSourceTypeIdentityMaps prepared
-    allBinderIdentities =
-      sourceBinderAliases `Map.union` binderIdentities
-
-    convertOne (expectedTypes, generator) (nodeKey, sourceType) = do
-      (expectedType, generator') <-
-        sourceTypeToElabTypeWithIdentitiesFromSupply
-          generator
-          headIdentities
-          allBinderIdentities
-          sourceType
-      pure (IntMap.insert nodeKey expectedType expectedTypes, generator')
-
-preparedAnnotationExpectedTypesForRoots
-  :: IdentityGenerator
-  -> [(key, PreparedExternalBindings, ModuleConstraintRoot)]
-  -> IntMap.IntMap NormSrcType
-  -> Either ElabError (IntMap.IntMap ElabType, IdentityGenerator)
-preparedAnnotationExpectedTypesForRoots identityGenerator roots sourceTypes =
-  -- Module roots already arrive in the stable order chosen by the batch plan.
-  -- Thread one supply across them so root-local and global finalization assign
-  -- the same lexical identities.
-  foldM convertRoot (IntMap.empty, identityGenerator) roots
-  where
-    convertRoot (expectedTypes, generator) (_, prepared, root) = do
-      (rootExpectedTypes, generator') <-
-        preparedAnnotationExpectedTypesWithSourceBinderAliases
-          generator
-          (mcrSourceTypeBinderAliases root)
-          prepared
-          (IntMap.restrictKeys sourceTypes (annotationSourceTypeNodeKeys (mcrAnnotated root)))
-      pure (IntMap.union expectedTypes rootExpectedTypes, generator')
-
--- Source annotation types are recorded only at coercion codomains and exact
--- lambda parameters.  Collect those raw graph keys per definition so a
--- multi-root batch converts each type with that definition's resolved binder
--- identities; merging spelling maps first would conflate unrelated @a@s.
-annotationSourceTypeNodeKeys :: AnnExpr -> IntSet.IntSet
-annotationSourceTypeNodeKeys ann =
-  case ann of
-    AResolvedVar {} -> IntSet.empty
-    ALit {} -> IntSet.empty
-    ALam _ _ paramNode _ body _ _ ->
-      IntSet.insert (getNodeId paramNode) (annotationSourceTypeNodeKeys body)
-    AApp fun arg _ _ _ ->
-      annotationSourceTypeNodeKeys fun
-        `IntSet.union` annotationSourceTypeNodeKeys arg
-    ALet _ _ _ _ _ _ rhs body _ ->
-      annotationSourceTypeNodeKeys rhs
-        `IntSet.union` annotationSourceTypeNodeKeys body
-    AExactAnn inner _ sourceTypeNode _ ->
-      IntSet.insert (getNodeId sourceTypeNode) (annotationSourceTypeNodeKeys inner)
-    AAnn inner sourceTypeNode _ ->
-      IntSet.insert (getNodeId sourceTypeNode) (annotationSourceTypeNodeKeys inner)
-    ALetScope inner _ _ -> annotationSourceTypeNodeKeys inner
-    AUnfold inner _ _ -> annotationSourceTypeNodeKeys inner
-
 externalBindingsSourceTypeIdentityCandidates ::
   ExternalBindings ->
   (SymbolIdentityCandidates, TypeBinderIdentityCandidates)
@@ -535,6 +469,7 @@ data RootPartition p = RootPartition
     rpConstraint :: Constraint p,
     rpAnnotated :: !AnnExpr,
     rpAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
+    rpAnnExpectedTypes :: !(IntMap.IntMap ElabType),
     rpExactProducerTypes :: !(IntMap.IntMap ResolvedSrcType),
     rpSourceTypeBinderIdentities :: !(IntMap.IntMap TypeBinderIdentity),
     rpSourceTypeBinderAliases :: !(Map.Map String TypeBinderIdentity),
@@ -750,10 +685,14 @@ elabEnvWithRootConstructionScope
   -> ElabEnv p
   -> Either ElabError (ElabEnv p)
 elabEnvWithRootConstructionScope rootConstruction constructionAnn elabEnv = do
+  rootAlignedInitialEnv <-
+    alignEnvToConstructionBinderRenames
+      (preparedRootConstructionScopeBinderRenames constructionScope)
+      (eeInitialTermEnv elabEnv)
   alignedInitialEnv <-
     case rootConstruction of
       PreparedOrdinaryRootConstruction{} ->
-        pure (eeInitialTermEnv elabEnv)
+        pure rootAlignedInitialEnv
       PreparedExactRootConstruction exactAnnotation _ -> do
         packets <- eeSubtermGeneralizations elabEnv
         envInPacketConstruction <-
@@ -764,7 +703,7 @@ elabEnvWithRootConstructionScope rootConstruction constructionAnn elabEnv = do
                 == Just (dreaEdgeId exactAnnotation)
             , rename <- subtermGeneralizationConstructionBinderRenames packet
             ]
-            (eeInitialTermEnv elabEnv)
+            rootAlignedInitialEnv
         alignEnvToCompilerExactBinderRenames
           [ rename
           | packet <- Map.elems packets
@@ -1372,6 +1311,7 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
       crAnnotated = ann,
       crIdentityGenerator = packetIdentityGenerator,
       crAnnSourceTypes = annSourceTypes,
+      crAnnExpectedTypes = annExpectedTypes,
       crExactProducerTypes = exactProducerTypes,
       crSourceTypeBinderIdentities = sourceTypeBinderIdentities,
       crSourceTypeBinderAliases = sourceTypeBinderAliases,
@@ -1381,19 +1321,11 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
   let c1 = normalize c0
   (cAcyclic, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
   pres <- fromPresolutionError (computePresolution traceCfg acyc cAcyclic)
-  (annExpectedTypes, preparationIdentityGenerator) <-
-    fromElabError
-      ( preparedAnnotationExpectedTypesWithSourceBinderAliases
-          packetIdentityGenerator
-          sourceTypeBinderAliases
-          extPrepared
-          annSourceTypes
-      )
   prepared0 <-
     fromSolveError $
       prepareGeneralizationArtifact
         traceCfg
-        preparationIdentityGenerator
+        packetIdentityGenerator
         exactProducerTypes
         annExpectedTypes
         sourceTypeBinderIdentities
@@ -1502,10 +1434,9 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
       ( applyPreparedRootSourceTypeBinderIdentities
           rootGeneralization0
       )
-  let rootSubst0 = prgSubst rootGeneralization
   rootSubstAliased <-
     fromElabError
-      (applyPreparedTermSourceBinderAliases prepared rootSubst0 term)
+      (applyPreparedTermSourceBinderAliases prepared rootGeneralization term)
   rootGeneralizationFinal <-
     case preparedRootConstruction of
       PreparedExactRootConstruction deferred _ ->
@@ -1525,7 +1456,16 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
   let
       rootScheme = prgScheme rootGeneralizationFinal
       rootSubst = prgSubst rootGeneralizationFinal
-      termSubst = substInTermRefs rootSubst term
+      termAtRootConstruction =
+        renameTermTypeBinderRefPayloads
+          ( preparedRootCertifiedTermBinderRenames
+              rootGeneralizationFinal
+          )
+          term
+      termSubst =
+        substInTermRefs
+          rootSubst
+          termAtRootConstruction
       projectedCompilerExactResultBoundCertificates =
         projectCompilerExactResultBoundCertificates
           rootSubst
@@ -1553,7 +1493,7 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
           initialTcEnv
           rootSubst
           (prgClosure rootGeneralizationFinal)
-          term
+          termAtRootConstruction
           termSubst
   (termExact, authoritativeResultType) <-
     case preparedRootConstruction of
@@ -1769,6 +1709,7 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
         crAnnotated = ann,
         crIdentityGenerator = packetIdentityGenerator,
         crAnnSourceTypes = annSourceTypes,
+        crAnnExpectedTypes = annExpectedTypes,
         crExactProducerTypes = exactProducerTypes,
         crSourceTypeBinderIdentities = sourceTypeBinderIdentities,
         crSourceTypeBinderAliases = sourceTypeBinderAliases,
@@ -1789,26 +1730,17 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
               <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
     prepared0 <-
       evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
-        do
-          (annExpectedTypes, preparationIdentityGenerator) <-
-            fromElabError
-              ( preparedAnnotationExpectedTypesWithSourceBinderAliases
-                  packetIdentityGenerator
-                  sourceTypeBinderAliases
-                  extPrepared
-                  annSourceTypes
-              )
-          fromSolveError
-            ( prepareGeneralizationArtifact
+        fromSolveError
+          ( prepareGeneralizationArtifact
               traceCfg
-              preparationIdentityGenerator
+              packetIdentityGenerator
               exactProducerTypes
               annExpectedTypes
               sourceTypeBinderIdentities
               cAcyclic
               pres
               ann
-            )
+          )
     let prepared =
           withPreparedResolvedTermSchemes
             (preparedExternalSchemesByIdentity extPrepared)
@@ -1882,21 +1814,13 @@ prepareRootGeneralizationContextWithTiming
 prepareRootGeneralizationContextWithTiming timing label traceCfg identityGenerator presolutionContext =
   timeProgramOperationWithSuffixIO timing label ".prepare_generalization" $
     evaluate $ do
-      (annExpectedTypes, preparationIdentityGenerator) <-
-        fromElabError
-          ( preparedAnnotationExpectedTypesWithSourceBinderAliases
-              identityGenerator
-              (rpSourceTypeBinderAliases partition)
-              (rfcPreparedExternalBindings finalizationContext)
-              (rpAnnSourceTypes partition)
-          )
       prepared0 <-
         fromSolveError
           ( prepareGeneralizationArtifact
               traceCfg
-              preparationIdentityGenerator
+              identityGenerator
               (rpExactProducerTypes partition)
-              annExpectedTypes
+              (rpAnnExpectedTypes partition)
               (rpSourceTypeBinderIdentities partition)
               (rpcAcyclicConstraint presolutionContext)
               (rpcPresolution presolutionContext)
@@ -2145,6 +2069,7 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGene
         mcrRoots = roots,
         mcrIdentityGenerator = packetIdentityGenerator,
         mcrAnnSourceTypes = annSourceTypes,
+        mcrAnnExpectedTypes = annExpectedTypes,
         mcrExactProducerTypes = exactProducerTypes,
         mcrSourceTypeBinderIdentities = sourceTypeBinderIdentities,
         mcrRootOwnership = rootOwnership
@@ -2174,6 +2099,7 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGene
             rootOwnership
             roots
             annSourceTypes
+            annExpectedTypes
             exactProducerTypes
             sourceTypeBinderIdentities
     liftIO $
@@ -2196,6 +2122,7 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTimingGene
             rootOwnership
             (mbpRoots batchPlan)
             annSourceTypes
+            annExpectedTypes
             exactProducerTypes
             sourceTypeBinderIdentities
 
@@ -2211,10 +2138,11 @@ runModuleBatchPlanGlobalWithTiming ::
   RootOwnershipIndex ->
   [(key, PreparedExternalBindings, ModuleConstraintRoot)] ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ElabType ->
   IntMap.IntMap ResolvedSrcType ->
   IntMap.IntMap TypeBinderIdentity ->
   IO (Either PipelineError (Map.Map key PipelineElabDetailedResult))
-runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg packetIdentityGenerator c0 rootOwnership roots annSourceTypes exactProducerTypes sourceTypeBinderIdentities =
+runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg packetIdentityGenerator c0 rootOwnership roots annSourceTypes annExpectedTypes exactProducerTypes sourceTypeBinderIdentities =
   runExceptT $ do
     normalizeResult <-
       timePipelineValueSuffix timing label ".constraint_normalize" $
@@ -2235,24 +2163,16 @@ runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode t
                 cAcyclic
     prepared0 <-
       evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
-        do
-          (annExpectedTypes, preparationIdentityGenerator) <-
-            fromElabError
-              ( preparedAnnotationExpectedTypesForRoots
-                  packetIdentityGenerator
-                  roots
-                  annSourceTypes
-              )
-          fromSolveError $
-            prepareGeneralizationArtifactForRoots
-              traceCfg
-              preparationIdentityGenerator
-              exactProducerTypes
-              annExpectedTypes
-              sourceTypeBinderIdentities
-              cAcyclic
-              pres
-              [mcrAnnotated root | (_, _, root) <- roots]
+        fromSolveError $
+          prepareGeneralizationArtifactForRoots
+            traceCfg
+            packetIdentityGenerator
+            exactProducerTypes
+            annExpectedTypes
+            sourceTypeBinderIdentities
+            cAcyclic
+            pres
+            [mcrAnnotated root | (_, _, root) <- roots]
     let prepared =
           withPreparedResolvedTermSchemes
             ( Map.unions
@@ -2453,10 +2373,11 @@ buildModuleBatchPlan ::
   RootOwnershipIndex ->
   Map.Map key ModuleConstraintRoot ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ElabType ->
   IntMap.IntMap ResolvedSrcType ->
   IntMap.IntMap TypeBinderIdentity ->
   ModuleBatchPlan key 'Raw
-buildModuleBatchPlan rootPrepared packetIdentityGenerator constraint rootOwnership roots annSourceTypes exactProducerTypes sourceTypeBinderIdentities =
+buildModuleBatchPlan rootPrepared packetIdentityGenerator constraint rootOwnership roots annSourceTypes annExpectedTypes exactProducerTypes sourceTypeBinderIdentities =
   ModuleBatchPlan
     { mbpRoots = orderedRoots,
       mbpPartitions = partitions,
@@ -2480,6 +2401,7 @@ buildModuleBatchPlan rootPrepared packetIdentityGenerator constraint rootOwnersh
           buildRootPartitionFromBucket
             constraint
             annSourceTypes
+            annExpectedTypes
             exactProducerTypes
             sourceTypeBinderIdentities
             rootExtPrepared
@@ -2622,18 +2544,21 @@ ownersForRefKey rootOwnership key
 buildRootPartitionFromBucket ::
   Constraint 'Raw ->
   IntMap.IntMap NormSrcType ->
+  IntMap.IntMap ElabType ->
   IntMap.IntMap ResolvedSrcType ->
   IntMap.IntMap TypeBinderIdentity ->
   PreparedExternalBindings ->
   ModuleConstraintRoot ->
   RootPartitionBucket ->
   RootPartition 'Raw
-buildRootPartitionFromBucket constraint annSourceTypes exactProducerTypes sourceTypeBinderIdentities rootExtPrepared root bucket =
+buildRootPartitionFromBucket constraint annSourceTypes annExpectedTypes exactProducerTypes sourceTypeBinderIdentities rootExtPrepared root bucket =
   RootPartition
     { rpRootId = rootId,
       rpConstraint = partitionConstraint,
       rpAnnotated = mcrAnnotated root,
       rpAnnSourceTypes = IntMap.restrictKeys annSourceTypes (rpbNodeKeys bucket),
+      rpAnnExpectedTypes =
+        IntMap.restrictKeys annExpectedTypes (rpbNodeKeys bucket),
       rpExactProducerTypes =
         IntMap.restrictKeys exactProducerTypes (rpbEdgeKeys bucket),
       rpSourceTypeBinderIdentities =
@@ -2927,11 +2852,10 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
         ( applyPreparedRootSourceTypeBinderIdentities
             rootGeneralization0
         )
-  let rootSubst0 = prgSubst rootGeneralization
   rootSubstAliased <-
     evaluatePipelineEitherSuffix timing label ".project_term_source_binders" $
       fromElabError
-        (applyPreparedTermSourceBinderAliases prepared rootSubst0 term)
+        (applyPreparedTermSourceBinderAliases prepared rootGeneralization term)
   rootGeneralizationFinal <-
     case preparedRootConstruction of
       PreparedExactRootConstruction deferred _ ->
@@ -2953,9 +2877,19 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
   let
       rootScheme = prgScheme rootGeneralizationFinal
       rootSubst = prgSubst rootGeneralizationFinal
+      termAtRootConstruction =
+        renameTermTypeBinderRefPayloads
+          ( preparedRootCertifiedTermBinderRenames
+              rootGeneralizationFinal
+          )
+          term
   termSubst <-
     timePipelineValueSuffix timing label ".subst_root" $
-      evaluate (substInTermRefs rootSubst term)
+      evaluate
+        ( substInTermRefs
+            rootSubst
+            termAtRootConstruction
+        )
   compilerExactRootBinderRoutes <-
     case preparedRootConstruction of
       PreparedOrdinaryRootConstruction{} -> pure []
@@ -2973,7 +2907,7 @@ preparePipelineRootStage timing label traceCfg extPrepared prepared elabConfig e
         pprsRootGeneralization = rootGeneralizationFinal,
         pprsRootScheme = rootScheme,
         pprsRootSubstitution = rootSubst,
-        pprsElaboratedTerm = term,
+        pprsElaboratedTerm = termAtRootConstruction,
         pprsSubstitutedTerm = termSubst,
         pprsCompilerExactResultBoundCertificates =
           projectCompilerExactResultBoundCertificates
@@ -3218,12 +3152,23 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
       retainedChildAuthoritativeCandidate =
         case rootClosure of
           PreparedLocalRootClosure{} -> False
+          PreparedInterleavedLocalRootClosure{} -> False
+          PreparedTopologyPacketRootClosure{} -> False
           PreparedWholeRootClosure{} ->
             case preserveRetainedChildAuthoritativeResult termSubst of
               Just _ -> True
               Nothing -> False
       termClosed0 =
         case (rootExactness, rootClosure) of
+          ( PreparedExactRoot{},
+            PreparedInterleavedLocalRootClosure _ localRefs _
+            ) ->
+              constructTermWithInterleavedSchemeSubstRefsAtPublication
+                initialTcEnv
+                rootSubst
+                localRefs
+                rootClosureScheme
+                term
           (PreparedExactRoot{}, _) ->
             -- Exact source binders are outer construction authority. Reuse
             -- only an abstraction with the same identity; a distinct leading
@@ -3242,6 +3187,26 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
           -- first root binder and then decline to add the missing outer binder.
           (PreparedOrdinaryRoot, PreparedLocalRootClosure{}) ->
             constructTermWithSchemeSubstRefs rootSubst rootClosureScheme term
+          ( PreparedOrdinaryRoot,
+            PreparedInterleavedLocalRootClosure _ localRefs _
+            ) ->
+              constructTermWithInterleavedSchemeSubstRefsAtPublication
+                initialTcEnv
+                rootSubst
+                localRefs
+                rootClosureScheme
+                term
+          -- Packet placement positively records that the generalization plan
+          -- moved a planned dependency spine into an enclosing flexible
+          -- consumer bound.  Construct that exact result through the source
+          -- lambda path before emitting the root abstraction; do not infer
+          -- this obligation from a polymorphic-looking final bound.
+          (PreparedOrdinaryRoot, PreparedTopologyPacketRootClosure{}) ->
+            constructTermWithSchemeSubstRefsAtResult
+              initialTcEnv
+              rootSubst
+              rootClosureScheme
+              term
           (PreparedOrdinaryRoot, PreparedWholeRootClosure{}) ->
             if retainedChildAuthoritativeCandidate
               then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
@@ -3262,7 +3227,13 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                         -- with the prepared binders.  Preserve an existing
                         -- explicit spine, including source-owned binder
                         -- identities, and construct only when it is absent.
-                        if termConstructsRootForallSpine rootClosureScheme termSubst
+                        if
+                            termConstructsRootForallSpine
+                              rootClosureScheme
+                              termSubst
+                              || termCarriesRootSchemeAuthority
+                                rootClosureScheme
+                                termSubst
                           then termSubst
                           else
                             closeTermWithSchemeSubstRefsIfNeeded
@@ -3284,6 +3255,10 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                   Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
    in case rootClosure of
         PreparedLocalRootClosure{} -> (termClosed0, generator0)
+        PreparedInterleavedLocalRootClosure{} ->
+          (termClosed0, generator0)
+        PreparedTopologyPacketRootClosure{} ->
+          (termClosed0, generator0)
         PreparedWholeRootClosure{} ->
           case preserveRetainedChildAuthoritativeResult termClosed0 of
             Just termAdjusted ->
@@ -3306,10 +3281,12 @@ rootSchemeMatchesOpenTerm scheme ty =
 
 -- | A term whose result path already spells the root's forall spine owns that
 -- construction, even when an explicit source annotation chose binder
--- identities different from the graph presentation.  A bare producer whose
--- type merely happens to be forall-shaped does not: closing it must emit the
--- root Lambda/applications explicitly so the term and published scheme share
--- one operational binder identity.
+-- identities different from the graph presentation.  A bare application
+-- whose result merely happens to be forall-shaped does not: closing it must
+-- emit the root Lambda/applications explicitly so the term and published
+-- scheme share one operational binder identity.  A resolved variable is
+-- different: its environment binding is positive construction authority for
+-- the scheme it carries.
 termConstructsRootForallSpine :: ElabScheme -> XmlfTerm -> Bool
 termConstructsRootForallSpine scheme =
   go (length (schemeBinderRefs scheme))
@@ -3325,6 +3302,38 @@ termConstructsRootForallSpine scheme =
                   go remaining rhs
             _ -> go remaining body
         _ -> False
+
+-- | Preserve a direct variable occurrence when its resolved binding already
+-- owns the exact root forall declarations.  Binder identity and bounds are
+-- checked explicitly; alpha-equivalent shape alone is not authority.  This
+-- avoids constructing the redundant eta form @Lambda a. x [a]@ for an
+-- identity-bearing external alias while retaining that construction for
+-- applications which merely return a polymorphic value.
+termCarriesRootSchemeAuthority :: ElabScheme -> XmlfTerm -> Bool
+termCarriesRootSchemeAuthority rootScheme (EVarNode resolved) =
+  not (null rootBinders)
+    && length rootBinders == length resolvedBinders
+    && and (zipWith bindersAgree rootBinders resolvedBinders)
+    && endpointTypesAgree
+      (schemeBody rootScheme)
+      (schemeBody resolvedScheme)
+  where
+    rootBinders = schemeBinderRefs rootScheme
+    resolvedScheme = schemeFromType (resolvedVarType resolved)
+    resolvedBinders = schemeBinderRefs resolvedScheme
+
+    bindersAgree (leftRef, leftBound) (rightRef, rightBound) =
+      typeBinderRefsSameIdentity leftRef rightRef
+        && boundsAgree leftBound rightBound
+
+    boundsAgree Nothing Nothing = True
+    boundsAgree (Just left) (Just right) =
+      endpointTypesAgree (tyToElab left) (tyToElab right)
+    boundsAgree _ _ = False
+
+    endpointTypesAgree left right =
+      alphaEqType left right || churchAwareEqType left right
+termCarriesRootSchemeAuthority _ _ = False
 
 -- | A source constructor can own a later binder in the root scheme while an
 -- inferred existential remains root-owned.  The paper's
@@ -3510,53 +3519,6 @@ freshenTypeAbsAgainstEnvFromSupply suppliedGenerator env term0 =
         let (body', generator') = go generator used visibleRefs tcEnv body
          in (EUnroll body', generator')
       _ -> (term, generator)
-
-renameTypeVarInTermAgainstEnv :: TypeCheck.Env -> TypeBinderRef -> TypeBinderRef -> XmlfTerm -> XmlfTerm
-renameTypeVarInTermAgainstEnv env oldRef newRef = go env
-  where
-    renameTy = substTypeCaptureRef oldRef (TVarRef newRef)
-    renameBound = mapBoundType renameTy
-    renameScheme sch = schemeFromType (renameTy (schemeToType sch))
-    renameRef ref
-      | typeBinderRefsSameIdentity ref oldRef = newRef
-      | otherwise = ref
-    renameInst inst = case project inst of
-      InstIdF -> InstId
-      InstAppF ty -> InstApp (renameTy ty)
-      InstIntroF -> InstIntro
-      InstElimF -> InstElim
-      InstInsideF inner -> InstInside (renameInst inner)
-      InstSeqF a b -> InstSeq (renameInst a) (renameInst b)
-      InstUnderFRef ref inner -> instUnderWithRef (renameRef ref) (renameInst inner)
-      InstBotF ty -> InstBot (renameTy ty)
-      InstAbstrFRef ref -> instAbstrWithRef (renameRef ref)
-
-    go tcEnv term = case project term of
-      EVarNodeF resolved ->
-        case TypeCheck.lookupResolvedTermEnvEntry (TypeCheck.resolvedTermEnv tcEnv) resolved of
-          Just (_, ty) -> EVarNode (mapResolvedVarType (const ty) resolved)
-          Nothing -> EVarNode (mapResolvedVarType renameTy resolved)
-      ELitF lit -> ELit lit
-      ELamF resolved body ->
-        let resolved' = mapResolvedVarType renameTy resolved
-            tcEnv' = TypeCheck.insertResolvedTermBinding resolved' (resolvedVarType resolved') tcEnv
-         in ELam resolved' (go tcEnv' body)
-      EAppF f a -> EApp (go tcEnv f) (go tcEnv a)
-      ELetF resolved sch rhs body ->
-        let sch' = renameScheme sch
-            schTy = schemeToType sch'
-            resolved' = mapResolvedVarType (const schTy) resolved
-            tcEnv' = TypeCheck.insertResolvedTermBinding resolved' schTy tcEnv
-         in ELet resolved' sch' (go tcEnv' rhs) (go tcEnv' body)
-      ETyAbsFRef ref mb body
-        | typeBinderRefsSameIdentity ref oldRef -> eTyAbsWithRef ref (fmap renameBound mb) body
-        | otherwise ->
-            let mb' = fmap renameBound mb
-                tcEnv' = TypeCheck.insertTypeBindingRef ref (maybe TBottom tyToElab mb') tcEnv
-             in eTyAbsWithRef ref mb' (go tcEnv' body)
-      ETyInstF t inst -> ETyInst (go tcEnv t) (renameInst inst)
-      ERollF ty body -> ERoll (renameTy ty) (go tcEnv body)
-      EUnrollF body -> EUnroll (go tcEnv body)
 
 data PipelineTypeCheckEnvSummary = PipelineTypeCheckEnvSummary
   { ptcesTermFreeVars :: FreeVarCounts,

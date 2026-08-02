@@ -13,7 +13,9 @@ module MLF.Constraint.Presolution.Plan.ReifyPlan
     inheritedGammaRouteRef,
     InheritedGammaRoutes,
     inheritedGammaRoutesEntries,
+    inheritedGammaRoutesLexicalRefs,
     emptyInheritedGammaRoutes,
+    inheritedGammaRoutesFromLexicalRefs,
     mergeInheritedGammaRoutes,
     mapInheritedGammaRouteRefs,
     ReifyPlan (..),
@@ -75,11 +77,13 @@ import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Graph (reachableFromStop)
 import MLF.Util.Names (alphaName)
 
--- | Exact routes that a reified inner scheme may leave free because an
--- enclosing lexical Gamma or structural source constructor already owns
--- their declarations.  The constructor stays private: finalization can only
+-- | Exact authority for declarations that a reified inner scheme may leave
+-- free because an enclosing lexical Gamma or structural source constructor
+-- already owns them.  This includes routed source/rigid declarations and
+-- reachable flexible declarations whose original owner is a strict ancestor
+-- of the current gen.  The constructor stays private: finalization can only
 -- consume authority proved while the reification plan still has the original
--- binding tree and live/base provenance.
+-- binding tree, the selected reify root, and live/base provenance.
 data InheritedGammaPlan = InheritedGammaPlan
   { inheritedGammaPlanLiveRoutes :: IntMap.IntMap TypeBinderRef,
     inheritedGammaPlanBaseRoutes :: IntMap.IntMap TypeBinderRef,
@@ -87,8 +91,10 @@ data InheritedGammaPlan = InheritedGammaPlan
     inheritedGammaPlanRoutes :: InheritedGammaRoutes
   }
 
--- | A frozen proof that one live rigid variable is the solved image of one
--- unbounded base variable.  The reified ref is deliberately retained as a
+-- | A frozen proof that one inherited live declaration is the solved image
+-- of one exact base declaration.  Rigid routes additionally prove the
+-- unbounded shape needed by rigid inlining; outer-flex routes instead prove
+-- strict lexical ancestry.  The reified ref is deliberately retained as a
 -- third component: later construction may route the base node to a distinct
 -- ambient identity, but it may do so only by joining against this exact
 -- live/base provenance.
@@ -99,25 +105,48 @@ data InheritedGammaRoute = InheritedGammaRoute
   }
   deriving (Eq, Show)
 
-newtype InheritedGammaRoutes =
-  InheritedGammaRoutes [InheritedGammaRoute]
+-- | Construction-facing inherited Gamma capability.  Frozen live/base routes
+-- support graph-domain transport.  Lexical refs cover declarations whose
+-- strict-ancestor proof is available only in the selected live binding tree;
+-- they may be consumed as ambient dependencies, never as base aliases.
+data InheritedGammaRoutes =
+  InheritedGammaRoutes
+    [InheritedGammaRoute]
+    [TypeBinderRef]
   deriving (Eq, Show)
 
 inheritedGammaRoutesEntries :: InheritedGammaRoutes -> [InheritedGammaRoute]
-inheritedGammaRoutesEntries (InheritedGammaRoutes routes) = routes
+inheritedGammaRoutesEntries (InheritedGammaRoutes routes _) = routes
+
+inheritedGammaRoutesLexicalRefs :: InheritedGammaRoutes -> [TypeBinderRef]
+inheritedGammaRoutesLexicalRefs (InheritedGammaRoutes _ refs) = refs
 
 emptyInheritedGammaRoutes :: InheritedGammaRoutes
-emptyInheritedGammaRoutes = InheritedGammaRoutes []
+emptyInheritedGammaRoutes = InheritedGammaRoutes [] []
+
+-- | Retain exact lexical Gamma authority when no graph route is needed.  This
+-- is used for source-owned enclosing binders: their semantic identity is the
+-- capability, while manufacturing a graph alias would lose that ownership.
+inheritedGammaRoutesFromLexicalRefs
+  :: [TypeBinderRef]
+  -> InheritedGammaRoutes
+inheritedGammaRoutesFromLexicalRefs = InheritedGammaRoutes []
 
 mergeInheritedGammaRoutes
   :: InheritedGammaRoutes
   -> InheritedGammaRoutes
   -> Either ElabError InheritedGammaRoutes
 mergeInheritedGammaRoutes
-  (InheritedGammaRoutes left)
-  (InheritedGammaRoutes right) =
-    InheritedGammaRoutes <$> go left right
+  (InheritedGammaRoutes left leftRefs)
+  (InheritedGammaRoutes right rightRefs) =
+    InheritedGammaRoutes
+      <$> go left right
+      <*> pure (foldr insertRef leftRefs rightRefs)
   where
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
     go routes [] = pure routes
     go routes (route : rest) =
       case
@@ -155,7 +184,7 @@ mapInheritedGammaRouteRefs
   :: (TypeBinderRef -> TypeBinderRef)
   -> InheritedGammaRoutes
   -> InheritedGammaRoutes
-mapInheritedGammaRouteRefs renameRef (InheritedGammaRoutes routes) =
+mapInheritedGammaRouteRefs renameRef (InheritedGammaRoutes routes lexicalRefs) =
   InheritedGammaRoutes
     [ route
         { inheritedGammaRouteRef =
@@ -163,6 +192,7 @@ mapInheritedGammaRouteRefs renameRef (InheritedGammaRoutes routes) =
         }
     | route <- routes
     ]
+    (map renameRef lexicalRefs)
 
 data ReifyPlan = ReifyPlan
   { rpSubst :: IntMap.IntMap TypeBinderRef,
@@ -215,7 +245,12 @@ data ReifyPlanInput p = ReifyPlanInput
     rpiBindParentsGa :: Maybe (GaBindParentsInfo p),
     rpiExtraNameStart :: Int,
     rpiOrderedExtra :: [Int],
+    -- | Exact declarations selected by BinderPlan after semantic-identity
+    -- quotienting.  Required-Gamma aliases may reuse one of these declarations
+    -- but must not recreate a separate exterior identity.
+    rpiOrderedBinderRefs :: IntMap.IntMap TypeBinderRef,
     rpiSubst0 :: IntMap.IntMap TypeBinderRef,
+    rpiInheritedRigidAliasRoutes :: IntMap.IntMap TypeBinderRef,
     rpiGammaAlias :: IntMap.IntMap Int,
     rpiNamedUnderGaSet :: IntSet.IntSet,
     rpiNestedSchemeInteriorSet :: IntSet.IntSet,
@@ -600,6 +635,10 @@ buildReifyPlan ReifyPlanInput {..} =
             , Just TyVar {} <- [IntMap.lookup key rpiNodes]
             , isNothing (VarStore.lookupVarBound rpiConstraint node)
             , hasInheritedRigidAuthority node
+            -- An exact generated source declaration is already the route for
+            -- this occurrence.  Do not manufacture an inherited graph
+            -- declaration for the same live key.
+            , IntMap.notMember key sourceLiveRefsLocal
             , not (IntSet.member key structuralLiveSourceBinderKeysLocal)
                 || IntSet.member key requiredGammaDependencyKeys
             , hasBaseOrigin key node
@@ -617,8 +656,56 @@ buildReifyPlan ReifyPlanInput {..} =
             , Just baseNode <- [frozenBaseNodeForLive ga liveNode]
             , Just TyVar {} <- [lookupNodeIn (cNodes (gbiBaseConstraint ga)) baseNode]
             , isNothing (VarStore.lookupVarBound (gbiBaseConstraint ga) baseNode)
+            , IntMap.notMember (getNodeId baseNode) sourceBaseRefsLocal
             ]
-      inheritedRigidLiveRoutesLocal =
+      inheritedOuterFlexRouteCandidatesLocal =
+        case (rpiScopeGen, rpiBindParentsGa) of
+          (Just currentGen, Just ga) ->
+            [ (liveKey, baseNode, graphRef liveNode)
+            | liveKey <-
+                IntSet.toList
+                  (rpiReachableFromWithBounds rpiTypeRoot)
+            , let liveNode = rpiCanonical (NodeId liveKey)
+            , Just TyVar {} <-
+                [IntMap.lookup (getNodeId liveNode) rpiNodes]
+            , not (isLocallyClosedLiveKey (getNodeId liveNode))
+            , Just (GenRef liveOwner, BindFlex) <-
+                [ IntMap.lookup
+                    (nodeRefKey (typeRef liveNode))
+                    rpiRigidBindParents
+                ]
+            , strictEnclosingGen
+                rpiRigidBindParents
+                currentGen
+                liveOwner
+            -- Source and structural routes already carry their own lexical
+            -- declaration authority.  This certificate is only for the
+            -- otherwise-unrouted graph declaration.
+            , IntMap.notMember (getNodeId liveNode) sourceLiveRefsLocal
+            , not
+                ( IntSet.member
+                    (getNodeId liveNode)
+                    structuralLiveSourceBinderKeysLocal
+                )
+            , Just baseNode <- [frozenBaseNodeForLive ga liveNode]
+            , Just TyVar {} <-
+                [lookupNodeIn (cNodes (gbiBaseConstraint ga)) baseNode]
+            , Just (GenRef baseOwner, BindFlex) <-
+                [ IntMap.lookup
+                    (nodeRefKey (typeRef baseNode))
+                    (gbiBindParentsBase ga)
+                ]
+            , strictEnclosingGen
+                (gbiBindParentsBase ga)
+                currentGen
+                baseOwner
+            , IntMap.notMember (getNodeId baseNode) sourceBaseRefsLocal
+            ]
+          _ -> []
+      inheritedGraphRouteCandidatesLocal =
+        inheritedRigidRouteCandidatesLocal
+          ++ inheritedOuterFlexRouteCandidatesLocal
+      inheritedGraphLiveRoutesLocal =
         case rpiBindParentsGa of
           Nothing ->
             IntMap.fromList
@@ -628,7 +715,7 @@ buildReifyPlan ReifyPlanInput {..} =
           Just _ ->
             IntMap.fromList
               [ (liveKey, ref)
-              | (liveKey, _, ref) <- inheritedRigidRouteCandidatesLocal
+              | (liveKey, _, ref) <- inheritedGraphRouteCandidatesLocal
               ]
       requiredGammaDependencyKeys =
         IntSet.fromList
@@ -637,14 +724,51 @@ buildReifyPlan ReifyPlanInput {..} =
           , dependency <- freeTypeVarRefsType (rgbOperatedType requirement)
           , Just node <- [typeBinderRefNode dependency]
           ]
-      inheritedRigidBaseRoutesLocal =
+      inheritedGraphBaseRoutesLocal =
         case rpiBindParentsGa of
           Nothing -> IntMap.empty
           Just _ ->
             IntMap.fromList
               [ (getNodeId baseNode, ref)
-              | (_, baseNode, ref) <- inheritedRigidRouteCandidatesLocal
+              | (_, baseNode, ref) <- inheritedGraphRouteCandidatesLocal
               ]
+      inheritedOuterFlexBaseRoutesLocal =
+        IntMap.fromList
+          [ (getNodeId baseNode, ref)
+          | (_, baseNode, ref) <-
+              inheritedOuterFlexRouteCandidatesLocal
+          ]
+      inheritedRigidAliasRouteErrors =
+        concatMap
+          validateInheritedRigidAliasRoute
+          (IntMap.toList rpiInheritedRigidAliasRoutes)
+      validateInheritedRigidAliasRoute (sourceKey, plannedTargetRef) =
+        case typeBinderRefNode plannedTargetRef of
+          Nothing ->
+            [ "inherited-rigid alias target has no graph identity: "
+                ++ show (sourceKey, plannedTargetRef)
+            ]
+          Just targetNode ->
+            let targetKey = getNodeId (rpiCanonical targetNode)
+             in case
+                    ( IntMap.lookup sourceKey rpiSubst0
+                    , IntMap.lookup targetKey inheritedGraphLiveRoutesLocal
+                    )
+                  of
+                  (Just sourceRoute, Just inheritedRoute)
+                    | typeBinderRefsSameIdentity
+                        sourceRoute
+                        plannedTargetRef
+                    , typeBinderRefsSameIdentity
+                        inheritedRoute
+                        plannedTargetRef ->
+                        []
+                  routes ->
+                    [ "inherited-rigid alias route is not backed by the selected inherited Gamma route"
+                    , "  source: " ++ show sourceKey
+                    , "  planned target: " ++ show plannedTargetRef
+                    , "  planner/inherited routes: " ++ show routes
+                    ]
       frozenBaseNodeForLive ga liveNode =
         case IntMap.lookup (getNodeId liveNode) (gbiSolvedToBase ga) of
           Just baseNode -> Just baseNode
@@ -769,19 +893,76 @@ buildReifyPlan ReifyPlanInput {..} =
             substAliasesCanonLocal,
             substAliasesFromBaseLocal
           ]
+      requiredDeclarationCandidates plannedRef =
+        [ (declarationKey, declarationRequirement)
+        | (declarationKey, declarationRef) <-
+            IntMap.toList rpiOrderedBinderRefs
+        , typeBinderRefsSameIdentity declarationRef plannedRef
+        , Just declarationRequirement <-
+            [IntMap.lookup declarationKey rpiRequiredGamma]
+        ]
+      requiredDeclarationRouteConflicts =
+        [ (key, candidates)
+        | (key, _) <- IntMap.toList rpiRequiredGamma
+        , Just plannedRef <- [IntMap.lookup key rpiSubst0]
+        , let candidates = requiredDeclarationCandidates plannedRef
+        , length candidates > 1
+        ]
       requiredGammaSubst =
         IntMap.fromList
-          [ ( key,
-              typeBinderRefFromIdentity
-                (typeBinderIdentityFromNode (rgbExteriorNode requirement))
-                ( maybe
-                    ("t" ++ show (getNodeId (rgbExteriorNode requirement)))
-                    typeBinderRefName
-                    (IntMap.lookup key substLocal)
-                )
-            )
-            | (key, requirement) <- IntMap.toList rpiRequiredGamma
+          [ (key, requiredRef)
+          | (key, requirement) <- IntMap.toList rpiRequiredGamma
+          , let plannedRef = IntMap.lookup key rpiSubst0
+          , let declarationRequirement =
+                  case plannedRef of
+                    Just ref ->
+                      case requiredDeclarationCandidates ref of
+                        [(_, selected)] -> selected
+                        _ -> requirement
+                    Nothing -> requirement
+          , let requiredRef =
+                  typeBinderRefFromIdentity
+                    ( typeBinderIdentityFromNode
+                        (rgbExteriorNode declarationRequirement)
+                    )
+                    ( maybe
+                        ("t" ++ show (getNodeId (rgbExteriorNode declarationRequirement)))
+                        typeBinderRefName
+                        plannedRef
+                    )
           ]
+      -- BinderPlan has already quotiented every graph occurrence that carries
+      -- one semantic declaration identity.  When required-Gamma construction
+      -- replaces that planned declaration with its selected exterior
+      -- identity, route the whole quotient class to the same exterior.  Doing
+      -- this here keeps S' and the final binder spine in agreement by
+      -- construction; otherwise a non-required result/root occurrence can
+      -- retain the old source identity and escape as a free variable.
+      requiredDeclarationAliasGroups =
+        IntMap.fromListWith (++)
+          [ (routeKey, [requiredRef])
+          | (requiredKey, _) <- IntMap.toList rpiRequiredGamma
+          , Just plannedRef <- [IntMap.lookup requiredKey rpiSubst0]
+          , Just requiredRef <- [IntMap.lookup requiredKey requiredGammaSubst]
+          , (routeKey, routeRef) <- IntMap.toList rpiSubst0
+          , typeBinderRefsSameIdentity routeRef plannedRef
+          ]
+      requiredDeclarationAliasConflicts =
+        [ (key, refs)
+        | (key, firstRef : refs) <-
+            IntMap.toList requiredDeclarationAliasGroups
+        , any
+            (not . typeBinderRefsSameIdentity firstRef)
+            refs
+        ]
+      requiredDeclarationAliasSubst =
+        IntMap.mapMaybe
+          ( \refs ->
+              case refs of
+                ref : _ -> Just ref
+                [] -> Nothing
+          )
+          requiredDeclarationAliasGroups
       requiredExteriorSubst =
         IntMap.fromList
           [ (getNodeId (rgbExteriorNode requirement), ref)
@@ -812,7 +993,8 @@ buildReifyPlan ReifyPlanInput {..} =
             typeBinderRefsSameIdentity plannedRef requiredRef
       requiredConstructionSubst =
         IntMap.unions
-          [ requiredGammaSubst,
+          [ requiredDeclarationAliasSubst,
+            requiredGammaSubst,
             requiredExteriorSubst,
             requiredEdgeResultSubst,
             requiredStructuralLiveAliasSubst
@@ -836,9 +1018,9 @@ buildReifyPlan ReifyPlanInput {..} =
                 Nothing ->
                   Just (rgbExteriorNode requirement)
             ]
-        , structuralChildren <-
+        , sourceStructuralChildren <-
             IntMap.elems structuralSourceBindersLocal
-        , structuralChild <- structuralChildren
+        , structuralChild <- sourceStructuralChildren
         , rpiCanonical structuralChild == rpiCanonical liveExterior
         ]
       requiredStructuralLiveAliasGroups =
@@ -934,6 +1116,7 @@ buildReifyPlan ReifyPlanInput {..} =
              in IntMap.unions
                   [ requiredBaseConstructionSubst,
                     requiredStructuralBaseAliasSubst,
+                    inheritedOuterFlexBaseRoutesLocal,
                     structuralBaseRefsLocal,
                     sourceBaseRefsLocal,
                     IntMap.fromListWith (\_ old -> old) fromBaseRep,
@@ -1036,9 +1219,9 @@ buildReifyPlan ReifyPlanInput {..} =
           (\key _ -> IntSet.member key externalSourceBinderBaseKeysLocal)
           sourceBaseRefsLocal
       inheritedLiveRoutesLocal =
-        IntMap.union externalLiveRoutesLocal inheritedRigidLiveRoutesLocal
+        IntMap.union externalLiveRoutesLocal inheritedGraphLiveRoutesLocal
       inheritedBaseRoutesLocal =
-        IntMap.union externalBaseRoutesLocal inheritedRigidBaseRoutesLocal
+        IntMap.union externalBaseRoutesLocal inheritedGraphBaseRoutesLocal
       uniqueRefs = foldr insertRef []
         where
           insertRef ref refs
@@ -1063,6 +1246,80 @@ buildReifyPlan ReifyPlanInput {..} =
               )
               (const False)
               root
+      strictEnclosingGen parents currentGen ownerGen
+        | currentGen == ownerGen = False
+        | otherwise =
+            case
+                Binding.bindingPathToRootLocal
+                  parents
+                  (GenRef currentGen)
+            of
+              Right (_ : ancestors) -> GenRef ownerGen `elem` ancestors
+              _ -> False
+      refIsLocal ref =
+        any (typeBinderRefsSameIdentity ref) localBinderRefs
+      selectedOuterFlexAuthorityRefs =
+        case (rpiScopeGen, rpiReifyRootSource) of
+          (Just currentGen, ReifyLiveRoot root) ->
+            uniqueRefs
+              [ selectedRef
+              | liveKey <-
+                  IntSet.toList
+                    (rpiReachableFromWithBounds root)
+              , let liveNode = rpiCanonical (NodeId liveKey)
+              , Just TyVar {} <-
+                  [IntMap.lookup (getNodeId liveNode) rpiNodes]
+              , not (isLocallyClosedLiveKey (getNodeId liveNode))
+              , Just (GenRef ownerGen, BindFlex) <-
+                  [ IntMap.lookup
+                      (nodeRefKey (typeRef liveNode))
+                      rpiRigidBindParents
+                  ]
+              , strictEnclosingGen
+                  rpiRigidBindParents
+                  currentGen
+                  ownerGen
+              , let selectedRef =
+                      IntMap.findWithDefault
+                        (graphRef liveNode)
+                        (getNodeId liveNode)
+                        reifySubstLocal
+              , not (refIsLocal selectedRef)
+              ]
+          (Just currentGen, ReifyBaseSchemeRoot root)
+            | Just ga <- rpiBindParentsGa ->
+                let baseParents = gbiBindParentsBase ga
+                    baseConstraint = gbiBaseConstraint ga
+                 in uniqueRefs
+                      [ selectedRef
+                      | baseKey <-
+                          IntSet.toList
+                            (baseReachableFromWithBounds root)
+                      , let baseNode = NodeId baseKey
+                      , Just TyVar {} <-
+                          [lookupNodeIn (cNodes baseConstraint) baseNode]
+                      , not
+                          ( IntSet.member
+                              baseKey
+                              locallyClosedBaseKeysLocal
+                          )
+                      , Just (GenRef ownerGen, BindFlex) <-
+                          [ IntMap.lookup
+                              (nodeRefKey (typeRef baseNode))
+                              baseParents
+                          ]
+                      , strictEnclosingGen
+                          baseParents
+                          currentGen
+                          ownerGen
+                      , let selectedRef =
+                              IntMap.findWithDefault
+                                (graphRef baseNode)
+                                baseKey
+                                substBaseByKeyLocal
+                      , not (refIsLocal selectedRef)
+                      ]
+          _ -> []
       sourceRefsAt sourceRefs rawNode canonicalNode =
         uniqueRefs
           [ ref
@@ -1122,26 +1379,25 @@ buildReifyPlan ReifyPlanInput {..} =
                 inheritedGammaPlanAuthorizedRefs =
                   uniqueRefs
                     ( selectedRouteRefs
+                        ++ selectedOuterFlexAuthorityRefs
                         ++ liveStructuralAuthorityRefs
                         ++ baseStructuralAuthorityRefs
                     ),
                 inheritedGammaPlanRoutes = inheritedGammaRoutesLocal
               }
       inheritedGammaRoutesLocalResult =
-        case rpiBindParentsGa of
-          Nothing -> pure emptyInheritedGammaRoutes
-          Just _ ->
-            pure
-              ( InheritedGammaRoutes
-                  [ InheritedGammaRoute
-                      { inheritedGammaRouteLiveNode = NodeId liveKey,
-                        inheritedGammaRouteBaseNode = baseNode,
-                        inheritedGammaRouteRef = inheritedRef
-                      }
-                  | (liveKey, baseNode, inheritedRef) <-
-                      inheritedRigidRouteCandidatesLocal
-                  ]
-              )
+        pure
+          ( InheritedGammaRoutes
+              [ InheritedGammaRoute
+                  { inheritedGammaRouteLiveNode = NodeId liveKey,
+                    inheritedGammaRouteBaseNode = baseNode,
+                    inheritedGammaRouteRef = inheritedRef
+                  }
+              | (liveKey, baseNode, inheritedRef) <-
+                  inheritedGraphRouteCandidatesLocal
+              ]
+              selectedOuterFlexAuthorityRefs
+          )
       typeRootC = rpiCanonical rpiTypeRoot
       (schemeOwnerFromBody, schemeOwnerFromBodyIsAlias) =
         SchemeRoots.schemeOwnerFromBody rpiSchemeRootsPlan rpiSolvedToBasePref typeRootC
@@ -1212,6 +1468,33 @@ buildReifyPlan ReifyPlanInput {..} =
               aeNodeChildren = rpiReachableFromWithBounds
             }
    in do
+      case inheritedRigidAliasRouteErrors of
+        [] -> pure ()
+        errors ->
+          Left
+            ( ValidationFailed
+                ( "invalid inherited-rigid binder alias plan"
+                    : errors
+                )
+            )
+      case requiredDeclarationRouteConflicts of
+        [] -> pure ()
+        conflicts ->
+          Left
+            ( ValidationFailed
+                [ "required Gamma identity quotient selected multiple declarations"
+                , "  conflicts: " ++ show conflicts
+                ]
+            )
+      case requiredDeclarationAliasConflicts of
+        [] -> pure ()
+        conflicts ->
+          Left
+            ( ValidationFailed
+                [ "required Gamma identity quotient selected conflicting exterior identities"
+                , "  conflicts: " ++ show conflicts
+                ]
+            )
       case
           ( requiredStructuralLiveAliasConflicts
           , requiredStructuralBaseAliasConflicts
@@ -1331,7 +1614,6 @@ bindingFor env plan (binderRef0, nidInt) = do
                 typeBinderRefFromIdentity
                   (typeBinderIdentityFromNode bNodeC)
                   (typeBinderRefName binderRef0)
-      name = typeBinderRefName binderRef
       binderIsNamed = IntSet.member (getNodeId bNodeC) namedUnderGaSet
       substForBoundRefs = substForBound binderKey
       mbBoundNode = VarStore.lookupVarBound constraint bNodeC
@@ -1370,6 +1652,23 @@ bindingFor env plan (binderRef0, nidInt) = do
               Just root -> root
               Nothing -> canonical bnd
           Nothing -> bNodeC
+      liveBoundRefinesUnboundedBase =
+        case (mbBoundNode, mbBindParentsGa) of
+          (Just _, Just ga) ->
+            let baseConstraint = gbiBaseConstraint ga
+                mbBaseBinder =
+                  case IntMap.lookup binderKey (gbiSolvedToBase ga) of
+                    Just baseBinder -> Just baseBinder
+                    Nothing -> IntMap.lookup binderKey solvedToBasePref
+             in case mbBaseBinder of
+                  Just baseBinder ->
+                    case lookupNodeIn (cNodes baseConstraint) baseBinder of
+                      Just TyVar {} ->
+                        isNothing
+                          (VarStore.lookupVarBound baseConstraint baseBinder)
+                      _ -> False
+                  Nothing -> False
+          _ -> False
   traceGeneralizeM
     ( "generalizeAt: boundRoot binder="
         ++ show bNodeC
@@ -1412,6 +1711,7 @@ bindingFor env plan (binderRef0, nidInt) = do
         if (isNothing mbBoundNode && not (hasExplicitBoundFn bNodeC))
           || boundIsLocalSchemeBody
           || boundParentIsBinder
+          || liveBoundRefinesUnboundedBase
           then Nothing
           else case mbBindParentsGa of
             Just ga ->
@@ -1756,8 +2056,11 @@ bindingFor env plan (binderRef0, nidInt) = do
           | otherwise ->
               Left $
                 ValidationFailed
-                  [ "alias bounds survived scheme finalization: "
-                      ++ show [name]
+                  [ "binder planning left an unsupported bare alias for reification"
+                  , "  binder: " ++ show binderRef
+                  , "  binder node: " ++ show bNodeC
+                  , "  bound: " ++ show ref
+                  , "  scope gen: " ++ show scopeGen
                   ]
         Nothing -> Right Nothing
         Just bnd -> case elabToBound bnd of

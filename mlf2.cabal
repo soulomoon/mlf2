@@ -300,6 +300,7 @@ library mlf2-internal
                       MLF.Elab.PipelineError,
                       MLF.Elab.Reduce,
                       MLF.Elab.SourceBinder,
+                      MLF.Elab.SourceType,
                       MLF.Elab.Run,
                       MLF.Elab.Run.Debug,
                       MLF.Elab.Run.Generalize.Common,

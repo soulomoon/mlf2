@@ -572,18 +572,24 @@ applyBaseBoundOverlay view constraint
     inputs = rtvInputs0 view
     overlay = rtvBoundOverlay0 view
     solvedToBase = gaSolvedToBase (rtcBindParentsGa inputs)
-    toBase nid =
-        IntMap.findWithDefault nid (getNodeId nid) solvedToBase
-    toBaseBound nid =
+    -- The frozen base graph may only contain an overlay whose target and
+    -- bound both have a base-domain representative.  Edge-local copies can
+    -- be allocated after that snapshot; retaining their live node id here
+    -- would manufacture a dangling base-graph bound.
+    toBaseNode nid =
         case lookupNodeIn (cNodes constraint) nid of
-            Just _ -> nid
-            Nothing -> toBase nid
+            Just _ -> Just nid
+            Nothing -> do
+                baseNode <- IntMap.lookup (getNodeId nid) solvedToBase
+                case lookupNodeIn (cNodes constraint) baseNode of
+                    Just _ -> Just baseNode
+                    Nothing -> Nothing
     baseOverlay =
         IntMap.fromList
-            [ ( getNodeId (toBase (NodeId solvedKey))
-              , toBaseBound solvedBound
-              )
+            [ (getNodeId baseRoot, baseBound)
             | (solvedKey, solvedBound) <- IntMap.toList overlay
+            , Just baseRoot <- [toBaseNode (NodeId solvedKey)]
+            , Just baseBound <- [toBaseNode solvedBound]
             ]
     adjustNode nodeIdKey node =
         case node of

@@ -125,6 +125,401 @@ spec = do
       expectNestedMixedAnnotationLocal
     it "constructs the paper's annotated self-application" $
       expectElabAnnotatedSelfApp
+    it "constructs the paper's annotated self-application as a direct identity argument" $
+      expectElabAnnotationErasureAtType annotatedSelfAppType
+        annotatedSelfAppThroughDirectIdentityApplicationExpr
+    it "keeps an annotated lambda closed under an applied unused outer lambda" $
+      expectElabAnnotationErasure nestedAnnotatedLambdaUnderUnusedApplicationExpr
+    it "keeps a mixed annotation closed under an applied unused outer lambda" $
+      expectElabAnnotationErasure mixedAnnotationUnderUnusedApplicationExpr
+    it "keeps a mixed annotation nested beneath applied ground wrappers" $
+      expectElabAnnotationErasure
+        mixedAnnotationBeneathAppliedGroundWrappersExpr
+    it "keeps a bounded annotation through an applied annotated unused lambda" $
+      expectElabAnnotationErasure boundedAnnotationUnderAppliedAnnotatedLambdaExpr
+    it "keeps a bounded annotation through nested unused constructions" $
+      expectElabAnnotationErasure boundedAnnotationThroughNestedUnusedConstructionsExpr
+    it "keeps annotated self-application typable under an unused outer lambda" $
+      expectElabAnnotationErasure nestedAnnotatedSelfAppUnderUnusedLambdaExpr
+    it "keeps annotated self-application typable under an applied annotated outer lambda" $
+      expectElabAnnotationErasure nestedAnnotatedSelfAppUnderAppliedAnnotatedLambdaExpr
+    it "retains the paper g g packet binder through an annotated application and unused let" $
+      expectElabAnnotationErasure
+        annotatedSelfAppThroughAnnotatedApplicationAndUnusedLetExpr
+    it "keeps annotated self-application typable under an applied unused outer lambda" $
+      expectElabAnnotationErasure nestedAnnotatedSelfAppUnderAppliedUnusedLambdaExpr
+    it "keeps an applied annotated self-application typable through a let result" $
+      expectElabAnnotationErasure appliedAnnotatedSelfAppLetResultExpr
+    it "keeps an applied annotated self-application typable after an unused let" $
+      expectElabAnnotationErasure appliedAnnotatedSelfAppAfterUnusedLetExpr
+    it "keeps annotated self-application typable through nested let and application owners" $
+      expectElabAnnotationErasure nestedAnnotatedSelfAppThroughLetAndApplicationOwnersExpr
+    it "keeps annotated self-application source identities through nested unused applications" $
+      expectElabAnnotationErasure annotatedSelfAppThroughNestedUnusedApplicationsExpr
+    it "keeps an annotated lambda construction through identity application" $
+      expectElabAnnotationErasure annotatedLambdaThroughIdentityApplicationExpr
+    it "keeps a let-wrapped annotated lambda through identity application" $
+      expectElabAnnotationErasure letWrappedAnnotatedLambdaThroughIdentityApplicationExpr
+    it "keeps an identity-wrapped annotated lambda under an outer application" $
+      expectElabAnnotationErasure identityWrappedAnnotatedLambdaUnderOuterApplicationExpr
+    it "keeps a nested mixed annotation through enclosing unused constructions" $
+      expectElabAnnotationErasure nestedMixedAnnotationThroughUnusedConstructionsExpr
+    it "keeps an existential mixed annotation through a returned lambda and identity application" $
+      expectElabAnnotationErasure mixedAnnotationThroughReturnedLambdaIdentityExpr
+    it "generalizes an unused lambda parameter through nested annotated lets" $
+      expectElabAnnotationErasure nestedAnnotatedLetLambdaRoundTripExpr
+    it "specializes a bounded application result through nested let round trips" $
+      expectElabAnnotationErasure nestedAnnotatedPolymorphicLambdaRoundTripExpr
+    it "keeps a mixed annotation through nested annotated applications" $
+      expectElabAnnotationErasure mixedAnnotationThroughNestedAnnotatedApplicationsExpr
+    it "keeps nested annotated applications through an outer lambda and let" $
+      expectElabAnnotationErasure nestedAnnotatedApplicationsThroughOuterConstructionsExpr
+    it "uses the direct application endpoint for an identity-wrapped ground let result" $
+      expectElabAnnotationErasure identityWrappedGroundLetResultExpr
+    it "keeps a polymorphic annotation through three unused lambdas" $
+      expectElabAnnotationErasure annotatedIdentityThroughThreeUnusedLambdasExpr
+    it "keeps source-projected annotation binders ordered inside a ground-result lambda" $
+      expectElabAnnotationErasure sourceProjectedAnnotationInGroundResultLambdaExpr
+    it "generalizes an identity-applied mixed annotation at its let boundary" $
+      expectElabAnnotationErasure identityAppliedMixedAnnotationLetExpr
+    it "preserves an identity-applied mixed annotation under an unused lambda" $
+      expectElabAnnotationErasure identityAppliedMixedAnnotationLetUnderUnusedLambdaExpr
+    it "preserves a bounded annotation returned by an unused application in a let" $
+      expectElabAnnotationErasure boundedAnnotationFromUnusedApplicationLetExpr
+    it "preserves that bounded let through an enclosing unused application" $
+      expectElabAnnotationErasure boundedAnnotationLetUnderUnusedApplicationExpr
+    it "preserves that bounded let through identity application" $
+      expectElabAnnotationErasure identityAppliedBoundedAnnotationLetExpr
+    it "preserves that identity-applied bounded let through an annotated application" $
+      expectElabAnnotationErasure annotatedApplicationAroundBoundedAnnotationLetExpr
+    it "lets one application Gamma closure cover its owned requirement subset" $
+      expectElabAnnotationErasure sharedApplicationGammaClosureExpr
+    it "keeps a forwarded ground application Gamma at its source occurrence" $
+      expectElabAnnotationErasure forwardedGroundApplicationGammaExpr
+    it "generalizes an annotation existential through nested lambda packet preparation" $
+      expectElabAnnotationErasure mixedAnnotationThroughNestedLambdaPacketExpr
+    it "closes a let-bound annotation existential beneath nested unused lambdas" $
+      expectElabAnnotationErasure letBoundMixedAnnotationThroughUnusedLambdasExpr
+    it "instantiates both binders of the let-bound mixed annotation" $
+      expectElabAnnotationErasure appliedMixedAnnotationLetExpr
+    it "keeps a descendant application Gamma distinct through nested application owners" $
+      expectElabAnnotationErasure
+        nestedApplicationOwnersAroundAppliedMixedAnnotationExpr
+    it "constructs nested unused lambdas around an applied polymorphic result" $
+      expectElabAnnotationErasure nestedUnusedLambdasAroundAppliedPolymorphicResultExpr
+    it "constructs an application certificate's free ambient at the root" $
+      expectElabAnnotationErasure rootAmbientApplicationCertificateExpr
+    it "completes an identity application's direct Gamma from its checked argument" $
+      expectElabAnnotationErasure identityApplicationWithNestedAnnotatedUseExpr
+    it "keeps independent descendant application Gammas separate at a let owner" $
+      expectElabAnnotationErasure independentApplicationGammasAtLetOwnerExpr
+    it "routes an annotated polymorphic parameter through enclosing unused owners" $
+      expectElabAnnotationErasure annotatedPolymorphicParameterThroughUnusedOwnersExpr
+    it "selects an annotated polymorphic parameter body's exact endpoint through applied owners" $
+      expectElabAnnotationErasure
+        annotatedPolymorphicParameterBodyEndpointThroughAppliedOwnersExpr
+    it "keeps an annotated polymorphic parameter through a partially applied four-lambda spine" $
+      expectElabAnnotationErasure
+        annotatedPolymorphicParameterThroughPartiallyAppliedFourLambdaSpineExpr
+    it "keeps a higher-rank parameter binder local through identity application" $
+      expectElabAnnotationErasure
+        higherRankParameterThroughIdentityApplicationExpr
+    it "keeps a bounded annotation local through an identity-applied lambda let" $
+      expectElabAnnotationErasure
+        boundedAnnotationThroughIdentityAppliedLambdaLetExpr
+    it "retains a term-used root binder through nested identity lets" $
+      expectElabAnnotationErasure termUsedRootBinderThroughNestedIdentityLetsExpr
+    it "constructs a multi-use annotated let beneath an unused lambda" $
+      expectElabAnnotationErasure multiUseAnnotationUnderUnusedLambdaLetExpr
+    it "completes a bounded annotation through nested unused and annotated applications" $
+      expectElabAnnotationErasure boundedAnnotationThroughNestedApplicationOwnersExpr
+    it "selects the exact specialization of a vacuous lambda body endpoint" $
+      expectElabAnnotationErasure vacuousLambdaBodyEndpointThroughNestedOwnersExpr
+    it "carries an identity-applied multi-use annotation through a let and unused application" $
+      expectElabAnnotationErasure identityAppliedMultiUseAnnotationThroughUnusedApplicationExpr
+    it "closes a polymorphic let dependency through an identity-applied nested lambda" $
+      expectElabAnnotationErasure
+        polymorphicLetDependencyThroughIdentityAppliedNestedLambdaExpr
+    it "carries an annotated identity application through nested let and unused application owners" $
+      expectElabAnnotationErasure annotatedIdentityApplicationThroughUnusedApplicationExpr
+    it "retains a mixed-annotation root RaiseMerge through an unused application let" $
+      expectElabAnnotationErasure mixedAnnotationRootRaiseMergeUnderUnusedApplicationLetExpr
+    it "keeps nested exact lambda binder spines through ground wrappers" $
+      expectElabAnnotationErasure nestedExactLambdaBinderSpineThroughGroundWrappersExpr
+    it "aligns root and packet result routes through identity-applied annotated lets" $
+      expectElabAnnotationErasure rootPacketRouteThroughIdentityAppliedAnnotatedLetExpr
+    it "restores an administrative lambda parameter beneath a nested source forall" $
+      expectElabAnnotationErasure administrativeLambdaParameterUnderSourceForallExpr
+    it "specializes a completed forall packet at its enclosing lambda consumer" $
+      expectElabAnnotationErasure completedForallPacketAtEnclosingLambdaConsumerExpr
+    it "reorders graph-owned body foralls without source-order sidecars" $
+      expectElabAnnotationErasure graphOwnedBodyForallsWithoutSourceOrderExpr
+    it "keeps distinct let-consumer bounds that share a graph exterior" $
+      expectElabAnnotationErasure distinctLetConsumerBoundsAtSharedExteriorExpr
+    it "constructs one final let Gamma for vacuous shared packet consumers" $
+      expectElabAnnotationErasure
+        vacuousSharedPacketConsumersAtFinalLetGammaExpr
+    it "completes a lambda consumer through its certified source occurrence route" $
+      expectElabAnnotationErasure lambdaConsumerThroughSourceOccurrenceRouteExpr
+    it "retains application Gamma authority for a constructed binder" $
+      expectElabAnnotationErasure constructedApplicationGammaBinderAuthorityExpr
+    it "completes a nested lambda consumer after annotated parameter application" $
+      expectElabAnnotationErasure
+        nestedLambdaConsumerAfterAnnotatedParameterApplicationExpr
+    it "constructs a nested lambda result through its exact enclosing bound" $
+      expectElabAnnotationErasure nestedLambdaResultAtExactEnclosingBoundExpr
+    it "closes an application Gamma dependency through an annotated let result" $
+      expectElabAnnotationErasure
+        applicationGammaDependencyThroughAnnotatedLetResultExpr
+    it "prepares a topology consumer through its exact enclosing route" $
+      expectElabAnnotationErasure
+        topologyConsumerThroughExactEnclosingRouteExpr
+    it "closes a restored annotation binder during subterm generalization" $
+      expectElabAnnotationErasure
+        restoredAnnotationBinderDuringSubtermGeneralizationExpr
+    it "closes an applied mixed annotation beneath nested unused lambdas" $
+      expectElabAnnotationErasure
+        appliedMixedAnnotationBeneathNestedUnusedLambdasExpr
+    it "keeps independent Gamma endpoints distinct at a nested lambda owner" $
+      expectElabAnnotationErasure
+        independentGammaEndpointsAtNestedLambdaOwnerExpr
+    it "discharges a vacuous enclosing consumer around an annotated let result" $
+      expectElabAnnotationErasure
+        vacuousEnclosingConsumerAroundAnnotatedLetResultExpr
+    it "completes a local topology result through an identity-applied higher-order lambda" $
+      expectElabAnnotationErasure
+        localTopologyResultThroughIdentityAppliedHigherOrderLambdaExpr
+    it "publishes application Gamma order for an identity lambda parameter" $
+      expectElabAnnotationErasure
+        applicationGammaOrderForIdentityLambdaParameterExpr
+    it "retains the paper g g topology result through nested applied wrappers" $
+      expectElabAnnotationErasure
+        paperSelfApplicationThroughNestedAppliedWrappersExpr
+    it "returns a let-bound paper g g lambda through nested lambda owners" $
+      expectElabAnnotationErasure
+        letBoundPaperSelfApplicationThroughNestedLambdaOwnersExpr
+    it "constructs paper g g through an applied annotated lambda and nested lets" $
+      expectElabAnnotationErasure
+        paperSelfApplicationThroughAppliedAnnotatedLambdaAndNestedLetsExpr
+    it "constructs a source-owned application Gamma without post-hoc closure" $
+      expectElabAnnotationErasure
+        sourceOwnedApplicationGammaConstructionExpr
+    it "closes a mixed annotation through the complete nested owner chain" $
+      expectElabAnnotationErasure
+        deepMixedAnnotationOwnerClosureExpr
+    it "constructs paper g g beneath nested lambda owners" $
+      expectElabAnnotationErasure
+        paperSelfApplicationBeneathNestedLambdaOwnersExpr
+    it "specializes an owner-final bounded declaration at let publication" $
+      expectElabAnnotationErasure
+        ownerFinalBoundedPublicationExpr
+    it "preserves a bounded annotation returned through an identity-applied nested lambda" $
+      expectElabAnnotationErasure
+        boundedAnnotationThroughIdentityAppliedNestedLambdaExpr
+    it "keeps a consumed application Gamma disjoint from ambient annotation binders" $
+      expectElabAnnotationErasure
+        consumedApplicationGammaBesideAmbientAnnotationExpr
+    it "returns paper g g through an identity application and nested lets" $
+      expectElabAnnotationErasure
+        paperSelfApplicationThroughIdentityAndNestedLetsExpr
+    it "places paper g g topology through an identity-applied let chain" $
+      expectElabAnnotationErasureAtType annotatedSelfAppType
+        paperSelfApplicationThroughIdentityAppliedLetChainExpr
+    it "preserves paper g g's principal type through an identity-applied unused let" $
+      expectElabAnnotationErasureAtType annotatedSelfAppType
+        paperSelfApplicationThroughIdentityAppliedUnusedLetExpr
+    it "preserves paper g g's principal type through an unused let" $
+      expectElabAnnotationErasureAtType annotatedSelfAppType
+        paperSelfApplicationThroughUnusedLetExpr
+    it "retains nested lambda packet consumers after applying an unused parameter" $
+      expectElabAnnotationErasure
+        nestedLambdaPacketAfterUnusedParameterApplicationExpr
+    it "prepares a root packet around a nested mixed-annotation application" $
+      expectElabAnnotationErasure
+        rootPacketAroundNestedMixedAnnotationApplicationExpr
+    it "constructs paper g g beneath nested applied unused lambdas" $
+      expectElabAnnotationErasure
+        paperSelfApplicationBeneathNestedAppliedUnusedLambdasExpr
+    it "constructs paper g g beneath an applied ground wrapper" $
+      expectElabAnnotationErasure
+        paperSelfApplicationBeneathAppliedGroundWrapperExpr
+    it "constructs paper g g beneath five applied unused lambdas and a let owner" $
+      expectElabAnnotationErasure
+        paperSelfApplicationBeneathFiveAppliedUnusedLambdasAndLetExpr
+    it "closes a consumed bounded result through applied and root owners" $
+      expectElabAnnotationErasure
+        consumedBoundedResultThroughAppliedAndRootOwnersExpr
+    it "advances a zero-local application from its completed mixed bound" $
+      expectElabAnnotationErasure
+        zeroLocalApplicationWithCompletedMixedBoundExpr
+    it "consumes a pending root declaration after its owner finalizes it" $
+      expectElabAnnotationErasure
+        consumedPendingRootAfterOwnerFinalizationExpr
+    it "generalizes an unused lambda parameter inside an applied annotated lambda" $
+      expectElabAnnotationErasure
+        unusedLambdaParameterInsideAppliedAnnotatedLambdaExpr
+    it "routes an applied lambda codomain through its selected reify root" $
+      expectElabAnnotationErasure
+        appliedLambdaCodomainThroughSelectedReifyRootExpr
+    it "keeps a future owner-emitted refinement out of ambient Gamma" $
+      expectElabAnnotationErasure
+        futureOwnerRefinementOutsideAmbientGammaExpr
+    it "closes a mixed annotation through a nested lambda let result" $
+      expectElabAnnotationErasure
+        mixedAnnotationThroughNestedLambdaLetResultExpr
+    it "closes a mixed annotation through nested identity applications" $
+      expectElabAnnotationErasure
+        mixedAnnotationThroughNestedIdentityApplicationsExpr
+    it "keeps a mixed annotation beneath an applied five-lambda spine" $
+      expectElabAnnotationErasure
+        mixedAnnotationBeneathAppliedFiveLambdaSpineExpr
+    it "keeps a polymorphic let ambient through nested applied lambda owners" $
+      expectElabAnnotationErasure
+        polymorphicLetAmbientThroughNestedAppliedLambdaOwnersExpr
+    it "keeps an annotated identity through nested identity and applied owners" $
+      expectElabAnnotationErasure
+        annotatedIdentityThroughNestedIdentityAndAppliedOwnersExpr
+    it "keeps a mixed annotation through nested let and identity owners" $
+      expectElabAnnotationErasure
+        mixedAnnotationThroughNestedLetAndIdentityOwnersExpr
+    it "returns a bounded identity lambda through an unused application and nested lets" $
+      expectElabAnnotationErasure
+        boundedIdentityLambdaThroughUnusedApplicationAndNestedLetsExpr
+    it "returns a bounded identity lambda from an unused application" $
+      expectElabAnnotationErasure
+        boundedIdentityLambdaFromUnusedApplicationExpr
+    it "opens an annotated parameter placeholder at its exact lambda owner" $
+      expectElabAnnotationErasure
+        annotatedParameterPlaceholderAtExactLambdaOwnerExpr
+    it "eliminates a vacuous root binder before publishing a lambda codomain" $
+      expectElabAnnotationErasure
+        vacuousRootBinderBeforeLambdaCodomainExpr
+    it "closes a bounded lambda result before an enclosing identity application" $
+      expectElabAnnotationErasure
+        boundedLambdaResultBeforeEnclosingIdentityApplicationExpr
+    it "keeps root-owned lambda binders outside a transparent let owner" $
+      expectElabAnnotationErasure
+        rootOwnedLambdaBindersOutsideTransparentLetExpr
+    it "carries an identity topology consumer through nested applied lambdas" $
+      expectElabAnnotationErasure
+        identityTopologyConsumerThroughNestedAppliedLambdasExpr
+    it "deduplicates a consumer between a declaration and its own bound" $
+      expectElabAnnotationErasure
+        duplicateConsumerClosureInsideOwnBoundExpr
+    it "orders returned-lambda binders without a synthetic dependency cycle" $
+      expectElabAnnotationErasure
+        returnedLambdaWithoutSyntheticBinderCycleExpr
+    it "constructs a returned higher-rank lambda through annotated applications" $
+      expectElabAnnotationErasure
+        returnedHigherRankLambdaThroughAnnotatedApplicationsExpr
+    it "generalizes a returned free annotation binder at its enclosing lambda" $
+      expectElabAnnotationErasure
+        returnedFreeAnnotationBinderAtEnclosingLambdaExpr
+    it "returns annotated self-application through a transparent lambda let without a binder cycle" $
+      expectElabAnnotationErasure
+        annotatedSelfAppThroughTransparentLambdaLetExpr
+    it "retains paper g g through an identity-applied nested lambda and lets" $
+      expectElabAnnotationErasure
+        annotatedSelfAppThroughIdentityAppliedNestedLambdaLetsExpr
+    it "routes a bounded identity annotation through applied annotated lambdas" $
+      expectElabAnnotationErasure
+        boundedIdentityThroughAppliedAnnotatedLambdasExpr
+    it "composes paper g g through an identity-applied opaque lambda result" $
+      expectElabAnnotationErasure
+        paperSelfApplicationThroughIdentityAppliedOpaqueLambdaExpr
+    it "inherits coalesced Gamma closures through nested identity applications" $
+      expectElabAnnotationErasure
+        polymorphicIdentityThroughCoalescedGammaClosuresExpr
+    it "retains paper g g beneath partially applied nested lambdas" $
+      expectElabAnnotationErasure
+        paperSelfApplicationBeneathPartiallyAppliedNestedLambdasExpr
+    it "keeps a let-generalized mixed annotation closed through identity application" $
+      expectElabAnnotationErasure
+        letGeneralizedMixedAnnotationThroughIdentityApplicationExpr
+    it "inherits a descendant application Gamma through coalesced identity applications" $
+      expectElabAnnotationErasure
+        descendantApplicationGammaThroughCoalescedIdentityApplicationsExpr
+    it "projects a consumed root declaration through nested mixed-annotation owners" $
+      expectElabAnnotationErasure
+        consumedRootDeclarationThroughNestedMixedAnnotationOwnersExpr
+    it "retains paper g g through a let-bound direct identity application" $
+      expectElabAnnotationErasureAtType annotatedSelfAppType
+        letBoundPaperSelfApplicationThroughDirectIdentityApplicationExpr
+    it "keeps an identity-applied lambda Gamma bound through a mixed annotation" $
+      expectElabAnnotationErasure
+        identityAppliedLambdaWithMixedAnnotationExpr
+    it "keeps a higher-rank lambda endpoint lexical through nested identity applications" $
+      expectElabAnnotationErasure
+        higherRankLambdaEndpointThroughNestedIdentityApplicationsExpr
+    it "keeps an identity-wrapped mixed annotation through a partially applied lambda spine" $
+      expectElabAnnotationErasure
+        identityWrappedMixedAnnotationThroughPartiallyAppliedLambdaExpr
+    it "aligns a mixed-annotation packet through nested identity and let owners" $
+      expectElabAnnotationErasure
+        mixedAnnotationPacketThroughNestedIdentityAndLetOwnersExpr
+    it "constructs a ground annotation beneath nested let and lambda owners" $
+      expectElabAnnotationErasure
+        groundAnnotationThroughNestedLetAndLambdaOwnersExpr
+    it "retains paper g g beneath an administrative body target" $
+      expectElabAnnotationErasure
+        paperSelfApplicationThroughAdministrativeBodyTargetExpr
+    it "constructs an administrative arrow outside an inner lambda spine" $
+      expectElabAnnotationErasure
+        groundAnnotationThroughAdministrativeLambdaSpineExpr
+    it "constructs nested administrative lambdas around a bounded higher-rank parameter" $
+      expectElabAnnotationErasure
+        boundedHigherRankParameterThroughAdministrativeLambdaSpineExpr
+    it "aligns a shadowed bounded forall in an application argument" $
+      expectElabAnnotationErasure
+        shadowedBoundedForallThroughApplicationArgumentExpr
+    it "preserves source forall order through a direct identity application" $
+      expectElabAnnotationErasure
+        sourceForallOrderThroughDirectIdentityApplicationExpr
+    it "completes source forall order through an applied lambda and identity" $
+      expectElabAnnotationErasure
+        sourceForallOrderThroughAppliedLambdaAndIdentityExpr
+    it "specializes a bounded forall beneath applied unused lambda results" $
+      expectElabAnnotationErasure
+        boundedForallThroughAppliedUnusedLambdaResultsExpr
+    it "keeps an identity argument principal over a provisional result specialization" $
+      expectElabAnnotationErasure
+        identityArgumentPrincipalOverProvisionalResultExpr
+    it "reinstalls a paper g g RHS ambient construction at let publication" $
+      expectElabAnnotationErasure
+        paperSelfApplicationAmbientConstructionAtLetPublicationExpr
+
+  describe "Thesis generated annotation evidence" $
+    it "O15-ELAB-GENERATED: generated closed annotated programs elaborate, typecheck, and erase" $
+      property $
+        withMaxSuccess 100 $
+          forAll genClosedWellTypedAnnotatedExpr $ \expr ->
+            case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+              Left err ->
+                counterexample
+                  ( "generated annotated program failed to elaborate\nexpr: "
+                      ++ show expr
+                      ++ "\nerror: "
+                      ++ Elab.renderPipelineError err
+                  )
+                  False
+              Right (term, pipelineTy) ->
+                conjoin
+                  [ case Elab.typeCheck term of
+                      Left err ->
+                        counterexample
+                          ( "generated elaboration failed xMLF typecheck\nexpr: "
+                              ++ show expr
+                              ++ "\nterm: "
+                              ++ show term
+                              ++ "\nerror: "
+                              ++ show err
+                          )
+                          False
+                      Right checkedTy ->
+                        typeShouldMatch checkedTy pipelineTy,
+                    eraseXmlfTerm term
+                      === eraseSurfaceAnnotations expr
+                  ]
 
 data Obligation = Obligation
   { obligationId :: String,
@@ -695,6 +1090,18 @@ expectElabAnnotationErasure expr =
       eraseXmlfTerm term `shouldBe` eraseSurfaceAnnotations expr
     Left err -> expectationFailure (Elab.renderPipelineError err)
 
+expectElabAnnotationErasureAtType ::
+  Elab.ElabType -> Surf.SurfaceExpr -> Expectation
+expectElabAnnotationErasureAtType expectedTy expr =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+    Left err -> expectationFailure (Elab.renderPipelineError err)
+    Right (term, ty) -> do
+      ty `shouldMatchType` expectedTy
+      case Elab.typeCheck term of
+        Left err -> expectationFailure (show err)
+        Right checkedTy -> checkedTy `shouldMatchType` expectedTy
+      eraseXmlfTerm term `shouldBe` eraseSurfaceAnnotations expr
+
 -- Thesis §§12.3.2 and 15.3.8: an annotation coercing the identity
 -- abstraction to forall (a >= sigma-id). a -> a is itself an identity term.
 -- Its xMLF construction therefore binds the flexible result before building
@@ -834,6 +1241,113 @@ annotationErasureCases =
       )
   ]
 
+-- | Closed eMLF programs generated by construction from an annotated,
+-- independently typable seed.  Every wrapper preserves typability without
+-- knowing the seed's inferred type:
+--
+--   * identity application and let round-tripping reuse the complete inferred
+--     scheme;
+--   * unused lets and ignored lambda arguments only extend lexical scope; and
+--   * annotated ignored arguments use a closed monotype.
+--
+-- This deliberately includes bounded, mixed existential/universal, and paper
+-- @g g@ seeds.  Unlike the older Chapter 15 obligations, the random size now
+-- changes the complete source tree rather than merely repeating one fixture.
+genClosedWellTypedAnnotatedExpr :: Gen Surf.SurfaceExpr
+genClosedWellTypedAnnotatedExpr =
+  sized $ \size -> do
+    seed <- genAnnotatedSeed
+    depth <- chooseInt (0, min 7 (max 0 (size `div` 3)))
+    wrapGeneratedAnnotatedExpr depth seed
+
+genAnnotatedSeed :: Gen Surf.SurfaceExpr
+genAnnotatedSeed = do
+  intValue <- chooseInteger (-16, 16)
+  boolValue <- arbitrary
+  elements
+    [ Surf.EAnn
+        (Surf.ELit (Surf.LInt intValue))
+        (Surf.STBase "Int"),
+      Surf.EAnn
+        (Surf.ELit (Surf.LBool boolValue))
+        (Surf.STBase "Bool"),
+      Surf.EAnn
+        (Surf.ELam "_generatedSeedX" (Surf.EVar "_generatedSeedX"))
+        sigmaIdSource,
+      boundedIdentityAnnotationExpr,
+      mixedAnnotationExpr,
+      nestedMixedAnnotationExpr,
+      annotatedSelfAppExpr,
+      Surf.ELamAnn
+        "_generatedSeedPoly"
+        sigmaIdSource
+        ( Surf.EApp
+            (Surf.EVar "_generatedSeedPoly")
+            (Surf.ELit (Surf.LInt intValue))
+        ),
+      Surf.ELet
+        "_generatedSeedId"
+        ( Surf.EAnn
+            (Surf.ELam "_generatedSeedArg" (Surf.EVar "_generatedSeedArg"))
+            sigmaIdSource
+        )
+        ( Surf.ELet
+            "_generatedSeedDiscard"
+            ( Surf.EApp
+                (Surf.EVar "_generatedSeedId")
+                (Surf.ELit (Surf.LInt intValue))
+            )
+            ( Surf.EApp
+                (Surf.EVar "_generatedSeedId")
+                (Surf.ELit (Surf.LBool boolValue))
+            )
+        )
+    ]
+
+wrapGeneratedAnnotatedExpr ::
+  Int ->
+  Surf.SurfaceExpr ->
+  Gen Surf.SurfaceExpr
+wrapGeneratedAnnotatedExpr depth expr
+  | depth <= 0 = pure expr
+  | otherwise = do
+      intValue <- chooseInteger (-16, 16)
+      boolValue <- arbitrary
+      wrapper <- chooseInt (0, 6)
+      let name = "_generatedWrap" ++ show depth
+          wrapped =
+            case wrapper of
+              0 ->
+                Surf.EApp
+                  (Surf.ELam name (Surf.EVar name))
+                  expr
+              1 ->
+                Surf.ELet name expr (Surf.EVar name)
+              2 ->
+                Surf.ELet
+                  name
+                  (Surf.ELit (Surf.LInt intValue))
+                  expr
+              3 ->
+                Surf.EApp
+                  (Surf.ELam name expr)
+                  (Surf.ELit (Surf.LBool boolValue))
+              4 ->
+                Surf.ELam name expr
+              5 ->
+                Surf.EApp
+                  (Surf.ELamAnn name (Surf.STBase "Int") expr)
+                  (Surf.ELit (Surf.LInt intValue))
+              _ ->
+                Surf.ELet
+                  name
+                  ( Surf.EAnn
+                      (Surf.ELit (Surf.LBool boolValue))
+                      (Surf.STBase "Bool")
+                  )
+                  expr
+      wrapGeneratedAnnotatedExpr (depth - 1) wrapped
+
 sigmaIdSource :: Surf.SrcType
 sigmaIdSource =
   Surf.STForall "a" Nothing (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
@@ -854,6 +1368,231 @@ boundedIdentityAnnotationType =
     "a"
     (Just (boundFromType polyIdTy))
     (Elab.TArrow (testTVar "a") (testTVar "a"))
+
+boundedAnnotationUnderAppliedAnnotatedLambdaExpr :: Surf.SurfaceExpr
+boundedAnnotationUnderAppliedAnnotatedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "unused"
+        (Surf.STBase "Int")
+        boundedIdentityAnnotationExpr
+    )
+    (Surf.ELit (Surf.LInt (-1)))
+
+boundedAnnotationThroughNestedUnusedConstructionsExpr :: Surf.SurfaceExpr
+boundedAnnotationThroughNestedUnusedConstructionsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-9)))
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool False))
+                        (Surf.STBase "Bool")
+                    )
+                    boundedAnnotationUnderAppliedAnnotatedLambdaExpr
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+
+polymorphicLetAmbientThroughNestedAppliedLambdaOwnersExpr ::
+  Surf.SurfaceExpr
+polymorphicLetAmbientThroughNestedAppliedLambdaOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 10))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EAnn
+                (Surf.ELit (Surf.LBool False))
+                (Surf.STBase "Bool")
+            )
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                ( Surf.ELet
+                                    "_generatedSeedId"
+                                    ( Surf.EAnn
+                                        ( Surf.ELam
+                                            "_generatedSeedArg"
+                                            (Surf.EVar "_generatedSeedArg")
+                                        )
+                                        sigmaIdSource
+                                    )
+                                    ( Surf.ELet
+                                        "_generatedSeedDiscard"
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedId")
+                                            (Surf.ELit (Surf.LInt (-2)))
+                                        )
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedId")
+                                            (Surf.ELit (Surf.LBool True))
+                                        )
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LBool True))
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt (-5)))
+            )
+        )
+    )
+
+annotatedIdentityThroughNestedIdentityAndAppliedOwnersExpr ::
+  Surf.SurfaceExpr
+annotatedIdentityThroughNestedIdentityAndAppliedOwnersExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap5"
+                                (Surf.STBase "Int")
+                                ( Surf.ELet
+                                    "_generatedWrap6"
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LBool False))
+                                        (Surf.STBase "Bool")
+                                    )
+                                    ( Surf.EAnn
+                                        ( Surf.ELam
+                                            "_generatedSeedX"
+                                            (Surf.EVar "_generatedSeedX")
+                                        )
+                                        sigmaIdSource
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 1))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+mixedAnnotationThroughNestedLetAndIdentityOwnersExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughNestedLetAndIdentityOwnersExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            mixedAnnotationExpr
+                        )
+                        (Surf.ELit (Surf.LBool True))
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LInt 4))
+
+boundedIdentityLambdaThroughUnusedApplicationAndNestedLetsExpr ::
+  Surf.SurfaceExpr
+boundedIdentityLambdaThroughUnusedApplicationAndNestedLetsExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            (Surf.ELit (Surf.LInt (-4)))
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                ( Surf.ELet
+                                    "_generatedWrap7"
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LBool True))
+                                        (Surf.STBase "Bool")
+                                    )
+                                    boundedIdentityAnnotationExpr
+                                )
+                            )
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-5)))
+
+boundedIdentityLambdaFromUnusedApplicationExpr :: Surf.SurfaceExpr
+boundedIdentityLambdaFromUnusedApplicationExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap3"
+            boundedIdentityLambdaFromUnusedApplicationCoreExpr
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+    (Surf.ELit (Surf.LInt (-5)))
+
+boundedIdentityLambdaFromUnusedApplicationCoreExpr :: Surf.SurfaceExpr
+boundedIdentityLambdaFromUnusedApplicationCoreExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap4"
+        ( Surf.ELet
+            "_generatedWrap5"
+            ( Surf.ELam
+                "_generatedWrap6"
+                boundedIdentityAnnotationExpr
+            )
+            (Surf.EVar "_generatedWrap5")
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
 
 mixedAnnotationExpr :: Surf.SurfaceExpr
 mixedAnnotationExpr =
@@ -877,6 +1616,3916 @@ nestedMixedAnnotationExpr =
         (Surf.EApp (Surf.EVar "k") (Surf.ELit (Surf.LInt 1)))
         (Surf.ELit (Surf.LBool True))
     )
+
+nestedAnnotatedLambdaUnderUnusedApplicationExpr :: Surf.SurfaceExpr
+nestedAnnotatedLambdaUnderUnusedApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "unused"
+        ( Surf.ELamAnn
+            "poly"
+            sigmaIdSource
+            (Surf.EApp (Surf.EVar "poly") (Surf.ELit (Surf.LInt 7)))
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+mixedAnnotationUnderUnusedApplicationExpr :: Surf.SurfaceExpr
+mixedAnnotationUnderUnusedApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "unused" mixedAnnotationExpr)
+    (Surf.ELit (Surf.LBool True))
+
+mixedAnnotationBeneathAppliedGroundWrappersExpr :: Surf.SurfaceExpr
+mixedAnnotationBeneathAppliedGroundWrappersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap4"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool True))
+                                (Surf.STBase "Bool")
+                            )
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool False))
+                                    (Surf.STBase "Bool")
+                                )
+                                (Surf.ELam "_generatedWrap7" mixedAnnotationExpr)
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt 6))
+                )
+            )
+            (Surf.ELit (Surf.LInt (-9)))
+        )
+    )
+
+mixedAnnotationThroughReturnedLambdaIdentityExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughReturnedLambdaIdentityExpr =
+  Surf.EApp
+    (Surf.ELam "identity" (Surf.EVar "identity"))
+    (Surf.ELam "unused" mixedAnnotationExpr)
+
+nestedAnnotatedLetLambdaRoundTripExpr :: Surf.SurfaceExpr
+nestedAnnotatedLetLambdaRoundTripExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt (-5)))
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    ( Surf.ELet
+                        "_generatedWrap6"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool False))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap7"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            (Surf.EVar "_generatedWrap7")
+                        )
+                    )
+                )
+                (Surf.EVar "_generatedWrap4")
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+nestedAnnotatedPolymorphicLambdaRoundTripExpr :: Surf.SurfaceExpr
+nestedAnnotatedPolymorphicLambdaRoundTripExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-15)))
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt (-16)))
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            ( Surf.ELamAnn
+                                "_generatedSeedPoly"
+                                sigmaIdSource
+                                ( Surf.EApp
+                                    (Surf.EVar "_generatedSeedPoly")
+                                    (Surf.ELit (Surf.LInt 11))
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                    (Surf.EVar "_generatedWrap5")
+                )
+                (Surf.EVar "_generatedWrap4")
+            )
+        )
+    )
+
+nestedAnnotatedSelfAppUnderUnusedLambdaExpr :: Surf.SurfaceExpr
+nestedAnnotatedSelfAppUnderUnusedLambdaExpr =
+  Surf.ELam
+    "unused"
+    annotatedSelfAppExpr
+
+nestedAnnotatedSelfAppUnderAppliedAnnotatedLambdaExpr :: Surf.SurfaceExpr
+nestedAnnotatedSelfAppUnderAppliedAnnotatedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "unused"
+        (Surf.STBase "Int")
+        annotatedSelfAppExpr
+    )
+    (Surf.ELit (Surf.LInt 6))
+
+annotatedSelfAppThroughAnnotatedApplicationAndUnusedLetExpr :: Surf.SurfaceExpr
+annotatedSelfAppThroughAnnotatedApplicationAndUnusedLetExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool False))
+                    (Surf.STBase "Bool")
+                )
+                annotatedSelfAppExpr
+            )
+        )
+        (Surf.ELit (Surf.LInt 5))
+    )
+
+localTopologyResultThroughIdentityAppliedHigherOrderLambdaExpr ::
+  Surf.SurfaceExpr
+localTopologyResultThroughIdentityAppliedHigherOrderLambdaExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                (Surf.EVar "_generatedWrap2")
+            )
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool True))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                ( Surf.ELamAnn
+                                    "_generatedSeedPoly"
+                                    sigmaIdSource
+                                    ( Surf.EApp
+                                        (Surf.EVar "_generatedSeedPoly")
+                                        (Surf.ELit (Surf.LInt (-13)))
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt (-4)))
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-13)))
+
+applicationGammaOrderForIdentityLambdaParameterExpr :: Surf.SurfaceExpr
+applicationGammaOrderForIdentityLambdaParameterExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EVar "_generatedWrap3")
+            )
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool True))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.EAnn
+                            ( Surf.ELam
+                                "_generatedSeedX"
+                                (Surf.EVar "_generatedSeedX")
+                            )
+                            sigmaIdSource
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+paperSelfApplicationThroughNestedAppliedWrappersExpr :: Surf.SurfaceExpr
+paperSelfApplicationThroughNestedAppliedWrappersExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap4"
+                            (Surf.STBase "Int")
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                annotatedSelfAppExpr
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 16))
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+letBoundPaperSelfApplicationThroughNestedLambdaOwnersExpr :: Surf.SurfaceExpr
+letBoundPaperSelfApplicationThroughNestedLambdaOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    annotatedSelfAppExpr
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+paperSelfApplicationThroughAppliedAnnotatedLambdaAndNestedLetsExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationThroughAppliedAnnotatedLambdaAndNestedLetsExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            (Surf.ELit (Surf.LInt 10))
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool False))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool True))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                annotatedSelfAppExpr
+                            )
+                            (Surf.ELit (Surf.LInt 5))
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt 12))
+
+boundedAnnotationThroughIdentityAppliedNestedLambdaExpr ::
+  Surf.SurfaceExpr
+boundedAnnotationThroughIdentityAppliedNestedLambdaExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt 0))
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool False))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap6"
+                        (Surf.ELit (Surf.LInt (-9)))
+                        boundedIdentityAnnotationExpr
+                    )
+                )
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+consumedApplicationGammaBesideAmbientAnnotationExpr ::
+  Surf.SurfaceExpr
+consumedApplicationGammaBesideAmbientAnnotationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.ELet
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                (Surf.EVar "_generatedWrap5")
+                            )
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool False))
+                                    (Surf.STBase "Bool")
+                                )
+                                ( Surf.EAnn
+                                    ( Surf.ELam
+                                        "_generatedSeedX"
+                                        (Surf.EVar "_generatedSeedX")
+                                    )
+                                    sigmaIdSource
+                                )
+                            )
+                        )
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+        )
+        (Surf.ELit (Surf.LInt 3))
+    )
+
+paperSelfApplicationThroughIdentityAndNestedLetsExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationThroughIdentityAndNestedLetsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EVar "_generatedWrap3")
+            )
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    (Surf.ELit (Surf.LInt (-11)))
+                    annotatedSelfAppExpr
+                )
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+    (Surf.EVar "_generatedWrap1")
+
+paperSelfApplicationThroughIdentityAppliedLetChainExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationThroughIdentityAppliedLetChainExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool True))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt (-11)))
+            ( Surf.ELet
+                "_generatedWrap4"
+                (Surf.ELit (Surf.LInt (-1)))
+                annotatedSelfAppExpr
+            )
+        )
+    )
+
+paperSelfApplicationThroughIdentityAppliedUnusedLetExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationThroughIdentityAppliedUnusedLetExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-1)))
+        annotatedSelfAppExpr
+    )
+
+paperSelfApplicationThroughUnusedLetExpr :: Surf.SurfaceExpr
+paperSelfApplicationThroughUnusedLetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-1)))
+    annotatedSelfAppExpr
+
+nestedLambdaPacketAfterUnusedParameterApplicationExpr ::
+  Surf.SurfaceExpr
+nestedLambdaPacketAfterUnusedParameterApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt (-8)))
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LInt (-2)))
+                            (Surf.STBase "Int")
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+rootPacketAroundNestedMixedAnnotationApplicationExpr ::
+  Surf.SurfaceExpr
+rootPacketAroundNestedMixedAnnotationApplicationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool True))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            ( Surf.ELet
+                                "_generatedWrap7"
+                                ( Surf.ELet
+                                    "k"
+                                    mixedAnnotationExpr
+                                    ( Surf.EApp
+                                        ( Surf.EApp
+                                            (Surf.EVar "k")
+                                            (Surf.ELit (Surf.LInt 1))
+                                        )
+                                        (Surf.ELit (Surf.LBool True))
+                                    )
+                                )
+                                (Surf.EVar "_generatedWrap7")
+                            )
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+paperSelfApplicationBeneathNestedAppliedUnusedLambdasExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationBeneathNestedAppliedUnusedLambdasExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    annotatedSelfAppExpr
+                )
+            )
+            (Surf.ELit (Surf.LBool False))
+        )
+    )
+    (Surf.ELit (Surf.LInt 6))
+
+paperSelfApplicationBeneathAppliedGroundWrapperExpr :: Surf.SurfaceExpr
+paperSelfApplicationBeneathAppliedGroundWrapperExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap2" annotatedSelfAppExpr)
+            (Surf.ELit (Surf.LBool True))
+        )
+    )
+    (Surf.ELit (Surf.LInt (-2)))
+
+paperSelfApplicationBeneathFiveAppliedUnusedLambdasAndLetExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationBeneathFiveAppliedUnusedLambdasAndLetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( appliedUnused "_generatedWrap3" False
+            ( appliedUnused "_generatedWrap4" True
+                ( appliedUnused "_generatedWrap5" False
+                    ( appliedUnused "_generatedWrap6" False
+                        ( appliedUnused "_generatedWrap7" True
+                            annotatedSelfAppExpr
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+  where
+    appliedUnused name argument body =
+      Surf.EApp
+        (Surf.ELam name body)
+        (Surf.ELit (Surf.LBool argument))
+
+consumedBoundedResultThroughAppliedAndRootOwnersExpr :: Surf.SurfaceExpr
+consumedBoundedResultThroughAppliedAndRootOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-10)))
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                (Surf.ELit (Surf.LInt 16))
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap5"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            boundedIdentityAnnotationExpr
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt 13))
+                )
+            )
+        )
+    )
+
+zeroLocalApplicationWithCompletedMixedBoundExpr :: Surf.SurfaceExpr
+zeroLocalApplicationWithCompletedMixedBoundExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedOuterIdentity" (Surf.EVar "_generatedOuterIdentity"))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap1"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap2"
+                ( Surf.ELet
+                    "_generatedWrap3"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap4"
+                            (Surf.EVar "_generatedWrap4")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                (Surf.EVar "_generatedWrap5")
+                            )
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                (Surf.ELit (Surf.LInt 11))
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    nestedMixedAnnotationExpr
+                                )
+                            )
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap3")
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-1)))
+    )
+
+consumedPendingRootAfterOwnerFinalizationExpr :: Surf.SurfaceExpr
+consumedPendingRootAfterOwnerFinalizationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    (Surf.EVar "_generatedWrap4")
+                )
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool False))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LInt (-11)))
+                        (Surf.STBase "Int")
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+unusedLambdaParameterInsideAppliedAnnotatedLambdaExpr ::
+  Surf.SurfaceExpr
+unusedLambdaParameterInsideAppliedAnnotatedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap4"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                ( Surf.ELet
+                                    "_generatedWrap7"
+                                    (Surf.ELit (Surf.LInt (-14)))
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LInt 11))
+                                        (Surf.STBase "Int")
+                                    )
+                                )
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt 11))
+                )
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+appliedLambdaCodomainThroughSelectedReifyRootExpr :: Surf.SurfaceExpr
+appliedLambdaCodomainThroughSelectedReifyRootExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                (Surf.EVar "_generatedWrap2")
+            )
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.ELet
+                        "_generatedWrap4"
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            (Surf.ELit (Surf.LInt 14))
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap6"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELamAnn
+                                        "_generatedSeedPoly"
+                                        sigmaIdSource
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedPoly")
+                                            (Surf.ELit (Surf.LInt (-9)))
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 9))
+                            )
+                        )
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt 7))
+
+futureOwnerRefinementOutsideAmbientGammaExpr :: Surf.SurfaceExpr
+futureOwnerRefinementOutsideAmbientGammaExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap4"
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap5"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELet
+                                        "_generatedWrap6"
+                                        ( Surf.EApp
+                                            ( Surf.ELam
+                                                "_generatedWrap7"
+                                                ( Surf.EAnn
+                                                    ( Surf.ELam
+                                                        "_generatedSeedX"
+                                                        (Surf.EVar "_generatedSeedX")
+                                                    )
+                                                    sigmaIdSource
+                                                )
+                                            )
+                                            (Surf.ELit (Surf.LBool False))
+                                        )
+                                        (Surf.EVar "_generatedWrap6")
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 10))
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LBool True))
+        )
+    )
+    (Surf.ELit (Surf.LInt 6))
+
+mixedAnnotationThroughNestedLambdaLetResultExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughNestedLambdaLetResultExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        (Surf.ELam "_generatedWrap3" mixedAnnotationExpr)
+    )
+    (Surf.EVar "_generatedWrap1")
+
+mixedAnnotationThroughNestedIdentityApplicationsExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughNestedIdentityApplicationsExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.EApp
+        (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+        mixedAnnotationExpr
+    )
+
+mixedAnnotationBeneathAppliedFiveLambdaSpineExpr :: Surf.SurfaceExpr
+mixedAnnotationBeneathAppliedFiveLambdaSpineExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 6))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            (Surf.ELam "_generatedWrap7" mixedAnnotationExpr)
+                        )
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LBool True))
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+annotatedParameterPlaceholderAtExactLambdaOwnerExpr :: Surf.SurfaceExpr
+annotatedParameterPlaceholderAtExactLambdaOwnerExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap5"
+                                (Surf.STBase "Int")
+                                mixedAnnotationExpr
+                            )
+                            (Surf.ELit (Surf.LInt 12))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+vacuousRootBinderBeforeLambdaCodomainExpr :: Surf.SurfaceExpr
+vacuousRootBinderBeforeLambdaCodomainExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.ELet
+                                        "_generatedWrap7"
+                                        (Surf.ELit (Surf.LInt (-4)))
+                                        ( Surf.ELet
+                                            "_generatedSeedId"
+                                            ( Surf.EAnn
+                                                ( Surf.ELam
+                                                    "_generatedSeedArg"
+                                                    (Surf.EVar "_generatedSeedArg")
+                                                )
+                                                sigmaIdSource
+                                            )
+                                            ( Surf.ELet
+                                                "_generatedSeedDiscard"
+                                                ( Surf.EApp
+                                                    (Surf.EVar "_generatedSeedId")
+                                                    (Surf.ELit (Surf.LInt (-13)))
+                                                )
+                                                ( Surf.EApp
+                                                    (Surf.EVar "_generatedSeedId")
+                                                    (Surf.ELit (Surf.LBool False))
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LBool True))
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 5))
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+
+boundedLambdaResultBeforeEnclosingIdentityApplicationExpr :: Surf.SurfaceExpr
+boundedLambdaResultBeforeEnclosingIdentityApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EAnn
+                (Surf.ELit (Surf.LBool False))
+                (Surf.STBase "Bool")
+            )
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            mixedAnnotationExpr
+                        )
+                        (Surf.ELit (Surf.LInt (-13)))
+                    )
+                )
+                (Surf.ELit (Surf.LInt 14))
+            )
+        )
+    )
+
+rootOwnedLambdaBindersOutsideTransparentLetExpr :: Surf.SurfaceExpr
+rootOwnedLambdaBindersOutsideTransparentLetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            ( Surf.ELet
+                                "_generatedWrap7"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool False))
+                                    (Surf.STBase "Bool")
+                                )
+                                mixedAnnotationExpr
+                            )
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-3)))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+identityTopologyConsumerThroughNestedAppliedLambdasExpr :: Surf.SurfaceExpr
+identityTopologyConsumerThroughNestedAppliedLambdasExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 5))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.ELet
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.EApp
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            ( Surf.EAnn
+                                                ( Surf.ELam
+                                                    "_generatedSeedX"
+                                                    (Surf.EVar "_generatedSeedX")
+                                                )
+                                                sigmaIdSource
+                                            )
+                                        )
+                                        (Surf.ELit (Surf.LBool False))
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LBool False))
+                        )
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+        (Surf.ELit (Surf.LInt (-12)))
+    )
+
+nestedAnnotatedSelfAppUnderAppliedUnusedLambdaExpr :: Surf.SurfaceExpr
+nestedAnnotatedSelfAppUnderAppliedUnusedLambdaExpr =
+  Surf.EApp
+    (Surf.ELam "unused" annotatedSelfAppExpr)
+    (Surf.ELit (Surf.LBool False))
+
+duplicateConsumerClosureInsideOwnBoundExpr :: Surf.SurfaceExpr
+duplicateConsumerClosureInsideOwnBoundExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            (Surf.EAnn (Surf.ELit (Surf.LBool False)) (Surf.STBase "Bool"))
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EAnn
+                            ( Surf.ELam
+                                "_generatedSeedX"
+                                (Surf.EVar "_generatedSeedX")
+                            )
+                            sigmaIdSource
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-15)))
+
+returnedLambdaWithoutSyntheticBinderCycleExpr :: Surf.SurfaceExpr
+returnedLambdaWithoutSyntheticBinderCycleExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.EAnn (Surf.ELit (Surf.LBool False)) (Surf.STBase "Bool"))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    (Surf.ELit (Surf.LInt 6))
+                    ( Surf.ELet
+                        "_generatedWrap6"
+                        (Surf.ELit (Surf.LInt (-4)))
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap7"
+                                (Surf.EVar "_generatedWrap7")
+                            )
+                            ( Surf.ELet
+                                "k"
+                                ( Surf.EAnn
+                                    ( Surf.ELam
+                                        "x"
+                                        ( Surf.ELam
+                                            "y"
+                                            (Surf.EVar "y")
+                                        )
+                                    )
+                                    ( Surf.STForall
+                                        "alpha"
+                                        Nothing
+                                        ( Surf.STArrow
+                                            (Surf.STVar "beta")
+                                            ( Surf.STArrow
+                                                (Surf.STVar "alpha")
+                                                (Surf.STVar "alpha")
+                                            )
+                                        )
+                                    )
+                                )
+                                ( Surf.EApp
+                                    ( Surf.EApp
+                                        (Surf.EVar "k")
+                                        (Surf.ELit (Surf.LInt 1))
+                                    )
+                                    (Surf.ELit (Surf.LBool True))
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+annotatedSelfAppThroughTransparentLambdaLetExpr :: Surf.SurfaceExpr
+annotatedSelfAppThroughTransparentLambdaLetExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                        ( Surf.ELamAnn
+                            "g"
+                            sigmaIdSource
+                            ( Surf.EApp
+                                (Surf.EVar "g")
+                                (Surf.EVar "g")
+                            )
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt 9))
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+annotatedSelfAppThroughIdentityAppliedNestedLambdaLetsExpr :: Surf.SurfaceExpr
+annotatedSelfAppThroughIdentityAppliedNestedLambdaLetsExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.EAnn (Surf.ELit (Surf.LBool False)) (Surf.STBase "Bool"))
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                (Surf.ELit (Surf.LInt (-16)))
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            annotatedSelfAppExpr
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+            )
+        )
+    )
+
+boundedIdentityThroughAppliedAnnotatedLambdasExpr :: Surf.SurfaceExpr
+boundedIdentityThroughAppliedAnnotatedLambdasExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap3"
+                    (Surf.STBase "Int")
+                    ( Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        ( Surf.STForall
+                            "a"
+                            (Just (Surf.mkSrcBound sigmaIdSource))
+                            ( Surf.STArrow
+                                (Surf.STVar "a")
+                                (Surf.STVar "a")
+                            )
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt (-14)))
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LInt (-1)))
+
+paperSelfApplicationThroughIdentityAppliedOpaqueLambdaExpr :: Surf.SurfaceExpr
+paperSelfApplicationThroughIdentityAppliedOpaqueLambdaExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt 5))
+                    (Surf.ELam "_generatedWrap5" annotatedSelfAppExpr)
+                )
+            )
+            (Surf.ELit (Surf.LBool False))
+        )
+    )
+
+polymorphicIdentityThroughCoalescedGammaClosuresExpr :: Surf.SurfaceExpr
+polymorphicIdentityThroughCoalescedGammaClosuresExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        (Surf.ELit (Surf.LInt 14))
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                ( Surf.EAnn
+                                    ( Surf.ELam
+                                        "_generatedSeedX"
+                                        (Surf.EVar "_generatedSeedX")
+                                    )
+                                    sigmaIdSource
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 6))
+                        )
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+
+paperSelfApplicationBeneathPartiallyAppliedNestedLambdasExpr ::
+  Surf.SurfaceExpr
+paperSelfApplicationBeneathPartiallyAppliedNestedLambdasExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.ELam "_generatedWrap4" annotatedSelfAppExpr)
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+letGeneralizedMixedAnnotationThroughIdentityApplicationExpr ::
+  Surf.SurfaceExpr
+letGeneralizedMixedAnnotationThroughIdentityApplicationExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                (Surf.EVar "_generatedWrap2")
+            )
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt (-4)))
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                mixedAnnotationExpr
+                            )
+                            (Surf.ELit (Surf.LBool False))
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-5)))
+
+descendantApplicationGammaThroughCoalescedIdentityApplicationsExpr ::
+  Surf.SurfaceExpr
+descendantApplicationGammaThroughCoalescedIdentityApplicationsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EVar "_generatedWrap3")
+            )
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        (Surf.ELit (Surf.LInt 3))
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            (Surf.ELit (Surf.LInt 15))
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap7"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELamAnn
+                                        "_generatedSeedPoly"
+                                        sigmaIdSource
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedPoly")
+                                            (Surf.ELit (Surf.LInt (-15)))
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 0))
+                            )
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+consumedRootDeclarationThroughNestedMixedAnnotationOwnersExpr ::
+  Surf.SurfaceExpr
+consumedRootDeclarationThroughNestedMixedAnnotationOwnersExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool False))
+                    (Surf.STBase "Bool")
+                )
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            nestedMixedAnnotationExpr
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+    )
+
+letBoundPaperSelfApplicationThroughDirectIdentityApplicationExpr ::
+  Surf.SurfaceExpr
+letBoundPaperSelfApplicationThroughDirectIdentityApplicationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        annotatedSelfAppExpr
+    )
+    (Surf.EVar "_generatedWrap1")
+
+returnedHigherRankLambdaThroughAnnotatedApplicationsExpr :: Surf.SurfaceExpr
+returnedHigherRankLambdaThroughAnnotatedApplicationsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.EAnn (Surf.ELit (Surf.LBool True)) (Surf.STBase "Bool"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.EAnn (Surf.ELit (Surf.LBool False)) (Surf.STBase "Bool"))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                (Surf.ELit (Surf.LInt 10))
+                                ( Surf.EApp
+                                    ( Surf.ELam
+                                        "_generatedWrap7"
+                                        ( Surf.ELamAnn
+                                            "_generatedSeedPoly"
+                                            sigmaIdSource
+                                            ( Surf.EApp
+                                                (Surf.EVar "_generatedSeedPoly")
+                                                (Surf.ELit (Surf.LInt 8))
+                                            )
+                                        )
+                                    )
+                                    (Surf.ELit (Surf.LBool True))
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt (-9)))
+                    )
+                )
+                (Surf.ELit (Surf.LInt 0))
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+returnedFreeAnnotationBinderAtEnclosingLambdaExpr :: Surf.SurfaceExpr
+returnedFreeAnnotationBinderAtEnclosingLambdaExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-9)))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-7)))
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                ( Surf.ELam
+                                    "x"
+                                    ( Surf.ELam
+                                        "y"
+                                        (Surf.EVar "y")
+                                    )
+                                )
+                                ( Surf.STForall
+                                    "alpha"
+                                    Nothing
+                                    ( Surf.STArrow
+                                        (Surf.STVar "beta")
+                                        ( Surf.STArrow
+                                            (Surf.STVar "alpha")
+                                            (Surf.STVar "alpha")
+                                        )
+                                    )
+                                )
+                            )
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap4")
+            )
+        )
+    )
+
+appliedAnnotatedSelfAppLetResultExpr :: Surf.SurfaceExpr
+appliedAnnotatedSelfAppLetResultExpr =
+  Surf.ELet
+    "kept"
+    nestedAnnotatedSelfAppUnderAppliedUnusedLambdaExpr
+    (Surf.EVar "kept")
+
+appliedAnnotatedSelfAppAfterUnusedLetExpr :: Surf.SurfaceExpr
+appliedAnnotatedSelfAppAfterUnusedLetExpr =
+  Surf.ELet
+    "ignored"
+    (Surf.ELit (Surf.LInt (-1)))
+    nestedAnnotatedSelfAppUnderAppliedUnusedLambdaExpr
+
+nestedAnnotatedSelfAppThroughLetAndApplicationOwnersExpr :: Surf.SurfaceExpr
+nestedAnnotatedSelfAppThroughLetAndApplicationOwnersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                (Surf.ELit (Surf.LInt (-1)))
+                ( Surf.EApp
+                    (Surf.ELam "_generatedWrap5" annotatedSelfAppExpr)
+                    (Surf.ELit (Surf.LBool False))
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+annotatedSelfAppThroughNestedUnusedApplicationsExpr :: Surf.SurfaceExpr
+annotatedSelfAppThroughNestedUnusedApplicationsExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt 5))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                (Surf.ELit (Surf.LInt 9))
+                                ( Surf.ELet
+                                    "_generatedWrap7"
+                                    (Surf.ELit (Surf.LInt (-6)))
+                                    annotatedSelfAppExpr
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool True))
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+annotatedLambdaThroughIdentityApplicationExpr :: Surf.SurfaceExpr
+annotatedLambdaThroughIdentityApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "identity" (Surf.EVar "identity"))
+    generatedAnnotatedIntLambdaExpr
+
+letWrappedAnnotatedLambdaThroughIdentityApplicationExpr :: Surf.SurfaceExpr
+letWrappedAnnotatedLambdaThroughIdentityApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "identity" (Surf.EVar "identity"))
+    ( Surf.ELet
+        "unused"
+        (Surf.ELit (Surf.LInt 2))
+        generatedAnnotatedIntLambdaExpr
+    )
+
+generatedAnnotatedIntLambdaExpr :: Surf.SurfaceExpr
+generatedAnnotatedIntLambdaExpr =
+  Surf.ELamAnn
+    "poly"
+    sigmaIdSource
+    (Surf.EApp (Surf.EVar "poly") (Surf.ELit (Surf.LInt 15)))
+
+identityWrappedAnnotatedLambdaUnderOuterApplicationExpr :: Surf.SurfaceExpr
+identityWrappedAnnotatedLambdaUnderOuterApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "unused"
+        annotatedLambdaThroughIdentityApplicationExpr
+    )
+    (Surf.ELit (Surf.LBool False))
+
+nestedMixedAnnotationThroughUnusedConstructionsExpr :: Surf.SurfaceExpr
+nestedMixedAnnotationThroughUnusedConstructionsExpr =
+  Surf.ELet
+    "_generatedOuterUnused"
+    (Surf.ELit (Surf.LInt (-6)))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedAnnotatedUnused"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedRoundTrip"
+                ( Surf.ELet
+                    "_generatedInnerUnused"
+                    (Surf.ELit (Surf.LInt (-11)))
+                    nestedMixedAnnotationExpr
+                )
+                (Surf.EVar "_generatedRoundTrip")
+            )
+        )
+        (Surf.ELit (Surf.LInt 5))
+    )
+
+mixedAnnotationThroughNestedAnnotatedApplicationsExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughNestedAnnotatedApplicationsExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedOuterAnnotatedUnused"
+        (Surf.STBase "Int")
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedInnerAnnotatedUnused"
+                (Surf.STBase "Int")
+                mixedAnnotationExpr
+            )
+            (Surf.ELit (Surf.LInt (-14)))
+        )
+    )
+    (Surf.ELit (Surf.LInt (-2)))
+
+nestedAnnotatedApplicationsThroughOuterConstructionsExpr :: Surf.SurfaceExpr
+nestedAnnotatedApplicationsThroughOuterConstructionsExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedOuterUnused"
+        ( Surf.ELet
+            "_generatedRoundTrip"
+            mixedAnnotationThroughNestedAnnotatedApplicationsExpr
+            (Surf.EVar "_generatedRoundTrip")
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+identityWrappedGroundLetResultExpr :: Surf.SurfaceExpr
+identityWrappedGroundLetResultExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+            ( Surf.ELet
+                "_generatedWrap4"
+                (Surf.ELit (Surf.LInt 6))
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool False))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LInt 13))
+                        (Surf.STBase "Int")
+                    )
+                )
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+annotatedIdentityThroughThreeUnusedLambdasExpr :: Surf.SurfaceExpr
+annotatedIdentityThroughThreeUnusedLambdasExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.EAnn
+                ( Surf.ELam
+                    "_generatedSeedX"
+                    (Surf.EVar "_generatedSeedX")
+                )
+                sigmaIdSource
+            )
+        )
+    )
+
+sourceProjectedAnnotationInGroundResultLambdaExpr :: Surf.SurfaceExpr
+sourceProjectedAnnotationInGroundResultLambdaExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "k"
+                mixedAnnotationExpr
+                ( Surf.EApp
+                    ( Surf.EApp
+                        (Surf.EVar "k")
+                        (Surf.ELit (Surf.LInt 1))
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-9)))
+
+identityAppliedMixedAnnotationLetExpr :: Surf.SurfaceExpr
+identityAppliedMixedAnnotationLetExpr =
+  Surf.ELet
+    "_generatedWrap3"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap4"
+            (Surf.EVar "_generatedWrap4")
+        )
+        mixedAnnotationExpr
+    )
+    (Surf.EVar "_generatedWrap3")
+
+identityAppliedMixedAnnotationLetUnderUnusedLambdaExpr :: Surf.SurfaceExpr
+identityAppliedMixedAnnotationLetUnderUnusedLambdaExpr =
+  Surf.ELam
+    "_generatedWrap2"
+    identityAppliedMixedAnnotationLetExpr
+
+boundedAnnotationFromUnusedApplicationLetExpr :: Surf.SurfaceExpr
+boundedAnnotationFromUnusedApplicationLetExpr =
+  Surf.ELet
+    "_generatedWrap6"
+    ( Surf.EApp
+        (Surf.ELam "_generatedWrap7" boundedIdentityAnnotationExpr)
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap6")
+
+boundedAnnotationLetUnderUnusedApplicationExpr :: Surf.SurfaceExpr
+boundedAnnotationLetUnderUnusedApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap4"
+        ( Surf.ELet
+            "_generatedWrap5"
+            (Surf.ELit (Surf.LInt (-9)))
+            boundedAnnotationFromUnusedApplicationLetExpr
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+identityAppliedBoundedAnnotationLetExpr :: Surf.SurfaceExpr
+identityAppliedBoundedAnnotationLetExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+    boundedAnnotationLetUnderUnusedApplicationExpr
+
+annotatedApplicationAroundBoundedAnnotationLetExpr :: Surf.SurfaceExpr
+annotatedApplicationAroundBoundedAnnotationLetExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        identityAppliedBoundedAnnotationLetExpr
+    )
+    (Surf.ELit (Surf.LInt (-15)))
+
+sharedApplicationGammaClosureExpr :: Surf.SurfaceExpr
+sharedApplicationGammaClosureExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            (Surf.ELam "_generatedWrap6" nestedMixedAnnotationExpr)
+                            (Surf.ELit (Surf.LBool False))
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+            (Surf.ELit (Surf.LBool False))
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+polymorphicLetDependencyThroughIdentityAppliedNestedLambdaExpr ::
+  Surf.SurfaceExpr
+polymorphicLetDependencyThroughIdentityAppliedNestedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    ( Surf.ELet
+                        "_generatedSeedId"
+                        ( Surf.EAnn
+                            ( Surf.ELam
+                                "_generatedSeedArg"
+                                (Surf.EVar "_generatedSeedArg")
+                            )
+                            sigmaIdSource
+                        )
+                        ( Surf.ELet
+                            "_generatedSeedDiscard"
+                            ( Surf.EApp
+                                (Surf.EVar "_generatedSeedId")
+                                (Surf.ELit (Surf.LInt 9))
+                            )
+                            ( Surf.EApp
+                                (Surf.EVar "_generatedSeedId")
+                                (Surf.ELit (Surf.LBool False))
+                            )
+                        )
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+-- Regression for a generated wrapper whose application result is copied to a
+-- deeper target scope.  The two forwarded root edges and the direct
+-- application edge form one source-owned Gamma closure; the copied result
+-- must not move that Gamma away from this application occurrence.
+forwardedGroundApplicationGammaExpr :: Surf.SurfaceExpr
+forwardedGroundApplicationGammaExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    multiUseAnnotatedIdentitySeed
+                )
+                (Surf.ELit (Surf.LInt 11))
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+mixedAnnotationThroughNestedLambdaPacketExpr :: Surf.SurfaceExpr
+mixedAnnotationThroughNestedLambdaPacketExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt 16))
+            ( Surf.ELam
+                "_generatedWrap4"
+                (Surf.ELam "_generatedWrap5" mixedAnnotationExpr)
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+letBoundMixedAnnotationThroughUnusedLambdasExpr :: Surf.SurfaceExpr
+letBoundMixedAnnotationThroughUnusedLambdasExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            mixedAnnotationExpr
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+appliedMixedAnnotationLetExpr :: Surf.SurfaceExpr
+appliedMixedAnnotationLetExpr =
+  Surf.ELet
+    "k"
+    mixedAnnotationExpr
+    ( Surf.EApp
+        ( Surf.EApp
+            (Surf.EVar "k")
+            (Surf.ELit (Surf.LInt 1))
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+nestedApplicationOwnersAroundAppliedMixedAnnotationExpr :: Surf.SurfaceExpr
+nestedApplicationOwnersAroundAppliedMixedAnnotationExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.EApp
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            (Surf.EVar "_generatedWrap7")
+                                        )
+                                        appliedMixedAnnotationLetExpr
+                                    )
+                                )
+                                (Surf.ELit (Surf.LBool True))
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt (-15)))
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+nestedUnusedLambdasAroundAppliedPolymorphicResultExpr :: Surf.SurfaceExpr
+nestedUnusedLambdasAroundAppliedPolymorphicResultExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt 16))
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+    )
+
+rootAmbientApplicationCertificateExpr :: Surf.SurfaceExpr
+rootAmbientApplicationCertificateExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EAnn
+                    ( Surf.ELam
+                        "x"
+                        (Surf.ELam "y" (Surf.EVar "y"))
+                    )
+                    ( Surf.STForall
+                        "alpha"
+                        Nothing
+                        ( Surf.STArrow
+                            (Surf.STVar "beta")
+                            ( Surf.STArrow
+                                (Surf.STVar "alpha")
+                                (Surf.STVar "alpha")
+                            )
+                        )
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+identityApplicationWithNestedAnnotatedUseExpr :: Surf.SurfaceExpr
+identityApplicationWithNestedAnnotatedUseExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "k"
+                    ( Surf.EAnn
+                        ( Surf.ELam
+                            "x"
+                            (Surf.ELam "y" (Surf.EVar "y"))
+                        )
+                        ( Surf.STForall
+                            "alpha"
+                            Nothing
+                            ( Surf.STArrow
+                                (Surf.STVar "beta")
+                                ( Surf.STArrow
+                                    (Surf.STVar "alpha")
+                                    (Surf.STVar "alpha")
+                                )
+                            )
+                        )
+                    )
+                    ( Surf.EApp
+                        ( Surf.EApp
+                            (Surf.EVar "k")
+                            (Surf.ELit (Surf.LInt 1))
+                        )
+                        (Surf.ELit (Surf.LBool True))
+                    )
+                )
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+independentApplicationGammasAtLetOwnerExpr :: Surf.SurfaceExpr
+independentApplicationGammasAtLetOwnerExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool True))
+                                (Surf.STBase "Bool")
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool True))
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+annotatedPolymorphicParameterThroughUnusedOwnersExpr :: Surf.SurfaceExpr
+annotatedPolymorphicParameterThroughUnusedOwnersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LInt (-2)))
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELamAnn
+                            "_generatedSeedPoly"
+                            sigmaIdSource
+                            ( Surf.EApp
+                                (Surf.EVar "_generatedSeedPoly")
+                                (Surf.ELit (Surf.LInt 3))
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+            )
+        )
+    )
+
+annotatedPolymorphicParameterBodyEndpointThroughAppliedOwnersExpr :: Surf.SurfaceExpr
+annotatedPolymorphicParameterBodyEndpointThroughAppliedOwnersExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.ELamAnn
+                        "_generatedSeedPoly"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "_generatedSeedPoly")
+                            (Surf.ELit (Surf.LInt 10))
+                        )
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LBool True))
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+annotatedPolymorphicParameterThroughPartiallyAppliedFourLambdaSpineExpr ::
+  Surf.SurfaceExpr
+annotatedPolymorphicParameterThroughPartiallyAppliedFourLambdaSpineExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELamAnn
+                        "_generatedSeedPoly"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "_generatedSeedPoly")
+                            (Surf.ELit (Surf.LInt (-6)))
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+higherRankParameterThroughIdentityApplicationExpr :: Surf.SurfaceExpr
+higherRankParameterThroughIdentityApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    )
+    ( Surf.ELamAnn
+        "_generatedSeedPoly"
+        sigmaIdSource
+        ( Surf.EApp
+            (Surf.EVar "_generatedSeedPoly")
+            (Surf.ELit (Surf.LInt 15))
+        )
+    )
+
+boundedAnnotationThroughIdentityAppliedLambdaLetExpr :: Surf.SurfaceExpr
+boundedAnnotationThroughIdentityAppliedLambdaLetExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            (Surf.EVar "_generatedWrap2")
+        )
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                boundedIdentityAnnotationExpr
+                (Surf.EVar "_generatedWrap4")
+            )
+        )
+    )
+
+termUsedRootBinderThroughNestedIdentityLetsExpr :: Surf.SurfaceExpr
+termUsedRootBinderThroughNestedIdentityLetsExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                (Surf.EVar "_generatedWrap2")
+            )
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt (-4)))
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                (Surf.EVar "_generatedWrap6")
+                            )
+                            ( Surf.EAnn
+                                ( Surf.ELam
+                                    "_generatedSeedX"
+                                    (Surf.EVar "_generatedSeedX")
+                                )
+                                sigmaIdSource
+                            )
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+multiUseAnnotationUnderUnusedLambdaLetExpr :: Surf.SurfaceExpr
+multiUseAnnotationUnderUnusedLambdaLetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        (multiUseAnnotatedIdentitySeedWith 5 True)
+    )
+    (Surf.EVar "_generatedWrap1")
+
+boundedAnnotationThroughNestedApplicationOwnersExpr :: Surf.SurfaceExpr
+boundedAnnotationThroughNestedApplicationOwnersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool True))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    boundedIdentityAnnotationExpr
+                                )
+                                (Surf.ELit (Surf.LBool False))
+                            )
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LInt (-10)))
+        )
+    )
+
+vacuousLambdaBodyEndpointThroughNestedOwnersExpr :: Surf.SurfaceExpr
+vacuousLambdaBodyEndpointThroughNestedOwnersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        (Surf.ELit (Surf.LInt 9))
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap7"
+                                    (Surf.STBase "Int")
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LInt 14))
+                                        (Surf.STBase "Int")
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 2))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+identityAppliedMultiUseAnnotationThroughUnusedApplicationExpr :: Surf.SurfaceExpr
+identityAppliedMultiUseAnnotationThroughUnusedApplicationExpr =
+  unusedAppliedMultiUseAnnotation
+    (roundTripMultiUseAnnotation identityAppliedMultiUseAnnotation)
+
+annotatedIdentityApplicationThroughUnusedApplicationExpr :: Surf.SurfaceExpr
+annotatedIdentityApplicationThroughUnusedApplicationExpr =
+  unusedAppliedMultiUseAnnotation
+    (roundTripMultiUseAnnotation annotatedIdentityAppliedMultiUseAnnotation)
+
+mixedAnnotationRootRaiseMergeUnderUnusedApplicationLetExpr :: Surf.SurfaceExpr
+mixedAnnotationRootRaiseMergeUnderUnusedApplicationLetExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" mixedAnnotationExpr)
+            (Surf.ELit (Surf.LBool False))
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+nestedExactLambdaBinderSpineThroughGroundWrappersExpr :: Surf.SurfaceExpr
+nestedExactLambdaBinderSpineThroughGroundWrappersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap6"
+                                    (Surf.STBase "Int")
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LBool True))
+                                        (Surf.STBase "Bool")
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 13))
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+rootPacketRouteThroughIdentityAppliedAnnotatedLetExpr :: Surf.SurfaceExpr
+rootPacketRouteThroughIdentityAppliedAnnotatedLetExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap4" (Surf.EVar "_generatedWrap4"))
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.ELamAnn
+                        "_generatedSeedPoly"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "_generatedSeedPoly")
+                            (Surf.ELit (Surf.LInt 0))
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap5")
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+administrativeLambdaParameterUnderSourceForallExpr :: Surf.SurfaceExpr
+administrativeLambdaParameterUnderSourceForallExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            (Surf.ELit (Surf.LInt 13))
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    ( Surf.EAnn
+                                        ( Surf.ELam
+                                            "_generatedSeedX"
+                                            (Surf.EVar "_generatedSeedX")
+                                        )
+                                        sigmaIdSource
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LBool False))
+                        )
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt 3))
+
+completedForallPacketAtEnclosingLambdaConsumerExpr :: Surf.SurfaceExpr
+completedForallPacketAtEnclosingLambdaConsumerExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap4"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.EApp
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            ( Surf.EAnn
+                                                (Surf.ELit (Surf.LInt (-3)))
+                                                (Surf.STBase "Int")
+                                            )
+                                        )
+                                        (Surf.ELit (Surf.LBool False))
+                                    )
+                                )
+                                (Surf.ELit (Surf.LBool False))
+                            )
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt 10))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt 1))
+
+-- Fixed forms minimized from generated O15 counterexamples.  These retain the
+-- exact owner nesting that exercises construction-time Gamma authority, while
+-- removing irrelevant random wrappers.
+sourceOwnedApplicationGammaConstructionExpr :: Surf.SurfaceExpr
+sourceOwnedApplicationGammaConstructionExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LBool True))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LInt 8))
+                                (Surf.STBase "Int")
+                            )
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt (-10)))
+            )
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+deepMixedAnnotationOwnerClosureExpr :: Surf.SurfaceExpr
+deepMixedAnnotationOwnerClosureExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap3"
+                    (Surf.STBase "Int")
+                    ( Surf.ELet
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap5"
+                                (Surf.STBase "Int")
+                                ( Surf.EApp
+                                    ( Surf.ELam
+                                        "_generatedWrap6"
+                                        (Surf.ELam "_generatedWrap7" mixedAnnotationExpr)
+                                    )
+                                    (Surf.ELit (Surf.LBool False))
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 1))
+                        )
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                )
+                (Surf.ELit (Surf.LInt 9))
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+paperSelfApplicationBeneathNestedLambdaOwnersExpr :: Surf.SurfaceExpr
+paperSelfApplicationBeneathNestedLambdaOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap4" annotatedSelfAppExpr)
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+ownerFinalBoundedPublicationExpr :: Surf.SurfaceExpr
+ownerFinalBoundedPublicationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool True))
+                                    (Surf.STBase "Bool")
+                                )
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LInt 0))
+                                        (Surf.STBase "Int")
+                                    )
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 7))
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LInt 2))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+graphOwnedBodyForallsWithoutSourceOrderExpr :: Surf.SurfaceExpr
+graphOwnedBodyForallsWithoutSourceOrderExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.EApp
+        (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap6"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELam
+                                        "_generatedWrap7"
+                                        ( Surf.EAnn
+                                            (Surf.ELit (Surf.LBool False))
+                                            (Surf.STBase "Bool")
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt (-11)))
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 16))
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+distinctLetConsumerBoundsAtSharedExteriorExpr :: Surf.SurfaceExpr
+distinctLetConsumerBoundsAtSharedExteriorExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 2))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                (Surf.EVar "_generatedWrap6")
+                            )
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap7"
+                                    (Surf.STBase "Int")
+                                    ( Surf.EAnn
+                                        ( Surf.ELam
+                                            "_generatedSeedX"
+                                            (Surf.EVar "_generatedSeedX")
+                                        )
+                                        sigmaIdSource
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt (-5)))
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap4")
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+vacuousSharedPacketConsumersAtFinalLetGammaExpr :: Surf.SurfaceExpr
+vacuousSharedPacketConsumersAtFinalLetGammaExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.EAnn
+                    ( Surf.ELam
+                        "_generatedSeedX"
+                        (Surf.EVar "_generatedSeedX")
+                    )
+                    sigmaIdSource
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+lambdaConsumerThroughSourceOccurrenceRouteExpr :: Surf.SurfaceExpr
+lambdaConsumerThroughSourceOccurrenceRouteExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-2)))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EAnn
+                ( Surf.ELam
+                    "_generatedSeedX"
+                    ( Surf.ELam
+                        "_generatedSeedY"
+                        (Surf.EVar "_generatedSeedY")
+                    )
+                )
+                ( Surf.STForall
+                    "alpha"
+                    Nothing
+                    ( Surf.STArrow
+                        (Surf.STVar "beta")
+                        ( Surf.STArrow
+                            (Surf.STVar "alpha")
+                            (Surf.STVar "alpha")
+                        )
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+constructedApplicationGammaBinderAuthorityExpr :: Surf.SurfaceExpr
+constructedApplicationGammaBinderAuthorityExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool False))
+                    (Surf.STBase "Bool")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt (-1)))
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            mixedAnnotationExpr
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+nestedLambdaConsumerAfterAnnotatedParameterApplicationExpr :: Surf.SurfaceExpr
+nestedLambdaConsumerAfterAnnotatedParameterApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap5"
+                            (Surf.STBase "Int")
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    (Surf.EVar "_generatedWrap6")
+                                )
+                                mixedAnnotationExpr
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt (-15)))
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LInt (-2)))
+        )
+    )
+
+nestedLambdaResultAtExactEnclosingBoundExpr :: Surf.SurfaceExpr
+nestedLambdaResultAtExactEnclosingBoundExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt 2))
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool False))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                (Surf.EVar "_generatedWrap6")
+                            )
+                            ( Surf.ELam
+                                "_generatedWrap7"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool True))
+                                    (Surf.STBase "Bool")
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-16)))
+    )
+
+applicationGammaDependencyThroughAnnotatedLetResultExpr :: Surf.SurfaceExpr
+applicationGammaDependencyThroughAnnotatedLetResultExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-9)))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    (Surf.EVar "_generatedWrap4")
+                )
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap5"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            boundedIdentityAnnotationExpr
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt (-13)))
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+topologyConsumerThroughExactEnclosingRouteExpr :: Surf.SurfaceExpr
+topologyConsumerThroughExactEnclosingRouteExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-5)))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        (Surf.ELit (Surf.LBool True))
+                        (Surf.STBase "Bool")
+                    )
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.ELet
+                                "_generatedWrap6"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool True))
+                                    (Surf.STBase "Bool")
+                                )
+                                ( Surf.ELet
+                                    "_generatedWrap7"
+                                    ( Surf.ELet
+                                        "k"
+                                        ( Surf.EAnn
+                                            ( Surf.ELam
+                                                "x"
+                                                ( Surf.ELam
+                                                    "y"
+                                                    (Surf.EVar "y")
+                                                )
+                                            )
+                                            ( Surf.STForall
+                                                "alpha"
+                                                Nothing
+                                                ( Surf.STArrow
+                                                    (Surf.STVar "beta")
+                                                    ( Surf.STArrow
+                                                        (Surf.STVar "alpha")
+                                                        (Surf.STVar "alpha")
+                                                    )
+                                                )
+                                            )
+                                        )
+                                        ( Surf.EApp
+                                            ( Surf.EApp
+                                                (Surf.EVar "k")
+                                                (Surf.ELit (Surf.LInt 1))
+                                            )
+                                            (Surf.ELit (Surf.LBool True))
+                                        )
+                                    )
+                                    (Surf.EVar "_generatedWrap7")
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt 12))
+    )
+
+restoredAnnotationBinderDuringSubtermGeneralizationExpr :: Surf.SurfaceExpr
+restoredAnnotationBinderDuringSubtermGeneralizationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-15)))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool True))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap4"
+                        (Surf.STBase "Int")
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                (Surf.EVar "_generatedWrap5")
+                            )
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap6"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELam
+                                        "_generatedWrap7"
+                                        ( Surf.EAnn
+                                            ( Surf.ELam
+                                                "_generatedSeedX"
+                                                (Surf.EVar "_generatedSeedX")
+                                            )
+                                            sigmaIdSource
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt (-2)))
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt (-8)))
+                )
+            )
+            (Surf.ELit (Surf.LInt 2))
+        )
+    )
+
+appliedMixedAnnotationBeneathNestedUnusedLambdasExpr :: Surf.SurfaceExpr
+appliedMixedAnnotationBeneathNestedUnusedLambdasExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            ( Surf.ELet
+                                "k"
+                                mixedAnnotationExpr
+                                ( Surf.EApp
+                                    ( Surf.EApp
+                                        (Surf.EVar "k")
+                                        (Surf.ELit (Surf.LInt 1))
+                                    )
+                                    (Surf.ELit (Surf.LBool True))
+                                )
+                            )
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+            (Surf.ELit (Surf.LInt 0))
+        )
+    )
+
+independentGammaEndpointsAtNestedLambdaOwnerExpr :: Surf.SurfaceExpr
+independentGammaEndpointsAtNestedLambdaOwnerExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.ELamAnn
+                            "_generatedSeedPoly"
+                            sigmaIdSource
+                            ( Surf.EApp
+                                (Surf.EVar "_generatedSeedPoly")
+                                (Surf.ELit (Surf.LInt 12))
+                            )
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+vacuousEnclosingConsumerAroundAnnotatedLetResultExpr :: Surf.SurfaceExpr
+vacuousEnclosingConsumerAroundAnnotatedLetResultExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.ELet
+                                        "_generatedWrap7"
+                                        ( Surf.EAnn
+                                            (Surf.ELit (Surf.LBool True))
+                                            (Surf.STBase "Bool")
+                                        )
+                                        ( Surf.EAnn
+                                            ( Surf.ELam
+                                                "_generatedSeedX"
+                                                (Surf.EVar "_generatedSeedX")
+                                            )
+                                            sigmaIdSource
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LBool True))
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+
+identityAppliedMultiUseAnnotation :: Surf.SurfaceExpr
+identityAppliedMultiUseAnnotation =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap7" (Surf.EVar "_generatedWrap7"))
+    multiUseAnnotatedIdentitySeed
+
+-- Minimized from generated seed 486053823.  The direct argument of the
+-- identity application constructs @a -> Bool@ from a child whose source type
+-- still exposes its bounded result forall.  The exact direct Gamma bound must
+-- refine the same unbounded owner declaration before the application claims
+-- are published.
+identityAppliedLambdaWithMixedAnnotationExpr :: Surf.SurfaceExpr
+identityAppliedLambdaWithMixedAnnotationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 9))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool True))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                    ( Surf.ELam
+                        "_generatedWrap6"
+                        appliedMixedAnnotationLetExpr
+                    )
+                )
+                (Surf.EVar "_generatedWrap4")
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+-- Minimized from the next seed-486053823 counterexample.  The source
+-- annotation binder is lexical to the higher-rank parameter type; the direct
+-- graph bound must not expose it as a free identity-application endpoint.
+higherRankLambdaEndpointThroughNestedIdentityApplicationsExpr :: Surf.SurfaceExpr
+higherRankLambdaEndpointThroughNestedIdentityApplicationsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-14)))
+    ( Surf.EApp
+        (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap4" (Surf.EVar "_generatedWrap4"))
+                ( Surf.ELamAnn
+                    "_generatedSeedPoly"
+                    sigmaIdSource
+                    ( Surf.EApp
+                        (Surf.EVar "_generatedSeedPoly")
+                        (Surf.ELit (Surf.LInt (-12)))
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+
+-- The third minimized seed-486053823 counterexample.  A transparent identity
+-- returns the checked lambda argument; a provisional direct-lambda result
+-- packet must not replace that value-owned result before the enclosing
+-- partially applied lambda consumes its own construction endpoint.
+identityWrappedMixedAnnotationThroughPartiallyAppliedLambdaExpr :: Surf.SurfaceExpr
+identityWrappedMixedAnnotationThroughPartiallyAppliedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                mixedAnnotationExpr
+                            )
+                            (Surf.ELit (Surf.LInt 13))
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+-- The fourth minimized seed-486053823 counterexample.  The annotation's free
+-- source @beta@ and the enclosing packet consumer are two references to one
+-- construction route; packet preparation must align their identities before
+-- checking lexical closure.
+mixedAnnotationPacketThroughNestedIdentityAndLetOwnersExpr :: Surf.SurfaceExpr
+mixedAnnotationPacketThroughNestedIdentityAndLetOwnersExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        (Surf.ELam "_generatedWrap2" (Surf.EVar "_generatedWrap2"))
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            (Surf.ELit (Surf.LInt (-1)))
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    (Surf.EVar "_generatedWrap7")
+                                )
+                                mixedAnnotationExpr
+                            )
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt 2))
+            )
+        )
+    )
+
+-- The fifth minimized seed-486053823 counterexample.  The exact @Int@
+-- endpoint belongs to the innermost lambda body; the enclosing lambda packet
+-- must construct its own arrow before generalization rather than treating the
+-- body endpoint as the complete packet type.
+groundAnnotationThroughNestedLetAndLambdaOwnersExpr :: Surf.SurfaceExpr
+groundAnnotationThroughNestedLetAndLambdaOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-7)))
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt (-1)))
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        (Surf.ELit (Surf.LInt 9))
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LInt 1))
+                            (Surf.STBase "Int")
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+
+-- The sixth minimized seed-486053823 counterexample.  Generalizing the
+-- administrative lambda body must still carry the descendant @g g@ topology
+-- consumer as an explicit term-used declaration for parent placement.
+paperSelfApplicationThroughAdministrativeBodyTargetExpr :: Surf.SurfaceExpr
+paperSelfApplicationThroughAdministrativeBodyTargetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt (-11)))
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            annotatedSelfAppExpr
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-13)))
+    )
+
+-- The seventh minimized seed-486053823 counterexample.  The body-target
+-- packet already contains the next lambda's forall/arrow spine; Var-Abs must
+-- add the current certified parameter outside that complete body type.
+groundAnnotationThroughAdministrativeLambdaSpineExpr :: Surf.SurfaceExpr
+groundAnnotationThroughAdministrativeLambdaSpineExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LInt (-14)))
+        ( Surf.EApp
+            ( Surf.ELamAnn
+                "_generatedWrap3"
+                (Surf.STBase "Int")
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                ( Surf.ELet
+                                    "_generatedWrap7"
+                                    (Surf.ELit (Surf.LInt (-1)))
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LBool True))
+                                        (Surf.STBase "Bool")
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 0))
+                        )
+                    )
+                )
+            )
+            (Surf.ELit (Surf.LInt (-11)))
+        )
+    )
+    (Surf.EVar "_generatedWrap1")
+
+-- The eighth minimized seed-486053823 counterexample.  Applying the first
+-- annotated parameter leaves several administrative lambdas around a bounded
+-- higher-rank parameter.  Each Var-Abs step must rebuild exactly one outer
+-- arrow without folding that parameter's lexical forall into the lambda spine.
+boundedHigherRankParameterThroughAdministrativeLambdaSpineExpr :: Surf.SurfaceExpr
+boundedHigherRankParameterThroughAdministrativeLambdaSpineExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool True))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool False))
+                    (Surf.STBase "Bool")
+                )
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELamAnn
+                            "_generatedSeedPoly"
+                            ( Surf.STForall
+                                "a"
+                                Nothing
+                                (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
+                            )
+                            ( Surf.EApp
+                                (Surf.EVar "_generatedSeedPoly")
+                                (Surf.ELit (Surf.LInt (-1)))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-1)))
+    )
+
+-- The ninth minimized seed-486053823 counterexample.  The annotation's bound
+-- has its own same-named lexical binder, distinct from the outer bounded
+-- binder used by the body.  Application construction must transport those
+-- identities atomically when the annotated lambda is itself an argument.
+shadowedBoundedForallThroughApplicationArgumentExpr :: Surf.SurfaceExpr
+shadowedBoundedForallThroughApplicationArgumentExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap2"
+                (Surf.EVar "_generatedWrap2")
+            )
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.EAnn
+                    (Surf.ELam "x" (Surf.EVar "x"))
+                    ( Surf.STForall
+                        "a"
+                        ( Just
+                            ( Surf.SrcBound
+                                ( Surf.STForall
+                                    "a"
+                                    Nothing
+                                    ( Surf.STArrow
+                                        (Surf.STVar "a")
+                                        (Surf.STVar "a")
+                                    )
+                                )
+                            )
+                        )
+                        ( Surf.STArrow
+                            (Surf.STVar "a")
+                            (Surf.STVar "a")
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+-- Minimized seed-1195910434 counterexample.  The graph presentation reuses
+-- the two source identities in dependency order, while the annotated value
+-- constructs them in lexical order.  A direct identity application must use
+-- the checked source endpoint; merely comparing the underlying identities
+-- would silently permute the explicit forall ABI.
+sourceForallOrderThroughDirectIdentityApplicationExpr :: Surf.SurfaceExpr
+sourceForallOrderThroughDirectIdentityApplicationExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt 3))
+                    ( Surf.EAnn
+                        ( Surf.ELam
+                            "x"
+                            (Surf.ELam "y" (Surf.EVar "y"))
+                        )
+                        ( Surf.STForall
+                            "alpha"
+                            Nothing
+                            ( Surf.STArrow
+                                (Surf.STVar "beta")
+                                ( Surf.STArrow
+                                    (Surf.STVar "alpha")
+                                    (Surf.STVar "alpha")
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LInt 5))
+
+-- The next minimized seed-1195910434 counterexample.  The applied unused
+-- lambda turns the same lexical annotation into a descendant completion for
+-- a future lambda owner.  Its checked completion must replace that owner's
+-- provisional closure presentation before the enclosing identity is built.
+sourceForallOrderThroughAppliedLambdaAndIdentityExpr :: Surf.SurfaceExpr
+sourceForallOrderThroughAppliedLambdaAndIdentityExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.EAnn
+                                ( Surf.ELam
+                                    "x"
+                                    (Surf.ELam "y" (Surf.EVar "y"))
+                                )
+                                ( Surf.STForall
+                                    "alpha"
+                                    Nothing
+                                    ( Surf.STArrow
+                                        (Surf.STVar "beta")
+                                        ( Surf.STArrow
+                                            (Surf.STVar "alpha")
+                                            (Surf.STVar "alpha")
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool True))
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LInt 4))
+
+-- Minimized seed-1 counterexample.  The exact result supplied to each
+-- applied unused lambda eventually reaches a bounded annotation beneath the
+-- returned lambda.  Construction must emit that annotation's N computation
+-- at the body boundary; an enclosing application cannot specialize beneath
+-- an already-built arrow afterwards.
+boundedForallThroughAppliedUnusedLambdaResultsExpr :: Surf.SurfaceExpr
+boundedForallThroughAppliedUnusedLambdaResultsExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap5"
+                                (Surf.STBase "Int")
+                                ( Surf.ELet
+                                    "_generatedWrap6"
+                                    ( Surf.EAnn
+                                        (Surf.ELit (Surf.LBool True))
+                                        (Surf.STBase "Bool")
+                                    )
+                                    ( Surf.ELam
+                                        "_generatedWrap7"
+                                        ( Surf.EAnn
+                                            ( Surf.ELam
+                                                "x"
+                                                (Surf.EVar "x")
+                                            )
+                                            ( Surf.STForall
+                                                "a"
+                                                ( Just
+                                                    ( Surf.SrcBound
+                                                        ( Surf.STForall
+                                                            "a"
+                                                            Nothing
+                                                            ( Surf.STArrow
+                                                                (Surf.STVar "a")
+                                                                (Surf.STVar "a")
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                                ( Surf.STArrow
+                                                    (Surf.STVar "a")
+                                                    (Surf.STVar "a")
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 2))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+            )
+            (Surf.ELit (Surf.LBool True))
+        )
+    )
+
+-- First minimized seed-2147483646 counterexample.  The identity argument has
+-- a checked forall endpoint while the enclosing application still carries a
+-- provisional result specialization.  Argument construction must retain the
+-- principal endpoint and let the outgoing EApp construction specialize it.
+identityArgumentPrincipalOverProvisionalResultExpr :: Surf.SurfaceExpr
+identityArgumentPrincipalOverProvisionalResultExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.EApp
+            (Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3"))
+            ( Surf.ELet
+                "_generatedWrap4"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool True))
+                    (Surf.STBase "Bool")
+                )
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap6"
+                            (Surf.STBase "Int")
+                            ( Surf.ELet
+                                "_generatedWrap7"
+                                (Surf.ELit (Surf.LInt 15))
+                                ( Surf.EAnn
+                                    ( Surf.ELam
+                                        "_generatedSeedX"
+                                        (Surf.EVar "_generatedSeedX")
+                                    )
+                                    ( Surf.STForall
+                                        "a"
+                                        Nothing
+                                        ( Surf.STArrow
+                                            (Surf.STVar "a")
+                                            (Surf.STVar "a")
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 0))
+                    )
+                )
+            )
+        )
+    )
+
+-- Second minimized seed-2147483646 counterexample.  The checked g g owner
+-- publishes a result binder whose exact ambient bound is the higher-rank
+-- parameter scheme.  Both the let publication and the enclosing let-Gamma
+-- recheck must inherit that owner-final declaration before checking the
+-- emitted InstAbstr computation.
+paperSelfApplicationAmbientConstructionAtLetPublicationExpr
+  :: Surf.SurfaceExpr
+paperSelfApplicationAmbientConstructionAtLetPublicationExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EAnn
+            (Surf.ELit (Surf.LBool False))
+            (Surf.STBase "Bool")
+        )
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EAnn
+                (Surf.ELit (Surf.LBool False))
+                (Surf.STBase "Bool")
+            )
+            ( Surf.EApp
+                (Surf.ELam "_generatedWrap4" (Surf.EVar "_generatedWrap4"))
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    ( Surf.ELam
+                        "_generatedWrap6"
+                        ( Surf.ELet
+                            "_generatedWrap7"
+                            ( Surf.ELamAnn
+                                "g"
+                                ( Surf.STForall
+                                    "a"
+                                    Nothing
+                                    ( Surf.STArrow
+                                        (Surf.STVar "a")
+                                        (Surf.STVar "a")
+                                    )
+                                )
+                                (Surf.EApp (Surf.EVar "g") (Surf.EVar "g"))
+                            )
+                            (Surf.EVar "_generatedWrap7")
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+annotatedIdentityAppliedMultiUseAnnotation :: Surf.SurfaceExpr
+annotatedIdentityAppliedMultiUseAnnotation =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap6"
+        (Surf.STBase "Int")
+        identityAppliedMultiUseAnnotation
+    )
+    (Surf.ELit (Surf.LInt 4))
+
+multiUseAnnotatedIdentitySeed :: Surf.SurfaceExpr
+multiUseAnnotatedIdentitySeed =
+  multiUseAnnotatedIdentitySeedWith 3 False
+
+multiUseAnnotatedIdentitySeedWith
+  :: Integer
+  -> Bool
+  -> Surf.SurfaceExpr
+multiUseAnnotatedIdentitySeedWith intValue boolValue =
+  Surf.ELet
+    "_generatedSeedId"
+    ( Surf.EAnn
+        ( Surf.ELam
+            "_generatedSeedArg"
+            (Surf.EVar "_generatedSeedArg")
+        )
+        sigmaIdSource
+    )
+    ( Surf.ELet
+        "_generatedSeedDiscard"
+        ( Surf.EApp
+            (Surf.EVar "_generatedSeedId")
+            (Surf.ELit (Surf.LInt intValue))
+        )
+        ( Surf.EApp
+            (Surf.EVar "_generatedSeedId")
+            (Surf.ELit (Surf.LBool boolValue))
+        )
+    )
+
+roundTripMultiUseAnnotation :: Surf.SurfaceExpr -> Surf.SurfaceExpr
+roundTripMultiUseAnnotation inner =
+  Surf.ELet "_generatedWrap5" inner (Surf.EVar "_generatedWrap5")
+
+unusedAppliedMultiUseAnnotation :: Surf.SurfaceExpr -> Surf.SurfaceExpr
+unusedAppliedMultiUseAnnotation inner =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap4" inner)
+    (Surf.ELit (Surf.LBool False))
 
 mixedAnnotationType :: Elab.ElabType
 mixedAnnotationType =
@@ -924,6 +5573,12 @@ annotatedSelfAppExpr =
     "g"
     sigmaIdSource
     (Surf.EApp (Surf.EVar "g") (Surf.EVar "g"))
+
+annotatedSelfAppThroughDirectIdentityApplicationExpr :: Surf.SurfaceExpr
+annotatedSelfAppThroughDirectIdentityApplicationExpr =
+  Surf.EApp
+    (Surf.ELam "_generatedWrap1" (Surf.EVar "_generatedWrap1"))
+    annotatedSelfAppExpr
 
 annotatedSelfAppType :: Elab.ElabType
 annotatedSelfAppType =

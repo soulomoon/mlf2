@@ -273,6 +273,7 @@ generalizeAtWithBuilderRequiredResultCertified
             certifyGeneralizedResultRoute
                 request
                 genPlan
+                reifyPlan
                 scheme
                 subst
         pure (scheme, subst, route)
@@ -303,11 +304,12 @@ generalizeAtWithBuilderRequiredRouted planBuilder requirements mbBindParentsGa p
             pure (scheme, subst, inheritedRoutes)
     in go mbBindParentsGa scopeRoot targetNode
 
--- | A certified caller needs both halves of the frozen route: the live node
--- retained in 'InheritedGammaRoutes' and the exact base key against which an
--- enclosing construction substitution can join it.  Ordinary generalization
--- still returns only published scheme routes; this bridge exists solely on
--- the certificate-bearing API.
+-- | Add an inherited base route only when the published substitution has no
+-- route for that key.  A source/generalized binder may legitimately use the
+-- same base key while the separate 'InheritedGammaRoutes' value retains an
+-- ambient rigid capability.  Those two authorities must remain separate;
+-- dependency classification overlays the inherited route explicitly when it
+-- needs the ambient view.
 attachInheritedGammaBaseRoutes
     :: Reify.InheritedGammaRoutes
     -> IntMap.IntMap TypeBinderRef
@@ -326,14 +328,7 @@ attachInheritedGammaBaseRoutes routes = go (Reify.inheritedGammaRoutesEntries ro
                 | typeBinderRefsSameIdentity existing inheritedRef ->
                     go rest subst
                 | otherwise ->
-                    Left
-                        ( ValidationFailed
-                            [ "certified inherited Gamma base route conflicts with generalized substitution"
-                            , "  base node: " ++ show baseNode
-                            , "  generalized ref: " ++ show existing
-                            , "  inherited ref: " ++ show inheritedRef
-                            ]
-                        )
+                    go rest subst
 
 mkGeneralizeAtWithBuilder
     :: PresolutionPlanBuilder

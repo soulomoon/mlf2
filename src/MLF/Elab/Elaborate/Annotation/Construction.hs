@@ -16,7 +16,7 @@ import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
 import MLF.Constraint.Types.Witness (isStrictReplayContract)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.SourceBinder
-  ( sourceBinderConstructionRenames,
+  ( sourceBinderConstructionRenamesRetainingAmbiguousSources,
     typeBinderDeclarationRefs,
   )
 import MLF.Elab.Types
@@ -127,8 +127,9 @@ checkedArgumentClosedTopology mbSourceScheme checkedSourceTy projectedTopology =
 --
 -- The recovered syntactic scheme is optional because deferred method
 -- occurrences need not be present in the elaboration environment.  It may
--- contribute routing metadata, but never binder declarations, ordering, or
--- display-name authority.
+-- contribute routing metadata and may retain an exact ordering certificate
+-- already published by a source ABI or construction boundary.  They never
+-- contribute binder declarations or display-name authority.
 checkedOccurrenceSchemeInfo ::
   ElabType ->
   Maybe SchemeInfo ->
@@ -141,10 +142,37 @@ checkedOccurrenceSchemeInfo checkedType recoveredSchemeInfo = do
         IntMap.traverseMaybeWithKey
           retainCompatibleRoute
           (siSubstRefs recovered)
+  let compatibleSourceOrderRoutes =
+        case recoveredSchemeInfo of
+          Nothing -> IntMap.empty
+          Just recovered ->
+            IntMap.filterWithKey
+              ( \nodeKey sourceRef ->
+                  maybe
+                    False
+                    (typeBinderRefsSameIdentity sourceRef)
+                    (IntMap.lookup nodeKey compatibleRoutes)
+              )
+              (siSourceBinderOrderRefs recovered)
+      compatibleConstructionOrderRoutes =
+        case recoveredSchemeInfo of
+          Nothing -> IntMap.empty
+          Just recovered ->
+            IntMap.filterWithKey
+              ( \nodeKey constructionRef ->
+                  maybe
+                    False
+                    (typeBinderRefsSameIdentity constructionRef)
+                    (IntMap.lookup nodeKey compatibleRoutes)
+              )
+              (siConstructionBinderOrderRefs recovered)
   pure
     SchemeInfo
-      { siScheme = schemeFromType checkedType,
-        siSubstRefs = compatibleRoutes
+      { siScheme = schemeFromType checkedType
+      , siSubstRefs = compatibleRoutes
+      , siSourceBinderOrderRefs = compatibleSourceOrderRoutes
+      , siConstructionBinderOrderRefs =
+          compatibleConstructionOrderRoutes
       }
  where
   declarationRefs = typeBinderDeclarationRefs checkedType
@@ -180,7 +208,10 @@ checkedOccurrenceSchemeInfo checkedType recoveredSchemeInfo = do
 -- A direct graph-node intersection is the authority: representative peers do
 -- not make an unrelated sibling route visible here.  The source identity must
 -- also occur free in this annotation's expected type, which prevents a
--- same-spelled but distinct source binder from being captured.
+-- same-spelled but distinct source binder from being captured.  When one
+-- lexical source binder has several live graph occurrences, none of those
+-- occurrences is an exact outward identity for the annotation.  Retain the
+-- source binder in that case instead of selecting an arbitrary peer.
 scopedAnnotationConstructionBinderRenames ::
   (NodeId -> NodeId) ->
   IntMap.IntMap TypeBinderRef ->
@@ -188,7 +219,7 @@ scopedAnnotationConstructionBinderRenames ::
   ElabType ->
   Either String [(TypeBinderRef, TypeBinderRef)]
 scopedAnnotationConstructionBinderRenames representative sourceBinderRefs constructionIdentityRoutes expectedType =
-  sourceBinderConstructionRenames
+  sourceBinderConstructionRenamesRetainingAmbiguousSources
     representative
     scopedSourceBinderRefs
     constructionIdentityRoutes
@@ -292,15 +323,57 @@ strictReplayCheckedSchemeInfo sourceBinderRefs traceInfo schemeInfo
                         )
                   )
                   (siSubstRefs schemeInfo)
+              retainedSourceOrderRefs =
+                IntMap.filterWithKey
+                  ( \nodeKey sourceRef ->
+                      maybe
+                        False
+                        (typeBinderRefsSameIdentity sourceRef)
+                        (IntMap.lookup nodeKey retainedSubst)
+                  )
+                  (siSourceBinderOrderRefs schemeInfo)
+              retainedConstructionOrderRefs =
+                IntMap.filterWithKey
+                  ( \nodeKey constructionRef ->
+                      maybe
+                        False
+                        (typeBinderRefsSameIdentity constructionRef)
+                        (IntMap.lookup nodeKey retainedSubst)
+                  )
+                  (siConstructionBinderOrderRefs schemeInfo)
           mapM_ (rejectUntouchedTargetConflict retainedSubst) coveredRoutes
           let replaySubst =
                 IntMap.fromList
                   [ (getNodeId replayTarget, checkedRef)
                   | (checkedRef, _sourceKey, replayTarget) <- coveredRoutes
                   ]
+              replaySourceOrderRefs =
+                IntMap.fromList
+                  [ (getNodeId replayTarget, checkedRef)
+                  | (checkedRef, _sourceKey, replayTarget) <- coveredRoutes
+                  , any
+                      (typeBinderRefsSameIdentity checkedRef)
+                      (IntMap.elems (siSourceBinderOrderRefs schemeInfo))
+                  ]
+              replayConstructionOrderRefs =
+                IntMap.fromList
+                  [ (getNodeId replayTarget, checkedRef)
+                  | (checkedRef, _sourceKey, replayTarget) <- coveredRoutes
+                  , any
+                      (typeBinderRefsSameIdentity checkedRef)
+                      (IntMap.elems (siConstructionBinderOrderRefs schemeInfo))
+                  ]
           pure
             schemeInfo
               { siSubstRefs = IntMap.union replaySubst retainedSubst
+              , siSourceBinderOrderRefs =
+                  IntMap.union
+                    replaySourceOrderRefs
+                    retainedSourceOrderRefs
+              , siConstructionBinderOrderRefs =
+                  IntMap.union
+                    replayConstructionOrderRefs
+                    retainedConstructionOrderRefs
               }
  where
   checkedBinderRefs =

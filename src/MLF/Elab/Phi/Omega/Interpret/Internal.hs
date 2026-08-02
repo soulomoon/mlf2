@@ -133,17 +133,19 @@ typeArgKeyForRef =
 orderPhiBindersByPrec ::
   (NodeId -> NodeId) ->
   (NodeId -> Bool) ->
+  (TypeBinderRef -> NodeId -> Bool) ->
   IntMap.IntMap Order.OrderKey ->
   [(TypeBinderRef, Maybe BoundType, Maybe NodeId)] ->
   Either ElabError [Maybe NodeId]
-orderPhiBindersByPrec canonicalNode isOrderedBinder orderKeysActive binders = do
+orderPhiBindersByPrec canonicalNode isOrderedBinder sourceOwnsBinderOrder orderKeysActive binders = do
   let refs = [ref | (ref, _, _) <- binders]
       binderMap = IntMap.fromList (zip [0 ..] binders)
       refIndex ref = findIndex (typeBinderRefsSameIdentity ref) refs
       schemeNodesByIndex =
         [ (index, canonicalNode nodeId)
-        | (index, (_, _, Just nodeId)) <- IntMap.toList binderMap
+        | (index, (ref, _, Just nodeId)) <- IntMap.toList binderMap
         , isOrderedBinder nodeId
+        , not (sourceOwnsBinderOrder ref nodeId)
         ]
 
   schemeOrderEntries <-
@@ -302,6 +304,13 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
 
     mSchemeInfo :: Maybe SchemeInfo
     mSchemeInfo = ocSchemeInfo ctx
+
+    sourceBinderOrderRefs :: IntMap.IntMap TypeBinderRef
+    sourceBinderOrderRefs = siSourceBinderOrderRefs si
+
+    constructionBinderOrderRefs :: IntMap.IntMap TypeBinderRef
+    constructionBinderOrderRefs =
+      siConstructionBinderOrderRefs si
 
     traceBinderSources :: IntSet.IntSet
     traceBinderSources = ocTraceBinderSources ctx
@@ -854,6 +863,7 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
           orderPhiBindersByPrec
             canonicalNode
             isSchemeBinder
+            schemeOwnsBinderOrder
             orderKeysActive
             binders
         of
@@ -873,7 +883,30 @@ phiWithSchemeOmegaOccurrence ctx namedSet si introCount omegaOps = phiWithScheme
                     [ (nodeId, lookupBindParent (typeRef (canonicalNode nodeId)))
                     | (_, _, Just nodeId) <- binders
                     ]
+                  ++ "; source binder order refs="
+                  ++ show (IntMap.toList sourceBinderOrderRefs)
+                  ++ "; construction binder order refs="
+                  ++ show (IntMap.toList constructionBinderOrderRefs)
           other -> other
+
+    -- A source-ABI binder retains a graph key in SchemeInfo so Omega can
+    -- address the exact witness-domain slot.  That routing key is not an
+    -- independent graph-order declaration and therefore need not be reachable
+    -- from Typexp's current root.  Only the source ABI's exact key/ref pair can
+    -- select this lane; inferred binders and compiler-created copies continue
+    -- to require ordinary @<P@ coverage.
+    schemeOwnsBinderOrder ref nodeId =
+      any
+        exactOrderRouteMatches
+        [ sourceBinderOrderRefs,
+          constructionBinderOrderRefs
+        ]
+      where
+        exactOrderRouteMatches routes =
+          case IntMap.lookup (getNodeId nodeId) routes of
+            Just orderedRef ->
+              typeBinderRefsSameIdentity ref orderedRef
+            Nothing -> False
 
     reorderTo :: VSpine -> ElabType -> [Maybe NodeId] -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderTo _vs0 ty ids desired = bubbleReorderTo "reorderBindersByPrec" ty ids desired

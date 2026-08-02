@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 module Parity.FrozenArtifacts (
     FrozenMetadata(..),
     FrozenAnchorResult(..),
@@ -13,7 +14,8 @@ module Parity.FrozenArtifacts (
 
 import Data.Char (isDigit)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (intercalate, stripPrefix)
+import Data.List (find, intercalate, stripPrefix)
+import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Set as Set
 
 import MLF.Constraint.Acyclicity (checkAcyclicity)
@@ -23,6 +25,12 @@ import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Pipeline (defaultTraceConfig, prettyDisplay, runPipelineElab)
+import MLF.Elab.Types
+    ( Ty(..)
+    , TypeBinderRef
+    , renameTypeBinderRef
+    , typeBinderRefsSameIdentity
+    )
 import MLF.Frontend.ConstraintGen (ConstraintResult(..), generateConstraints)
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax
@@ -133,8 +141,88 @@ buildAnchorResult (label, expr) = do
         , farCanonicalConstraint = show (Solved.canonicalConstraint solved)
         , farOriginalConstraint = show (Solved.originalConstraint solved)
         , farCanonicalMap = canonicalMapPairs (Solved.canonicalMap solved)
-        , farElaboratedType = prettyDisplay ty
+        , farElaboratedType = prettyDisplay (canonicalizeFrozenBinderDisplays ty)
         }
+
+-- | Frozen parity records the semantic elaborated type, not whichever source
+-- alias happened to reach the display field of an identity-bearing binder.
+-- Canonicalize only bound display names at this serialization boundary; all
+-- references continue to be matched and rewritten by 'TypeBinderRef' identity.
+canonicalizeFrozenBinderDisplays :: Ty v -> Ty v
+canonicalizeFrozenBinderDisplays ty =
+    fst (go [] 0 ty)
+  where
+    go :: [(TypeBinderRef, TypeBinderRef)] -> Int -> Ty a -> (Ty a, Int)
+    go env next current =
+        case current of
+            TVarRef ref ->
+                (TVarRef (renameReference env ref), next)
+            TArrow domain codomain ->
+                let (domain', afterDomain) = go env next domain
+                    (codomain', afterCodomain) = go env afterDomain codomain
+                in (TArrow domain' codomain', afterCodomain)
+            TConWithIdentity identity con args ->
+                let (args', afterArgs) = goArgs env next args
+                in (TConWithIdentity identity con args', afterArgs)
+            TVarAppRef ref args ->
+                let (args', afterArgs) = goArgs env next args
+                in (TVarAppRef (renameReference env ref) args', afterArgs)
+            TBaseWithIdentity identity base ->
+                (TBaseWithIdentity identity base, next)
+            TForallRef ref mbBound body ->
+                let canonicalRef = renameTypeBinderRef (canonicalBinderName next) ref
+                    (mbBound', afterBound) = goMaybe env (next + 1) mbBound
+                    (body', afterBody) =
+                        go ((ref, canonicalRef) : env) afterBound body
+                in (TForallRef canonicalRef mbBound' body', afterBody)
+            TMuRef ref body ->
+                let canonicalRef = renameTypeBinderRef (canonicalBinderName next) ref
+                    (body', afterBody) =
+                        go ((ref, canonicalRef) : env) (next + 1) body
+                in (TMuRef canonicalRef body', afterBody)
+            TBottom ->
+                (TBottom, next)
+
+    goMaybe
+        :: [(TypeBinderRef, TypeBinderRef)]
+        -> Int
+        -> Maybe (Ty a)
+        -> (Maybe (Ty a), Int)
+    goMaybe _ next Nothing = (Nothing, next)
+    goMaybe env next (Just ty') =
+        let (out, after) = go env next ty'
+        in (Just out, after)
+
+    goArgs
+        :: [(TypeBinderRef, TypeBinderRef)]
+        -> Int
+        -> NonEmpty (Ty a)
+        -> (NonEmpty (Ty a), Int)
+    goArgs env next (arg :| rest) =
+        let (arg', afterArg) = go env next arg
+            (rest', afterRest) = goList env afterArg rest
+        in (arg' :| rest', afterRest)
+
+    goList
+        :: [(TypeBinderRef, TypeBinderRef)]
+        -> Int
+        -> [Ty a]
+        -> ([Ty a], Int)
+    goList _ next [] = ([], next)
+    goList env next (ty' : rest) =
+        let (out, afterTy) = go env next ty'
+            (rest', afterRest) = goList env afterTy rest
+        in (out : rest', afterRest)
+
+    renameReference env ref =
+        case find (typeBinderRefsSameIdentity ref . fst) env of
+            Just (_, canonicalRef) -> canonicalRef
+            Nothing -> ref
+
+canonicalBinderName :: Int -> String
+canonicalBinderName index =
+    [toEnum (fromEnum 'a' + index `mod` 26)]
+        ++ if index < 26 then "" else show (index `div` 26)
 
 canonicalMapPairs :: IntMap.IntMap NodeId -> [(Int, Int)]
 canonicalMapPairs uf =

@@ -31,8 +31,10 @@ module MLF.Elab.Run.Generalize.Prepare.TestSupport (
     applicationCertificateOwnsAmbientRootRequirementForTest,
     applicationCertificateDirectClaimOwnsPlanningRequirementForTest,
     applicationCertificateCompletesProvisionalResultRequirementForTest,
+    applicationCertificateCompletesExactResultRequirementForTest,
     applicationCertificateTransfersRootRequirementOwnershipForTest,
     applicationCertificateDischargesRootClosureForTest,
+    applicationCertificateDischargesLocalGammaClosureForTest,
     rootRequirementOwnershipAllowsLocalGammaClosureForTest,
     validateLocalApplicationCertificatesForTest,
     unclaimedEdgesOutsideLocalGammaClosuresForTest,
@@ -122,9 +124,11 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , applicationCertificateOwnsRootRequirement
     , applicationCertificateOwnsAmbientRootRequirement
     , applicationCertificateDirectClaimOwnsPlanningRequirement
+    , applicationCertificateCompletesExactResultRequirement
     , applicationCertificateCompletesProvisionalResultRequirement
     , applicationCertificateTransfersRootRequirementOwnership
     , applicationCertificateDischargesRootClosure
+    , applicationCertificateDischargesLocalGammaClosure
     , rootRequirementOwnershipAllowsLocalGammaClosure
     , validateLocalApplicationCertificates
     , unclaimedEdgesOutsideLocalGammaClosures
@@ -192,6 +196,14 @@ applicationCertificateCompletesProvisionalResultRequirementForTest
 applicationCertificateCompletesProvisionalResultRequirementForTest =
     applicationCertificateCompletesProvisionalResultRequirement
 
+applicationCertificateCompletesExactResultRequirementForTest
+    :: NodeRef
+    -> LocalGammaConstructionCertificate
+    -> RequiredGammaBinder
+    -> Bool
+applicationCertificateCompletesExactResultRequirementForTest =
+    applicationCertificateCompletesExactResultRequirement
+
 applicationCertificateTransfersRootRequirementOwnershipForTest
     :: NodeRef
     -> LocalGammaConstructionCertificate
@@ -209,6 +221,13 @@ applicationCertificateDischargesRootClosureForTest
     -> Bool
 applicationCertificateDischargesRootClosureForTest =
     applicationCertificateDischargesRootClosure
+
+applicationCertificateDischargesLocalGammaClosureForTest
+    :: LocalGammaClosure
+    -> LocalGammaConstructionCertificate
+    -> Bool
+applicationCertificateDischargesLocalGammaClosureForTest =
+    applicationCertificateDischargesLocalGammaClosure
 
 rootRequirementOwnershipAllowsLocalGammaClosureForTest
     :: GaBindParents 'Presolved
@@ -557,6 +576,7 @@ reconcileRootSourceBinderAliasesForTest
     -> [TypeBinderRef]
     -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap TypeBinderRef
+    -> IntMap.IntMap TypeBinderRef
     -> Either ElabError (IntMap.IntMap TypeBinderRef)
 reconcileRootSourceBinderAliasesForTest =
     reconcileRootSourceBinderAliases
@@ -572,7 +592,8 @@ projectPreparedSourceBinderSubstExceptForTest =
     projectPreparedSourceBinderSubstExceptWithLocalKeys
 
 insertPreparedTermSourceBinderAliasForTest
-    :: IntSet.IntSet
+    :: Set.Set TypeBinderIdentity
+    -> IntSet.IntSet
     -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap TypeBinderRef
     -> (Int, TypeBinderRef)

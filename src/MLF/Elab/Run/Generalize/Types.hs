@@ -196,10 +196,14 @@ data DirectApplicationGammaClaim = DirectApplicationGammaClaim
 -- | Positive post-construction proof that one complete direct application
 -- requirement was already ambient.  Every endpoint was absent from the
 -- application's local construction routes, and the exact ambient declaration
--- and its bound satisfied the operated requirement when the application was
--- constructed.  Keeping both occurrence and declaration identity prevents a
--- zero-local fact from being transferred to another same-shaped source
--- occurrence or a provisional declaration with a different bound.
+-- and its bound supplied the operated endpoint when the application was
+-- constructed, either directly or through an exact leading-binder-spine
+-- construction.  When a certified descendant has completed a provisional
+-- declaration, 'daagcOperatedType' is that checked endpoint; it must still
+-- specialize to the graph requirement.  Keeping both occurrence and
+-- declaration identity prevents a zero-local fact from being transferred to
+-- another same-shaped source occurrence or a provisional declaration with a
+-- different bound.
 data DirectApplicationAmbientGammaClaim = DirectApplicationAmbientGammaClaim
     { daagcEdgeIds :: !(NonEmpty EdgeId)
     , daagcExteriorNode :: !NodeId
@@ -250,6 +254,20 @@ data LocalGammaConstructionCertificate = LocalGammaConstructionCertificate
     -- | Exact ambient identities used freely by the checked application term,
     -- its checked result type, or an ambient declaration's bound.
     , lgccUsedAmbientBinderRefs :: ![TypeBinderRef]
+    -- | Formerly ambient dependencies that an enclosing let RHS has closed
+    -- with an exact leading 'ETyAbsRef'.  The let constructor records these
+    -- declarations only after the finalized RHS has typechecked at its
+    -- published scheme.  They remain available to validate this nested
+    -- application certificate, but they are not ambient at the enclosing
+    -- root and must never become root-generalization candidates.
+    , lgccEnclosingTypeAbsBinders
+        :: ![(TypeBinderRef, Maybe BoundType)]
+    -- | Source-sidecar occurrences that prove a used ambient identity is
+    -- introduced by a nested source annotation rather than by the enclosing
+    -- root Gamma.  These routes are distinct from
+    -- 'lgccSourceBinderAuthorities': they authorize an already-bound
+    -- dependency and never authorize a local Gamma binder.
+    , lgccUsedSourceBinderAuthorities :: !(IntMap.IntMap TypeBinderRef)
     }
     deriving (Eq, Show)
 

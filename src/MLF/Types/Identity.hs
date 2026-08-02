@@ -14,6 +14,7 @@ module MLF.Types.Identity
     lookupTypeBinderIdentityAlias,
     typeBinderIdentityFromUnique,
     typeBinderIdentityFromStructural,
+    freshenTypeBinderIdentity,
     typeBinderGeneratedIdentities,
     LocalIdentity (..),
     localIdentityStableUnique,
@@ -94,6 +95,10 @@ data TypeBinderIdentity
   = GraphTypeBinderIdentity NodeId
   | GeneratedTypeBinderIdentity UniqueIdentity
   | StructuralTypeBinderIdentity UniqueIdentity StructuralTypeBinderRole
+  | FreshenedStructuralTypeBinderIdentity
+      UniqueIdentity
+      StructuralTypeBinderRole
+      UniqueIdentity
   deriving (Eq, Ord, Show)
 
 typeBinderIdentityFromNode :: NodeId -> TypeBinderIdentity
@@ -105,11 +110,13 @@ typeBinderIdentityNode identity =
     GraphTypeBinderIdentity node -> Just node
     GeneratedTypeBinderIdentity {} -> Nothing
     StructuralTypeBinderIdentity {} -> Nothing
+    FreshenedStructuralTypeBinderIdentity {} -> Nothing
 
 typeBinderIdentityGeneratedUnique :: TypeBinderIdentity -> Maybe UniqueIdentity
 typeBinderIdentityGeneratedUnique identity =
   case identity of
     GeneratedTypeBinderIdentity unique -> Just unique
+    FreshenedStructuralTypeBinderIdentity _ _ freshUnique -> Just freshUnique
     GraphTypeBinderIdentity {} -> Nothing
     StructuralTypeBinderIdentity {} -> Nothing
 
@@ -120,10 +127,23 @@ typeBinderIdentityFromStructural :: UniqueIdentity -> StructuralTypeBinderRole -
 typeBinderIdentityFromStructural =
   StructuralTypeBinderIdentity
 
+-- | Allocate a distinct alpha-binder identity without discarding structural
+-- owner provenance.  Ordinary binders remain generated identities; a
+-- structural binder retains its nominal owner and role alongside the fresh
+-- occurrence identity.
+freshenTypeBinderIdentity :: TypeBinderIdentity -> UniqueIdentity -> TypeBinderIdentity
+freshenTypeBinderIdentity identity freshUnique =
+  case typeBinderIdentityStructural identity of
+    Just (ownerUnique, role) ->
+      FreshenedStructuralTypeBinderIdentity ownerUnique role freshUnique
+    Nothing ->
+      GeneratedTypeBinderIdentity freshUnique
+
 typeBinderIdentityStructural :: TypeBinderIdentity -> Maybe (UniqueIdentity, StructuralTypeBinderRole)
 typeBinderIdentityStructural identity =
   case identity of
     StructuralTypeBinderIdentity unique role -> Just (unique, role)
+    FreshenedStructuralTypeBinderIdentity unique role _ -> Just (unique, role)
     GraphTypeBinderIdentity {} -> Nothing
     GeneratedTypeBinderIdentity {} -> Nothing
 
@@ -134,6 +154,8 @@ typeBinderIdentityKey identity =
     GeneratedTypeBinderIdentity unique -> negate (uniqueIdentityValue unique + 1)
     StructuralTypeBinderIdentity unique role ->
       negate (uniqueIdentityValue unique * 2 + structuralRoleKey role + 1000000)
+    FreshenedStructuralTypeBinderIdentity _ _ freshUnique ->
+      negate (uniqueIdentityValue freshUnique + 1)
 
 typeBinderIdentityStableName :: TypeBinderIdentity -> String
 typeBinderIdentityStableName identity =
@@ -142,6 +164,13 @@ typeBinderIdentityStableName identity =
     GeneratedTypeBinderIdentity unique -> "$typevar#" ++ show (uniqueIdentityValue unique)
     StructuralTypeBinderIdentity unique role ->
       "$typevar#structural#" ++ show (uniqueIdentityValue unique) ++ "#" ++ structuralRoleName role
+    FreshenedStructuralTypeBinderIdentity unique role freshUnique ->
+      "$typevar#structural#"
+        ++ show (uniqueIdentityValue unique)
+        ++ "#"
+        ++ structuralRoleName role
+        ++ "#fresh#"
+        ++ show (uniqueIdentityValue freshUnique)
 
 typeBinderIdentityAliasNames :: String -> TypeBinderIdentity -> [String]
 typeBinderIdentityAliasNames name identity =
@@ -175,6 +204,8 @@ typeBinderGeneratedIdentities identity =
     GeneratedTypeBinderIdentity unique -> [unique]
     GraphTypeBinderIdentity {} -> []
     StructuralTypeBinderIdentity unique _ -> [unique]
+    FreshenedStructuralTypeBinderIdentity unique _ freshUnique ->
+      [unique, freshUnique]
 
 structuralRoleKey :: StructuralTypeBinderRole -> Int
 structuralRoleKey =

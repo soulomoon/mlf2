@@ -61,6 +61,13 @@ import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (schemeToType)
+import MLF.Elab.TermClosure
+    ( renameBoundTypeBinderRefPayloads
+    , renameTypeBinderRefPayloads
+    )
+import MLF.Elab.SourceBinder
+    ( publishSourceBinderOrderFromProvenance
+    )
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.ReadModel
     ( ElabReadModel
@@ -242,6 +249,7 @@ phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel gaParen
         gaParents
         mSchemeInfo
         IntMap.empty
+        IntMap.empty
         replay
 
 -- | Read-model translation with exact endpoints already constructed by
@@ -253,10 +261,11 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     -> ElabReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
+    -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap ElabType
     -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes replay =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo sourceBinderOrderProvenance frozenEndpointTypes replay =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
@@ -264,6 +273,7 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith 
             readModel
             gaParents
             mSchemeInfo
+            sourceBinderOrderProvenance
             frozenEndpointTypes
             Nothing
             replay
@@ -277,11 +287,12 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor
     -> ElabReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
+    -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap ElabType
     -> PhiEndpointShapeAuthority
     -> PhiReplayCertificate
     -> Either ElabError Instantiation
-phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay =
+phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWith readModel gaParents mSchemeInfo sourceBinderOrderProvenance frozenEndpointTypes endpointShapeAuthority replay =
     occurrenceComputationInstantiation
         <$> phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
             traceCfg
@@ -289,6 +300,7 @@ phiFromEdgeWitnessWithTraceReadModelAtFrozenEndpointsFor traceCfg generalizeAtWi
             readModel
             gaParents
             mSchemeInfo
+            sourceBinderOrderProvenance
             frozenEndpointTypes
             (Just endpointShapeAuthority)
             replay
@@ -310,6 +322,7 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readMod
         gaParents
         mSchemeInfo
         IntMap.empty
+        IntMap.empty
         Nothing
         replay
 
@@ -319,11 +332,12 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints
     -> ElabReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
+    -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
     -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay = do
+phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg generalizeAtWith readModel gaParents mSchemeInfo sourceBinderOrderProvenance frozenEndpointTypes endpointShapeAuthority replay = do
     phiReadModel <- buildPhiReadModel readModel
     phiFromEdgeWitnessCore
         traceCfg
@@ -331,6 +345,7 @@ phiOccurrenceFromEdgeWitnessWithTraceReadModelAtFrozenEndpoints traceCfg general
         phiReadModel
         gaParents
         mSchemeInfo
+        sourceBinderOrderProvenance
         frozenEndpointTypes
         endpointShapeAuthority
         replay
@@ -350,11 +365,12 @@ phiFromEdgeWitnessCore
     -> PhiReadModel p
     -> GaBindParents p
     -> Maybe SchemeInfo
+    -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap ElabType
     -> Maybe PhiEndpointShapeAuthority
     -> PhiReplayCertificate
     -> Either ElabError OccurrenceComputation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo frozenEndpointTypes endpointShapeAuthority replay = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeInfo sourceBinderOrderProvenance frozenEndpointTypes endpointShapeAuthority replay = do
     let namedSet0 = ermNamedNodes readModel
     case if tcGeneralize traceCfg
         then
@@ -514,7 +530,11 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                         pure
                             ( IntSet.fromList
                                 [ getNodeId sourceBinder
-                                | (_producerBinder, sourceBinder, _argument) <- binderArgs
+                                | ( _producerRef
+                                  , _producerBinder
+                                  , sourceBinder
+                                  , _argument
+                                  ) <- binderArgs
                                 ]
                             )
                     Nothing ->
@@ -795,7 +815,11 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
         case pvLookupNode presolutionView rootC of
             Just TyForall {} -> do
                 ty <- reifyDebugType rootC
-                pure (schemeInfoFromRefSubst (schemeFromType ty) IntMap.empty)
+                pure
+                    ( publishSourceBinderOrderFromProvenance
+                        sourceBinderOrderProvenance
+                        (schemeInfoFromRefSubst (schemeFromType ty) IntMap.empty)
+                    )
             _ -> do
                 let targetNode =
                         case pvLookupVarBound presolutionView rootC of
@@ -807,13 +831,17 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                 scopeRoot <- instScopeRoot root0
                 (sch, subst) <-
                     generalizeAtWith (Just gaParents) scopeRoot targetNode
-                pure (schemeInfoFromRefSubst sch subst)
+                pure
+                    ( publishSourceBinderOrderFromProvenance
+                        sourceBinderOrderProvenance
+                        (schemeInfoFromRefSubst sch subst)
+                    )
 
     producerReplayDomain :: SchemeInfo -> EdgeTrace -> Maybe [NodeId]
     producerReplayDomain sourceSchemeInfo tr = do
         binderArgs <- replaySpineBinderArgs sourceSchemeInfo tr
         traverse
-            (\(_producerBinder, sourceBinder, _argument) ->
+            (\(_producerRef, _producerBinder, sourceBinder, _argument) ->
                 IntMap.lookup
                     (getNodeId sourceBinder)
                     (etBinderReplayMap tr)
@@ -825,7 +853,11 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
         case replaySpineBinderArgs schemeInfo tr of
             Just bindings@(_ : _) ->
                 all
-                    (\(producerBinder, sourceBinder, _argument) ->
+                    (\( _producerRef
+                       , producerBinder
+                       , sourceBinder
+                       , _argument
+                       ) ->
                         IntMap.lookup
                             (getNodeId sourceBinder)
                             (etBinderReplayMap tr)
@@ -844,16 +876,29 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
     -- solely for Omega construction authority.  Ambiguous classification
     -- still fails closed.
     --
-    -- Each result is @(producer binder, frozen source binder, argument)@.
-    replaySpineBinderArgs :: SchemeInfo -> EdgeTrace -> Maybe [(NodeId, NodeId, NodeId)]
+    -- Each result is @(producer ref, producer occurrence, frozen source
+    -- binder, argument)@.  The producer ref owns the quantifier.  Its graph
+    -- occurrence is selected by the strict trace itself, which matters for a
+    -- source identity that deliberately has several graph-occurrence routes.
+    replaySpineBinderArgs
+        :: SchemeInfo
+        -> EdgeTrace
+        -> Maybe [(TypeBinderRef, NodeId, NodeId, NodeId)]
     replaySpineBinderArgs sourceSchemeInfo tr = do
-        producerDomain <- schemeInfoSpineDomain sourceSchemeInfo
         traceEntries <- uniqueTraceEntries (etBinderArgs tr)
-        classified <- catMaybes <$> traverse (traceEntryFor traceEntries) producerDomain
+        classified <-
+            catMaybes
+                <$> traverse
+                    (traceEntryFor traceEntries)
+                    (schemeSpineBinderRefs (siScheme sourceSchemeInfo))
         let classifiedSources =
                 IntSet.fromList
                     [ getNodeId sourceBinder
-                    | (_producerBinder, sourceBinder, _argument) <- classified
+                    | ( _producerRef
+                      , _producerBinder
+                      , sourceBinder
+                      , _argument
+                      ) <- classified
                     ]
         if IntSet.size classifiedSources == length classified
             then Just classified
@@ -861,14 +906,28 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
       where
         replayMap = etBinderReplayMap tr
 
-        traceEntryFor traceEntries producerBinder =
+        traceEntryFor traceEntries producerRef =
+            case typeBinderRefNode producerRef of
+                Nothing ->
+                    sourceOwnedTraceEntry traceEntries producerRef
+                Just producerBinder ->
+                    graphOwnedTraceEntry
+                        traceEntries
+                        producerRef
+                        producerBinder
+
+        graphOwnedTraceEntry traceEntries producerRef producerBinder =
             case retainedProducerEntries traceEntries producerBinder of
                 -- The solved/base quotient plus normalized Merge orientation
                 -- is the producer-owned construction certificate.  Prefer it
                 -- to live union-find equality: multiple frozen source nodes
                 -- can project to one producer binder, while OpMerge records
                 -- exactly which one survives as the quantified source.
-                [entry] -> Just (Just (classifiedEntry producerBinder entry))
+                [entry] ->
+                    Just
+                        ( Just
+                            (classifiedEntry producerRef producerBinder entry)
+                        )
                 [] ->
                     case
                         [ entry
@@ -884,9 +943,18 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                             || producerBaseSource producerBinder == Just sourceBinder
                             || IntMap.lookup (getNodeId sourceBinder) replayMap
                                 == Just producerBinder
+                            || occurrenceRoutesTo producerRef sourceBinder
                         ]
                     of
-                        [entry] -> Just (Just (classifiedEntry producerBinder entry))
+                        [entry] ->
+                            Just
+                                ( Just
+                                    ( classifiedEntry
+                                        producerRef
+                                        producerBinder
+                                        entry
+                                    )
+                                )
                         [] -> Just Nothing
                         _ -> Nothing
                 -- More than one non-eliminated member of the producer's base
@@ -895,8 +963,59 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                 -- trace order or NodeId.
                 _ -> Nothing
 
-        classifiedEntry producerBinder (sourceBinder, argument) =
-            (producerBinder, sourceBinder, argument)
+        -- A source-owned binder has no graph identity of its own.  Its
+        -- SchemeInfo may therefore publish several occurrence routes to the
+        -- same semantic ref.  The strict trace disambiguates them positively:
+        -- before transport the frozen source key names the producer
+        -- occurrence; after transport the replay target key does.
+        sourceOwnedTraceEntry traceEntries producerRef =
+            case
+                [ (producerBinder, entry)
+                | entry@(sourceBinder, _argument) <- traceEntries
+                , Just producerBinder <-
+                    [sourceOwnedProducerOccurrence producerRef sourceBinder]
+                ]
+            of
+                [(producerBinder, entry)] ->
+                    Just
+                        ( Just
+                            ( classifiedEntry
+                                producerRef
+                                producerBinder
+                                entry
+                            )
+                        )
+                [] -> Just Nothing
+                _ -> Nothing
+
+        sourceOwnedProducerOccurrence producerRef sourceBinder =
+            case
+                IntMap.lookup
+                    (getNodeId sourceBinder)
+                    replayMap
+            of
+                Just replayBinder
+                    | occurrenceRoutesTo producerRef replayBinder ->
+                        Just replayBinder
+                _
+                    | occurrenceRoutesTo producerRef sourceBinder ->
+                        Just sourceBinder
+                    | otherwise -> Nothing
+
+        occurrenceRoutesTo producerRef occurrence =
+            any
+                ( maybe
+                    False
+                    (typeBinderRefsSameIdentity producerRef)
+                    . IntMap.lookup (getNodeId occurrence)
+                )
+                [ siConstructionBinderOrderRefs sourceSchemeInfo
+                , siSourceBinderOrderRefs sourceSchemeInfo
+                , schemeInfoBinderRefSubst sourceSchemeInfo
+                ]
+
+        classifiedEntry producerRef producerBinder (sourceBinder, argument) =
+            (producerRef, producerBinder, sourceBinder, argument)
 
         retainedProducerEntries traceEntries producerBinder =
             case producerBaseIdentity producerBinder of
@@ -977,21 +1096,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                 TForallRef ref _bound body -> ref : leadingBodyRefs body
                 _ -> []
 
-    schemeInfoSpineDomain :: SchemeInfo -> Maybe [NodeId]
-    schemeInfoSpineDomain schemeInfo =
-        traverse refDomain (schemeSpineBinderRefs (siScheme schemeInfo))
-      where
-        subst = schemeInfoBinderRefSubst schemeInfo
-        refDomain ref =
-            typeBinderRefNode ref
-                <|> case
-                    [ NodeId key
-                    | (key, substRef) <- IntMap.toList subst
-                    , typeBinderRefsSameIdentity ref substRef
-                    ] of
-                    [node] -> Just node
-                    _ -> Nothing
-
     -- Transport a producer scheme into the producer-approved replay key space.
     -- This is an injective identity-preserving alpha-renaming of exactly the
     -- replay-covered quantifiers.  Untouched producer quantifiers retain their
@@ -999,25 +1103,18 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
     transportSchemeInfoToReplayDomain :: SchemeInfo -> EdgeTrace -> Maybe SchemeInfo
     transportSchemeInfoToReplayDomain supplied tr = do
         classifiedBinderArgs <- replaySpineBinderArgs supplied tr
-        sourceSpineDomain <- schemeInfoSpineDomain supplied
         let sourceBinders = schemeBinderRefs (siScheme supplied)
             sourceSpineRefs = schemeSpineBinderRefs (siScheme supplied)
             sourceSubst = schemeInfoBinderRefSubst supplied
-        if length sourceSpineRefs == length sourceSpineDomain
-            then pure ()
-            else Nothing
         renamesWithNodes <-
             traverse
-                (\(producerBinder, sourceBinder, _argument) -> do
-                    sourceRef <-
-                        case
-                            [ ref
-                            | (ref, domainBinder) <- zip sourceSpineRefs sourceSpineDomain
-                            , domainBinder == producerBinder
-                            ]
-                        of
-                            [ref] -> Just ref
-                            _ -> Nothing
+                (\(sourceRef, producerBinder, sourceBinder, _argument) -> do
+                    if
+                        any
+                            (typeBinderRefsSameIdentity sourceRef)
+                            sourceSpineRefs
+                        then pure ()
+                        else Nothing
                     replayBinder <-
                         IntMap.lookup
                             (getNodeId sourceBinder)
@@ -1078,7 +1175,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                         ]
             replaySpecs =
                 [ ( fromMaybe sourceRef (replayRefFor sourceRef)
-                  , fmap (mapBoundType renameType) mbBound
+                  , fmap (renameBoundTypeBinderRefPayloads renames) mbBound
                   )
                 | (sourceRef, mbBound) <- sourceBinders
                 ]
@@ -1097,48 +1194,66 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith phiReadModel gaParents mSchemeI
                         (\sourceRef -> fromMaybe sourceRef (replayRefFor sourceRef))
                         sourceSubst
                     )
-        pure (schemeInfoFromRefSubst replayScheme replaySubst)
+            transportOrderRefs orderRefs =
+                IntMap.union
+                    ( IntMap.fromList
+                        [ (getNodeId replayBinder, replayRef)
+                        | ( _producerBinder
+                          , replayBinder
+                          , sourceRef
+                          , replayRef
+                          ) <- renamesWithNodes
+                        , any
+                            (typeBinderRefsSameIdentity sourceRef)
+                            (IntMap.elems orderRefs)
+                        ]
+                    )
+                    ( IntMap.map
+                        ( \sourceRef ->
+                            fromMaybe sourceRef (replayRefFor sourceRef)
+                        )
+                        orderRefs
+                    )
+            replaySourceOrderRefs =
+                transportOrderRefs
+                    (siSourceBinderOrderRefs supplied)
+            replayConstructionOrderRefs =
+                IntMap.union
+                    -- The producer scheme fixes the order of its forall
+                    -- spine before strict replay changes binder identities.
+                    -- The injective transport above is therefore direct
+                    -- construction authority for every replay-covered
+                    -- declaration, including a fresh replay key that has no
+                    -- current graph <P order entry.
+                    ( IntMap.fromList
+                        [ (getNodeId replayBinder, replayRef)
+                        | ( _producerBinder
+                          , replayBinder
+                          , _sourceRef
+                          , replayRef
+                          ) <- renamesWithNodes
+                        ]
+                    )
+                    ( transportOrderRefs
+                        (siConstructionBinderOrderRefs supplied)
+                    )
+            replayInfo =
+                rebuildSchemeInfoFromRefSubst
+                    supplied
+                    { siSourceBinderOrderRefs =
+                        replaySourceOrderRefs
+                    , siConstructionBinderOrderRefs =
+                        replayConstructionOrderRefs
+                    }
+                replayScheme
+                replaySubst
+        pure replayInfo
 
     -- Apply a binder-identity renaming simultaneously.  Sequential
     -- substitution collapses valid injective swaps such as @a -> b, b -> a@
     -- and can capture later sources before they are visited.
     renameTypeBinderIdentities :: [(TypeBinderRef, TypeBinderRef)] -> ElabType -> ElabType
-    renameTypeBinderIdentities renames ty =
-        case ty of
-            TVarRef ref -> TVarRef (renameRef ref)
-            TArrow domain codomain ->
-                TArrow
-                    (renameTypeBinderIdentities renames domain)
-                    (renameTypeBinderIdentities renames codomain)
-            TConWithIdentity identity con args ->
-                TConWithIdentity
-                    identity
-                    con
-                    (fmap (renameTypeBinderIdentities renames) args)
-            TVarAppRef ref args ->
-                TVarAppRef
-                    (renameRef ref)
-                    (fmap (renameTypeBinderIdentities renames) args)
-            TBaseWithIdentity {} -> ty
-            TForallRef ref mbBound body ->
-                TForallRef
-                    (renameRef ref)
-                    (fmap (mapBoundType (renameTypeBinderIdentities renames)) mbBound)
-                    (renameTypeBinderIdentities renames body)
-            TMuRef ref body ->
-                TMuRef
-                    (renameRef ref)
-                    (renameTypeBinderIdentities renames body)
-            TBottom -> TBottom
-      where
-        renameRef ref =
-            fromMaybe ref $
-                snd
-                    <$> listToMaybe
-                        [ pair
-                        | pair@(sourceRef, _replayRef) <- renames
-                        , typeBinderRefsSameIdentity sourceRef ref
-                        ]
+    renameTypeBinderIdentities = renameTypeBinderRefPayloads
 
     typeBinderRefsInType :: ElabType -> [TypeBinderRef]
     typeBinderRefsInType ty =

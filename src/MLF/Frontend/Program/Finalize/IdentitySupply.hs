@@ -24,6 +24,8 @@ import MLF.Types.Identity
   ( IdentityGenerator,
     UniqueIdentity,
     advanceIdentityGeneratorPastMany,
+    freshenTypeBinderIdentity,
+    freshIdentity,
     identityGeneratorAfter,
   )
 
@@ -85,6 +87,14 @@ freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 =
     binderCollides ref =
       any (X.typeBinderRefsSameIdentity ref) reservedRefs
 
+    freshBinderRef ref freshName generator =
+      let (freshUnique, generator') = freshIdentity generator
+       in ( X.typeBinderRefFromIdentity
+              (freshenTypeBinderIdentity (X.typeBinderRefIdentity ref) freshUnique)
+              freshName,
+            generator'
+          )
+
     go :: IdentityGenerator -> X.Ty v -> (X.Ty v, IdentityGenerator)
     go generator ty =
       case ty of
@@ -116,7 +126,8 @@ freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 =
                               Set.singleton (X.typeBinderRefName ref)
                             ]
                         freshName = freshNameLike (X.typeBinderRefName ref) usedNames
-                        (freshRef, generator') = X.freshTypeBinderRef freshName generator1
+                        (freshRef, generator') =
+                          freshBinderRef ref freshName generator1
                      in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
                   else (ref, body, generator1)
               (body', generator3) = go generator2 bodyForFreshening
@@ -132,7 +143,8 @@ freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 =
                               Set.singleton (X.typeBinderRefName ref)
                             ]
                         freshName = freshNameLike (X.typeBinderRefName ref) usedNames
-                        (freshRef, generator') = X.freshTypeBinderRef freshName generator
+                        (freshRef, generator') =
+                          freshBinderRef ref freshName generator
                      in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
                   else (ref, body, generator)
               (body', generator2) = go generator1 bodyForFreshening

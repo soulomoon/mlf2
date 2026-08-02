@@ -404,6 +404,11 @@ spec =
                 PreludeCacheTestSupport.readBuiltinPreludeCheckBuildCount cacheHandle
                     `shouldReturn` 0
 
+        it "checks a compiler-exact nested lambda spine with one terminal recursive result" $ do
+            program <- requireParsed nestedLambdaRecursiveResultSource
+            _ <- requireRight (checkProgram program)
+            pure ()
+
         it "includes binding, data, class, and instance metadata in the shared checked-module identity inventory" $ do
             program <- requireParsed metadataInventorySource
             checked <- requireRight (checkProgram program)
@@ -742,7 +747,7 @@ spec =
             checkedArtifactNativeLLVM artifact `shouldSatisfy` isRight
             readIORef preparationCount `shouldReturn` 1
 
-        it "checks independent annotated defs equivalently through CLI batch size 2" $
+        it "checks independent annotated defs equivalently across batch boundaries" $
             withBatchEquivalenceFile $ \path -> do
                 oneRoot <- checkProgramArgsWithBatchSize Nothing [path]
                 batch2 <- checkProgramArgsWithBatchSize (Just "2") [path]
@@ -829,8 +834,11 @@ batchEquivalenceSource =
         , "module Main export (main) {"
         , "  import Helper exposing (one);"
         ]
+            -- Cross both the production size-16 boundary and the diagnostic
+            -- size-2 boundary.  Parser-scale load belongs in the benchmark,
+            -- while this test owns semantic equivalence between batch plans.
             ++ [ "  def value" ++ show index ++ " : Int = one;"
-               | index <- [(1 :: Int) .. 150]
+               | index <- [(1 :: Int) .. 18]
                ]
             ++ [ "  def main : Int = value1;"
                , "}"
@@ -868,6 +876,82 @@ higherKindedRuntimeWithoutPreludeSource =
         , "    truthy = λbox true;"
         , "  }"
         , "  def main : Bool = truthy (Box false);"
+        , "}"
+        ]
+
+nestedLambdaRecursiveResultSource :: String
+nestedLambdaRecursiveResultSource =
+    unlines
+        [ "module SeedSource export (SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), SeedInputSymbol(..), SeedInput(..)) {"
+        , "  data SourceSpan ="
+        , "      SpanDefKeyword : SourceSpan"
+        , "    | SpanIdentifierMain : SourceSpan"
+        , "    | SpanEquals : SourceSpan"
+        , "    | SpanBoolTrue : SourceSpan"
+        , "    | SpanUnknownSymbol : SourceSpan;"
+        , "  data SeedIdentifier ="
+        , "      IdentifierMain : SeedIdentifier;"
+        , "  data SeedBoolLiteral ="
+        , "      BoolLiteralTrue : SeedBoolLiteral;"
+        , "  data SeedInputSymbol ="
+        , "      InputDef : SourceSpan -> SeedInputSymbol"
+        , "    | InputIdentifier : SourceSpan -> SeedIdentifier -> SeedInputSymbol"
+        , "    | InputEquals : SourceSpan -> SeedInputSymbol"
+        , "    | InputBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedInputSymbol"
+        , "    | InputUnknown : SourceSpan -> SeedInputSymbol;"
+        , "  data SeedInput ="
+        , "      SeedInputNil : SeedInput"
+        , "    | SeedInputCons : SeedInputSymbol -> SeedInput -> SeedInput;"
+        , "}"
+        , "module SeedToken export (SeedToken(..), SeedTokenStream(..)) {"
+        , "  import SeedSource exposing (SourceSpan, SeedIdentifier, SeedBoolLiteral);"
+        , "  data SeedToken ="
+        , "      TokenDef : SourceSpan -> SeedToken"
+        , "    | TokenIdentifier : SourceSpan -> SeedIdentifier -> SeedToken"
+        , "    | TokenEquals : SourceSpan -> SeedToken"
+        , "    | TokenBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedToken;"
+        , "  data SeedTokenStream ="
+        , "      SeedTokenNil : SeedTokenStream"
+        , "    | SeedTokenCons : SeedToken -> SeedTokenStream -> SeedTokenStream;"
+        , "}"
+        , "module SeedDiagnostic export (LexerDiagnosticKind(..), LexerDiagnostic(..)) {"
+        , "  import SeedSource exposing (SourceSpan);"
+        , "  data LexerDiagnosticKind ="
+        , "      UnknownInputSymbol : LexerDiagnosticKind;"
+        , "  data LexerDiagnostic ="
+        , "      LexerDiagnostic : SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic;"
+        , "}"
+        , "module Main export (LexerResult(..), lexAfterIdentifier, lexAfterEquals, main) {"
+        , "  import SeedSource exposing (SourceSpan(..), SeedIdentifier(..), SeedInput(..), SeedInputSymbol(..));"
+        , "  import SeedToken exposing (SeedTokenStream(..));"
+        , "  import SeedDiagnostic exposing (LexerDiagnosticKind(..), LexerDiagnostic(..));"
+        , "  data LexerResult ="
+        , "      LexerOk : SeedTokenStream -> LexerResult"
+        , "    | LexerError : LexerDiagnostic -> LexerResult;"
+        , "  def lexAfterIdentifier : SourceSpan -> SourceSpan -> SeedIdentifier -> SeedInput -> LexerResult ="
+        , "    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(input : SeedInput) case input of {"
+        , "      SeedInputNil -> LexerError (LexerDiagnostic identSpan UnknownInputSymbol);"
+        , "      SeedInputCons symbol rest -> case symbol of {"
+        , "        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)"
+        , "      }"
+        , "    };"
+        , "  def lexAfterEquals : SourceSpan -> SourceSpan -> SeedIdentifier -> SourceSpan -> SeedInput -> LexerResult ="
+        , "    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(equalsSpan : SourceSpan) λ(input : SeedInput) case input of {"
+        , "      SeedInputNil -> LexerError (LexerDiagnostic equalsSpan UnknownInputSymbol);"
+        , "      SeedInputCons symbol rest -> case symbol of {"
+        , "        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);"
+        , "        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)"
+        , "      }"
+        , "    };"
+        , "  def main : LexerResult ="
+        , "    lexAfterEquals SpanDefKeyword SpanIdentifierMain IdentifierMain SpanEquals SeedInputNil;"
         , "}"
         ]
 

@@ -8,6 +8,7 @@ import qualified Data.IntSet as IntSet
 import Data.Either (isLeft)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.List (isInfixOf)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
@@ -61,6 +62,7 @@ import MLF.Constraint.Types.Graph
     , cNodes
     , fromListGen
     , getNodeId
+    , insertNode
     , nodeRefKey
     )
 import MLF.Constraint.Types.Witness
@@ -74,6 +76,7 @@ import MLF.Elab.Generalize
     , GaBindParents(..)
     , GammaPacketAuthority(..)
     , GeneralizedResultRoute(..)
+    , GeneralizedResultRouteLocator(..)
     , GeneralizedResultRouteRequest(..)
     , IdentityTopologyConsumerAuthority
     , LocalGammaConstructor(..)
@@ -96,11 +99,16 @@ import MLF.Elab.Generalize
     , pairSubtermGeneralizationRoots
     , placeSubtermGeneralizationBinders
     , placeSubtermGeneralizationBindersWithRoutes
+    , placeSubtermGeneralizationBindersWithRoutesAndProvenance
+    , placedSubtermBinderScheme
+    , placedSubtermConstructedConsumerIdentities
     , prepareRootRaiseMergeScheme
     , prepareRootRaiseMergeSchemeAtEdge
     , prepareSubtermGeneralizationPacket
+    , publishRootRaiseMergePacketResultRoute
     , resolveAmbientGammaOperatedEndpoint
     , resolveFrozenOperatedOccurrenceEndpoint
+    , resolveSubtermLocalResultAtConstruction
     , rootRaiseMergeAuthorityFor
     , publishSubtermGammaConstructionSourceSchemeInfo
     , selectConstructionRequirementEndpoint
@@ -108,6 +116,7 @@ import MLF.Elab.Generalize
     , shadowCompareTypes
     , subtermGeneralizationConsumerConstructionSchemeInfo
     , subtermGeneralizationConsumerAuthority
+    , subtermGeneralizationLocalResultAuthority
     , subtermGeneralizationGammaAuthority
     , subtermGeneralizationOperatedSchemeInfo
     , subtermGeneralizationResultAbstractionRef
@@ -161,6 +170,7 @@ import MLF.Elab.Types
     )
 import MLF.Elab.SourceBinder.TestSupport
     ( orderSourceProjectedSchemeBindersForTest
+    , publishSourceBinderOrderFromProvenanceForTest
     , resolveConstructionSourceBindersInSchemeInfoExceptForTest
     , resolveConstructionSourceBindersInSchemeInfoForTest
     , resolveConstructionSourceBindersInPacketAtExpectedForTest
@@ -1250,6 +1260,100 @@ spec = do
                 packet
                 `shouldBe` Right packet
 
+        it "carries source binder order authority to the packet occurrence key" $ do
+            let sourceRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 732))
+                        "alpha"
+                body =
+                    TArrow
+                        (tVarWithRef sourceRef)
+                        (tVarWithRef sourceRef)
+                packet =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(sourceRef, Nothing)] body)
+                        (IntMap.singleton 284 sourceRef)
+                expected =
+                    packet
+                        { siSourceBinderOrderRefs =
+                            IntMap.singleton 284 sourceRef
+                        }
+            resolveConstructionSourceBindersInSchemeInfoExceptForTest
+                (Set.singleton (typeBinderRefIdentity sourceRef))
+                id
+                (IntMap.singleton 285 sourceRef)
+                packet
+                `shouldBe` Right expected
+
+        it "publishes source order for an imported generalized occurrence key" $ do
+            let sourceRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 733))
+                        "alpha"
+                body =
+                    TArrow
+                        (tVarWithRef sourceRef)
+                        (tVarWithRef sourceRef)
+                generalized =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(sourceRef, Nothing)] body)
+                        (IntMap.singleton 1 sourceRef)
+            publishSourceBinderOrderFromProvenanceForTest
+                (IntMap.singleton 285 sourceRef)
+                generalized
+                `shouldBe`
+                    generalized
+                        { siSourceBinderOrderRefs =
+                            IntMap.singleton 1 sourceRef
+                        }
+
+        it "publishes source order for a graph-backed existential carrier" $ do
+            let sourceRef = typeRef 1285 "beta"
+                body =
+                    TArrow
+                        (tVarWithRef sourceRef)
+                        (tVarWithRef sourceRef)
+                generalized =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(sourceRef, Nothing)] body)
+                        (IntMap.singleton 1286 sourceRef)
+            publishSourceBinderOrderFromProvenanceForTest
+                (IntMap.singleton 1286 sourceRef)
+                generalized
+                `shouldBe`
+                    generalized
+                        { siSourceBinderOrderRefs =
+                            IntMap.fromList
+                                [ (1285, sourceRef)
+                                , (1286, sourceRef)
+                                ]
+                        }
+
+        it "publishes source order for imported structural binders" $ do
+            let structuralRef =
+                    typeBinderRefFromIdentity
+                        ( typeBinderIdentityFromStructural
+                            (UniqueIdentity 734)
+                            StructuralResultBinder
+                        )
+                        "result"
+                body =
+                    TArrow
+                        (tVarWithRef structuralRef)
+                        (tVarWithRef structuralRef)
+                generalized =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(structuralRef, Nothing)] body)
+                        (IntMap.singleton 1 structuralRef)
+            publishSourceBinderOrderFromProvenanceForTest
+                (IntMap.singleton 285 structuralRef)
+                generalized
+                `shouldBe`
+                    generalized
+                        { siSourceBinderOrderRefs =
+                            IntMap.singleton 1 structuralRef
+                        }
+
         it "joins a packet-local graph identity to its source identity by substitution key" $ do
             let graphRef = typeRef 274 "graph-a"
                 sourceRef =
@@ -1393,6 +1497,45 @@ spec = do
                 Right resolved ->
                     expectationFailure
                         ("expected ambiguous packet-source route, got " ++ show resolved)
+
+        it "keeps an exact declaration out of lexical packet aliases" $ do
+            let graphRef = typeRef 274 "graph-a"
+                actualSource =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 724))
+                        "actual"
+                exactDeclaration =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 725))
+                        "expected"
+                actualBody =
+                    tVarWithRef actualSource
+                packet =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(graphRef, Nothing)]
+                            (tVarWithRef graphRef)
+                        )
+                        (IntMap.fromList [(278, graphRef), (279, graphRef)])
+                expected =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] actualBody)
+                        ( IntMap.fromList
+                            [ (274, actualSource)
+                            , (278, actualSource)
+                            , (279, actualSource)
+                            ]
+                        )
+            resolveConstructionSourceBindersInSchemeInfoExceptForTest
+                (Set.singleton (typeBinderRefIdentity exactDeclaration))
+                id
+                ( IntMap.fromList
+                    [ (278, actualSource)
+                    , (279, exactDeclaration)
+                    ]
+                )
+                packet
+                `shouldBe` Right expected
 
         it "keeps structural owner identities out of free Gamma aliases" $ do
             let graphRef = typeRef 41 "structural-alias"
@@ -2161,8 +2304,11 @@ spec = do
                     Left err -> expectationFailure (show err) >> fail "consumer specialization failed"
                     Right specialized -> pure specialized
             schemeBinderRefs
-                (siScheme (subtermGeneralizationConsumerConstructionSchemeInfo packet))
+                (siScheme (subtermGeneralizationSchemeInfo packet))
                 `shouldBe` [(consumerRef, Just expectedBound)]
+            schemeBinderRefs
+                (siScheme (subtermGeneralizationConsumerConstructionSchemeInfo packet))
+                `shouldBe` [(consumerRef, Nothing)]
 
         it "keeps a consumer bound whose exact source argument is already published" $ do
             let consumerRef = typeRef 434 "consumer"
@@ -2195,8 +2341,11 @@ spec = do
                     Left err -> expectationFailure (show err) >> fail "source-aligned consumer specialization failed"
                     Right specialized -> pure specialized
             schemeBinderRefs
-                (siScheme (subtermGeneralizationConsumerConstructionSchemeInfo packet))
+                (siScheme (subtermGeneralizationSchemeInfo packet))
                 `shouldBe` [(consumerRef, Just consumerBound)]
+            schemeBinderRefs
+                (siScheme (subtermGeneralizationConsumerConstructionSchemeInfo packet))
+                `shouldBe` [(consumerRef, Nothing)]
 
         it "rejects a consumer bound without the routed construction slot" $ do
             let consumerRef = typeRef 435 "consumer"
@@ -2383,6 +2532,7 @@ spec = do
                         ]
                         , grSourceBinderRefs = IntMap.empty
                         , grAmbientBinderRefs = []
+                        , grTermUsedRootBinderRefs = []
                         , grAmbientGammaAuthorities = IntMap.empty
                         , grLocallyClosedGammaNodes = mempty
                         }
@@ -2432,6 +2582,271 @@ spec = do
                 other ->
                     expectationFailure
                         ("expected one existing exterior Γ binder, got " ++ show other)
+
+        it "publishes the packet-owned result bridge before root validation" $ do
+            let resultRoot = NodeId 18
+                resultTrace = trace {etResultRoot = resultRoot}
+                resultArtifacts =
+                    setEdgeArtifactTraceForTest
+                        edgeId
+                        resultTrace
+                        artifacts
+                exteriorRef = typeRef 17 "result"
+                rootInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(exteriorRef, Just resultBound)]
+                            (lambdaOwnerBody (tVarWithRef exteriorRef))
+                        )
+                        (IntMap.singleton (getNodeId exterior) exteriorRef)
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(exteriorRef, Just resultBound)]
+                            (tVarWithRef exteriorRef)
+                        )
+                        ( IntMap.fromList
+                            [ (getNodeId exterior, exteriorRef)
+                            , (getNodeId resultRoot, exteriorRef)
+                            ]
+                        )
+                operatedInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] (tyToElab resultBound))
+                        IntMap.empty
+                gammaAuthority =
+                    GammaPacketAuthority
+                        edgeId
+                        (GenNodeId 90)
+                        (typeBinderRefIdentity exteriorRef)
+            (packet, _) <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (GammaPacket gammaAuthority)
+                        packetInfo
+                        operatedInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "root RaiseMerge packet preparation failed"
+                    Right prepared -> pure prepared
+            authority <-
+                case rootRaiseMergeAuthorityFor resultArtifacts edgeId of
+                    Right (Just present) -> pure present
+                    other ->
+                        expectationFailure
+                            ("expected exact root RaiseMerge authority, got " ++ show other)
+                            >> fail "root RaiseMerge authority missing"
+            published <-
+                case
+                    publishRootRaiseMergePacketResultRoute
+                        edgeId
+                        authority
+                        (Map.singleton (ownerKey 90 "owner") packet)
+                        rootInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "root RaiseMerge packet route publication failed"
+                    Right info -> pure info
+            IntMap.lookup (getNodeId resultRoot) (siSubstRefs published)
+                `shouldBe` Just exteriorRef
+            prepareRootRaiseMergeScheme
+                resultArtifacts
+                ann
+                (requirementsFor resultRoot (tyToElab resultBound))
+                published
+                `shouldBe` Right published
+
+        it "installs a packet-owned exterior absent from the root scheme" $ do
+            let resultRoot = NodeId 18
+                resultTrace = trace {etResultRoot = resultRoot}
+                resultArtifacts =
+                    setEdgeArtifactTraceForTest
+                        edgeId
+                        resultTrace
+                        artifacts
+                exteriorRef = typeRef 17 "result"
+                rootInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            []
+                            (lambdaOwnerBody (tyToElab resultBound))
+                        )
+                        IntMap.empty
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(exteriorRef, Just resultBound)]
+                            (tVarWithRef exteriorRef)
+                        )
+                        ( IntMap.fromList
+                            [ (getNodeId exterior, exteriorRef)
+                            , (getNodeId resultRoot, exteriorRef)
+                            ]
+                        )
+                operatedInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] (tyToElab resultBound))
+                        IntMap.empty
+                gammaAuthority =
+                    GammaPacketAuthority
+                        edgeId
+                        (GenNodeId 90)
+                        (typeBinderRefIdentity exteriorRef)
+            (packet, _) <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (GammaPacket gammaAuthority)
+                        packetInfo
+                        operatedInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "root RaiseMerge packet preparation failed"
+                    Right prepared -> pure prepared
+            authority <-
+                case rootRaiseMergeAuthorityFor resultArtifacts edgeId of
+                    Right (Just present) -> pure present
+                    other ->
+                        expectationFailure
+                            ("expected exact root RaiseMerge authority, got " ++ show other)
+                            >> fail "root RaiseMerge authority missing"
+            published <-
+                case
+                    publishRootRaiseMergePacketResultRoute
+                        edgeId
+                        authority
+                        (Map.singleton (ownerKey 90 "owner") packet)
+                        rootInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "root RaiseMerge packet publication failed"
+                    Right info -> pure info
+            schemeBinderRefs (siScheme published)
+                `shouldBe` [(exteriorRef, Just resultBound)]
+            IntMap.lookup (getNodeId exterior) (siSubstRefs published)
+                `shouldBe` Just exteriorRef
+            IntMap.lookup (getNodeId resultRoot) (siSubstRefs published)
+                `shouldBe` Just exteriorRef
+            prepared <-
+                case
+                    prepareRootRaiseMergeScheme
+                        resultArtifacts
+                        ann
+                        (requirementsFor resultRoot (tyToElab resultBound))
+                        published
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "published root RaiseMerge validation failed"
+                    Right result -> pure result
+            schemeBinderRefs (siScheme prepared)
+                `shouldBe` [(exteriorRef, Just resultBound)]
+            schemeBody (siScheme prepared)
+                `shouldBe` lambdaOwnerBody (tVarWithRef exteriorRef)
+
+        it "normalizes a leading forall exposed inside the root scheme body" $ do
+            let exteriorRef = typeRef 17 "result"
+                exposedForall =
+                    TForallRef
+                        exteriorRef
+                        (Just resultBound)
+                        (lambdaOwnerBody (tVarWithRef exteriorRef))
+                schemeInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] exposedForall)
+                        (IntMap.singleton (getNodeId exterior) exteriorRef)
+            prepared <-
+                case
+                    prepareRootRaiseMergeScheme
+                        artifacts
+                        ann
+                        (requirementsFor exterior (tyToElab resultBound))
+                        schemeInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "leading root forall normalization failed"
+                    Right result -> pure result
+            schemeBinderRefs (siScheme prepared)
+                `shouldBe` [(exteriorRef, Just resultBound)]
+            schemeBody (siScheme prepared)
+                `shouldBe` lambdaOwnerBody (tVarWithRef exteriorRef)
+
+        it "does not borrow a same-exterior packet from another RaiseMerge edge" $ do
+            let resultRoot = NodeId 19
+                resultTrace = trace {etResultRoot = resultRoot}
+                resultArtifacts =
+                    setEdgeArtifactTraceForTest
+                        edgeId
+                        resultTrace
+                        artifacts
+                exteriorRef = typeRef 17 "result"
+                rootInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(exteriorRef, Just resultBound)]
+                            (lambdaOwnerBody (tVarWithRef exteriorRef))
+                        )
+                        (IntMap.singleton (getNodeId exterior) exteriorRef)
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(exteriorRef, Just resultBound)]
+                            (tVarWithRef exteriorRef)
+                        )
+                        ( IntMap.fromList
+                            [ (getNodeId exterior, exteriorRef)
+                            , (getNodeId resultRoot, exteriorRef)
+                            ]
+                        )
+                operatedInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] (tyToElab resultBound))
+                        IntMap.empty
+                prepareUnrelatedPacket unrelatedEdge =
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        ( EnclosingConsumerPacket
+                            (typeBinderRefIdentity exteriorRef)
+                            unrelatedEdge
+                            testEnclosingConsumerOwner
+                        )
+                        packetInfo
+                        operatedInfo
+            firstPacket <-
+                case prepareUnrelatedPacket (EdgeId 181) of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "first unrelated packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            secondPacket <-
+                case prepareUnrelatedPacket (EdgeId 182) of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "second unrelated packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            authority <-
+                case rootRaiseMergeAuthorityFor resultArtifacts edgeId of
+                    Right (Just present) -> pure present
+                    other ->
+                        expectationFailure
+                            ("expected exact root RaiseMerge authority, got " ++ show other)
+                            >> fail "root RaiseMerge authority missing"
+            publishRootRaiseMergePacketResultRoute
+                edgeId
+                authority
+                ( Map.fromList
+                    [ (ownerKey 181 "first-owner", firstPacket)
+                    , (ownerKey 182 "second-owner", secondPacket)
+                    ]
+                )
+                rootInfo
+                `shouldBe` Right rootInfo
 
         it "rejects a result-only scheme at the lambda-owner boundary" $ do
             case prepareRootRaiseMergeScheme
@@ -2595,6 +3010,8 @@ spec = do
                     SchemeInfo
                         { siScheme = scheme
                         , siSubstRefs = IntMap.singleton (getNodeId exterior) conflictingRef
+                        , siSourceBinderOrderRefs = IntMap.empty
+                        , siConstructionBinderOrderRefs = IntMap.empty
                         }
             case prepareRootRaiseMergeScheme
                     artifacts
@@ -2846,9 +3263,14 @@ spec = do
                     TArrow
                         (tVarWithRef sameNamedPeer)
                         TBottom
+                exactRoute =
+                    route
+                        { AlgebraTestSupport.bcrtvConstructionOperatedType =
+                            sourceTy
+                        }
                 specialize projectedTy resultRef publishedTy =
                     AlgebraTestSupport.validatedBodyConsumerProjectionSpecializationForTest
-                        route
+                        exactRoute
                         sourceTy
                         projectedTy
                         resultRef
@@ -2894,6 +3316,8 @@ spec = do
                             constructionRef
                         , AlgebraTestSupport.bcrtvOperatedType =
                             declaredType
+                        , AlgebraTestSupport.bcrtvConstructionOperatedType =
+                            projectedType
                         }
                 ambientBindings =
                     Map.singleton constructionRef declaredType
@@ -2928,6 +3352,8 @@ spec = do
                 selfRoute =
                     route
                         { AlgebraTestSupport.bcrtvOperatedType = selfType
+                        , AlgebraTestSupport.bcrtvConstructionOperatedType =
+                            selfType
                         }
             AlgebraTestSupport.validatedBodyConsumerProjectionSpecializationForTest
                 selfRoute
@@ -2980,6 +3406,11 @@ spec = do
                         (tVarWithRef sameNamedConstructionPeer)
                         TBottom
                 lambdaParamType = TBottom
+                exactRoute =
+                    route
+                        { AlgebraTestSupport.bcrtvConstructionOperatedType =
+                            projectedBodyType
+                        }
             projectedBound <-
                 case elabToBound projectedBodyType of
                     Left cause ->
@@ -3007,7 +3438,7 @@ spec = do
                     completedType
                     targetType =
                         AlgebraTestSupport.validatedBodyConsumerLeadingEliminationForTest
-                            route
+                            exactRoute
                             projectedBodyType
                             projectedBodyType
                             constructionOperatedType
@@ -3229,8 +3660,24 @@ spec = do
 
         it "keeps construction and operated schemes distinct" $ do
             (packet, _) <- prepareGammaPacket
-            subtermGeneralizationSchemeInfo packet `shouldBe` constructionInfo
-            subtermGeneralizationOperatedSchemeInfo packet `shouldBe` operatedInfo
+            let expectedConstructionInfo =
+                    constructionInfo
+                        { siConstructionBinderOrderRefs =
+                            IntMap.singleton
+                                (getNodeId resultRefNode)
+                                resultRef
+                        }
+                expectedOperatedInfo =
+                    operatedInfo
+                        { siConstructionBinderOrderRefs =
+                            IntMap.singleton
+                                (getNodeId sigmaRefNode)
+                                sigmaRef
+                        }
+            subtermGeneralizationSchemeInfo packet
+                `shouldBe` expectedConstructionInfo
+            subtermGeneralizationOperatedSchemeInfo packet
+                `shouldBe` expectedOperatedInfo
             subtermGeneralizationSchemeInfo packet `shouldNotBe` subtermGeneralizationOperatedSchemeInfo packet
 
         it "keeps exact sigma-id closed in every enclosing packet view" $ do
@@ -3279,7 +3726,14 @@ spec = do
                   of
                     Left err -> expectationFailure (show err) >> fail "exact Gamma packet preparation failed"
                     Right prepared -> pure prepared
-            subtermGeneralizationSchemeInfo packet `shouldBe` rawConstructionInfo
+            subtermGeneralizationSchemeInfo packet
+                `shouldBe`
+                    rawConstructionInfo
+                        { siConstructionBinderOrderRefs =
+                            IntMap.singleton
+                                (getNodeId resultRefNode)
+                                resultRef
+                        }
             schemeToType
                 (siScheme (subtermGeneralizationOperatedSchemeInfo packet))
                 `shouldBe` exactSigmaType
@@ -3369,6 +3823,97 @@ spec = do
                 binders ->
                     expectationFailure
                         ("expected one prepared topology bound, got " ++ show binders)
+
+        it "consumes a topology packet at its exact nested bound declaration" $ do
+            let nestedPacketRef = typeRef 117 "packet"
+                nestedConsumerRef = typeRef 118 "nested-result"
+                enclosingRef = typeRef 119 "enclosing"
+                nestedPacketInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(nestedPacketRef, Nothing)]
+                            (tVarWithRef nestedPacketRef)
+                        )
+                        (IntMap.singleton 118 nestedPacketRef)
+                nestedPacketBound :: BoundType
+                nestedPacketBound =
+                    TForallRef
+                        nestedPacketRef
+                        Nothing
+                        (tVarWithRef nestedPacketRef)
+                enclosingBound =
+                    TForallRef
+                        nestedConsumerRef
+                        (Just nestedPacketBound)
+                        (tVarWithRef nestedConsumerRef)
+                enclosingScheme =
+                    mkElabSchemeWithRefs
+                        [(enclosingRef, Just enclosingBound)]
+                        (tVarWithRef enclosingRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 117)
+                    (NodeId 116)
+                    (NodeId 118)
+            packet <-
+                prepareTopologyPacketForTest
+                    topologyAuthority
+                    nestedPacketInfo
+            placeSubtermGeneralizationBinders
+                (Map.singleton (ownerKey 117 "nested-owner") packet)
+                enclosingScheme
+                `shouldBe` Right enclosingScheme
+
+        it "discharges a closed topology packet without manufacturing an enclosing binder" $ do
+            let closedInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] (TestElab.tBase (BaseTy "Bool")))
+                        IntMap.empty
+                unrelatedRef = typeRef 116 "a"
+                enclosingScheme =
+                    mkElabSchemeWithRefs
+                        [(unrelatedRef, Nothing)]
+                        ( TArrow
+                            (tVarWithRef unrelatedRef)
+                            (TestElab.tBase (BaseTy "Bool"))
+                        )
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 116)
+                    (NodeId 115)
+                    (NodeId 117)
+            packet <-
+                prepareTopologyPacketForTest
+                    topologyAuthority
+                    closedInfo
+            placeSubtermGeneralizationBinders
+                (Map.singleton (ownerKey 116 "closed-owner") packet)
+                enclosingScheme
+                `shouldBe` Right enclosingScheme
+
+        it "rejects an unplaced topology consumer that remains free in its packet" $ do
+            let consumerRef = typeRef 119 "result"
+                openInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] (tVarWithRef consumerRef))
+                        IntMap.empty
+                enclosingScheme =
+                    mkElabSchemeWithRefs
+                        []
+                        (TestElab.tBase (BaseTy "Bool"))
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 118)
+                    (NodeId 118)
+                    (NodeId 119)
+            packet <-
+                prepareTopologyPacketForTest
+                    topologyAuthority
+                    openInfo
+            placeSubtermGeneralizationBinders
+                (Map.singleton (ownerKey 119 "open-owner") packet)
+                enclosingScheme
+                `shouldSatisfy` isLeft
 
         it "routes a frozen topology consumer only through its exact published graph key" $ do
             let outwardConsumerRef = typeRef 54 "result"
@@ -3470,6 +4015,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = IntMap.empty
                         , gaBaseConstraint = emptyConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved =
                             IntMap.singleton
                                 (getNodeId sourceRoot)
@@ -3516,6 +4062,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = IntMap.empty
                         , gaBaseConstraint = emptyConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = IntMap.singleton 44 (NodeId 56)
                         , gaSolvedToBase = IntMap.singleton 56 (NodeId 44)
                         , gaRestoredSchemeRootTargets = IntMap.empty
@@ -3568,6 +4115,89 @@ spec = do
                     expectationFailure
                         ("expected topology route conflict, got " ++ show other)
 
+        it "records when topology placement constructs an enclosing flexible bound" $ do
+            let packetRef = typeRef 121 "packet"
+                dependencyRef = typeRef 159 "dependency"
+                consumerRef = typeRef 131 "result"
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(packetRef, Nothing)]
+                            (tVarWithRef packetRef)
+                        )
+                        (IntMap.singleton 131 packetRef)
+                enclosingScheme =
+                    mkElabSchemeWithRefs
+                        [ (dependencyRef, Nothing)
+                        , ( consumerRef
+                          , Just
+                              ( TArrow
+                                  (tVarWithRef dependencyRef)
+                                  (tVarWithRef dependencyRef)
+                              )
+                          )
+                        ]
+                        (TArrow (tVarWithRef consumerRef) (tVarWithRef consumerRef))
+                enclosingInfo =
+                    schemeInfoFromRefSubst
+                        enclosingScheme
+                        (IntMap.singleton 131 consumerRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 121)
+                    (NodeId 121)
+                    (NodeId 131)
+            packet <-
+                prepareTopologyPacketForTest
+                    topologyAuthority
+                    packetInfo
+            published <-
+                case
+                    publishTopologyConsumerRoutesForTest
+                        (\node -> [node])
+                        (Map.singleton (ownerKey 121 "owner") packet)
+                        enclosingInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "topology dependency publication failed"
+                    Right schemeInfo -> pure schemeInfo
+            placement <-
+                case
+                    placeSubtermGeneralizationBindersWithRoutesAndProvenance
+                        (siSubstRefs published)
+                        (Map.singleton (ownerKey 121 "owner") packet)
+                        (siScheme published)
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "topology construction placement failed"
+                    Right placed -> pure placed
+            Set.member
+                (typeBinderRefIdentity consumerRef)
+                (placedSubtermConstructedConsumerIdentities placement)
+                `shouldBe` True
+            case
+                schemeBinderRefs
+                    (placedSubtermBinderScheme placement)
+              of
+                [ (placedConsumerRef, Just (TForallRef copiedRef Nothing copiedBody))
+                  ] -> do
+                    placedConsumerRef
+                        `shouldSatisfy` typeBinderRefsSameIdentity consumerRef
+                    copiedRef
+                        `shouldNotSatisfy` typeBinderRefsSameIdentity dependencyRef
+                    copiedBody
+                        `shouldBe`
+                            TArrow
+                                (tVarWithRef copiedRef)
+                                (tVarWithRef copiedRef)
+                binders ->
+                    expectationFailure
+                        ( "expected one topology-constructed consumer, got "
+                            ++ show binders
+                        )
+
         it "publishes a named-retained topology consumer through reverse solved-to-base provenance" $ do
             let outwardConsumerRef = typeRef 54 "result"
                 packetRef = typeRef 39 "a"
@@ -3586,6 +4216,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = IntMap.empty
                         , gaBaseConstraint = emptyConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = IntMap.singleton 44 (NodeId 44)
                         , gaSolvedToBase = IntMap.singleton 56 (NodeId 44)
                         , gaRestoredSchemeRootTargets = IntMap.empty
@@ -3802,6 +4433,7 @@ spec = do
                     GaBindParents
                         { gaBindParentsBase = IntMap.empty
                         , gaBaseConstraint = producerConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
                         , gaBaseToSolved = IntMap.empty
                         , gaSolvedToBase = IntMap.empty
                         , gaRestoredSchemeRootTargets = IntMap.empty
@@ -3817,6 +4449,11 @@ spec = do
                                 , instantiationArrowDomain = NodeId 36
                                 , instantiationArrowCodomain = boundaryBodyRoot
                                 }
+                        }
+                retainedFunctionSite =
+                    functionSite
+                        { instantiationSiteSource = NodeId 43
+                        , instantiationSiteTarget = NodeId 43
                         }
                 argumentSite =
                     mkInstantiationSite
@@ -3845,6 +4482,29 @@ spec = do
                         (NodeId 48)
                         scopeRoot
                         sourceBody
+                        topologyEdgeId
+                        lambdaNode
+                retainedSourceLambda =
+                    ALam
+                        "x"
+                        (ownerDetails 46 "x")
+                        (NodeId 48)
+                        scopeRoot
+                        ( AApp
+                            ( AResolvedVar
+                                (ownerDetails 1 "make")
+                                "make"
+                                (NodeId 43)
+                            )
+                            ( AResolvedVar
+                                (ownerDetails 20 "x")
+                                "x"
+                                (NodeId 36)
+                            )
+                            retainedFunctionSite
+                            argumentSite
+                            boundaryBodyRoot
+                        )
                         topologyEdgeId
                         lambdaNode
                 owner =
@@ -3914,8 +4574,97 @@ spec = do
                             GeneralizedResultRouteRequest
                                 { grrrOwnerTarget = lambdaNode
                                 , grrrFrozenConsumer = frozenResultRoot
-                                , grrrConstructionRoot = constructionRoot
+                                , grrrRouteLocator =
+                                    ApplicationResultConstruction
+                                        constructionRoot
                                 }
+                        )
+            let unboundSourceProvenance =
+                    routeProvenance
+                        { gaBaseConstraint =
+                            producerConstraint
+                                { cGraftResultConstructions =
+                                    IntMap.singleton
+                                        (getEdgeId functionEdgeId)
+                                        functionConstruction
+                                            { grcSourceBoundRoot = Nothing
+                                            , grcSourceResultRoot = Nothing
+                                            }
+                                }
+                        }
+            sourceLambdaGeneralizedResultRouteRequestForTest
+                unboundSourceProvenance
+                sourceLambda
+                packets
+                `shouldBe`
+                    Right
+                        ( Just
+                            GeneralizedResultRouteRequest
+                                { grrrOwnerTarget = lambdaNode
+                                , grrrFrozenConsumer = frozenResultRoot
+                                , grrrRouteLocator =
+                                    ApplicationResultConstruction
+                                        constructionRoot
+                                }
+                        )
+            let retainedArrowConstraint =
+                    producerConstraint
+                        { cNodes =
+                            insertNode
+                                (NodeId 43)
+                                TyArrow
+                                    { tnId = NodeId 43
+                                    , tnDom = NodeId 41
+                                    , tnCod = NodeId 42
+                                    }
+                                (cNodes producerConstraint)
+                        , cGraftResultConstructions = IntMap.empty
+                        }
+                retainedArrowProvenance =
+                    routeProvenance
+                        { gaBaseConstraint = retainedArrowConstraint
+                        , gaAnnotationNodeRedirects = IntMap.empty
+                        , gaBaseToSolved =
+                            IntMap.singleton 42 boundaryBodyRoot
+                        , gaSolvedToBase =
+                            IntMap.singleton
+                                (getNodeId boundaryBodyRoot)
+                                (NodeId 42)
+                        }
+            sourceLambdaGeneralizedResultRouteRequestForTest
+                retainedArrowProvenance
+                retainedSourceLambda
+                packets
+                `shouldBe`
+                    Right
+                        ( Just
+                            GeneralizedResultRouteRequest
+                                { grrrOwnerTarget = lambdaNode
+                                , grrrFrozenConsumer = frozenResultRoot
+                                , grrrRouteLocator =
+                                    ApplicationResultConstruction
+                                        boundaryBodyRoot
+                                }
+                        )
+            let wrongRetainedCodomainProvenance =
+                    retainedArrowProvenance
+                        { gaBaseToSolved = IntMap.empty
+                        , gaSolvedToBase = IntMap.empty
+                        }
+            case
+                sourceLambdaGeneralizedResultRouteRequestForTest
+                    wrongRetainedCodomainProvenance
+                    retainedSourceLambda
+                    packets
+              of
+                Left (ValidationFailed messages) ->
+                    messages
+                        `shouldSatisfy` any
+                            (isInfixOf "missing exact application graft construction")
+                other ->
+                    expectationFailure
+                        ( "expected wrong retained-codomain rejection, got "
+                            ++ show other
                         )
             published <-
                 case
@@ -4560,6 +5309,281 @@ spec = do
                     subtermConsumerAuthorityEnclosingOwner authority
                         `shouldBe` Just testEnclosingConsumerOwner
                 Nothing -> expectationFailure "expected enclosing consumer authority"
+
+        it "keeps a local topology result distinct from an enclosing consumer" $ do
+            let localEdge = EdgeId 116
+                sourceBody = NodeId 117
+                outerEdge = EdgeId 118
+                outerRef = typeRef 119 "outer-result"
+                outerOwner =
+                    testEnclosingConsumerOwner
+                        { lgoBoundaryEdge = outerEdge
+                        }
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        ( WithLocalTopologyResult
+                            ( EnclosingConsumerPacket
+                                (typeBinderRefIdentity outerRef)
+                                outerEdge
+                                outerOwner
+                            )
+                            topologyAuthority
+                        )
+                        constructionInfo
+                        operatedInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "dual-authority packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            case subtermGeneralizationConsumerAuthority packet of
+                Just authority -> do
+                    scaEdgeId authority `shouldBe` outerEdge
+                    scaConsumerIdentity authority
+                        `shouldBe` typeBinderRefIdentity outerRef
+                Nothing ->
+                    expectationFailure "expected enclosing consumer authority"
+            case subtermGeneralizationLocalResultAuthority packet of
+                Just authority -> do
+                    scaEdgeId authority `shouldBe` localEdge
+                    scaConsumerIdentity authority
+                        `shouldBe` typeBinderRefIdentity resultRef
+                Nothing ->
+                    expectationFailure "expected local topology result authority"
+            subtermGeneralizationResultAbstractionRef packet
+                `shouldBe` Just resultRef
+            subtermGeneralizationConstructionResultAbstractionRef packet
+                `shouldBe` Just resultRef
+            schemeBinderRefs
+                ( siScheme
+                    (subtermGeneralizationSchemeInfo packet)
+                )
+                `shouldSatisfy` any
+                    ( \(ref, mbBound) ->
+                        typeBinderRefsSameIdentity ref resultRef
+                            && mbBound == Just sigmaBound
+                    )
+            schemeBinderRefs
+                ( siScheme
+                    ( subtermGeneralizationConsumerConstructionSchemeInfo
+                        packet
+                    )
+                )
+                `shouldSatisfy` any
+                    ( \(ref, mbBound) ->
+                        typeBinderRefsSameIdentity ref resultRef
+                            && mbBound == Nothing
+                    )
+
+        it "rejects multiple local topology result authorities" $ do
+            firstAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 120)
+                    (NodeId 121)
+                    resultRefNode
+            secondAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 122)
+                    (NodeId 123)
+                    resultRefNode
+            case
+                prepareSubtermGeneralizationPacket
+                    initialIdentityGenerator
+                    ( WithLocalTopologyResult
+                        (WithLocalTopologyResult DirectPacket firstAuthority)
+                        secondAuthority
+                    )
+                    constructionInfo
+                    operatedInfo
+              of
+                Left (ValidationFailed messages) ->
+                    messages
+                        `shouldSatisfy` any
+                            (isInfixOf "multiple local result authorities")
+                other ->
+                    expectationFailure
+                        ( "expected duplicate local result rejection, got "
+                            ++ show other
+                        )
+
+        it "materializes a local topology result in an otherwise closed packet" $ do
+            let localEdge = EdgeId 124
+                sourceBody = NodeId 125
+                outerEdge = EdgeId 126
+                outerRef = typeRef 127 "outer-result"
+                outerOwner =
+                    testEnclosingConsumerOwner
+                        { lgoBoundaryEdge = outerEdge
+                        }
+                closedInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] sigmaType)
+                        (IntMap.singleton (getNodeId sigmaRefNode) sigmaRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        ( WithLocalTopologyResult
+                            ( EnclosingConsumerPacket
+                                (typeBinderRefIdentity outerRef)
+                                outerEdge
+                                outerOwner
+                            )
+                            topologyAuthority
+                        )
+                        closedInfo
+                        closedInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "closed local-result packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            case subtermGeneralizationLocalResultAuthority packet of
+                Just authority -> do
+                    scaEdgeId authority `shouldBe` localEdge
+                    scaConsumerIdentity authority
+                        `shouldBe` typeBinderRefIdentity resultRef
+                Nothing ->
+                    expectationFailure "expected constructed local topology result authority"
+            subtermGeneralizationResultAbstractionRef packet
+                `shouldBe` Just resultRef
+            subtermGeneralizationConstructionResultAbstractionRef packet
+                `shouldBe` Just resultRef
+
+        it "discharges a vacuous local topology result at its exact construction boundary" $ do
+            let localEdge = EdgeId 128
+                sourceBody = NodeId 129
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(resultRef, Nothing)] sigmaType)
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+                constructionInfoWithoutResult =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] sigmaType)
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (WithLocalTopologyResult DirectPacket topologyAuthority)
+                        packetInfo
+                        packetInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "vacuous local-result packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            resolved <-
+                case
+                    resolveSubtermLocalResultAtConstruction
+                        constructionInfoWithoutResult
+                        packet
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "exact local-result discharge failed"
+                    Right prepared -> pure prepared
+            subtermGeneralizationLocalResultAuthority resolved
+                `shouldBe` Nothing
+            subtermGeneralizationResultAbstractionRef resolved
+                `shouldBe` Nothing
+
+        it "retains a local topology result represented by an ambient occurrence" $ do
+            let localEdge = EdgeId 132
+                sourceBody = NodeId 133
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(resultRef, Nothing)] sigmaType)
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+                constructionInfoWithAmbientResult =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            []
+                            (TArrow sigmaType (tVarWithRef resultRef))
+                        )
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (WithLocalTopologyResult DirectPacket topologyAuthority)
+                        packetInfo
+                        packetInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "ambient local-result packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            resolved <-
+                case
+                    resolveSubtermLocalResultAtConstruction
+                        constructionInfoWithAmbientResult
+                        packet
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "ambient local-result classification failed"
+                    Right prepared -> pure prepared
+            subtermGeneralizationLocalResultAuthority resolved
+                `shouldSatisfy` isJust
+            subtermGeneralizationResultAbstractionRef resolved
+                `shouldBe` Just resultRef
+
+        it "rejects local-result discharge at an unrelated closed construction" $ do
+            let localEdge = EdgeId 130
+                sourceBody = NodeId 131
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [(resultRef, Nothing)] sigmaType)
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+                unrelatedInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            []
+                            (TestElab.tBase (BaseTy "Bool"))
+                        )
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (WithLocalTopologyResult DirectPacket topologyAuthority)
+                        packetInfo
+                        packetInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "guarded local-result packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            resolveSubtermLocalResultAtConstruction unrelatedInfo packet
+                `shouldSatisfy` isLeft
 
     describe "Prepared subterm generalization placement" $ do
         it "classifies only the exact result-lambda source declaration as locally emitted" $ do

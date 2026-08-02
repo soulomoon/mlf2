@@ -47,6 +47,18 @@ data BinderPlanInput p = BinderPlanInput
     , bpiReachableForBinders :: IntSet.IntSet
     , bpiReachableType :: IntSet.IntSet
     , bpiReachableTypeStructural :: IntSet.IntSet
+    -- | Live variables whose exact frozen-base origin is a binder owned by a
+    -- forall that no longer survives in the selected live reification root.
+    -- These are declaration candidates by construction even when solving has
+    -- reparented the live occurrence to an ancestor gen.
+    , bpiEscapedFrozenForallBinders :: [NodeId]
+    -- | Live source-routed occurrences whose exact source identity remains
+    -- free after reifying the selected live root.  The exact source-facing
+    -- free-variable result, together with exclusion from the ambient binder
+    -- set, is the construction proof that the enclosing binder plan must
+    -- declare them even when graph scope or nested-scheme filtering alone
+    -- would hide the occurrence.
+    , bpiEscapedSourceBinderOccurrences :: [NodeId]
     , bpiTypeRoot0 :: NodeId
     , bpiTypeRoot :: NodeId
     , bpiTypeRootFromBoundVar :: Maybe NodeId
@@ -60,6 +72,7 @@ data BinderPlanInput p = BinderPlanInput
     , bpiIsNestedSchemeBound :: NodeId -> Bool
     , bpiSchemeRootKeySet :: IntSet.IntSet
     , bpiSchemeRootByBody :: IntMap.IntMap NodeId
+    , bpiSchemeRootOwner :: IntMap.IntMap GenNodeId
     , bpiSchemeRootOwnerBase :: IntMap.IntMap GenNodeId
     , bpiSchemeRootByBodyBase :: IntMap.IntMap NodeId
     , bpiAliasBinderBases :: IntSet.IntSet
@@ -68,11 +81,16 @@ data BinderPlanInput p = BinderPlanInput
     , bpiLocallyClosedGammaNodes :: IntSet.IntSet
     , bpiSourceBinderRefs :: IntMap.IntMap TypeBinderRef
     , bpiAmbientBinderRefs :: [TypeBinderRef]
+    , bpiTermUsedRootBinderRefs :: [TypeBinderRef]
     }
 
 data BinderPlan = BinderPlan
     { bpOrderedBinders :: [(Int, TypeBinderRef)]
+    -- | Exact routes for both locally planned declarations and candidates
+    -- discharged by an enclosing ambient declaration.
     , bpBinderRefRoutes :: IntMap.IntMap TypeBinderRef
+    , bpRootBodyClosureKeys :: IntSet.IntSet
+    , bpInheritedRigidAliasRoutes :: IntMap.IntMap TypeBinderRef
     , bpLocallyClosedGammaKeys :: IntSet.IntSet
     , bpNestedSchemeInteriorSet :: IntSet.IntSet
     , bpGammaAlias :: IntMap.IntMap Int
@@ -86,4 +104,8 @@ data BinderPlan = BinderPlan
     , bpRequiredGamma :: IntMap.IntMap RequiredGammaBinder
     , bpSourceBinderRefs :: IntMap.IntMap TypeBinderRef
     , bpAmbientBinderRefs :: [TypeBinderRef]
+    -- | Construction-used refs matched to declarations already selected by
+    -- this plan.  Finalization may preserve these declarations, but cannot
+    -- use the field to synthesize an unplanned binder.
+    , bpTermUsedRootBinderRefs :: [TypeBinderRef]
     }

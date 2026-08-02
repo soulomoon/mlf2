@@ -48,7 +48,12 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Types.Elab
-import MLF.Types.Identity (typeBinderIdentityStructural)
+import MLF.Types.Identity
+  ( UniqueIdentity (..),
+    freshenTypeBinderIdentity,
+    freshIdentity,
+    typeBinderIdentityStructural,
+  )
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Names (freshNameLike)
 
@@ -170,18 +175,44 @@ substTypeCaptureRef target s = goSub
     freeSRefs = freeTypeVarRefsType s
     freeSNames = Set.unions (map typeBinderRefAliasNames freeSRefs)
 
-    freshCaptureRef :: String -> ElabType -> Maybe BoundType -> TypeBinderRef
-    freshCaptureRef name body mbBound =
-      fst (freshTypeBinderRef name (identityGeneratorAfterType seed))
+    freshCaptureRef :: TypeBinderRef -> String -> ElabType -> Maybe BoundType -> TypeBinderRef
+    freshCaptureRef originalRef name body mbBound =
+      typeBinderRefFromIdentity
+        (freshenTypeBinderIdentity (typeBinderRefIdentity originalRef) freshUnique)
+        name
       where
+        (baseUnique, _) =
+          freshIdentity (identityGeneratorAfterType seed)
+        -- Capture avoidance is deliberately pure, so there is no mutable
+        -- supply to thread through nested binders.  The seed alone is not
+        -- enough: a vacuous outer freshened binder does not occur in an inner
+        -- binder's body, which used to allocate the same generated identity
+        -- for several distinct binders.  Pair the seed's next identity with
+        -- the original binder identity so distinct lexical declarations are
+        -- distinct by construction.
+        freshUnique =
+          UniqueIdentity
+            ( uniqueIdentityValue baseUnique
+                + captureIdentityOffset
+                  (typeBinderIdentityKey (typeBinderRefIdentity originalRef))
+            )
         seed =
           TArrow
             s
             (maybe body (\bound -> TArrow (tyToElab bound) body) mbBound)
+        captureIdentityOffset key
+          | key >= 0 = key * 2
+          | otherwise = negate key * 2 - 1
 
     replacementMentionsRef :: TypeBinderRef -> Bool
     replacementMentionsRef ref =
       any (binderMayCaptureReplacementRef ref) freeSRefs
+
+    targetOccursFreeIn :: ElabType -> Bool
+    targetOccursFreeIn ty =
+      any
+        (typeBinderRefsSameIdentity target)
+        (freeTypeVarRefsType ty)
 
     binderMayCaptureReplacementRef :: TypeBinderRef -> TypeBinderRef -> Bool
     binderMayCaptureReplacementRef binder replacementRef =
@@ -203,7 +234,8 @@ substTypeCaptureRef target s = goSub
         | typeBinderRefsSameIdentity ref targetRef ->
             let mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
              in TForallRef ref mb' body
-        | replacementMentionsRef ref ->
+        | replacementMentionsRef ref
+        , targetOccursFreeIn (tyToElab body) ->
             let used =
                   Set.unions
                     [ freeSNames,
@@ -212,7 +244,7 @@ substTypeCaptureRef target s = goSub
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                ref' = freshCaptureRef v' (tyToElab body) mb
+                ref' = freshCaptureRef ref v' (tyToElab body) mb
                 body' = substTypeCaptureRef ref (TVarRef ref') body
                 mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
              in TForallRef ref' mb' (substTypeCaptureRef targetRef replacement body')
@@ -223,7 +255,8 @@ substTypeCaptureRef target s = goSub
           v = typeBinderRefName ref
       TMuRef ref body
         | typeBinderRefsSameIdentity ref targetRef -> TMuRef ref body
-        | replacementMentionsRef ref ->
+        | replacementMentionsRef ref
+        , targetOccursFreeIn (tyToElab body) ->
             let used =
                   Set.unions
                     [ freeSNames,
@@ -231,7 +264,7 @@ substTypeCaptureRef target s = goSub
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                ref' = freshCaptureRef v' (tyToElab body) Nothing
+                ref' = freshCaptureRef ref v' (tyToElab body) Nothing
                 body' = substTypeCaptureRef ref (TVarRef ref') body
              in TMuRef ref' (substTypeCaptureRef targetRef replacement body')
         | otherwise ->
@@ -259,7 +292,8 @@ substTypeCaptureRef target s = goSub
             | typeBinderRefsSameIdentity ref target ->
                 let mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
                  in TForallRef ref mb' (fst (unIxPair body))
-            | replacementMentionsRef ref ->
+            | replacementMentionsRef ref
+            , targetOccursFreeIn (fst (unIxPair body)) ->
                 let used =
                       Set.unions
                         [ freeSNames,
@@ -268,7 +302,7 @@ substTypeCaptureRef target s = goSub
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    ref' = freshCaptureRef v' (fst (unIxPair body)) (fmap (fst . unIxPair) mb)
+                    ref' = freshCaptureRef ref v' (fst (unIxPair body)) (fmap (fst . unIxPair) mb)
                     body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
                     mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
                  in TForallRef ref' mb' (substTypeCaptureRef target s body')
@@ -279,7 +313,8 @@ substTypeCaptureRef target s = goSub
               v = typeBinderRefName ref
           TMuIFRef ref body
             | typeBinderRefsSameIdentity ref target -> TMuRef ref (fst (unIxPair body))
-            | replacementMentionsRef ref ->
+            | replacementMentionsRef ref
+            , targetOccursFreeIn (fst (unIxPair body)) ->
                 let used =
                       Set.unions
                         [ freeSNames,
@@ -287,7 +322,7 @@ substTypeCaptureRef target s = goSub
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    ref' = freshCaptureRef v' (fst (unIxPair body)) Nothing
+                    ref' = freshCaptureRef ref v' (fst (unIxPair body)) Nothing
                     body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
                  in TMuRef ref' (substTypeCaptureRef target s body')
             | otherwise ->
@@ -847,8 +882,6 @@ churchAwareEqType = go [] []
 churchRepresentationEqType :: ElabType -> ElabType -> Bool
 churchRepresentationEqType = go [] []
   where
-    go _envL _envR left right
-      | alphaEqType left right = True
     go envL envR (TVarRef leftRef) (TVarRef rightRef) =
       alphaEqRef envL envR leftRef rightRef
     go envL envR

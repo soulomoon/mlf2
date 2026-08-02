@@ -42,8 +42,10 @@ import MLF.Constraint.Types.Graph
     NodeId (..),
     NodeRef (..),
     TyNode (..),
+    cNodes,
     getNodeId,
     gnSchemes,
+    lookupNodeIn,
     typeRef,
   )
 import MLF.Elab.Run.Util (chaseRedirects)
@@ -228,7 +230,9 @@ resolveCanonicalScope constraint presolutionView redirects scopeRoot = do
 -- map and the node map remains only a generic root/scheme fallback.
 data ConstructionScopes = ConstructionScopes
   { constructionNodeScopeCandidates :: !(IntMap.IntMap (Set.Set NodeRef)),
-    constructionBoundaryScopeCandidates :: !(IntMap.IntMap (Set.Set NodeRef))
+    constructionBoundaryScopeCandidates :: !(IntMap.IntMap (Set.Set NodeRef)),
+    constructionApplicationTargetScopeCandidates
+      :: !(IntMap.IntMap (IntMap.IntMap (Set.Set NodeRef)))
   }
   deriving (Eq, Show)
 
@@ -242,11 +246,16 @@ instance Semigroup ConstructionScopes where
         constructionBoundaryScopeCandidates =
           IntMap.unionWith Set.union
             (constructionBoundaryScopeCandidates left)
-            (constructionBoundaryScopeCandidates right)
+            (constructionBoundaryScopeCandidates right),
+        constructionApplicationTargetScopeCandidates =
+          IntMap.unionWith
+            (IntMap.unionWith Set.union)
+            (constructionApplicationTargetScopeCandidates left)
+            (constructionApplicationTargetScopeCandidates right)
       }
 
 instance Monoid ConstructionScopes where
-  mempty = ConstructionScopes IntMap.empty IntMap.empty
+  mempty = ConstructionScopes IntMap.empty IntMap.empty IntMap.empty
 
 -- | The source occurrence and the type selected for its local scheme carry
 -- distinct scope evidence.  In particular, 'generalizeTargetNode' may unwrap
@@ -363,11 +372,53 @@ resolveApplicationConstructionScopes
         scopes
         boundaryEdge
         applicationNode
-      <*> resolveConstructionScopeForNode
+      <*> resolveApplicationTargetScope
         canonical
         ga
         scopes
+        boundaryEdge
         targetNode
+
+resolveApplicationTargetScope
+  :: (NodeId -> NodeId)
+  -> GaBindParents p
+  -> ConstructionScopes
+  -> EdgeId
+  -> NodeId
+  -> Either ElabError NodeRef
+resolveApplicationTargetScope canonical ga scopes edgeId targetNode =
+  case applicationTargetScopeSelection scopes edgeId (canonical targetNode) of
+    MissingConstructionScope ->
+      resolveConstructionScopeForNode canonical ga scopes targetNode
+    UniqueConstructionScope scope -> pure scope
+    AmbiguousConstructionScope candidates ->
+      Left
+        ( ValidationFailed
+            [ "one application target has conflicting source scopes",
+              "  edge: " ++ show edgeId,
+              "  target: " ++ show (canonical targetNode),
+              "  scopes: " ++ show candidates
+            ]
+        )
+
+applicationTargetScopeSelection
+  :: ConstructionScopes
+  -> EdgeId
+  -> NodeId
+  -> ConstructionScopeSelection
+applicationTargetScopeSelection scopes (EdgeId edgeKey) (NodeId targetKey) =
+  case
+      IntMap.lookup edgeKey
+        (constructionApplicationTargetScopeCandidates scopes)
+        >>= IntMap.lookup targetKey
+    of
+      Nothing -> MissingConstructionScope
+      Just candidates ->
+        case Set.toAscList candidates of
+          [] -> MissingConstructionScope
+          [candidate] -> UniqueConstructionScope candidate
+          first : second : rest ->
+            AmbiguousConstructionScope (first :| second : rest)
 
 constructionScopeSelection
   :: Int
@@ -439,6 +490,32 @@ constructionScopes base solvedForGen presolutionView redirects ann =
                   scope
                   (constructionBoundaryScopeCandidates acc)
             }
+      addApplicationTargetScope acc edgeId sourceResultNode = do
+        let sourceTargetNode =
+              sourceGeneralizationTarget base sourceResultNode
+            targetNode =
+              canonical
+                (chaseRedirects redirects sourceTargetNode)
+        scope0 <- bindingScopeRef base sourceTargetNode
+        let scope =
+              canonicalizeScopeRef
+                presolutionView
+                redirects
+                scope0
+            insertTarget =
+              IntMap.insertWith
+                Set.union
+                (getNodeId targetNode)
+                (Set.singleton scope)
+        pure
+          acc
+            { constructionApplicationTargetScopeCandidates =
+                IntMap.insertWith
+                  (IntMap.unionWith Set.union)
+                  (getEdgeId edgeId)
+                  (insertTarget IntMap.empty)
+                  (constructionApplicationTargetScopeCandidates acc)
+            }
       alg expr = case expr of
         AResolvedVarF _ _ _ -> pure mempty
         ALitF _ _ -> pure mempty
@@ -449,8 +526,13 @@ constructionScopes base solvedForGen presolutionView redirects ann =
           -- obligation but is never queried as a scope boundary.
           funScopes <- fun
           argScopes <- arg
-          addBoundaryScope
-            (funScopes <> argScopes)
+          occurrenceScopes <-
+            addBoundaryScope
+              (funScopes <> argScopes)
+              (instantiationSiteEdgeId funSite)
+              resultNode
+          addApplicationTargetScope
+            occurrenceScopes
             (instantiationSiteEdgeId funSite)
             resultNode
         ALetF _ _ _ schemeRootId _ _ rhs body _ -> do
@@ -464,5 +546,14 @@ constructionScopes base solvedForGen presolutionView redirects ann =
         AUnfoldF inner _ _ -> inner
    in cata alg ann
   where
+    sourceGeneralizationTarget constraint target =
+      case lookupNodeIn (cNodes constraint) target of
+        Just TyVar {tnBound = Just bound} ->
+          case lookupNodeIn (cNodes constraint) bound of
+            Just TyForall {tnBody = body} -> body
+            _ -> bound
+        Just TyForall {tnBody = body} -> body
+        _ -> target
+
     insertCandidate key candidate =
       IntMap.insertWith Set.union key (Set.singleton candidate)

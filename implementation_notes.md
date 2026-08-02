@@ -1,3 +1,83 @@
+## 2026-08-01 - Constructed application endpoints and let ambient re-entry
+
+- A Bottom-backed terminal application result is no longer accepted as exact
+  merely because its graph identity is present in ambient Gamma. When the
+  function packet owns that terminal result, the endpoint remains provisional
+  until the checked function construction completes it. Parameter-side graph
+  variables remain admissible, so this does not discard already-constructed
+  ambient authority.
+- A direct lambda's static body packet is now treated as a prospective result.
+  After elaborating the function child, the application retains that result
+  only when `constructExactInstantiation` proves that the owner-final checked
+  function constructs the corresponding exact arrow. This prevents an
+  enclosing application from specializing a packet that the function owner
+  did not materialize.
+- When a checked identity argument and a provisional expected result present
+  different endpoints, the exact-instantiation construction decides the
+  ordering. A positively checked principal argument endpoint is retained and
+  the outgoing `EApp` construction performs any required specialization.
+- Let publication now re-enters the exact ambient declarations recorded by the
+  checked RHS owner before constructing and checking its published term. The
+  enclosing let-Gamma wrapper performs the same certificate-driven re-entry
+  before its second construction check. Thus the `InstAbstr` emitted for the
+  paper's `g g` result is checked under the Gamma that constructed it; no later
+  type-shape recovery or free-variable closure invents its bound.
+- Added fixed regressions for the principal identity-argument endpoint and for
+  owner-final ambient re-entry around a let-bound paper `g g`. The complete
+  fixed annotation slice passes (`148 examples, 0 failures`), and seeds
+  `1195910434`, `984941370`, `1`, `20260727`, `20260801`, `2147483646`,
+  `618238226`, and `486053823` each pass all 100 generated O15 cases.
+- The previously slow focused rows remain fast in the already-built binary:
+  the higher-kinded interpreter/LLVM/native parity row takes 1.31 seconds, the
+  ordinary lambda/application row 0.92 seconds, and bare overloaded-method
+  rejection 0.16 seconds wall time. Serialized `cabal build all` and
+  `cabal test` pass; the current suite contains 3883 examples.
+- This completes the compiler's tested construction path for the paper's
+  annotated `g g` term across the covered lambda, application, let, ambient
+  Gamma, and owner-final publication families. It remains executable evidence
+  for the supported language, not a mechanized proof of every eMLF theorem.
+
+## 2026-07-27 - Identity-authoritative paper self-application construction
+
+- Added `MLF.Elab.SourceType` as the sole normalized-source-annotation to
+  `ElabType` conversion owner. It consumes resolved symbol and binder identity
+  maps, advances the shared identity supply past every carried payload,
+  allocates genuinely free source variables as flexible existentials, and
+  rejects a missing source head or binder. Annotation elaboration no longer
+  creates a rigid root to compensate for a failed name lookup.
+- Compiler-exact construction routes now distinguish two operations. A strict
+  merge rejects different source identities for one graph node within the same
+  domain. Entering a nested exact annotation performs explicit lexical
+  shadowing after each domain has independently proved its one-to-one route.
+  This preserves first-class local polymorphism when solving reuses a graph
+  node across nested source scopes without weakening same-layer conflict
+  checks.
+- Owner-final let publication now retains a free identity as ambient only when
+  the exact publication environment owns it and either the construction
+  certificate declares it or an enclosing authoritative term scheme proves
+  its ambient use. A bounded construction-local declaration is substituted in
+  the scheme while the term receives the corresponding explicit `Lambda`/`N`
+  computation. Thus the published checked term and scheme are produced
+  together instead of closing or specializing one after the other.
+- Exact producer comparison checks constructor and type-application arity
+  before pairwise recursion. Recursive-let free-term-variable analysis now
+  agrees with the checker that the let binder is in scope in both RHS and
+  body, and a redundant endpoint validation was removed because certified
+  completion already entails it.
+- Four fixed regressions cover source-owned application Gamma, a deep mixed
+  annotation owner chain, paper `g g` beneath nested lambda owners, and bounded
+  owner-final publication. Focused validation passes the 102-example fixed
+  annotation slice, two independent 100-case O15 generated seeds, 372 pipeline
+  cases, 154 backend-conversion cases, 90 program-diagnostic cases, 29 package
+  owner/cache cases, 130 witness-translation cases, and all five xMLF golden
+  files. The merged higher-kinded interpreter/LLVM/native row takes 1.37
+  seconds and the bare overloaded-method rejection takes 0.095 seconds in the
+  already-built test binary.
+- This completes the tested paper `g g` construction path for the compiler's
+  supported source language. It is executable implementation evidence, not a
+  mechanized proof of every typing, normalization, or soundness theorem in
+  eMLF.
+
 ## 2026-07-26 - Construction-owned annotation/replay authority
 
 - Generalization preparation now calls `mkElaborationEdgeAuthority` while all

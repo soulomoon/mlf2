@@ -239,10 +239,11 @@ generateResolvedConstraintsCoreWithExternalBindingsFromSupply generator polySyms
         (mkInitialStateWithPolySyms polySyms)
           { bsTypeHeadIdentities = constraintTypeHeadIdentities typeHeadIdentities polySyms extBindings
           , bsTypeBinderIdentities = typeBinderIdentities
+          , bsIdentityGenerator = generator
           }
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
-  constraintResultFromState generator initialEnv rootNode annRoot finalState
+  constraintResultFromState initialEnv rootNode annRoot finalState
 
 generateModuleConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> [(VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult VarName p)
 generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs =
@@ -287,10 +288,11 @@ generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromS
         (mkInitialStateWithPolySyms polySyms)
           { bsTypeHeadIdentities = constraintTypeHeadIdentities typeHeadIdentities polySyms extBindings
           , bsTypeBinderIdentities = typeBinderIdentities
+          , bsIdentityGenerator = generator'
           }
   ((_rootGen, initialEnv, roots), finalState) <-
     runConstraintM (buildModuleRootExprsKeyedWithExternalBindings rootTypeBinderIdentities extBindings namedCoreExprs) initialState
-  constraintModuleResultFromState generator' initialEnv roots finalState
+  constraintModuleResultFromState initialEnv roots finalState
 
 -- | A keyed module is a finite map of independent roots, not a sequence whose
 -- input order may assign semantic identities.  Allocate syntax and graph
@@ -360,24 +362,25 @@ constraintTypeHeadIdentities supplied polySyms extBindings =
         (name, identity) <- Map.toList (externalBindingTypeHeadIdentities binding)
       ]
 
-constraintResultFromState :: IdentityGenerator -> Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
-constraintResultFromState identityGenerator initialEnv rootNode annRoot finalState = do
+constraintResultFromState :: Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
+constraintResultFromState initialEnv rootNode annRoot finalState = do
   let annEdges = collectAnnEdges annRoot
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
   pure
     ConstraintResult { crConstraint = constraint,
         crRoot = rootNode,
         crAnnotated = annRoot,
-        crIdentityGenerator = identityGenerator,
+        crIdentityGenerator = bsIdentityGenerator finalState,
         crAnnSourceTypes = bsAnnSourceTypes finalState,
+        crAnnExpectedTypes = bsAnnExpectedTypes finalState,
         crExactProducerTypes = bsExactProducerTypes finalState,
         crSourceTypeBinderIdentities = bsTypeBinderNodeIdentities finalState,
         crSourceTypeBinderAliases = bsTypeBinderIdentities finalState,
         crInitialEnv = initialEnv
       }
 
-constraintModuleResultFromState :: IdentityGenerator -> Env -> Map.Map key (ModuleRootId, NodeId, AnnExpr, Map.Map String TypeBinderIdentity) -> BuildState -> Either ConstraintError (ModuleConstraintResult key p)
-constraintModuleResultFromState identityGenerator initialEnv roots finalState = do
+constraintModuleResultFromState :: Env -> Map.Map key (ModuleRootId, NodeId, AnnExpr, Map.Map String TypeBinderIdentity) -> BuildState -> Either ConstraintError (ModuleConstraintResult key p)
+constraintModuleResultFromState initialEnv roots finalState = do
   let annEdges = IntSet.unions [collectAnnEdges annRoot | (_, _rootNode, annRoot, _) <- Map.elems roots]
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
       rootMap =
@@ -395,8 +398,9 @@ constraintModuleResultFromState identityGenerator initialEnv roots finalState = 
     ModuleConstraintResult
       { mcrConstraint = constraint,
         mcrRoots = rootMap,
-        mcrIdentityGenerator = identityGenerator,
+        mcrIdentityGenerator = bsIdentityGenerator finalState,
         mcrAnnSourceTypes = bsAnnSourceTypes finalState,
+        mcrAnnExpectedTypes = bsAnnExpectedTypes finalState,
         mcrExactProducerTypes = bsExactProducerTypes finalState,
         mcrSourceTypeBinderIdentities = bsTypeBinderNodeIdentities finalState,
         mcrInitialEnv = initialEnv,

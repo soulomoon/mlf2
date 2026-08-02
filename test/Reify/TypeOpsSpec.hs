@@ -53,7 +53,14 @@ import MLF.Types.Elab
     typeBinderRefName,
     typeHeadRefMatches,
   )
-import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityStableName)
+import MLF.Types.Identity
+  ( StructuralTypeBinderRole (StructuralSelfBinder),
+    UniqueIdentity (..),
+    typeBinderIdentityFromStructural,
+    typeBinderIdentityGeneratedUnique,
+    typeBinderIdentityStableName,
+    typeBinderIdentityStructural,
+  )
 import Test.Hspec
 
 intTy :: ElabType
@@ -214,6 +221,22 @@ spec = describe "MLF.Reify.TypeOps" $ do
               (tVarAppWithRef refF (tVarWithRef refA NE.:| []))
        in substTypeCaptureRef refZ intTy ty `shouldBe` ty
 
+    it "does not freshen an enclosing binder when the target is only nested-bound" $
+      let target = typeRef 881 "inner"
+          enclosing = generatedTypeRef 882 "outer"
+          nestedBound =
+            tForallWithRef
+              target
+              Nothing
+              (tVarWithRef target)
+          ty =
+            tForallWithRef
+              enclosing
+              (Just nestedBound)
+              (tVarWithRef enclosing)
+       in substTypeCaptureRef target (tVarWithRef enclosing) ty
+            `shouldBe` ty
+
     it "freshens binder identity when capture freshening renames display name" $
       let refA = typeRef 88 "a"
           refB = typeRef 3 "b"
@@ -226,6 +249,74 @@ spec = describe "MLF.Reify.TypeOps" $ do
               typeBinderRefName ref' `shouldBe` "b1"
               bodyRef `shouldBe` refB
             other -> expectationFailure ("expected freshened forall, got: " ++ show other)
+
+    it "allocates distinct identities for several vacuous capture-avoiding binders" $
+      let sourceB = typeRef 890 "sourceB"
+          sourceC = typeRef 891 "sourceC"
+          sourceD = typeRef 892 "sourceD"
+          binderB = typeRef 893 "b"
+          binderC = typeRef 894 "c"
+          binderD = typeRef 895 "d"
+          ty =
+            tForallWithRef
+              binderB
+              Nothing
+              ( tForallWithRef
+                  binderC
+                  Nothing
+                  ( tForallWithRef
+                      binderD
+                      Nothing
+                      ( TArrow
+                          (tVarWithRef sourceB)
+                          ( TArrow
+                              (tVarWithRef sourceC)
+                              (tVarWithRef sourceD)
+                          )
+                      )
+                  )
+              )
+          result =
+            foldl
+              ( \current (sourceRef, replacementRef) ->
+                  substTypeCaptureRef
+                    sourceRef
+                    (tVarWithRef replacementRef)
+                    current
+              )
+              ty
+              [ (sourceB, binderB)
+              , (sourceC, binderC)
+              , (sourceD, binderD)
+              ]
+       in case result of
+            TForallRef freshB Nothing
+              (TForallRef freshC Nothing (TForallRef freshD Nothing _)) ->
+                Set.fromList
+                  (map typeBinderRefIdentity [freshB, freshC, freshD])
+                  `shouldSatisfy` ((== 3) . Set.size)
+            other ->
+              expectationFailure
+                ("expected three freshened foralls, got: " ++ show other)
+
+    it "retains structural owner provenance when capture freshening a recursive binder" $
+      let target = typeRef 89 "target"
+          owner = UniqueIdentity 1301
+          self =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromStructural owner StructuralSelfBinder)
+              "self"
+          ty = tMuWithRef self (tVarWithRef target)
+          result = substTypeCaptureRef target (tVarWithRef self) ty
+       in case result of
+            TMuRef freshSelf (TVarRef bodyRef) -> do
+              typeBinderRefIdentity freshSelf `shouldNotBe` typeBinderRefIdentity self
+              typeBinderIdentityStructural (typeBinderRefIdentity freshSelf)
+                `shouldBe` Just (owner, StructuralSelfBinder)
+              typeBinderIdentityGeneratedUnique (typeBinderRefIdentity freshSelf)
+                `shouldSatisfy` maybe False (const True)
+              bodyRef `shouldBe` self
+            other -> expectationFailure ("expected provenance-preserving freshened mu, got: " ++ show other)
 
     it "freshens away from type binder stable aliases during capture avoidance" $
       let target = typeRef 39 "target"

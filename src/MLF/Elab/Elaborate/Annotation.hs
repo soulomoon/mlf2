@@ -26,6 +26,7 @@ module MLF.Elab.Elaborate.Annotation
     sourceAnnSchemeInfoResolved,
     annBinderKey,
     annExprReferenceKey,
+    sourceResultAnnotationEdge,
     desugaredAnnLambdaInfo,
     elaborateAnnotationTerm,
     elaborateExactAnnotationTerm,
@@ -54,7 +55,7 @@ import qualified Data.IntSet as IntSet
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust, listToMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe, maybeToList)
 import qualified Data.Set as Set
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -88,6 +89,7 @@ import MLF.Elab.Elaborate.Scope
     reifyNodeTypePreferringBound,
     reifyTargetNodeType,
     reifyTargetType,
+    scopeRootForBoundary,
     scopeRootForNode,
     scopeTypeBinderIdentityRepresentative,
   )
@@ -95,10 +97,12 @@ import MLF.Elab.Generalize
   ( GammaPacketAuthority (..),
     SubtermConsumerAuthority,
     SubtermGeneralizations,
+    directLetBoundaryEdge,
     gaConstructionRouteNodes,
     generalizationRequirementsForEnclosingRootEdges,
     generalizationRequirementsForRootEdges,
     generalizationRequirementsForRootEdgesInConstruction,
+    localGammaOwnerOccursIn,
     placeSubtermGeneralizationBindersWithRoutes,
     publishSourceLambdaTopologyConsumerRoute,
     publishTopologyConsumerRoutes,
@@ -106,6 +110,8 @@ import MLF.Elab.Generalize
     publishSubtermGammaConstructionSourceSchemeInfo,
     rootRaiseMergeAuthorityForExpression,
     scaConsumerIdentity,
+    scaEdgeId,
+    subtermConsumerAuthorityKey,
     subtermConsumerAuthorityEnclosingOwner,
     subtermGeneralizationConsumerAuthority,
     subtermGeneralizationConstructionBinderRenames,
@@ -113,6 +119,10 @@ import MLF.Elab.Generalize
     subtermGeneralizationSchemeInfo,
     subtermGeneralizationsOwnedBy,
     sourceLambdaGeneralizedResultRouteRequest,
+  )
+import MLF.Elab.Run.Scope
+  ( applicationGeneralizationScopeForRequirements,
+    resolveApplicationConstructionScopes,
   )
 import MLF.Elab.Inst (applyInstantiation, composeInst, instForLeadingTypeArgument, schemeToType)
 import MLF.Elab.Elaborate.Annotation.Construction
@@ -135,10 +145,16 @@ import qualified MLF.Elab.Reduce as Reduce
 import qualified MLF.Elab.Sigma as Sigma
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Scope (generalizeTargetNode)
-import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs)
+import MLF.Elab.Run.Instantiation
+  ( exactBinderSpineInstantiation,
+    exactBinderSpineRenames,
+    inferInstAppArgsFromSchemeRefs,
+    planExactBinderSpine,
+  )
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeWithContext)
 import MLF.Elab.SourceBinder
-  ( resolveConstructionSourceBindersInSchemeInfoExcept,
+  ( publishSourceBinderOrderFromProvenance,
+    resolveConstructionSourceBindersInSchemeInfoExcept,
     sourceBinderAliasSubstitution,
     typeBinderDeclarationRefs,
   )
@@ -179,6 +195,7 @@ import MLF.Elab.Types
     schemeBody,
     schemeFromType,
     schemeInfoFromRefSubst,
+    rebuildSchemeInfoFromRefSubst,
     schemeInfoBinderRefSubst,
     TypeBinderRef,
     typeBinderRefAliasNames,
@@ -522,6 +539,33 @@ annExprReferenceKey annExpr =
     AUnfold inner _ _ -> annExprReferenceKey inner
     _ -> Nothing
 
+-- | Find an explicit annotation that is positive authority for an expression's
+-- result endpoint.  Only result-transparent syntax is traversed; annotations
+-- in discarded siblings or ordinary application functions are not results.
+sourceResultAnnotationEdge :: AnnExpr -> Maybe EdgeId
+sourceResultAnnotationEdge sourceAnn =
+  case sourceAnn of
+    AAnn _ _ edgeId -> Just edgeId
+    AExactAnn _ _ _ edgeId -> Just edgeId
+    ALetScope inner _ _ -> sourceResultAnnotationEdge inner
+    ALet _ mbDetails _ _ _ _ rhs body _
+      | annRefersToVar (annBinderKey mbDetails) body ->
+          sourceResultAnnotationEdge rhs
+      | otherwise ->
+          sourceResultAnnotationEdge body
+    AApp fun arg _ _ _
+      | directlyAppliedIdentity fun ->
+          sourceResultAnnotationEdge arg
+      | otherwise -> Nothing
+    _ -> Nothing
+  where
+    directlyAppliedIdentity ann =
+      case ann of
+        ALam _ mbDetails _ _ body _ _ ->
+          annRefersToVar (annBinderKey mbDetails) body
+        ALetScope inner _ _ -> directlyAppliedIdentity inner
+        _ -> False
+
 desugaredAnnLambdaInfo :: IdDetails -> AnnExpr -> Maybe (IdDetails, NodeId, EdgeId, AnnExpr)
 desugaredAnnLambdaInfo mbParamDetails bodyAnn =
   case bodyAnn of
@@ -720,6 +764,17 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
     generalizedSchemeInfo ambientBinderRefs sourceAnn = do
       let ownedPackets =
             subtermGeneralizationsOwnedBy sourceAnn subtermGeneralizations
+          placementPackets =
+            Map.filter
+              (not . consumedByLocalSourceConstructor)
+              ownedPackets
+          consumedByLocalSourceConstructor packet =
+            case
+                subtermGeneralizationConsumerAuthority packet
+                  >>= subtermConsumerAuthorityEnclosingOwner
+              of
+                Just owner -> localGammaOwnerOccursIn owner sourceAnn
+                Nothing -> False
           constructionRouteNodes =
             gaConstructionRouteNodes
               (scCanonical scopeContext)
@@ -757,22 +812,35 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
         rootRaiseMergeAuthorityForExpression edgeArtifacts sourceAnn
       (requirements, generalizationResult) <-
         case mRootAuthority of
-          Nothing ->
-            let requirements =
-                  GeneralizationRequirements
-                  { grRequiredGammaBinders = [],
-                    grSourceBinderRefs = acSourceBinderRefs annotationContext,
-                    grAmbientBinderRefs = ambientBinderRefs,
-                    grAmbientGammaAuthorities = IntMap.empty,
-                    grLocallyClosedGammaNodes = mempty
-                  }
-                sourceNode = annNode sourceAnn
+          Nothing -> do
+            requirements <-
+              nonRootConstructionRequirements
+                edgeArtifacts
+                placementPackets
+            let sourceNode = annNode sourceAnn
                 target =
                   generalizeTargetNode
                     (scPresolutionView scopeContext)
                     (scCanonical scopeContext sourceNode)
              in do
-                  scope <- scopeRootForNode scopeContext sourceNode
+                  scope <-
+                    case
+                        sourceGeneralizationScope
+                          requirements
+                          sourceAnn
+                          sourceNode
+                          target
+                      of
+                        Right selectedScope -> pure selectedScope
+                        Left cause ->
+                          Left
+                            ( ValidationFailed
+                                [ "annotation source has no exact construction scope"
+                                , "  source node: " ++ show sourceNode
+                                , "  target node: " ++ show target
+                                , "  cause: " ++ show cause
+                                ]
+                            )
                   pure
                     ( requirements,
                       runGeneralization
@@ -809,7 +877,10 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
               )
       case generalizationResult of
         Right (scheme, subst, generalizedResultRoute) -> do
-          let normalized = schemeInfoFromRefSubst scheme subst
+          let normalized =
+                publishSourceBinderOrderFromProvenance
+                  (grSourceBinderRefs requirements)
+                  (schemeInfoFromRefSubst scheme subst)
           prepared <-
             case
                 prepareRootRaiseMergeScheme
@@ -823,30 +894,29 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                   Left
                     ( ValidationFailed
                         [ "annotation source scheme failed root RaiseMerge validation"
-                        , "  source: " ++ show sourceAnn
                         , "  generalized: " ++ show normalized
                         , "  owned packets: " ++ show ownedPackets
                         , "  cause: " ++ show err
                         ]
                     )
+          preparedWithConsumerRoutes <-
+            publishTopologyConsumerRoutes
+              constructionRouteNodes
+              ownedPackets
+              prepared
           preparedWithSourceTopologyRoute <-
             publishSourceLambdaTopologyConsumerRoute
               generalizedResultRoute
               constructionRouteNodes
               sourceAnn
               ownedPackets
-              prepared
-          preparedWithConsumerRoutes <-
-            publishTopologyConsumerRoutes
-              constructionRouteNodes
-              ownedPackets
-              preparedWithSourceTopologyRoute
+              preparedWithConsumerRoutes
           placed <-
             case
                 placeSubtermGeneralizationBindersWithRoutes
-                  (siSubstRefs preparedWithConsumerRoutes)
-                  ownedPackets
-                  (siScheme preparedWithConsumerRoutes)
+                  (siSubstRefs preparedWithSourceTopologyRoute)
+                  placementPackets
+                  (siScheme preparedWithSourceTopologyRoute)
               of
                 Right placedScheme -> pure placedScheme
                 Left cause ->
@@ -859,9 +929,9 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                             ++ show (activeEnclosingConsumer boundary)
                         , "  prepared binders: "
                             ++ show
-                              (schemeBinderRefs (siScheme preparedWithConsumerRoutes))
+                              (schemeBinderRefs (siScheme preparedWithSourceTopologyRoute))
                         , "  prepared routes: "
-                            ++ show (siSubstRefs preparedWithConsumerRoutes)
+                            ++ show (siSubstRefs preparedWithSourceTopologyRoute)
                         , "  packet consumer route hops: "
                             ++ show
                               ( packetConsumerRouteHops
@@ -873,7 +943,8 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                         ]
                     )
           let placedInfo =
-                schemeInfoFromRefSubst
+                rebuildSchemeInfoFromRefSubst
+                  preparedWithSourceTopologyRoute
                   placed
                   (siSubstRefs preparedWithConsumerRoutes)
           publishedInfo <-
@@ -907,6 +978,34 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
           pure (Just publishedInfo)
         Left _ -> pure Nothing
       where
+        sourceGeneralizationScope
+          requirements
+          sourceExpr
+          sourceNode
+          targetNode =
+            case sourceExpr of
+              AApp _ _ functionSite _ applicationNode -> do
+                applicationScopes <-
+                  resolveApplicationConstructionScopes
+                    (scCanonical scopeContext)
+                    (scGaParents scopeContext)
+                    (scScopeOverrides scopeContext)
+                    (instantiationSiteEdgeId functionSite)
+                    applicationNode
+                    targetNode
+                pure
+                  ( applicationGeneralizationScopeForRequirements
+                      applicationScopes
+                      requirements
+                  )
+              ALet _ _ _ _ _ _ _ body resultNode -> do
+                boundaryEdge <- directLetBoundaryEdge body
+                scopeRootForBoundary
+                  scopeContext
+                  boundaryEdge
+                  resultNode
+              _ -> scopeRootForNode scopeContext sourceNode
+
         rootGammaOwner ann edgeId ownedPackets =
           case
               [ authority
@@ -973,9 +1072,65 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                   { activeConstructionCurrentConsumer = currentConsumer
                   } ->
                   generalizationRequirementsForRootEdgesInConstruction
-                    (scaConsumerIdentity <$> currentConsumer)
+                    ( maybe
+                        Set.empty
+                        (Set.singleton . subtermConsumerAuthorityKey)
+                        currentConsumer
+                    )
                     ambientBinderRefs
                     IntMap.empty
+
+        -- A result-transparent source can own a completed descendant packet
+        -- even when the source root itself has no terminal RaiseMerge.  The
+        -- packet's consumer edge is then the positive Gamma construction
+        -- authority: omitting it leaves the generalized source body with no
+        -- declaration at which packet placement can occur.  Select only the
+        -- exact packet owned by this source expression and retain the active
+        -- construction key so S'(operated) is recovered in the packet's open
+        -- domain.
+        nonRootConstructionRequirements edgeArtifacts placementPackets =
+          case boundary of
+            ActiveConstructionSchemeBoundary
+              { activeConstructionCurrentConsumer = currentConsumer
+              }
+                | not (null packetAuthorities) ->
+                    generalizationRequirementsForRootEdgesInConstruction
+                      activeConsumerKeys
+                      ambientBinderRefs
+                      IntMap.empty
+                      (scopeTypeBinderIdentityRepresentative scopeContext)
+                      (scCanonical scopeContext)
+                      (scGaParents scopeContext)
+                      (scPresolutionView scopeContext)
+                      edgeArtifacts
+                      (acSourceBinderRefs annotationContext)
+                      placementPackets
+                      [ (scaEdgeId authority, Nothing)
+                      | authority <- packetAuthorities
+                      ]
+              where
+                activeConsumerKeys =
+                  Set.fromList
+                    ( map
+                        subtermConsumerAuthorityKey
+                        (packetAuthorities ++ maybeToList currentConsumer)
+                    )
+            _ ->
+              pure
+                GeneralizationRequirements
+                  { grRequiredGammaBinders = [],
+                    grSourceBinderRefs =
+                      acSourceBinderRefs annotationContext,
+                    grAmbientBinderRefs = ambientBinderRefs,
+                    grTermUsedRootBinderRefs = [],
+                    grAmbientGammaAuthorities = IntMap.empty,
+                    grLocallyClosedGammaNodes = mempty
+                  }
+          where
+            packetAuthorities =
+              mapMaybe
+                subtermGeneralizationConsumerAuthority
+                (Map.elems placementPackets)
 
         -- The construction caller supplies the active packet's opaque
         -- consumer authority, not an independently paired owner and identity.
@@ -1019,42 +1174,31 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
         ALet _letName mbDetails _ schemeRootId _ _ rhsAnn bodyAnn _
           | annRefersToVar (annBinderKey mbDetails) bodyAnn ->
               firstJustE
-                (explicitSourceAnnotatedScheme rhsAnn)
-                ( firstJustE
-                    (explicitSourceAnnotatedScheme sourceAnn)
-                    ( pure
-                        ( case generalizeAtNode scopeContext schemeRootId of
-                            Right (scheme, subst) -> Just (schemeInfoFromRefSubst scheme subst)
-                            Left _ -> Nothing
-                        )
+                (sourceResultAnnotatedScheme rhsAnn)
+                ( pure
+                    ( case generalizeAtNode scopeContext schemeRootId of
+                        Right (scheme, subst) -> Just (schemeInfoFromRefSubst scheme subst)
+                        Left _ -> Nothing
                     )
                 )
-        AAnn inner _ _ -> syntheticLetSchemeInfo inner
-        ALetScope inner _ _ -> syntheticLetSchemeInfo inner
-        AUnfold inner _ _ -> syntheticLetSchemeInfo inner
         _ -> pure Nothing
 
-    explicitSourceAnnotatedScheme sourceAnn =
-      case sourceAnn of
-        AAnn inner _ edgeId ->
-          case annotationExpectedTypeForEdge annotationContext edgeId of
-            Just expectedTy ->
-              pure
-                ( Just
-                    ( schemeInfoFromRefSubst
-                        (schemeFromType expectedTy)
-                        IntMap.empty
-                    )
-                )
-            Nothing -> explicitSourceAnnotatedScheme inner
-        ALetScope inner _ _ -> explicitSourceAnnotatedScheme inner
-        ALam _ _ _ _ body _ _ -> explicitSourceAnnotatedScheme body
-        AApp fun arg _ _ _ ->
-          firstJustE (explicitSourceAnnotatedScheme fun) (explicitSourceAnnotatedScheme arg)
-        ALet _ _ _ _ _ _ rhs body _ ->
-          firstJustE (explicitSourceAnnotatedScheme rhs) (explicitSourceAnnotatedScheme body)
-        AUnfold inner _ _ -> explicitSourceAnnotatedScheme inner
-        _ -> pure Nothing
+    -- Follow only syntax that preserves the result endpoint.  Searching an
+    -- arbitrary subtree for an annotation is unsound: in
+    -- @let x = (let _ = (False : Bool) in (13 : Int)) in x@ the first
+    -- annotation belongs to a discarded sibling, while the let result is
+    -- exactly @Int@.  A directly applied syntactic identity is the one
+    -- application form whose argument itself is positive result authority.
+    sourceResultAnnotatedScheme sourceAnn =
+      pure $ do
+        edgeId <- sourceResultAnnotationEdge sourceAnn
+        expectedTy <-
+          annotationExpectedTypeForEdge annotationContext edgeId
+        pure
+          ( schemeInfoFromRefSubst
+              (schemeFromType expectedTy)
+              IntMap.empty
+          )
 
     firstJustE left right = do
       result <- left
@@ -1089,8 +1233,21 @@ inferPreservingAnnotationInstFor ::
 inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
   | alphaEqType sourceTy targetTy = Just InstId
   | otherwise =
-      case (sourceTy, targetTy) of
-        (_, TForallRef targetRef Nothing targetBody)
+      preserveVacuousTarget
+        <|> preserveLeadingForall
+        <|> eliminateVacuousSource
+        <|> inferredTypeApplication
+        <|> canonicalBoundElimination sourceTy targetTy
+        <|> exactProducerBinderSpine
+  where
+    -- Each structural construction is only a candidate until the completed
+    -- instantiation reaches the exact target.  Keep the candidates
+    -- backtracking: aligning two leading foralls can construct their bounds
+    -- successfully yet fail after their bodies are composed, in which case a
+    -- vacuous source forall may still be eliminated by N.
+    preserveVacuousTarget =
+      case targetTy of
+        TForallRef targetRef Nothing targetBody
           | not
               ( any
                   (typeBinderRefsSameIdentity targetRef)
@@ -1107,40 +1264,37 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
                   boundaryRole
                   sourceTy
                   targetBody
-              let candidate = composeInst inner InstIntro
-              applied <- either (const Nothing) Just (applyInstantiation sourceTy candidate)
-              if alphaEqType applied targetTy
-                then Just candidate
-                else Nothing
-        (TForallRef sourceRef sourceBound sourceBody, TForallRef targetRef targetBound targetBody)
-          | Just boundInst <-
-              inferPreservingAnnotationInst
-                (maybe TBottom tyToElab sourceBound)
-                (maybe TBottom tyToElab targetBound) -> do
-              let targetBody' =
-                    substTypeCaptureRef targetRef (TVarRef sourceRef) targetBody
-              bodyInst <-
-                inferPreservingAnnotationInstFor
-                  boundaryRole
-                  sourceBody
-                  targetBody'
-              let boundStep =
-                    case boundInst of
-                      InstId -> InstId
-                      _ -> InstInside boundInst
-                  bodyStep =
-                    case bodyInst of
-                      InstId -> InstId
-                      _ -> instUnderWithRef sourceRef bodyInst
-                  candidate =
-                    composeInst
-                      boundStep
-                      bodyStep
-              applied <- either (const Nothing) Just (applyInstantiation sourceTy candidate)
-              if alphaEqType applied targetTy
-                then Just candidate
-                else Nothing
-        (TForallRef sourceRef _ sourceBody, _)
+              validateCandidate (composeInst inner InstIntro)
+        _ -> Nothing
+
+    preserveLeadingForall =
+      case (sourceTy, targetTy) of
+        (TForallRef sourceRef sourceBound sourceBody, TForallRef targetRef targetBound targetBody) -> do
+          boundInst <-
+            inferPreservingAnnotationInst
+              (maybe TBottom tyToElab sourceBound)
+              (maybe TBottom tyToElab targetBound)
+          let targetBody' =
+                substTypeCaptureRef targetRef (TVarRef sourceRef) targetBody
+          bodyInst <-
+            inferPreservingAnnotationInstFor
+              boundaryRole
+              sourceBody
+              targetBody'
+          let boundStep =
+                case boundInst of
+                  InstId -> InstId
+                  _ -> InstInside boundInst
+              bodyStep =
+                case bodyInst of
+                  InstId -> InstId
+                  _ -> instUnderWithRef sourceRef bodyInst
+          validateCandidate (composeInst boundStep bodyStep)
+        _ -> Nothing
+
+    eliminateVacuousSource =
+      case sourceTy of
+        TForallRef sourceRef _ sourceBody
           | not
               ( any
                   (typeBinderRefsSameIdentity sourceRef)
@@ -1156,16 +1310,40 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
                     case inner of
                       InstId -> elimination
                       _ -> InstSeq elimination inner
-              applied <- either (const Nothing) Just (applyInstantiation sourceTy candidate)
-              if alphaEqType applied targetTy
-                then Just candidate
-                else Nothing
-        _ ->
-          inferredTypeApplication
-            <|> canonicalBoundElimination sourceTy targetTy
-  where
+              validateCandidate candidate
+        _ -> Nothing
+
+    validateCandidate candidate = do
+      applied <- either (const Nothing) Just (applyInstantiation sourceTy candidate)
+      if alphaEqType applied targetTy
+        then Just candidate
+        else Nothing
+
     inferredTypeApplication =
       inferredTypeApplicationFrom sourceTy targetTy
+
+    -- The shared exact-spine planner consumes one source binder at a time and
+    -- validates the completed xMLF computation.  That construction is needed
+    -- when inference supplies a proper prefix and a later vacuous bounded
+    -- binder must then be eliminated by N.  This annotation seam can consume
+    -- such a producer plan directly only when it performs no lexical binder
+    -- rename; retained-binder renames are constructed by the recursive term
+    -- cases above.  Application arguments keep their explicit bound
+    -- applications rather than replacing them with producer-side N.
+    exactProducerBinderSpine = do
+      case boundaryRole of
+        AnnotationProducerBoundary -> pure ()
+        AnnotationApplicationArgumentBoundary -> Nothing
+      plan <-
+        planExactBinderSpine
+          exactTypesAgree
+          sourceTy
+          targetTy
+      guard (null (exactBinderSpineRenames plan))
+      pure (exactBinderSpineInstantiation plan)
+
+    exactTypesAgree left right =
+      alphaEqType left right || churchAwareEqType left right
 
     inferredTypeApplicationFrom currentTy expectedTy = do
       let sourceScheme = schemeFromType currentTy
@@ -1246,12 +1424,13 @@ elaborateExactAnnotationTerm ::
   AnnotationContext p ->
   TypeCheck.Env ->
   ElabType ->
+  [(TypeBinderRef, TypeBinderRef)] ->
   IntMap.IntMap TypeBinderRef ->
   NodeId ->
   EdgeId ->
   XmlfTerm ->
   Either ElabError XmlfTerm
-elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType edgeRefs _annNodeId eid expr' = do
+elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType constructionBinderRenames edgeRefs _annNodeId eid expr' = do
   case annotationExpectedTypeForEdge annotationContext eid of
     Just _ -> pure ()
     Nothing ->
@@ -1271,10 +1450,20 @@ elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType e
           representative
           sourceBinderRefs
           (Reduce.freeTypeVarRefsTerm expr')
+      sourceTerm0 = substInTermRefs sourceAliasSubst expr'
+      sourceTermConstructionRenames =
+        constructionBinderRenamesForRefs
+          constructionBinderRenames
+          (Reduce.freeTypeVarRefsTerm sourceTerm0)
       sourceTerm =
         freshenTermTypeAbsAgainstEnv tcEnv
-          (substInTermRefs sourceAliasSubst expr')
-      expectedTy = openCompilerExactTypeAgainstEnv tcEnv expectedType
+          (renameTermTypeVars sourceTermConstructionRenames sourceTerm0)
+      expectedTy =
+        schemeToType
+          ( applyFreeConstructionBinderRenamesToScheme
+              constructionBinderRenames
+              (schemeFromType (openCompilerExactTypeAgainstEnv tcEnv expectedType))
+          )
   elaborateClosedExactAnnotationTermAtTypeFor
     boundaryRole
     tcEnv
@@ -1847,6 +2036,7 @@ constructExactAnnotationTermForWithIntroducedBinders boundaryRole introducedTarg
                 sourceTy
                 targetTy
                 "no preserving xMLF construction"
+
     boundsAgree Nothing Nothing = True
     boundsAgree (Just left) (Just right) =
       alphaEqType (tyToElab left) (tyToElab right)
@@ -2011,9 +2201,18 @@ applyFreeConstructionBinderRenamesToSchemeInfo
   -> SchemeInfo
   -> SchemeInfo
 applyFreeConstructionBinderRenamesToSchemeInfo renames schemeInfo =
-  schemeInfoFromRefSubst
-    (applyFreeConstructionBinderRenamesToScheme activeRenames (siScheme schemeInfo))
-    (IntMap.map renameRef (schemeInfoBinderRefSubst schemeInfo))
+  ( rebuildSchemeInfoFromRefSubst
+      schemeInfo
+        { siSourceBinderOrderRefs =
+            IntMap.map renameRef (siSourceBinderOrderRefs schemeInfo)
+        , siConstructionBinderOrderRefs =
+            IntMap.map
+              renameRef
+              (siConstructionBinderOrderRefs schemeInfo)
+        }
+      (applyFreeConstructionBinderRenamesToScheme activeRenames (siScheme schemeInfo))
+      (IntMap.map renameRef (schemeInfoBinderRefSubst schemeInfo))
+  )
   where
     activeRenames =
       constructionBinderRenamesForRefs
@@ -2024,27 +2223,84 @@ applyFreeConstructionBinderRenamesToSchemeInfo renames schemeInfo =
         Just (_, constructionRef) -> constructionRef
         Nothing -> ref
 
+-- | Apply one construction quotient to the term occurrence payload and its
+-- resolved lookup entry as one typed operation.  Rewriting only the term
+-- would make the boundary temporarily ill-typed and force a later recovery
+-- based on display names or graph representatives.
+projectResolvedTermLookupTypes
+  :: [(TypeBinderRef, TypeBinderRef)]
+  -> TypeCheck.Env
+  -> TypeCheck.Env
+projectResolvedTermLookupTypes renames env =
+  env
+    { TypeCheck.resolvedTermEnv =
+        TypeCheck.resolvedTermEnvFromList
+          [ ( mapResolvedVarType
+                renameType
+                resolved
+            , renameType ty
+            )
+          | (resolved, ty) <-
+              TypeCheck.resolvedTermEnvEntries
+                (TypeCheck.resolvedTermEnv env)
+          ]
+    }
+  where
+    renameType ty0 =
+      foldl'
+        ( \ty (sourceRef, constructionRef) ->
+            if typeBinderRefsSameIdentityAndName sourceRef constructionRef
+              then ty
+              else substTypeCaptureRef sourceRef (TVarRef constructionRef) ty
+        )
+        ty0
+        renames
+
 elaborateAnnotationTerm ::
   AnnotationBoundaryRole ->
   AnnotationContext p ->
   IntSet.IntSet ->
   (IdDetails -> Maybe SchemeInfo) ->
   TypeCheck.Env ->
+  ElabScheme ->
   [(TypeBinderRef, TypeBinderRef)] ->
+  [(TypeBinderRef, TypeBinderRef)] ->
+  Set.Set TypeBinderIdentity ->
   IntMap.IntMap TypeBinderRef ->
   AnnExpr ->
   NodeId ->
   EdgeId ->
   XmlfTerm ->
-  Either ElabError XmlfTerm
-elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLookup tcEnv constructionBinderRenames constructionIdentityRoutes exprAnn _annNodeId eid expr' = do
+  Either ElabError (XmlfTerm, ElabType)
+elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLookup tcEnv constructionSourceScheme constructionBinderRenames completedOccurrenceRenames protectedBinderIdentities constructionIdentityRoutes exprAnn _annNodeId eid expr' = do
+  let reversesCompletedOccurrence (sourceRef, constructionRef) =
+        any
+          ( \(completedGraphRef, completedSourceRef) ->
+              typeBinderRefsSameIdentity sourceRef completedSourceRef
+                && typeBinderRefsSameIdentity
+                  constructionRef
+                  completedGraphRef
+          )
+          completedOccurrenceRenames
+      capturesProtectedBinder (sourceRef, _) =
+        Set.member
+          (typeBinderRefIdentity sourceRef)
+          protectedBinderIdentities
   preparedAnnotationConstructionBinderRenames <-
     foldM
       insertConstructionBinderRename
       []
-      ( constructionBinderRenames
+      ( filter
+          (not . capturesProtectedBinder)
+          constructionBinderRenames
           ++ concatMap
-            subtermGeneralizationConstructionBinderRenames
+            ( filter
+                ( \rename ->
+                    not (reversesCompletedOccurrence rename)
+                      && not (capturesProtectedBinder rename)
+                )
+                . subtermGeneralizationConstructionBinderRenames
+            )
             ( Map.elems
                 ( subtermGeneralizationsOwnedBy
                     exprAnn
@@ -2057,19 +2313,17 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
       insertConstructionSourceRoute
       (acSourceBinderRefs annotationContext)
       (IntMap.toList constructionIdentityRoutes)
-  annotationExpectedType <-
-    case annotationExpectedTypeForEdge annotationContext eid of
-      Just expectedTy -> pure expectedTy
+  case annotationExpectedTypeForEdge annotationContext eid of
+      Just _ -> pure ()
       Nothing ->
         Left
           ( ValidationFailed
               ["missing source type for annotation " ++ show eid]
           )
-  let expectedSourceScheme0 = schemeFromType annotationExpectedType
   let representative =
         scopeTypeBinderIdentityRepresentative
           (acScopeContext annotationContext)
-  scopedConstructionBinderRenames <-
+  scopedConstructionBinderRenames0 <-
     either
       ( \cause ->
           Left
@@ -2085,8 +2339,15 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
           representative
           (acSourceBinderRefs annotationContext)
           constructionIdentityRoutes
-          (schemeToType expectedSourceScheme0)
+          (schemeToType constructionSourceScheme)
       )
+  let scopedConstructionBinderRenames =
+        filter
+          ( \rename ->
+              not (reversesCompletedOccurrence rename)
+                && not (capturesProtectedBinder rename)
+          )
+          scopedConstructionBinderRenames0
   annotationConstructionBinderRenames <-
     foldM
       insertConstructionBinderRename
@@ -2096,7 +2357,52 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
       expectedSourceScheme =
         applyFreeConstructionBinderRenamesToScheme
           annotationConstructionBinderRenames
-          expectedSourceScheme0
+          constructionSourceScheme
+      annotationOwnedBinderRefs =
+        map fst (schemeBinderRefs expectedSourceScheme)
+      closedAnnotationTcEnvFor term =
+        let termScopedTcEnv =
+              TypeCheck.restrictResolvedTermBindings
+                (Reduce.freeResolvedTermVars term)
+                constructionTcEnv
+            requiredRefs =
+              closeRequiredTypeRefs
+                []
+                ( Reduce.freeTypeVarRefsTerm term
+                    ++ concatMap
+                      (freeTypeVarRefsType . snd)
+                      ( TypeCheck.resolvedTermEnvEntries
+                          (TypeCheck.resolvedTermEnv termScopedTcEnv)
+                      )
+                )
+         in termScopedTcEnv
+              { TypeCheck.typeEnv =
+                  Map.filterWithKey
+                    ( \ref _ ->
+                        any
+                          (typeBinderRefsSameIdentity ref)
+                          requiredRefs
+                          && not
+                            ( any
+                                (typeBinderRefsSameIdentity ref)
+                                annotationOwnedBinderRefs
+                            )
+                    )
+                    (TypeCheck.typeEnv termScopedTcEnv)
+              }
+      closeRequiredTypeRefs required [] = required
+      closeRequiredTypeRefs required (ref : pending)
+        | any (typeBinderRefsSameIdentity ref) required =
+            closeRequiredTypeRefs required pending
+        | otherwise =
+            let dependencies =
+                  maybe
+                    []
+                    freeTypeVarRefsType
+                    (TypeCheck.lookupTypeBindingRef ref constructionTcEnv)
+             in closeRequiredTypeRefs
+                  (ref : required)
+                  (dependencies ++ pending)
       sourceTermSubst =
         sourceBinderAliasSubstitution
           representative
@@ -2107,21 +2413,25 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
         constructionBinderRenamesForRefs
           annotationConstructionBinderRenames
           (Reduce.freeTypeVarRefsTerm sourceTerm0)
+      constructionTcEnv =
+        projectResolvedTermLookupTypes
+          sourceTermConstructionRenames
+          tcEnv
       exprFresh =
-        freshenTermTypeAbsAgainstEnv tcEnv
+        freshenTermTypeAbsAgainstEnv constructionTcEnv
           (renameTermTypeVars sourceTermConstructionRenames sourceTerm0)
       annotatedLambdaParamConstruction = do
         closed <-
           closeAnnotatedLambdaParam
             annotationConstructionBinderRenames
-            tcEnv
+            constructionTcEnv
             (schemeToType expectedSourceScheme)
             exprFresh
         closedTy <-
           either
             (const Nothing)
             Just
-            (TypeCheck.typeCheckWithEnv tcEnv closed)
+            (TypeCheck.typeCheckWithEnv constructionTcEnv closed)
         closedInst <-
           inferPreservingAnnotationInstFor
             boundaryRole
@@ -2130,7 +2440,7 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
         pure (closed, closedInst)
       exactCompositeConstruction = do
         sourceTy <-
-          case TypeCheck.typeCheckWithEnv tcEnv exprFresh of
+          case TypeCheck.typeCheckWithEnv constructionTcEnv exprFresh of
             Left tcError ->
               Left
                 ( PhiInvariantError
@@ -2138,13 +2448,19 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                         ++ show eid
                         ++ ": "
                         ++ show tcError
+                        ++ "\n  completed occurrences: "
+                        ++ show completedOccurrenceRenames
+                        ++ "\n  annotation construction renames: "
+                        ++ show annotationConstructionBinderRenames
+                        ++ "\n  producer construction renames: "
+                        ++ show sourceTermConstructionRenames
                     )
                 )
             Right ty -> pure ty
         constructed <-
           constructExactAnnotationTermFor
             boundaryRole
-            tcEnv
+            constructionTcEnv
             sourceTy
             (schemeToType expectedSourceScheme)
             exprFresh
@@ -2200,8 +2516,8 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
   let freshenSchemeAgainstEnv scheme0 =
         let reserved =
               Set.unions
-                ( map freeTypeVarAliasNamesType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv tcEnv)))
-                    ++ [typeVarRefAliasNames (Map.keys (TypeCheck.typeEnv tcEnv))]
+                ( map freeTypeVarAliasNamesType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv constructionTcEnv)))
+                    ++ [typeVarRefAliasNames (Map.keys (TypeCheck.typeEnv constructionTcEnv))]
                 )
             go _ [] bodyAcc acc = (reverse acc, bodyAcc)
             go used ((ref, mb) : rest) bodyAcc acc =
@@ -2313,7 +2629,7 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                             <|> alignTermTypeVarsToTopTyAbs exprPrepared
                         )
                     alignedExprMatchesExpected =
-                      case TypeCheck.typeCheckWithEnv tcEnv alignedExpr of
+                      case TypeCheck.typeCheckWithEnv constructionTcEnv alignedExpr of
                         Right tyExpr ->
                           alphaEqType tyExpr (schemeToType expectedSourceScheme)
                             || churchAwareEqType tyExpr (schemeToType expectedSourceScheme)
@@ -2345,11 +2661,15 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
         -- here would publish a term with a different instantiation ABI.
         rollExplicitMuAnnotation
           annotationConstructionBinderRenames
-          tcEnv
+          constructionTcEnv
           expectedSourceScheme
           exprClosed0
   sourceClosedTy <-
-    case TypeCheck.typeCheckWithEnv tcEnv exprClosed of
+    case
+        TypeCheck.typeCheckWithEnv
+          (closedAnnotationTcEnvFor exprClosed)
+          exprClosed
+      of
       Left tcError ->
         Left
           ( PhiInvariantError
@@ -2357,7 +2677,19 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                   [ "annotation source term is not typable before applying authoritative edge " ++ show eid,
                     "typecheck=" ++ show tcError,
                     "source scheme=" ++ show (fmap (schemeToType . siScheme) sourceSchemeInfo),
-                    "expected annotation=" ++ show (schemeToType expectedSourceScheme)
+                    "expected annotation=" ++ show (schemeToType expectedSourceScheme),
+                    "closed annotation type environment="
+                      ++ show
+                        ( TypeCheck.typeEnv
+                            (closedAnnotationTcEnvFor exprClosed)
+                        ),
+                    "closed annotation term environment="
+                      ++ show
+                        ( TypeCheck.resolvedTermEnvEntries
+                            ( TypeCheck.resolvedTermEnv
+                                (closedAnnotationTcEnvFor exprClosed)
+                            )
+                        )
                   ]
               )
           )
@@ -2372,7 +2704,11 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
           InstId -> exprClosed
           _ -> ETyInst exprClosed instFinal
   annotatedTy <-
-    case TypeCheck.typeCheckWithEnv tcEnv annotatedTerm of
+    case
+        TypeCheck.typeCheckWithEnv
+          (closedAnnotationTcEnvFor annotatedTerm)
+          annotatedTerm
+      of
       Left tcError ->
         Left
           ( PhiInvariantError
@@ -2395,36 +2731,38 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
               )
           )
       Right ty -> pure ty
-  if
-      alphaEqType annotatedTy expectedAnnotationTy
-        || churchAwareEqType annotatedTy expectedAnnotationTy
-    then
-      case instFinal of
-        InstId -> pure exprClosed
-        _ ->
-          case applyInstantiation sourceClosedTy instFinal of
-            Right tyApplied
-              | alphaEqType tyApplied sourceClosedTy -> pure exprClosed
-            _ -> pure annotatedTerm
-    else
-      Left
-        ( PhiInvariantError
-            ( "authoritative annotation instantiation for edge "
-                ++ show eid
-                ++ " with source type "
-                ++ show sourceClosedTy
-                ++ " and computation "
-                ++ show instFinal
-                ++ " from source scheme "
-                ++ show (fmap (schemeToType . siScheme) sourceSchemeInfo)
-                ++ " and preserving computation "
-                ++ show preservingAnnotationInst
-                ++ " has type "
-                ++ show annotatedTy
-                ++ " instead of its source annotation "
-                ++ show expectedAnnotationTy
-            )
-        )
+  finalTerm <-
+    if
+        alphaEqType annotatedTy expectedAnnotationTy
+          || churchAwareEqType annotatedTy expectedAnnotationTy
+      then
+        case instFinal of
+          InstId -> pure exprClosed
+          _ ->
+            case applyInstantiation sourceClosedTy instFinal of
+              Right tyApplied
+                | alphaEqType tyApplied sourceClosedTy -> pure exprClosed
+              _ -> pure annotatedTerm
+      else
+        Left
+          ( PhiInvariantError
+              ( "authoritative annotation instantiation for edge "
+                  ++ show eid
+                  ++ " with source type "
+                  ++ show sourceClosedTy
+                  ++ " and computation "
+                  ++ show instFinal
+                  ++ " from source scheme "
+                  ++ show (fmap (schemeToType . siScheme) sourceSchemeInfo)
+                  ++ " and preserving computation "
+                  ++ show preservingAnnotationInst
+                  ++ " has type "
+                  ++ show annotatedTy
+                  ++ " instead of its source annotation "
+                  ++ show expectedAnnotationTy
+              )
+          )
+  pure (finalTerm, expectedAnnotationTy)
   where
     producerOwnedBinderIdentities =
       case sourceAnnSchemeInfoResolved resolvedLookup exprAnn of
@@ -2970,12 +3308,41 @@ mergeOccurrenceSchemeInfoIntoReplayRequirements edgeId mbTrace constructionAlias
     -- replay capability.  Normalize that stale key through the capability
     -- before merging and return the same normalized SchemeInfo to Phi.
     replaySchemeInfo =
-      schemeInfoFromRefSubst
-        (siScheme schemeInfo)
-        ( IntMap.mapWithKey
-            normalizeMetadataOnlyRoute
-            (siSubstRefs schemeInfo)
-        )
+      (schemeInfoFromRefSubst (siScheme schemeInfo) normalizedSubst)
+        { siSourceBinderOrderRefs =
+            IntMap.filterWithKey
+              ( \nodeKey sourceRef ->
+                  maybe
+                    False
+                    (typeBinderRefsSameIdentity sourceRef)
+                    (IntMap.lookup nodeKey normalizedSubst)
+              )
+              normalizedSourceBinderOrderRefs
+        , siConstructionBinderOrderRefs =
+            IntMap.filterWithKey
+              ( \nodeKey constructionRef ->
+                  maybe
+                    False
+                    (typeBinderRefsSameIdentity constructionRef)
+                    (IntMap.lookup nodeKey normalizedSubst)
+              )
+              normalizedConstructionBinderOrderRefs
+        }
+
+    normalizedSubst =
+      IntMap.mapWithKey
+        normalizeMetadataOnlyRoute
+        (siSubstRefs schemeInfo)
+
+    normalizedSourceBinderOrderRefs =
+      IntMap.mapWithKey
+        normalizeMetadataOnlyRoute
+        (siSourceBinderOrderRefs schemeInfo)
+
+    normalizedConstructionBinderOrderRefs =
+      IntMap.mapWithKey
+        normalizeMetadataOnlyRoute
+        (siConstructionBinderOrderRefs schemeInfo)
 
     normalizeMetadataOnlyRoute nodeKey incomingRef =
       case IntMap.lookup nodeKey (grSourceBinderRefs requirements) of
@@ -3220,7 +3587,18 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
             _ ->
               case phiForOccurrenceEndpoint of
                 Right phi0' -> pure phi0'
-                Left err -> Left (edgeContextError err)
+                Left err ->
+                  Left
+                    ( ValidationFailed
+                        [ "occurrence Phi replay failed"
+                        , "  raw scheme info: " ++ show mSchemeInfoRaw
+                        , "  aligned scheme info: " ++ show mSchemeInfo
+                        , "  replay source binder refs: "
+                            ++ show replaySourceBinderRefs
+                        , "  trace: " ++ show traceInfo
+                        , "  cause: " ++ show (edgeContextError err)
+                        ]
+                    )
               where
                 phiForOccurrenceEndpoint =
                   case endpointShapeAuthority of
@@ -3231,6 +3609,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         (scReadModel scopeContext)
                         gaParents
                         mSchemeInfo
+                        replaySourceBinderRefs
                         frozenEndpointTypes
                         replay
                     Just authority ->
@@ -3240,6 +3619,7 @@ reifyInstWithSourceSchemeUsing generalizeAtWith replaySourceBinderRefs annotatio
                         (scReadModel scopeContext)
                         gaParents
                         mSchemeInfo
+                        replaySourceBinderRefs
                         frozenEndpointTypes
                         authority
                         replay

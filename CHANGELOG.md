@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Changed
+- Completed the identity-authoritative construction path for the paper's
+  annotated self-application family. Normalized source annotations now become
+  `ElabType` through one owner that requires carried head and binder identities;
+  missing payloads fail instead of allocating rigid replacements or recovering
+  identity from spelling. Compiler-exact binder routes use lexical shadowing
+  only when entering a nested exact annotation and retain conflict rejection
+  within one domain. Owner-final let publication distinguishes exact ambient
+  Gamma ownership from packet-local aliases and constructs bounded type
+  substitution together with the matching explicit `Lambda`/`N` term. Fixed
+  regressions cover source-owned application Gamma, deep mixed-annotation
+  owner chains, paper `g g` beneath nested lambdas, and bounded owner-final
+  publication; generated O15 properties cover the same identity-sensitive
+  construction families. Application endpoints now remain provisional when
+  their terminal result is still owned by an unfinished function packet; a
+  prospective direct-lambda result becomes exact only after the checked
+  owner-final function positively constructs that arrow. Identity arguments
+  keep their checked principal endpoint over a provisional result
+  specialization, and both RHS publication and the enclosing let-Gamma recheck
+  reinstall the exact owner-final ambient declarations before checking an
+  emitted `InstAbstr`. The fixed annotation slice passes all 148 examples,
+  eight pinned generated seeds pass 800 programs, and the full serialized
+  3883-example suite passes.
 - Made the annotation-type/replay boundary construction-owned. Generalization
   preparation now validates all canonical roots once and seals their
   occurrence-owned annotation types together with the complete

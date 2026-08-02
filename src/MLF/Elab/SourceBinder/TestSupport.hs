@@ -1,5 +1,6 @@
 module MLF.Elab.SourceBinder.TestSupport
   ( orderSourceProjectedSchemeBindersForTest,
+    publishSourceBinderOrderFromProvenanceForTest,
     resolveConstructionSourceBindersInSchemeInfoForTest,
     resolveConstructionSourceBindersInSchemeInfoExceptForTest,
     resolveConstructionSourceBindersInTypeForTest,
@@ -15,6 +16,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Elab.SourceBinder
   ( orderSourceProjectedSchemeBinders,
+    publishSourceBinderOrderFromProvenance,
     resolveConstructionSourceBindersInSchemeInfo,
     resolveConstructionSourceBindersInSchemeInfoExcept,
     resolveConstructionSourceBindersInType,
@@ -37,6 +39,13 @@ orderSourceProjectedSchemeBindersForTest
   -> Either String ElabScheme
 orderSourceProjectedSchemeBindersForTest =
   orderSourceProjectedSchemeBinders
+
+publishSourceBinderOrderFromProvenanceForTest
+  :: IntMap.IntMap TypeBinderRef
+  -> SchemeInfo
+  -> SchemeInfo
+publishSourceBinderOrderFromProvenanceForTest =
+  publishSourceBinderOrderFromProvenance
 
 resolveConstructionSourceBindersInSchemeInfoForTest
   :: (NodeId -> NodeId)

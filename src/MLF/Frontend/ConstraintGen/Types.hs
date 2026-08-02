@@ -64,7 +64,7 @@ import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (Lit, NormSrcType, ResolvedSrcType, TermReference (..), TermReferencePhase (..), VarName)
-import MLF.Types.Elab (ResolvedVar (..))
+import MLF.Types.Elab (ElabType, ResolvedVar (..))
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, ResolvedTermIdentityKey, TypeBinderIdentity, idDetailsIdentityKey, idDetailsRuntimeName)
 
 -- | Errors that can surface during constraint generation.
@@ -94,6 +94,8 @@ data ConstraintResult p = ConstraintResult { crConstraint :: Constraint p,
     -- exact-lambda parameter node. Preserves the lowered 'NormSrcType' so
     -- elaboration retains source binder identities and stripped type structure.
     crAnnSourceTypes :: IntMap.IntMap NormSrcType,
+    -- | Identity-bearing annotation types allocated with their graph copies.
+    crAnnExpectedTypes :: IntMap.IntMap ElabType,
     -- | Authoritative producer types for compiler exact annotations, keyed by
     -- their construction-time edge.  Retaining the resolved source type makes
     -- exact-owner construction independent of later graph reconstruction.
@@ -133,6 +135,7 @@ data ModuleConstraintResult key p = ModuleConstraintResult
     -- | Module-level identity supply after resolving/desugaring every root.
     mcrIdentityGenerator :: IdentityGenerator,
     mcrAnnSourceTypes :: IntMap.IntMap NormSrcType,
+    mcrAnnExpectedTypes :: IntMap.IntMap ElabType,
     mcrExactProducerTypes :: IntMap.IntMap ResolvedSrcType,
     mcrSourceTypeBinderIdentities :: IntMap.IntMap TypeBinderIdentity,
     mcrInitialEnv :: Env,

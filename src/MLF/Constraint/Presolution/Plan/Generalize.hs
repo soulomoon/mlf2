@@ -34,7 +34,7 @@ testable independently of the elaboration pipeline.
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (listToMaybe)
+import Data.Maybe (listToMaybe, maybeToList)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Plan.BinderPlan
@@ -80,6 +80,7 @@ import MLF.Constraint.Presolution.Plan.Target
     GammaPlanInput (..),
     TargetPlan (..),
     TargetPlanInput (..),
+    ReifyRootSource (..),
     TypeRootPlan (..),
     TypeRootPlanInput (..),
     buildGammaPlan,
@@ -89,6 +90,9 @@ import MLF.Constraint.Presolution.Plan.Target
 import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Named (softenCanonicalBindParentsUnder)
+import MLF.Reify.Type (reifyTypeWithRefsNoFallback)
+import MLF.Reify.TypeOps (freeTypeVarRefsType)
+import MLF.Types.Elab (typeBinderRefsSameIdentity)
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
@@ -150,6 +154,7 @@ planGeneralizeAt
     ctx <- resolveContext env bindParentsSoft scopeRoot targetNode
     let GeneralizeCtx
           { gcTarget0 = target0,
+            gcTargetBase = targetBase,
             gcScopeRootC = scopeRootC,
             gcOrderRoot = orderRoot,
             gcTypeRoot0 = typeRoot0,
@@ -577,6 +582,7 @@ planGeneralizeAt
                 trpiTargetIsTyVar = targetIsTyVar,
                 trpiTargetBoundUnderOtherGen = targetBoundUnderOtherGen,
                 trpiNamedUnderGaSet = namedUnderGaSet,
+                trpiRequiredGammaKeys = IntSet.fromList (IntMap.keys requiredGamma),
                 trpiTypeRoot0 = typeRoot0,
                 trpiTypeRootFromBoundVar = typeRootFromBoundVar,
                 trpiTypeRootHasNamedOutsideGamma = typeRootHasNamedOutsideGamma,
@@ -591,10 +597,249 @@ planGeneralizeAt
               }
         TypeRootPlan
           { trTargetIsBaseLike = targetIsBaseLike,
-            trTypeRoot = typeRoot
+            trTypeRoot = typeRoot,
+            trReifyRootSource = reifyRootSource
           } = typeRootPlan
     reachableType <- Right (reachableFromWithBounds typeRoot)
     reachableTypeStructural <- Right (reachableFromStructural typeRoot)
+    let reachableForBinderPlan =
+          case (reifyRootSource, mbBindParentsGaInfo) of
+            (ReifyBaseSchemeRoot baseRoot, Just ga) ->
+              IntSet.union
+                reachableForBinders
+                (projectBaseBinderReachability ga baseRoot)
+            _ -> reachableForBinders
+        escapedFrozenForallBinders =
+          case (reifyRootSource, mbBindParentsGaInfo) of
+            (ReifyLiveRoot _, Just ga) ->
+              case
+                  IntMap.lookup
+                    (canonKey typeRoot)
+                    solvedToBasePref
+              of
+                Just baseRoot ->
+                  IntMap.elems $
+                    IntMap.fromList
+                      [ (canonKey liveBinder, liveBinder)
+                      | baseKey <-
+                          IntSet.toList
+                            (baseReachableFromWithBounds ga baseRoot)
+                      , let baseBinder = NodeId baseKey
+                      , Just TyVar {} <-
+                          [ lookupNodeIn
+                              (cNodes (gbiBaseConstraint ga))
+                              baseBinder
+                          ]
+                      , Just (TypeRef baseOwner, BindFlex) <-
+                          [ IntMap.lookup
+                              (nodeRefKey (typeRef baseBinder))
+                              (gbiBindParentsBase ga)
+                          ]
+                      , Just TyForall {} <-
+                          [ lookupNodeIn
+                              (cNodes (gbiBaseConstraint ga))
+                              baseOwner
+                          ]
+                      , not
+                          ( frozenForallOwnerSurvives
+                              ga
+                              baseOwner
+                          )
+                      , liveBinder <-
+                          projectedLiveBinders
+                            ga
+                            baseBinder
+                      , IntSet.member
+                          (canonKey liveBinder)
+                          reachableType
+                      , Just TyVar {} <-
+                          [lookupNodeInMap nodes liveBinder]
+                      ]
+                Nothing -> []
+            _ -> []
+        projectedLiveBinders ga baseBinder =
+          IntMap.elems $
+            IntMap.fromList
+              ( directProjection ++ reversePreferredProjections )
+          where
+            directProjection =
+              [ (canonKey projected, canonical projected)
+              | projected <-
+                  maybeToList
+                    ( IntMap.lookup
+                        (getNodeId baseBinder)
+                        (gbiBaseToSolved ga)
+                    )
+              ]
+            reversePreferredProjections =
+              [ (liveKey, NodeId liveKey)
+              | liveKey <- IntSet.toList reachableType
+              , IntMap.lookup liveKey solvedToBasePref
+                  == Just baseBinder
+              ]
+        frozenForallOwnerSurvives ga baseOwner =
+          case
+              IntMap.lookup
+                (getNodeId baseOwner)
+                (gbiBaseToSolved ga)
+          of
+            Just projectedOwner ->
+              let liveOwner = canonical projectedOwner
+              in IntSet.member
+                    (canonKey liveOwner)
+                    reachableType
+                  && case lookupNodeInMap nodes liveOwner of
+                    Just TyForall {} -> True
+                    _ -> False
+            Nothing -> False
+        projectBaseBinderReachability ga baseRoot =
+          IntSet.fromList
+            [ canonKey liveNode
+            | baseKey <-
+                IntSet.toList
+                  (baseReachableFromWithBounds ga baseRoot),
+              let baseNode = NodeId baseKey,
+              Just TyVar {} <-
+                [lookupNodeIn (cNodes (gbiBaseConstraint ga)) baseNode],
+              Just liveNode <- [projectBaseNode ga baseNode],
+              Just TyVar {} <- [lookupNodeInMap nodes liveNode]
+            ]
+        projectBaseNode ga baseNode =
+          let baseKey = getNodeId baseNode
+              solvedNode =
+                case IntMap.lookup baseKey (gbiBaseToSolved ga) of
+                  Just solved -> Just solved
+                  Nothing
+                    | IntMap.member baseKey nodes -> Just baseNode
+                    | otherwise -> Nothing
+           in canonical <$> solvedNode
+        baseReachableFromWithBounds ga baseRoot =
+          let baseConstraint = gbiBaseConstraint ga
+              baseNodes = cNodes baseConstraint
+              baseSchemeOwner bnd =
+                case
+                    IntMap.lookup
+                      (getNodeId bnd)
+                      schemeRootOwnerBase
+                  of
+                    Just owner -> Just owner
+                    Nothing -> do
+                      root <-
+                        IntMap.lookup
+                          (getNodeId bnd)
+                          schemeRootByBodyBase
+                      IntMap.lookup
+                        (getNodeId root)
+                        schemeRootOwnerBase
+              boundIsTargetSchemeBody bnd =
+                case
+                    IntMap.lookup
+                      (getNodeId bnd)
+                      schemeRootByBodyBase
+                  of
+                    Just root -> root == targetBase
+                    Nothing -> False
+              allowBaseBoundTraversal bnd =
+                case baseSchemeOwner bnd of
+                  Nothing -> True
+                  Just owner ->
+                    Just owner == scopeGen
+                      || boundIsTargetSchemeBody bnd
+              children baseNode =
+                case lookupNodeIn baseNodes baseNode of
+                  Just node@TyVar {tnBound = Just bnd}
+                    | allowBaseBoundTraversal bnd ->
+                        structuralChildrenWithBounds node
+                  Just node -> structuralChildren node
+                  Nothing -> []
+           in reachableFrom getNodeId id children baseRoot
+        sourceRefForLiveKey liveKey =
+          case IntMap.lookup liveKey sourceBinderRefs of
+            Just sourceRef -> Just sourceRef
+            Nothing -> do
+              baseNode <- IntMap.lookup liveKey solvedToBasePref
+              IntMap.lookup (getNodeId baseNode) sourceBinderRefs
+        sourceFacingSubst =
+          IntMap.union
+            ( IntMap.fromList
+                [ (sourceKey, sourceRef)
+                | (sourceKey, sourceRef) <-
+                    IntMap.toList sourceBinderRefs
+                , Just _ <-
+                    [lookupNodeInMap nodes (NodeId sourceKey)]
+                ]
+            )
+            ( IntMap.fromList
+                [ (liveKey, sourceRef)
+                | liveKey <- IntSet.toList reachableType
+                , Just sourceRef <- [sourceRefForLiveKey liveKey]
+                ]
+            )
+        reachableSourceRefs =
+          [ sourceRef
+          | liveKey <- IntSet.toList reachableType
+          , Just sourceRef <- [sourceRefForLiveKey liveKey]
+          ]
+    escapedSourceBinderOccurrences <-
+      case reifyRootSource of
+        ReifyLiveRoot liveRoot
+          | not (IntMap.null sourceFacingSubst) -> do
+              sourceFacingType <-
+                reifyTypeWithRefsNoFallback
+                  resForReify
+                  sourceFacingSubst
+                  (canonical liveRoot)
+              let freeSourceRefs =
+                    freeTypeVarRefsType sourceFacingType
+                  escapedOccurrences =
+                    IntMap.elems $
+                      IntMap.fromList
+                        ( [ (sourceKey, sourceNode)
+                          | (sourceKey, sourceRef) <-
+                              IntMap.toList sourceBinderRefs
+                          , let sourceNode = NodeId sourceKey
+                          , Just TyVar {} <-
+                              [lookupNodeInMap nodes sourceNode]
+                          , any
+                              (typeBinderRefsSameIdentity sourceRef)
+                              reachableSourceRefs
+                          , any
+                              (typeBinderRefsSameIdentity sourceRef)
+                              freeSourceRefs
+                          , not
+                              ( any
+                                  (typeBinderRefsSameIdentity sourceRef)
+                                  (grAmbientBinderRefs requirements)
+                              )
+                          ]
+                            ++ [ (liveKey, liveNode)
+                               | liveKey <- IntSet.toList reachableType
+                               , let liveNode = NodeId liveKey
+                               , Just TyVar {} <-
+                                   [lookupNodeInMap nodes liveNode]
+                               , Just sourceRef <-
+                                   [sourceRefForLiveKey liveKey]
+                               , any
+                                   (typeBinderRefsSameIdentity sourceRef)
+                                   freeSourceRefs
+                               , not
+                                   ( any
+                                       (typeBinderRefsSameIdentity sourceRef)
+                                       (grAmbientBinderRefs requirements)
+                                   )
+                               ]
+                        )
+              traceGeneralizeM
+                env
+                ( "generalizeAt: source-facing target="
+                    ++ show sourceFacingType
+                    ++ " source subst="
+                    ++ show sourceFacingSubst
+                    ++ " escaped source occurrences="
+                    ++ show escapedOccurrences
+                )
+              pure escapedOccurrences
+        _ -> pure []
     let orderBinderCandidatesFor =
           orderBinderCandidates
             (geDebugEnabled env)
@@ -605,7 +850,7 @@ planGeneralizeAt
             orderRootBaseForBinders
     binderPlan <-
       buildBinderPlan
-        BinderPlanInput
+        ( BinderPlanInput
           { bpiDebugEnabled = geDebugEnabled env,
             bpiConstraint = constraint,
             bpiNodes = nodes,
@@ -630,9 +875,18 @@ planGeneralizeAt
             bpiNamedUnderGaSet = namedUnderGaSet,
             bpiSolvedToBasePref = solvedToBasePref,
             bpiReachable = reachable,
-            bpiReachableForBinders = reachableForBinders,
+            -- Binder membership must use the same graph domain selected for
+            -- S'. A frozen base scheme can retain a source variable that is
+            -- no longer reachable from its solved live root; project that
+            -- exact base reachability through frozen base-to-solved
+            -- provenance before filtering candidates.
+            bpiReachableForBinders = reachableForBinderPlan,
             bpiReachableType = reachableType,
             bpiReachableTypeStructural = reachableTypeStructural,
+            bpiEscapedFrozenForallBinders =
+              escapedFrozenForallBinders,
+            bpiEscapedSourceBinderOccurrences =
+              escapedSourceBinderOccurrences,
             bpiTypeRoot0 = typeRoot0,
             bpiTypeRoot = typeRoot,
             bpiTypeRootFromBoundVar = typeRootFromBoundVar,
@@ -646,6 +900,7 @@ planGeneralizeAt
             bpiIsNestedSchemeBound = isNestedSchemeBound,
             bpiSchemeRootKeySet = schemeRootKeySet,
             bpiSchemeRootByBody = schemeRootByBody,
+            bpiSchemeRootOwner = schemeRootOwner,
             bpiSchemeRootOwnerBase = schemeRootOwnerBase,
             bpiSchemeRootByBodyBase = schemeRootByBodyBase,
             bpiAliasBinderBases = aliasBinderBases,
@@ -653,8 +908,11 @@ planGeneralizeAt
             bpiRequiredGamma = requiredGamma,
             bpiLocallyClosedGammaNodes = grLocallyClosedGammaNodes requirements,
             bpiSourceBinderRefs = sourceBinderRefs,
-            bpiAmbientBinderRefs = grAmbientBinderRefs requirements
+            bpiAmbientBinderRefs = grAmbientBinderRefs requirements,
+            bpiTermUsedRootBinderRefs =
+              grTermUsedRootBinderRefs requirements
           }
+        )
     pure
       GeneralizePlan
         { gpEnv = env,
