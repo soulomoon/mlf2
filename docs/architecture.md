@@ -347,6 +347,12 @@ runtime invariants as compile-time types:
 - The old public program re-export shim has been retired. `.mlfp` parsing and pretty-printing are owned by `MLF.API`; `.mlfp` checking and runtime are owned by `MLF.Pipeline`.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
+- `MLF.Elab.SourceType` is the sole normalized source-type to `ElabType`
+  conversion owner. Annotation preparation and Algebra delegate directly;
+  external-binding preparation supplies its required free-binder order and
+  consumes the exact refs returned by the same owner. Lexical binder scope is
+  carried through every recursive subtree, including constructor and
+  variable-application arguments in structural lower bounds.
 - `MLF.Elab.Run.Generalize.Prepare` owns the elaboration-side Generalization
   Preparation step. Its normal API exposes the abstract
   `PreparedGeneralizationArtifact` plus owner operations for prepared
@@ -722,6 +728,66 @@ semantics that are not represented elsewhere just as explicitly.”
   capability; `ElabEnv`, `AnnotationContext`, and `AlgebraContext` cannot
   install annotation types and replay artifacts as independent fields, and
   there is no post-construction validation pass that repairs their association.
+- Root instantiation edges carry tagged exact endpoints: producer endpoints
+  still require packet projection from `Typ(a')`, whereas operated endpoints
+  are already the checked occurrence's `S'(operated)`. Direct application
+  Gamma construction routes its provisional bounds into that endpoint's
+  source-identity domain before selecting and emitting a declaration. Root
+  publication consumes a root-local filtered route carrier rather than the
+  aggregate occurrence-local annotation map, preventing a child-owned forall
+  from becoming an enclosing root binder. Exactness of a structured producer
+  does not transfer ownership of every nested result declaration: any prepared
+  packet mentioning an identity proves that the identity remains packet-owned,
+  and only the packet selected by this exact edge may authorize its closed
+  presolution projection. A sibling or descendant packet may block premature
+  inlining but cannot authorize this edge to consume the identity; an open
+  projection stays at its lexical Gamma owner.
+- Lambda construction keeps a child-local exact body endpoint distinct from a
+  completed inherited endpoint owned by the enclosing lambda. Once a checked
+  child publishes an owner-final construction certificate, that endpoint is
+  the enclosing constructor's body source; its earlier graph-edge computation
+  is not replayed. A descendant `BodyConsumerBoundRefinementCertificate` may
+  close an opened leading bounded declaration only when its private ordinary
+  owner route records the same completed declaration as the incoming,
+  operated, and construction-operated endpoint. The same private route may
+  preserve an already specialized owner endpoint only when the
+  construction-operated declaration equals the certified completed bound and
+  exact xMLF instantiation of the operated declaration reaches that endpoint.
+- A transparent `let x = lambda in x` may inherit an enclosing exact result
+  endpoint only after an independent owner-final pass identifies the same
+  terminal graph result and a closed returned construction. That pass is an
+  authorization certificate, not the let scheme: the graph plan still selects
+  the declaration spine, and the RHS is then constructed in that complete
+  Gamma so `Hyp` is emitted at the value boundary. Administrative child-lambda
+  completion accepts either a direct lambda owner or the unique lambda in an
+  application/let returned-result certificate chain whose constructed endpoint
+  is the checked body source. It never discovers the lambda from arrow shape.
+- A root that carries both an application certificate and the returned
+  result's owner-final certificate applies those authorities in construction
+  order. The application projects only its own Gamma; the returned owner then
+  projects the exact bound payload for each uniquely routed local declaration
+  before root/local partitioning. This projection preserves the planner's
+  binder identity, order, and body. A route with no matching construction
+  binder or more than one matching binder is rejected, so neither type shape
+  nor a post-construction lambda rewrite can supply the missing authority.
+- An inherited ambient `BodyConsumerBoundRefinementCertificate` advances the
+  construction route at declaration installation time, before construction
+  Gamma requirements are planned. Its private `BodyConsumerInheritedAmbient`
+  authority must prove the semantic exterior, exact construction target,
+  previous bound, completed bound, and unique bindings. The installer then
+  routes both the exterior node and target node to the completed ambient ref,
+  composes routes ending at the provisional semantic ref, retires the exact
+  inverse rename, and rejects any route to a third identity. Thus later
+  construction cannot rediscover and emit a stale `Hyp` for the provisional
+  graph declaration.
+- When a completed administrative lambda packet retains one declaration both
+  in its outer construction Gamma and along a returned-lambda codomain, the
+  exact identity and bound authorize opening the nested occurrence before the
+  endpoint is published. This operation follows value-arrow codomains to any
+  depth, never arrow domains, and leaves a different identity or bound for the
+  ordinary exact constructor to reject. The child term therefore performs the
+  corresponding M/N movement under one outer declaration rather than
+  constructing two lexical binders with the same identity.
 - Φ/Ω consumes one of those packets through the opaque
   `PhiReplayCertificate`. Annotation/result-type consumers, identity-edge
   recognition, root-`RaiseMerge` authority, and occurrence translation carry
@@ -763,9 +829,13 @@ semantics that are not represented elsewhere just as explicitly.”
   `SchemeClosureAuthority` admits free binder identities only through an exact
   ambient, inherited Γ, or locally closed Γ capability. Generalization outer
   binders additionally pass through the opaque `FinalizeBinderPlan`, which
-  pairs the planner order with its reified bounds once; finalization cannot
-  manufacture a forall for a residual ref. Let publication and prepared-root
-  closure revalidate the composed scheme at their authoritative boundaries.
+  pairs the planner order with its reified bounds once. The binder planner
+  retains the unsoftened binding colours used by final rigid inlining and
+  closes over identities exposed by each reachable rigid bound before that
+  reification step. Finalization therefore cannot discover a new free
+  identity or manufacture a forall for a residual ref. Let publication and
+  prepared-root closure revalidate the composed scheme at their authoritative
+  boundaries.
 
 ## Executable
 

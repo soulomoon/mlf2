@@ -50,7 +50,6 @@ module MLF.Elab.Run.Pipeline
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Concurrent
   ( forkIO,
     newEmptyMVar,
@@ -64,7 +63,6 @@ import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.Conc (getNumCapabilities, getNumProcessors, setNumCapabilities)
@@ -91,8 +89,7 @@ import MLF.Constraint.RootOwnership
     ownersForNode,
   )
 import MLF.Constraint.Types.Graph
-  ( BaseTy (..),
-    BindFlag,
+  ( BindFlag,
     Constraint (..),
     EdgeId (..),
     GenNode,
@@ -179,6 +176,7 @@ import MLF.Elab.Run.Generalize.Prepare
     preparedResultTypeViewReady,
     stripPreparedWitnesslessAuthoritativeAnn,
   )
+import qualified MLF.Elab.SourceType as SourceType
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
     constructTermWithInterleavedSchemeSubstRefsAtPublication,
@@ -213,10 +211,9 @@ import MLF.Frontend.ConstraintGen
     generateModuleConstraintsKeyedWithExternalBindingsAndTypeIdentitiesFromSupply,
     generateModuleConstraintsKeyedWithResolvedExternalBindingsAndTypeIdentitiesFromSupply,
   )
-import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdentityMaps)
-import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
-import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, NormSurfaceExprOf, ResolvedNormSurfaceExpr, ResolvedSrcType, StructBound, VarName)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap, symbolUniqueIdentity)
+import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, NormSurfaceExprOf, ResolvedNormSurfaceExpr, ResolvedSrcType, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, matchTypeRefs)
 import MLF.Util.Timing
@@ -505,8 +502,8 @@ data PreparedRootFinalizationContext = PreparedRootFinalizationContext
     prfcPreparedGeneralization :: !PreparedGeneralizationArtifact
   }
 
-data DeferredRootExactAnnotation = DeferredRootExactAnnotation
-  { dreaEdgeId :: !EdgeId
+newtype DeferredRootExactAnnotation = DeferredRootExactAnnotation
+  { dreaEdgeId :: EdgeId
   }
 
 data RootElaborationPlan
@@ -3755,8 +3752,17 @@ externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindi
 srcTypeToElabSchemeWithFresh :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabScheme, Map.Map String TypeBinderIdentity, IdentityGenerator)
 srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy = do
   let freeNames = freeSrcTypeVarsInOrder srcTy
-      (refs, generator1) = sourceTypeBinderRefsFromIdentities binderIdentities freeNames generator0
-  (ty, generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 srcTy
+  (ty, refs, generator2) <-
+    either
+      (Left . sourceTypeElabConstraintError)
+      Right
+      ( SourceType.sourceTypeToElabTypeWithFreeBinderOrderFromSupply
+          generator0
+          headIdentities
+          binderIdentities
+          freeNames
+          srcTy
+      )
   let explicitScheme = schemeFromType ty
       explicitRefs = map fst (schemeBinderRefs explicitScheme)
       freeBinds =
@@ -3780,6 +3786,14 @@ srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy = 
       inferredBinderIdentities,
       generator2
     )
+
+sourceTypeElabConstraintError :: ElabError -> ConstraintError
+sourceTypeElabConstraintError err =
+  case err of
+    InstantiationError message -> InternalConstraintError message
+    _ ->
+      InternalConstraintError
+        ("source type elaboration failed: " ++ show err)
 
 -- | Recover the exact identities allocated for binder declarations while
 -- preparing an external scheme.  Constraint generation internalizes the
@@ -3841,120 +3855,3 @@ freeSrcTypeVarsInOrder = orderedNub . collect Set.empty
     add (seen, acc) name
       | name `Set.member` seen = (seen, acc)
       | otherwise = (Set.insert name seen, name : acc)
-
-srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWith =
-  srcTypeToElabTypeWithBound Set.empty
-
-srcTypeToElabTypeWithBound ::
-  Set.Set String ->
-  Map.Map String SymbolIdentity ->
-  Map.Map String TypeBinderIdentity ->
-  Map.Map String TypeBinderRef ->
-  IdentityGenerator ->
-  NormSrcType ->
-  Either ConstraintError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator ty = case ty of
-  Surface.STVar name -> do
-    ref <- sourceTypeBinderRef refs name
-    Right (TVarRef ref, generator)
-  Surface.STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator1 cod
-    Right (TArrow dom' cod', generator2)
-  Surface.STBase name -> do
-    identity <- sourceTypeHeadIdentity name
-    Right (TBaseWithIdentity identity (builtinBaseTy name), generator)
-  Surface.STCon name args -> do
-    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
-    identity <- sourceTypeHeadIdentity name
-    Right (TConWithIdentity identity (builtinBaseTy name) args', generator')
-  Surface.STVarApp name args -> do
-    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
-    ref <- sourceTypeBinderRef refs name
-    Right (TVarAppRef ref args', generator')
-  Surface.STTyLam {} ->
-    Left (InternalConstraintError "residual type lambda reached elaboration")
-  Surface.STTyApp {} ->
-    Left (InternalConstraintError "residual type application reached elaboration")
-  Surface.STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        refs' = Map.insert name ref refs
-        boundNames' = Set.insert name boundNames
-     in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator2 body
-          Right (TForallRef ref mb' body', generator3)
-  Surface.STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        boundNames' = Set.insert name boundNames
-     in do
-          (body', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities (Map.insert name ref refs) generator1 body
-          Right (TMuRef ref body', generator2)
-  Surface.STBottom -> Right (TBottom, generator)
-  where
-    sourceTypeBinderRef env name =
-      case Map.lookup name env of
-        Just ref -> Right ref
-        Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
-
-    sourceTypeHeadIdentity name =
-      case lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name of
-        Just identity -> Right identity
-        Nothing -> Left (InternalConstraintError ("unresolved source type head `" ++ name ++ "` reached pipeline external binding preparation"))
-
-    srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
-      (argsRev, generator') <-
-        foldM
-          ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 gen next
-              Right (next' : acc, gen')
-          )
-          ([], generator1)
-          args
-      Right (arg' :| reverse argsRev, generator')
-
-    srcBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> Surface.SrcBound 'Surface.NormN -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
-    srcBoundToElabBoundWith boundNames' refs' generator0 (Surface.SrcBound boundTy) = structBoundToElabBoundWith boundNames' refs' generator0 boundTy
-
-    structBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
-    structBoundToElabBoundWith boundNames' refs' generator0 bTy = case bTy of
-      Surface.STArrow dom cod -> do
-        (dom', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator0 dom
-        (cod', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator1 cod
-        Right (Just (TArrow dom' cod'), generator2)
-      Surface.STBase name -> do
-        identity <- sourceTypeHeadIdentity name
-        Right (Just (TBaseWithIdentity identity (builtinBaseTy name)), generator0)
-      Surface.STCon name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
-        identity <- sourceTypeHeadIdentity name
-        Right (Just (TConWithIdentity identity (builtinBaseTy name) args'), generator1)
-      Surface.STVarApp name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
-        ref <- sourceTypeBinderRef refs' name
-        Right (Just (TVarAppRef ref args'), generator1)
-      Surface.STTyLam {} ->
-        Left (InternalConstraintError "residual type lambda reached elaboration")
-      Surface.STTyApp {} ->
-        Left (InternalConstraintError "residual type application reached elaboration")
-      Surface.STForall name mb body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') binderIdentities name generator0
-            refs'' = Map.insert name ref refs'
-            boundNames'' = Set.insert name boundNames'
-         in do
-              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames' refs' generator1) mb
-              (body', generator3) <- srcTypeToElabTypeWithBound boundNames'' headIdentities binderIdentities refs'' generator2 body
-              Right (Just (TForallRef ref mb' body'), generator3)
-      Surface.STMu name body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') binderIdentities name generator0
-            boundNames'' = Set.insert name boundNames'
-         in do
-              (body', generator2) <- srcTypeToElabTypeWithBound boundNames'' headIdentities binderIdentities (Map.insert name ref refs') generator1 body
-              Right (Just (TMuRef ref body'), generator2)
-      Surface.STBottom -> Right (Nothing, generator0)
-
-builtinBaseTy :: String -> BaseTy
-builtinBaseTy =
-  BaseTy . Builtins.normalizeBuiltinTypeReference

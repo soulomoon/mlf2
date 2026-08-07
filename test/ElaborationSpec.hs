@@ -8098,6 +8098,37 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               , Map.empty
               )
 
+      it "closes an opened parameter body only when its identities do not escape to a sibling" $ do
+        let paramNode = NodeId 992149
+            exactParamRef =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992150))
+                "a"
+            exactParamVar = ElabTypes.tVarWithRef exactParamRef
+            openedBody = Elab.TArrow exactParamVar exactParamVar
+            exactParamTy =
+              ElabTypes.tForallWithRef exactParamRef Nothing openedBody
+            sharedSiblingBound =
+              Elab.TArrow exactParamVar openedBody
+            independentSiblingBound =
+              Elab.TArrow (TestElab.tBase (BaseTy "Bool")) openedBody
+
+        AlgebraTestSupport.completeExactLambdaParamBoundaryBoundForTest
+          paramNode
+          exactParamTy
+          sharedSiblingBound
+          `shouldBe` Right sharedSiblingBound
+        AlgebraTestSupport.completeExactLambdaParamBoundaryBoundForTest
+          paramNode
+          exactParamTy
+          independentSiblingBound
+          `shouldBe`
+            Right
+              ( Elab.TArrow
+                  (TestElab.tBase (BaseTy "Bool"))
+                  exactParamTy
+              )
+
       it "keeps method-local forall and class identities at a polymorphic evidence boundary" $ do
         let paramNode = NodeId 992142
             classParamRef =

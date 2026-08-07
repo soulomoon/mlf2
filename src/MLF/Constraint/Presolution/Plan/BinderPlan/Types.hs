@@ -27,6 +27,10 @@ data BinderPlanInput p = BinderPlanInput
     , bpiCanonKey :: NodeId -> Int
     , bpiIsTyVarKey :: Int -> Bool
     , bpiBindParents :: BindParents
+    -- | Unsoftened binding colours consumed by final rigid inlining.  Binder
+    -- closure must account for identities that this later construction step
+    -- exposes from a rigid variable's bound.
+    , bpiRigidBindParents :: BindParents
     , bpiBindParentsGa :: Maybe (GaBindParentsInfo p)
     , bpiScopeRootC :: NodeRef
     , bpiScopeGen :: Maybe GenNodeId

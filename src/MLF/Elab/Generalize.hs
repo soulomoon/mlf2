@@ -32,6 +32,7 @@ module MLF.Elab.Generalize
     LocalGammaConstructor (..),
     LocalGammaOwner (..),
     localGammaOwnerOccursIn,
+    localGammaOwnerEncloses,
     LocalGammaFrame,
     lgfOwner,
     lgfDirectEdgeSources,
@@ -81,6 +82,7 @@ module MLF.Elab.Generalize
     freshenSchemeInfoBinderNamesAgainst,
     placeSubtermGeneralizationBinders,
     placeSubtermGeneralizationBindersWithRoutes,
+    publishPlacedSubtermConstructionBinderOrder,
     PlacedSubtermBinders,
     placedSubtermBinderScheme,
     placedSubtermCopiedBinderRoutes,
@@ -98,8 +100,16 @@ module MLF.Elab.Generalize
     rootRaiseMergeAuthorityForExpression,
     rootRaiseMergeExteriorIdentityFor,
     rootRaiseMergeExteriorOwnedByScope,
+    RootEdgeExactEndpoint (..),
+    rootEdgeExactEndpointType,
+    mapRootEdgeExactEndpoint,
     generalizationRequirementsForRootEdges,
+    LexicalTypeAbsClosure,
+    mkLexicalTypeAbsClosure,
     generalizationRequirementsForRootEdgesInConstruction,
+    generalizationRequirementsForRootEdgesInConstructionWithLexicalClosures,
+    generalizationRequirementsForRootExactEdgesInConstruction,
+    generalizationRequirementsForRootExactEdgesInConstructionWithLexicalClosures,
     generalizationRequirementsForEnclosingRootEdges,
     resolveFrozenOperatedOccurrenceEndpoint,
     resolveAmbientGammaOperatedEndpoint,
@@ -116,8 +126,11 @@ module MLF.Elab.Generalize
     subtermGeneralizationCompilerExactBinderRenames,
     subtermGeneralizationConstructionBinderRenames,
     subtermGeneralizationExactConsumerSpecialization,
+    subtermGeneralizationSourceOwnerConsumerCompletion,
+    subtermGeneralizationSourceOwnerFinalConsumerCompletion,
     subtermGeneralizationOpaqueResultConstruction,
     subtermGeneralizationOpaqueResultConstructionPlan,
+    subtermGeneralizationOpaqueResultSourceLambdaCompletion,
     subtermGeneralizationCopiedBinderRoutes,
     subtermGeneralizationPlacedCopiedBinderRoutes,
     subtermGeneralizationInheritedGammaRoutes,
@@ -126,6 +139,8 @@ module MLF.Elab.Generalize
     withPlacedCopiedBinderRoutes,
     withSourceLambdaParameter,
     withExactConsumerSpecialization,
+    withSourceOwnerConsumerCompletion,
+    withSourceOwnerFinalConsumerCompletion,
     withOpaqueResultConstruction,
     publishSubtermGammaConstructionSourceSchemeInfo,
     withCompilerExactBinderRenames,
@@ -144,15 +159,22 @@ module MLF.Elab.Generalize
     subtermGeneralizationSourceLambdaParameter,
     subtermGeneralizationApplicationSourceLambdaParameter,
     subtermGeneralizationAdministrativeLambdaResultConstruction,
+    subtermGeneralizationSourceStagedAdministrativeLambdaResultConstruction,
+    subtermGeneralizationGammaBoundHasNestedSourceDeclaration,
     subtermGeneralizationSourceLambdaResultConstruction,
     subtermGeneralizationApplicationSourceLambdaResultConstruction,
+    directAdministrativeLambdaApplicationResultConstructionFor,
+    directAdministrativeLambdaApplicationSourceOwnerCompletionFor,
     subtermGeneralizationGammaBoundSchemeForConsumer,
     subtermGeneralizationOperatedSchemeForConsumer,
     subtermGeneralizationLocalConsumerClosure,
     subtermGeneralizationOwnsGammaEdge,
     subtermGeneralizationOwnsGammaForEdge,
+    DirectLambdaApplicationResultConstruction (..),
+    directLambdaApplicationResultConstructionType,
     directLambdaApplicationResultConstructionFor,
     subtermResultOwnershipFor,
+    subtermResultOwnershipForResolvedLetAlias,
     subtermResultOwnershipConsumerClosedLocally,
     subtermResultOwnershipLocalSourceDeclarationRefs,
     subtermResultOwnershipHasTransparentPath,
@@ -165,6 +187,7 @@ module MLF.Elab.Generalize
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad (foldM, guard, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -332,7 +355,7 @@ localGammaOwnerOccursIn :: LocalGammaOwner -> AnnExpr -> Bool
 localGammaOwnerOccursIn owner = go
   where
     go ann =
-      ownerMatches ann
+      localGammaOwnerMatches owner ann
         || case ann of
           AResolvedVar {} -> False
           ALit {} -> False
@@ -344,25 +367,53 @@ localGammaOwnerOccursIn owner = go
           ALetScope inner _ _ -> go inner
           AUnfold inner _ _ -> go inner
 
-    ownerMatches ann =
-      case ann of
-        ALam _ _ _ lambdaScope _ bodyEdge lambdaNode ->
-          lgoConstructor owner == LocalLambdaGamma
-            && lgoBoundaryEdge owner == bodyEdge
-            && lgoTermNode owner == lambdaNode
-            && lgoScope owner == GenRef lambdaScope
-        AApp _ _ funSite _ applicationNode ->
-          lgoConstructor owner == LocalApplicationGamma
-            && lgoBoundaryEdge owner == instantiationSiteEdgeId funSite
-            && lgoTermNode owner == applicationNode
-        ALet _ _ _ _ _ _ _ body resultNode ->
-          lgoConstructor owner == LocalLetGamma
-            && case body of
-              ALetScope _ _ edgeId ->
-                lgoBoundaryEdge owner == edgeId
-                  && lgoTermNode owner == resultNode
-              _ -> False
-        _ -> False
+-- | Whether one exact source constructor lexically encloses another.  This is
+-- stronger than sharing a graph scope: the outer occurrence must be found in
+-- the annotated source tree, and the nested occurrence must occur in that
+-- constructor's actual subtree.
+localGammaOwnerEncloses
+  :: LocalGammaOwner
+  -> LocalGammaOwner
+  -> AnnExpr
+  -> Bool
+localGammaOwnerEncloses outerOwner nestedOwner = go
+  where
+    go ann
+      | localGammaOwnerMatches outerOwner ann =
+          outerOwner /= nestedOwner
+            && localGammaOwnerOccursIn nestedOwner ann
+      | otherwise =
+          case ann of
+            AResolvedVar {} -> False
+            ALit {} -> False
+            ALam _ _ _ _ body _ _ -> go body
+            AApp fun argument _ _ _ -> go fun || go argument
+            ALet _ _ _ _ _ _ rhs body _ -> go rhs || go body
+            AExactAnn inner _ _ _ -> go inner
+            AAnn inner _ _ -> go inner
+            ALetScope inner _ _ -> go inner
+            AUnfold inner _ _ -> go inner
+
+localGammaOwnerMatches :: LocalGammaOwner -> AnnExpr -> Bool
+localGammaOwnerMatches owner ann =
+  case ann of
+    ALam _ _ _ lambdaScope _ bodyEdge lambdaNode ->
+      lgoConstructor owner == LocalLambdaGamma
+        && lgoBoundaryEdge owner == bodyEdge
+        && lgoTermNode owner == lambdaNode
+        && lgoScope owner == GenRef lambdaScope
+    AApp _ _ funSite _ applicationNode ->
+      lgoConstructor owner == LocalApplicationGamma
+        && lgoBoundaryEdge owner == instantiationSiteEdgeId funSite
+        && lgoTermNode owner == applicationNode
+    ALet _ _ _ _ _ _ _ body resultNode ->
+      lgoConstructor owner == LocalLetGamma
+        && case body of
+          ALetScope _ _ edgeId ->
+            lgoBoundaryEdge owner == edgeId
+              && lgoTermNode owner == resultNode
+          _ -> False
+    _ -> False
 
 -- | Construction proof retained for the identity case of a lambda-body
 -- instantiation edge.  The source scope/body/result roots are frozen before
@@ -688,6 +739,20 @@ desugaredAnnotatedLambdaBody ownerDetails body =
         AExactAnn inner _ _ _ -> annotationRefersTo expectedDetails inner
         ALetScope inner _ _ -> annotationRefersTo expectedDetails inner
         AUnfold inner _ _ -> annotationRefersTo expectedDetails inner
+        _ -> False
+
+-- | Whether a let's result is exactly its own resolved binding occurrence.
+-- The constraint-only let-scope wrapper does not change that identity.  No
+-- name comparison or type-shape comparison participates in this decision.
+letBodyReturnsResolvedBinding :: IdDetails -> AnnExpr -> Bool
+letBodyReturnsResolvedBinding expectedDetails = aliasBody
+  where
+    aliasBody ann =
+      case ann of
+        AResolvedVar actualDetails _ _ ->
+          idDetailsIdentityKey actualDetails
+            == idDetailsIdentityKey expectedDetails
+        ALetScope inner _ _ -> aliasBody inner
         _ -> False
 
 -- | Decompose exactly one annotated source layer into its local-Gamma owner,
@@ -1334,6 +1399,21 @@ data PreparedSubtermGeneralization = PreparedSubtermGeneralization
   -- missing binder.
   , psgExactConsumerSpecialization
       :: Maybe ExactConsumerSpecialization
+  -- A paired source/canonical owner walk can determine the exact endpoint of
+  -- an enclosing lambda before its recursively elaborated child is checked.
+  -- Retain that construction authority when the packet's frozen operated
+  -- view places a returned result declaration at a different lexical depth.
+  -- The child must later validate this endpoint with its owner-final
+  -- construction; the certificate never derives an endpoint from a checked
+  -- final type.
+  , psgSourceOwnerConsumerCompletion
+      :: Maybe SourceOwnerConsumerCompletion
+  -- A paired source/canonical owner walk may also determine the complete
+  -- result endpoint published by an enclosing owner.  This is distinct from
+  -- the body endpoint above: root-edge grouping uses it only to select an
+  -- already-present requirement with that exact endpoint.
+  , psgSourceOwnerFinalConsumerCompletion
+      :: Maybe SourceOwnerConsumerCompletion
   -- A source/canonical lockstep walk can prove that an opaque nested-lambda
   -- carrier has already been replaced by its completed descendant packet.
   -- Retain that exact endpoint so term elaboration reuses the construction
@@ -1441,6 +1521,34 @@ data SubtermResultOwnership = SubtermResultOwnership
   , sroPacket :: !PreparedSubtermGeneralization
   }
   deriving (Eq, Show)
+
+data SourceOwnerConsumerCompletion =
+  SourceOwnerConsumerCompletion
+    { soccAuthority :: !SubtermConsumerAuthority
+    , soccOwner :: !LocalGammaOwner
+    , soccFrozenOperatedType :: !ElabType
+    , soccExpectedEndpoint :: !ElabType
+    }
+  deriving (Eq, Show)
+
+-- | Positive construction evidence for the result of a direct source-lambda
+-- application.  A packet-local Gamma result and an enclosing-consumer
+-- Eq-Free result have different consequences for the lambda child: only the
+-- latter proves the complete returned-lambda parameter spine before that
+-- child is checked.  Keep that distinction in the value instead of asking the
+-- application elaborator to rediscover it from two equal-looking types.
+data DirectLambdaApplicationResultConstruction
+  = DirectLambdaPacketGammaResultConstruction !ElabType
+  | DirectLambdaEnclosingConsumerEqFreeResultConstruction !ElabType
+  deriving (Eq, Show)
+
+directLambdaApplicationResultConstructionType
+  :: DirectLambdaApplicationResultConstruction
+  -> ElabType
+directLambdaApplicationResultConstructionType construction =
+  case construction of
+    DirectLambdaPacketGammaResultConstruction resultTy -> resultTy
+    DirectLambdaEnclosingConsumerEqFreeResultConstruction resultTy -> resultTy
 
 -- | Construction-time authority for Figure 15.3.4's root
 -- @RaiseMerge(r,m)@ case.  Both nodes stay in the frozen source-domain
@@ -1792,6 +1900,7 @@ prepareRootRaiseMergeSchemeWithPlacement resultPlacement artifacts edgeId requir
   case mAuthority of
     Nothing -> pure schemeInfo
     Just authority -> do
+      validateUnnormalizedExteriorProvenance authority schemeInfo
       let normalizedSchemeInfo =
             -- Opaque source constructions can expose a leading forall spine
             -- inside 'schemeBody'.  It is still the current constructor's
@@ -1807,6 +1916,31 @@ prepareRootRaiseMergeSchemeWithPlacement resultPlacement artifacts edgeId requir
       requirement <- requiredGammaBinderForRootRaiseMerge edgeId authority requirements
       constructExteriorResult authority requirement validated
   where
+    -- Attaching the exterior substitution quotients graph binders by design.
+    -- Reject contradictory input before that construction step can erase the
+    -- evidence: an explicit exterior binder cannot coexist with a route that
+    -- assigns the same graph node to a different semantic identity.
+    validateUnnormalizedExteriorProvenance authority info =
+      case IntMap.lookup exteriorKey (siSubstRefs info) of
+        Just routedRef
+          | typeBinderRefIdentity routedRef /= exteriorIdentity
+          , any
+              ((== exteriorIdentity) . typeBinderRefIdentity . fst)
+              (schemeBinderRefs (siScheme info)) ->
+              Left
+                ( ValidationFailed
+                    [ "root RaiseMerge Gamma alias was not quotiented to S(operated)"
+                    , "  exterior: " ++ show exterior
+                    , "  routed ref: " ++ show routedRef
+                    , "  surviving exterior identity: " ++ show exteriorIdentity
+                    ]
+                )
+        _ -> Right ()
+      where
+        exterior = rrmaExterior authority
+        exteriorKey = getNodeId exterior
+        exteriorIdentity = typeBinderIdentityFromNode exterior
+
     -- Figure 15.3.5 constructs the result of the edge-owned body computation
     -- at the fresh exterior, not at S'(operated).  The edge authority already
     -- identifies that position: it is the whole packet result at a body
@@ -1886,6 +2020,12 @@ prepareRootRaiseMergeSchemeWithPlacement resultPlacement artifacts edgeId requir
           pure
             ( rebuildSchemeInfoFromRefSubst
                 info
+                  { siConstructionBinderOrderRefs =
+                      IntMap.insert
+                        (getNodeId exterior)
+                        exteriorRef
+                        (siConstructionBinderOrderRefs info)
+                  }
                 (mkElabSchemeWithRefs retainedBinders bodyConstructed)
                 (siSubstRefs info)
             )
@@ -2172,10 +2312,20 @@ subtermGeneralizationConsumerProjectionSchemeInfo
 subtermGeneralizationConsumerProjectionSchemeInfo packet =
   case psgConsumerAuthority packet of
     Just EnclosingGammaConsumerAuthority{} ->
-      rebuildSchemeInfoFromRefSubst
-        projectionAuthority
-        (psgGammaBoundScheme packet)
-        projectionRefs
+      projected
+        { siSourceBinderOrderRefs =
+            retainedOrderRoutes
+              ( IntMap.union
+                  (siSourceBinderOrderRefs constructionInfo)
+                  (siSourceBinderOrderRefs operatedInfo)
+              )
+        , siConstructionBinderOrderRefs =
+            retainedOrderRoutes
+              ( IntMap.union
+                  (siConstructionBinderOrderRefs constructionInfo)
+                  (siConstructionBinderOrderRefs operatedInfo)
+              )
+        }
     _ ->
       psgOperatedSchemeInfo packet
   where
@@ -2193,6 +2343,24 @@ subtermGeneralizationConsumerProjectionSchemeInfo packet =
         ( IntMap.union
             (siSubstRefs constructionInfo)
             (siSubstRefs operatedInfo)
+        )
+    projected =
+      rebuildSchemeInfoFromRefSubst
+        projectionAuthority
+        (psgGammaBoundScheme packet)
+        projectionRefs
+    projectedDeclarationRefs =
+      typeBinderDeclarationRefs gammaType
+    retainedOrderRoutes =
+      IntMap.filterWithKey
+        ( \nodeKey orderedRef ->
+            any
+              (typeBinderRefsSameIdentity orderedRef)
+              projectedDeclarationRefs
+              && maybe
+                False
+                (typeBinderRefsSameIdentity orderedRef)
+                (IntMap.lookup nodeKey (siSubstRefs projected))
         )
 
 -- | Exact original-identity to fresh-copy routes allocated when this packet
@@ -2459,6 +2627,89 @@ subtermGeneralizationExactConsumerSpecialization packet = do
     , exactBinderSpineInstantiation (ecsPlan certificate)
     )
 
+-- | Revalidate the source-owner endpoint sealed during packet preparation.
+-- The paired source/canonical walk supplies the endpoint and owner; this view
+-- exposes them only while the packet still has the exact consumer authority
+-- and frozen operated state against which the certificate was created.
+subtermGeneralizationSourceOwnerConsumerCompletion
+  :: PreparedSubtermGeneralization
+  -> Maybe
+      ( SubtermConsumerAuthority
+      , LocalGammaOwner
+      , ElabType
+      , ElabType
+      )
+subtermGeneralizationSourceOwnerConsumerCompletion packet = do
+  validatedSourceOwnerConsumerCompletion
+    (psgSourceOwnerConsumerCompletion packet)
+    packet
+
+-- | Revalidate the complete source-owner result endpoint sealed during
+-- packet preparation.  Unlike the body-completion view, this certificate is
+-- usable only when the packet consumer is the exact result node of its owner.
+-- Root-edge grouping may then use it to select an existing requirement; it
+-- never manufactures a new operated root from the endpoint's type shape.
+subtermGeneralizationSourceOwnerFinalConsumerCompletion
+  :: PreparedSubtermGeneralization
+  -> Maybe
+      ( SubtermConsumerAuthority
+      , LocalGammaOwner
+      , ElabType
+      , ElabType
+      )
+subtermGeneralizationSourceOwnerFinalConsumerCompletion packet = do
+  completion@(_authority, owner, _frozenOperatedType, _expectedEndpoint) <-
+    validatedSourceOwnerConsumerCompletion
+      (psgSourceOwnerFinalConsumerCompletion packet)
+      packet
+  guard
+    ( scaConsumerIdentity (completionAuthority completion)
+        == typeBinderIdentityFromNode (lgoTermNode owner)
+    )
+  pure completion
+  where
+    completionAuthority (authority, _, _, _) = authority
+
+validatedSourceOwnerConsumerCompletion
+  :: Maybe SourceOwnerConsumerCompletion
+  -> PreparedSubtermGeneralization
+  -> Maybe
+      ( SubtermConsumerAuthority
+      , LocalGammaOwner
+      , ElabType
+      , ElabType
+      )
+validatedSourceOwnerConsumerCompletion mbCertificate packet = do
+  certificate <- mbCertificate
+  authority <- psgConsumerAuthority packet
+  guard (authority == soccAuthority certificate)
+  owner <- subtermConsumerAuthorityEnclosingOwner authority
+  guard (owner == soccOwner certificate)
+  guard (isNothing (psgGammaAuthority packet))
+  let currentOperatedType =
+        schemeToType (siScheme (psgOperatedSchemeInfo packet))
+      frozenOperatedType = soccFrozenOperatedType certificate
+      expectedEndpoint = soccExpectedEndpoint certificate
+      consumerIdentity = scaConsumerIdentity authority
+  guard (typesAgree currentOperatedType frozenOperatedType)
+  guard
+    ( all
+        ((/= consumerIdentity) . typeBinderRefIdentity)
+        ( typeBinderDeclarationRefs expectedEndpoint
+            ++ freeTypeVarRefsType expectedEndpoint
+        )
+    )
+  pure
+    ( authority
+    , owner
+    , frozenOperatedType
+    , expectedEndpoint
+    )
+  where
+    typesAgree left right =
+      alphaEqTypePreservingStructuralBinders left right
+        || churchRepresentationEqType left right
+
 subtermGeneralizationPlacedCopiedBinderRoutes
   :: PreparedSubtermGeneralization
   -> Map.Map
@@ -2561,6 +2812,22 @@ subtermGeneralizationOpaqueResultConstructionPlan packet = do
   case orcCompletionAuthority certificate of
     OpaqueResultBinderSpineCompletion plan -> Just plan
     OpaqueResultSourceLambdaCompletion {} -> Nothing
+
+-- | Project the source-constructor authority sealed by
+-- 'withOpaqueResultConstruction'.  This view is deliberately unavailable for
+-- an ordinary binder-spine completion: consumers may use it only when every
+-- provisional carrier was tied to the exact source lambda that constructs the
+-- opaque endpoint.  A later checked owner must still match those lambda nodes
+-- against its own result-construction certificate before using the endpoint.
+subtermGeneralizationOpaqueResultSourceLambdaCompletion
+  :: PreparedSubtermGeneralization
+  -> Maybe (ElabType, [(NodeId, ElabType)])
+subtermGeneralizationOpaqueResultSourceLambdaCompletion packet = do
+  certificate <- psgOpaqueResultConstruction packet
+  case orcCompletionAuthority certificate of
+    OpaqueResultSourceLambdaCompletion authorities ->
+      Just (orcConstructedType certificate, authorities)
+    OpaqueResultBinderSpineCompletion {} -> Nothing
 
 -- | Seal a source-proved opaque result composition.  The completed packet
 -- must construct the exact source endpoint either by a replayable binder-spine
@@ -2721,6 +2988,138 @@ withExactConsumerSpecialization expectedEndpoints packet =
       packet
         { psgExactConsumerSpecialization = Just certificate
         }
+
+-- | Seal the exact body endpoint obtained from the enclosing source owner.
+-- The caller owns a lockstep source/canonical traversal of that owner; this
+-- constructor checks the packet-local facts that make the endpoint usable by
+-- the later body consumer.  In particular, it cannot be attached to a
+-- packet-owned Gamma or to an endpoint that still mentions the provisional
+-- consumer identity.
+withSourceOwnerConsumerCompletion
+  :: LocalGammaOwner
+  -> ElabType
+  -> PreparedSubtermGeneralization
+  -> Either ElabError PreparedSubtermGeneralization
+withSourceOwnerConsumerCompletion owner expectedEndpoint packet = do
+  certificate <-
+    sourceOwnerConsumerCompletionCertificate
+      owner
+      expectedEndpoint
+      packet
+  pure
+    packet
+      { psgSourceOwnerConsumerCompletion = Just certificate
+      }
+
+-- | Seal the complete result endpoint of the enclosing source owner.  The
+-- packet must consume that owner's exact result node; this prevents an
+-- owner's final type from being reused as the bound of an unrelated nested
+-- Gamma.  Later grouping still has to find a real requirement that already
+-- publishes the endpoint.
+withSourceOwnerFinalConsumerCompletion
+  :: LocalGammaOwner
+  -> ElabType
+  -> PreparedSubtermGeneralization
+  -> Either ElabError PreparedSubtermGeneralization
+withSourceOwnerFinalConsumerCompletion owner expectedEndpoint packet = do
+  certificate <-
+    sourceOwnerConsumerCompletionCertificate
+      owner
+      expectedEndpoint
+      packet
+  unless
+    ( scaConsumerIdentity (soccAuthority certificate)
+        == typeBinderIdentityFromNode (lgoTermNode owner)
+    ) $
+    completionFailure
+      [ "the source-owner endpoint does not name the owner's exact result node"
+      , "  owner result: " ++ show (lgoTermNode owner)
+      , "  consumer identity: "
+          ++ show (scaConsumerIdentity (soccAuthority certificate))
+      ]
+  pure
+    packet
+      { psgSourceOwnerFinalConsumerCompletion = Just certificate
+      }
+  where
+    completionFailure details =
+      Left
+        ( ValidationFailed
+            ( "invalid source-owner final consumer completion"
+                : details
+            )
+        )
+
+sourceOwnerConsumerCompletionCertificate
+  :: LocalGammaOwner
+  -> ElabType
+  -> PreparedSubtermGeneralization
+  -> Either ElabError SourceOwnerConsumerCompletion
+sourceOwnerConsumerCompletionCertificate owner expectedEndpoint packet = do
+  authority <-
+    case psgConsumerAuthority packet of
+      Just candidate -> pure candidate
+      Nothing ->
+        completionFailure
+          ["the packet has no enclosing consumer authority"]
+  actualOwner <-
+    case subtermConsumerAuthorityEnclosingOwner authority of
+      Just candidate -> pure candidate
+      Nothing ->
+        completionFailure
+          [ "the packet consumer has no enclosing source owner"
+          , "  authority: " ++ show authority
+          ]
+  unless (actualOwner == owner) $
+    completionFailure
+      [ "the paired source owner differs from the packet owner"
+      , "  paired owner: " ++ show owner
+      , "  packet owner: " ++ show actualOwner
+      ]
+  unless (isNothing (psgGammaAuthority packet)) $
+    completionFailure
+      [ "a packet-owned Gamma cannot use an enclosing source-owner completion"
+      , "  Gamma authority: " ++ show (psgGammaAuthority packet)
+      ]
+  let consumerIdentity = scaConsumerIdentity authority
+      endpointRefs =
+        typeBinderDeclarationRefs expectedEndpoint
+          ++ freeTypeVarRefsType expectedEndpoint
+  unless
+    ( all
+        ((/= consumerIdentity) . typeBinderRefIdentity)
+        endpointRefs
+    ) $
+    completionFailure
+      [ "the source-owner endpoint retains the provisional consumer"
+      , "  consumer identity: " ++ show consumerIdentity
+      , "  expected endpoint: " ++ show expectedEndpoint
+      ]
+  case elabToBound expectedEndpoint of
+    Right _ -> pure ()
+    Left cause ->
+      completionFailure
+        [ "the source-owner endpoint is not a legal Gamma bound"
+        , "  expected endpoint: " ++ show expectedEndpoint
+        , "  cause: " ++ cause
+        ]
+  pure
+    SourceOwnerConsumerCompletion
+      { soccAuthority = authority
+      , soccOwner = owner
+      , soccFrozenOperatedType =
+          schemeToType
+            (siScheme (psgOperatedSchemeInfo packet))
+      , soccExpectedEndpoint = expectedEndpoint
+      }
+  where
+    completionFailure details =
+      Left
+        ( ValidationFailed
+            ( "invalid source-owner consumer completion"
+                : details
+            )
+        )
 
 exactConsumerSpecializationFor
   :: ElabType
@@ -3560,6 +3959,42 @@ subtermGeneralizationAdministrativeLambdaResultConstruction packet = do
     , schemeToType (siScheme (psgSchemeInfo packet))
     )
 
+-- | Select an administrative source-lambda result only when its returned
+-- value contains a nested generated declaration owned by source provenance.
+-- Such a declaration is not part of the lambda's leading graph Gamma and can
+-- be alpha-freshened when the returned value is published.  The recursively
+-- checked child must therefore confirm its final identity before the endpoint
+-- becomes exact.  A packet containing only leading graph declarations has no
+-- such claim; those declarations remain owned by the enclosing constructor.
+subtermGeneralizationSourceStagedAdministrativeLambdaResultConstruction
+  :: IntMap.IntMap TypeBinderRef
+  -> PreparedSubtermGeneralization
+  -> Maybe (NodeId, ElabType)
+subtermGeneralizationSourceStagedAdministrativeLambdaResultConstruction sourceSidecarRefs packet = do
+  result@(_, resultTy) <-
+    subtermGeneralizationAdministrativeLambdaResultConstruction packet
+  guard
+    ( administrativeLambdaResultNeedsOwnerConfirmation
+        sourceSidecarRefs
+        packet
+        resultTy
+    )
+  pure result
+
+-- | Whether the packet's consumer-facing bound carries a generated source
+-- declaration beneath its leading Gamma spine.  This is the propagation
+-- certificate used by enclosing lambda constructors: they may forward the
+-- returned value without claiming the returned lambda's parameter ownership.
+subtermGeneralizationGammaBoundHasNestedSourceDeclaration
+  :: IntMap.IntMap TypeBinderRef
+  -> PreparedSubtermGeneralization
+  -> Bool
+subtermGeneralizationGammaBoundHasNestedSourceDeclaration sourceSidecarRefs packet =
+  administrativeLambdaResultNeedsOwnerConfirmation
+    sourceSidecarRefs
+    packet
+    (schemeToType (psgGammaBoundScheme packet))
+
 schemeInPacketConstructionDomain
   :: PreparedSubtermGeneralization
   -> ElabScheme
@@ -3690,17 +4125,18 @@ consumerGammaBoundSchemeFrom consumerAuthority constructionScheme operatedScheme
   case consumerAuthority of
     Just EnclosingGammaConsumerAuthority{} ->
       -- An enclosing source constructor consumes the packet's completed
-      -- construction.  The mere existence of an xMLF specialization from
-      -- that construction to the operated view is not authority to perform
-      -- it: every nontrivial forall packet has such a path.  Compiler-exact
-      -- publication applies its separately certified binder routes later.
+      -- construction.  A proved xMLF specialization selects the operated
+      -- endpoint, but it does not reopen dependencies already owned by the
+      -- completed packet.  Close those dependencies here, while both schemes
+      -- and their exact identities are present; a farther enclosing Gen must
+      -- never have to recover them as ambient binders.
       case
           planExactBinderSpine
             alphaEqType
             (schemeToType constructionScheme)
             (schemeToType operatedScheme)
         of
-          Just _ -> operatedScheme
+          Just _ -> enclosingOperatedScheme
           Nothing -> constructionScheme
     _ ->
       mkElabSchemeWithRefs
@@ -3738,6 +4174,36 @@ consumerGammaBoundSchemeFrom consumerAuthority constructionScheme operatedScheme
       , refMember ref selectedRefs
       , not (refMember ref (map fst retainedOperatedBinders))
       ]
+
+    -- Preserve the completed packet's dependency order while taking the
+    -- selected operated declaration for binders common to both views.  The
+    -- operated scheme can leave a construction-owned declaration free (for
+    -- example an annotation binder closed by an intervening ETyAbs); that
+    -- declaration is selected above and must remain inside this packet.
+    enclosingOperatedScheme =
+      mkElabSchemeWithRefs
+        (constructionOrderedBinders ++ operatedOnlyBinders)
+        (schemeBody operatedScheme)
+
+    constructionOrderedBinders =
+      [ fromMaybe constructionBinder (operatedBinderFor constructionRef)
+      | constructionBinder@(constructionRef, _) <- constructionBinders
+      , refMember constructionRef enclosingSelectedRefs
+      ]
+
+    operatedOnlyBinders =
+      [ operatedBinder
+      | operatedBinder@(operatedRef, _) <- retainedOperatedBinders
+      , not (refMember operatedRef (map fst constructionBinders))
+      ]
+
+    enclosingSelectedRefs =
+      selectedRefs ++ map fst retainedOperatedBinders
+
+    operatedBinderFor constructionRef =
+      find
+        (typeBinderRefsSameIdentity constructionRef . fst)
+        retainedOperatedBinders
 
     dependencyClosure refs =
       let dependencies =
@@ -3803,8 +4269,91 @@ generalizationRequirementsForRootEdges
   -> SubtermGeneralizations
   -> [(EdgeId, Maybe ElabType)]
   -> Either ElabError GeneralizationRequirements
-generalizationRequirementsForRootEdges =
-  generalizationRequirementsForRootEdgesAt PacketLocalRequirementBoundary
+generalizationRequirementsForRootEdges identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges =
+  generalizationRequirementsForRootEdgesAt
+    PacketLocalRequirementBoundary
+    []
+    identityRepresentative
+    constructionCanonical
+    ga
+    presolutionView
+    edgeArtifacts
+    sourceBinderRefs
+    subtermPackets
+    (map exactProducerEdge edges)
+
+-- | The exact endpoint attached to a root instantiation edge carries one of
+-- two distinct paper meanings.  A producer endpoint is @Typ(a')@ and still
+-- has to be projected to @S'(operated)@ through its prepared packet.  An
+-- operated endpoint was recovered from the checked source occurrence itself
+-- and already /is/ the @S'(operated)@ used by the edge's Hyp declaration.
+-- Keeping that distinction in the value prevents packet projection from
+-- replacing an exact source construction with an older graph presentation.
+data RootEdgeExactEndpoint
+  = RootEdgeExactProducer !ElabType
+  | RootEdgeExactOperated !ElabType
+  deriving (Eq, Show)
+
+rootEdgeExactEndpointType :: RootEdgeExactEndpoint -> ElabType
+rootEdgeExactEndpointType endpoint =
+  case endpoint of
+    RootEdgeExactProducer ty -> ty
+    RootEdgeExactOperated ty -> ty
+
+mapRootEdgeExactEndpoint
+  :: (ElabType -> ElabType)
+  -> RootEdgeExactEndpoint
+  -> RootEdgeExactEndpoint
+mapRootEdgeExactEndpoint f endpoint =
+  case endpoint of
+    RootEdgeExactProducer ty -> RootEdgeExactProducer (f ty)
+    RootEdgeExactOperated ty -> RootEdgeExactOperated (f ty)
+
+exactProducerEdge
+  :: (EdgeId, Maybe ElabType)
+  -> (EdgeId, Maybe RootEdgeExactEndpoint)
+exactProducerEdge (edgeId, mbEndpoint) =
+  (edgeId, RootEdgeExactProducer <$> mbEndpoint)
+
+-- | Positive evidence that a source-owned type binder was closed by an exact
+-- lexical 'ETyAbsRef' before an enclosing construction consumes a prepared
+-- packet.  The constructor is private: callers join the checked binder to at
+-- least one source-sidecar occurrence with 'mkLexicalTypeAbsClosure'.  Packet
+-- selection must independently retain the complete enclosing consumer route
+-- before the binder may be closed inside its Gamma bound.
+data LexicalTypeAbsClosure = LexicalTypeAbsClosure
+  { ltacBinder :: !(TypeBinderRef, Maybe BoundType)
+  , ltacSourceOccurrenceKeys :: !(NonEmpty Int)
+  , ltacEnclosingConsumers :: !(NonEmpty SubtermConsumerKey)
+  }
+  deriving (Eq, Show)
+
+-- | Join one checked lexical type abstraction to the exact source-sidecar
+-- occurrences that used it and to the exact packet consumers whose source
+-- constructors lexically enclose that abstraction.  A binder missing either
+-- half of that construction proof is not packet-closure authority and is
+-- deliberately ignored.
+mkLexicalTypeAbsClosure
+  :: (TypeBinderRef, Maybe BoundType)
+  -> IntMap.IntMap TypeBinderRef
+  -> [SubtermConsumerKey]
+  -> Maybe LexicalTypeAbsClosure
+mkLexicalTypeAbsClosure binder@(binderRef, _) sourceAuthorities enclosingConsumers = do
+  occurrenceKeys <-
+    NonEmpty.nonEmpty
+      [ nodeKey
+      | (nodeKey, sourceRef) <- IntMap.toList sourceAuthorities
+      , typeBinderRefsSameIdentity binderRef sourceRef
+      ]
+  consumerKeys <-
+    NonEmpty.nonEmpty
+      (Set.toList (Set.fromList enclosingConsumers))
+  pure
+    LexicalTypeAbsClosure
+      { ltacBinder = binder
+      , ltacSourceOccurrenceKeys = occurrenceKeys
+      , ltacEnclosingConsumers = consumerKeys
+      }
 
 -- | Build the obligations for a construction that may be running inside one
 -- prepared packet.  Only that active packet has its quantifiers open in the
@@ -3827,12 +4376,78 @@ generalizationRequirementsForRootEdgesInConstruction
   -> [(EdgeId, Maybe ElabType)]
   -> Either ElabError GeneralizationRequirements
 generalizationRequirementsForRootEdgesInConstruction activeConsumerKeys ambientBinderRefs ambientGammaAuthorities identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
+  generalizationRequirementsForRootEdgesInConstructionWithLexicalClosures
+    activeConsumerKeys
+    ambientBinderRefs
+    ambientGammaAuthorities
+    []
+    identityRepresentative
+    constructionCanonical
+    ga
+    presolutionView
+    edgeArtifacts
+    sourceBinderRefs
+    subtermPackets
+    edges
+
+-- | Construction-boundary requirements with exact lexical type-abstraction
+-- closures produced by already checked descendants.  An inactive packet may
+-- close one of its free source dependencies only when an enclosing completed
+-- packet retains both the source occurrence and the selected packet's exact
+-- consumer declaration.
+generalizationRequirementsForRootEdgesInConstructionWithLexicalClosures
+  :: Set.Set SubtermConsumerKey
+  -> [TypeBinderRef]
+  -> IntMap.IntMap AmbientGammaAuthority
+  -> [LexicalTypeAbsClosure]
+  -> (NodeId -> NodeId)
+  -> (NodeId -> NodeId)
+  -> GaBindParents p
+  -> PresolutionView p
+  -> EdgeArtifacts
+  -> IntMap.IntMap TypeBinderRef
+  -> SubtermGeneralizations
+  -> [(EdgeId, Maybe ElabType)]
+  -> Either ElabError GeneralizationRequirements
+generalizationRequirementsForRootEdgesInConstructionWithLexicalClosures activeConsumerKeys ambientBinderRefs ambientGammaAuthorities lexicalClosures identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
+  generalizationRequirementsForRootExactEdgesInConstructionWithLexicalClosures
+    activeConsumerKeys
+    ambientBinderRefs
+    ambientGammaAuthorities
+    lexicalClosures
+    identityRepresentative
+    constructionCanonical
+    ga
+    presolutionView
+    edgeArtifacts
+    sourceBinderRefs
+    subtermPackets
+    (map exactProducerEdge edges)
+
+-- | Exact-endpoint form of
+-- 'generalizationRequirementsForRootEdgesInConstructionWithLexicalClosures'.
+generalizationRequirementsForRootExactEdgesInConstructionWithLexicalClosures
+  :: Set.Set SubtermConsumerKey
+  -> [TypeBinderRef]
+  -> IntMap.IntMap AmbientGammaAuthority
+  -> [LexicalTypeAbsClosure]
+  -> (NodeId -> NodeId)
+  -> (NodeId -> NodeId)
+  -> GaBindParents p
+  -> PresolutionView p
+  -> EdgeArtifacts
+  -> IntMap.IntMap TypeBinderRef
+  -> SubtermGeneralizations
+  -> [(EdgeId, Maybe RootEdgeExactEndpoint)]
+  -> Either ElabError GeneralizationRequirements
+generalizationRequirementsForRootExactEdgesInConstructionWithLexicalClosures activeConsumerKeys ambientBinderRefs ambientGammaAuthorities lexicalClosures identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
   requirements <-
     generalizationRequirementsForRootEdgesAt
       ( ConstructionRequirementBoundary
           activeConsumerKeys
           ambientGammaAuthorities
       )
+      lexicalClosures
       identityRepresentative
       constructionCanonical
       ga
@@ -3854,6 +4469,39 @@ generalizationRequirementsForRootEdgesInConstruction activeConsumerKeys ambientB
       | any (typeBinderRefsSameIdentity ref) refs = refs
       | otherwise = ref : refs
 
+-- | Construction-boundary variant that preserves whether an exact edge value
+-- is the producer @Typ(a')@ or an already checked source-occurrence
+-- @S'(operated)@.  Callers should use this entrypoint only when they retain
+-- that positive provenance from source recovery; ordinary exact-producer
+-- tables continue through 'generalizationRequirementsForRootEdgesInConstruction'.
+generalizationRequirementsForRootExactEdgesInConstruction
+  :: Set.Set SubtermConsumerKey
+  -> [TypeBinderRef]
+  -> IntMap.IntMap AmbientGammaAuthority
+  -> (NodeId -> NodeId)
+  -> (NodeId -> NodeId)
+  -> GaBindParents p
+  -> PresolutionView p
+  -> EdgeArtifacts
+  -> IntMap.IntMap TypeBinderRef
+  -> SubtermGeneralizations
+  -> [(EdgeId, Maybe RootEdgeExactEndpoint)]
+  -> Either ElabError GeneralizationRequirements
+generalizationRequirementsForRootExactEdgesInConstruction activeConsumerKeys ambientBinderRefs ambientGammaAuthorities identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
+  generalizationRequirementsForRootExactEdgesInConstructionWithLexicalClosures
+    activeConsumerKeys
+    ambientBinderRefs
+    ambientGammaAuthorities
+    []
+    identityRepresentative
+    constructionCanonical
+    ga
+    presolutionView
+    edgeArtifacts
+    sourceBinderRefs
+    subtermPackets
+    edges
+
 -- | Build requirements at a boundary outside every supplied packet. The
 -- packet's enclosing operated scheme closes packet-owned quantifiers but
 -- leaves enclosing lexical identities free for the root binder planner. The
@@ -3869,8 +4517,18 @@ generalizationRequirementsForEnclosingRootEdges
   -> SubtermGeneralizations
   -> [(EdgeId, Maybe ElabType)]
   -> Either ElabError GeneralizationRequirements
-generalizationRequirementsForEnclosingRootEdges =
-  generalizationRequirementsForRootEdgesAt EnclosingRequirementBoundary
+generalizationRequirementsForEnclosingRootEdges identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges =
+  generalizationRequirementsForRootEdgesAt
+    EnclosingRequirementBoundary
+    []
+    identityRepresentative
+    constructionCanonical
+    ga
+    presolutionView
+    edgeArtifacts
+    sourceBinderRefs
+    subtermPackets
+    (map exactProducerEdge edges)
 
 data RequirementSchemeBoundary
   = PacketLocalRequirementBoundary
@@ -3977,6 +4635,7 @@ resolveAmbientGammaOperatedEndpoint authorities exactEndpoint operatedType =
 
 generalizationRequirementsForRootEdgesAt
   :: RequirementSchemeBoundary
+  -> [LexicalTypeAbsClosure]
   -> (NodeId -> NodeId)
   -> (NodeId -> NodeId)
   -> GaBindParents p
@@ -3984,9 +4643,9 @@ generalizationRequirementsForRootEdgesAt
   -> EdgeArtifacts
   -> IntMap.IntMap TypeBinderRef
   -> SubtermGeneralizations
-  -> [(EdgeId, Maybe ElabType)]
+  -> [(EdgeId, Maybe RootEdgeExactEndpoint)]
   -> Either ElabError GeneralizationRequirements
-generalizationRequirementsForRootEdgesAt boundary identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
+generalizationRequirementsForRootEdgesAt boundary lexicalClosures identityRepresentative constructionCanonical ga presolutionView edgeArtifacts sourceBinderRefs subtermPackets edges = do
   requirements <- traverse requirementForEdge edges
   packetDiagnostics <- traverse packetDiagnostic edges
   requiredBinders <-
@@ -4244,8 +4903,21 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                   (requirementConsumerIdentityIs expectedConsumer)
                   group ->
                   do
+                    let mbSourceOwnerDeclaration =
+                          sourceOwnerFinalDeclaration
+                            exterior
+                            owner
+                            group
                     mbFinalDeclaration <-
-                      finalExteriorDeclaration exterior group
+                      case mbSourceOwnerDeclaration of
+                        Just declaration -> pure (Just declaration)
+                        Nothing -> do
+                          mbLiveDeclaration <-
+                            finalExteriorDeclaration exterior group
+                          pure
+                            ( mbLiveDeclaration
+                                <|> checkedOperatedDeclaration group
+                            )
                     case mbFinalDeclaration of
                       Just selected ->
                         pure
@@ -4258,6 +4930,74 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                             )
                       Nothing -> pure Nothing
             _ -> pure Nothing
+
+    -- A construction boundary can carry the checked source occurrence's
+    -- exact S'(operated) for one forwarded edge while earlier edges for the
+    -- same enclosing consumer still carry intermediate packet views.  Once
+    -- the enclosing-owner proof above has established one owner, exterior,
+    -- consumer identity, placement, and scope, that tagged endpoint is the
+    -- declaration constructed by the source occurrence.  It is therefore a
+    -- stronger final authority than comparing the intermediate type shapes.
+    -- Multiple tagged endpoints are accepted only when they publish the same
+    -- type; conflicting exact occurrences continue to the strict rejection.
+    checkedOperatedDeclaration group =
+      case filter carriesCheckedOperatedEndpoint group of
+        [] -> Nothing
+        selected : others
+          | all
+              (requirementPublishes (rgbOperatedType selected))
+              others ->
+              Just selected
+        _ -> Nothing
+
+    carriesCheckedOperatedEndpoint requirement =
+      any edgePublishesRequirement
+        (NonEmpty.toList (rgbEdgeIds requirement))
+      where
+        edgePublishesRequirement edgeId =
+          case lookup edgeId edges of
+            Just (Just (RootEdgeExactOperated exactTy)) ->
+              requirementPublishes exactTy requirement
+            _ -> False
+
+    -- Packet preparation can recover the complete result of an enclosing
+    -- source owner before recursive elaboration.  Every member of this group
+    -- must carry that same exact certificate, and one real edge requirement
+    -- must already publish the certified endpoint.  Selecting that edge keeps
+    -- its operated-root provenance; the certificate never turns an arbitrary
+    -- type into a synthetic graph requirement.  This is the construction
+    -- case where an inner identity first presents the shared exterior through
+    -- its parameter, while a later application has already specialized the
+    -- same owner result to a ground endpoint.
+    sourceOwnerFinalDeclaration exterior owner group = do
+      completions <- traverse completionForRequirement group
+      (_, _, _, expectedEndpoint) : remainingCompletions <-
+        pure completions
+      guard
+        ( all
+            ( \(_, _, _, endpoint) ->
+                alphaEqType endpoint expectedEndpoint
+                  || churchAwareEqType endpoint expectedEndpoint
+            )
+            remainingCompletions
+        )
+      find
+        (requirementPublishes expectedEndpoint)
+        group
+      where
+        expectedConsumer = typeBinderIdentityFromNode exterior
+
+        completionForRequirement requirement = do
+          packet <- packetForRequirement requirement
+          completion@(authority, certifiedOwner, _, _) <-
+            subtermGeneralizationSourceOwnerFinalConsumerCompletion packet
+          guard (certifiedOwner == owner)
+          guard (scaConsumerIdentity authority == expectedConsumer)
+          guard
+            ( scaEdgeId authority
+                `elem` NonEmpty.toList (rgbEdgeIds requirement)
+            )
+          pure completion
 
     -- The live binding tree, rather than packet traversal order, identifies
     -- which frozen S'(operated) declaration is ultimately published for one
@@ -4539,7 +5279,7 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                 <$> mbPacket
             )
 
-    requirementForEdge (edgeId, exactOperatedType) = do
+    requirementForEdge (edgeId, exactEndpoint) = do
       authority <- rootRaiseMergeAuthorityFor edgeArtifacts edgeId
       case authority of
         Nothing -> pure []
@@ -4549,16 +5289,23 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
               edgeId
               (typeBinderIdentityFromNode (rrmaExterior rootAuthority))
               subtermPackets
-          let packetOperatedScheme =
-                packetRequirementScheme rootAuthority <$> selectedPacket
+          packetOperatedScheme <-
+            traverse
+              (packetRequirementScheme rootAuthority)
+              selectedPacket
           exactRequirementType <-
             traverse
-              ( exactOperatedRequirementType
-                  rootAuthority
-                  selectedPacket
-                  packetOperatedScheme
+              ( \endpoint ->
+                  case endpoint of
+                    RootEdgeExactOperated exactType -> pure exactType
+                    RootEdgeExactProducer exactType ->
+                      exactOperatedRequirementType
+                        rootAuthority
+                        selectedPacket
+                        packetOperatedScheme
+                        exactType
               )
-              exactOperatedType
+              exactEndpoint
           let ambientRequirementType =
                 constructionAmbientRequirementType rootAuthority
               selectedExactRequirementType =
@@ -4572,6 +5319,17 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                 , packetOperatedScheme
                 )
               of
+              ( ConstructionRequirementBoundary {}
+                , Just exactType
+                , _
+                )
+                  | exactEndpointIsOperated exactEndpoint ->
+                      -- Source recovery has already checked this exact
+                      -- occurrence as S'(operated).  It is the declaration
+                      -- bound required by the local Hyp; an older packet is
+                      -- placement/provenance evidence, not a competing type
+                      -- endpoint.
+                      pure exactType
               ( ConstructionRequirementBoundary activeConsumerKeys _
                 , Just exactType
                 , _
@@ -4615,8 +5373,8 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                         [ "root RaiseMerge operated packet cannot be aligned to its construction Gamma"
                         , "  edge: " ++ show edgeId
                         , "  authority: " ++ show rootAuthority
-                        , "  checked exact operated type: "
-                            ++ show exactOperatedType
+                        , "  checked exact endpoint: "
+                            ++ show exactEndpoint
                         , "  selected exact requirement type: "
                             ++ show selectedExactRequirementType
                         , "  selected packet: " ++ show selectedPacket
@@ -4642,99 +5400,106 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                     )
               )
               Right
-              ( case selectedExactRequirementType of
-                  Just exactType ->
-                    case boundary of
-                      ConstructionRequirementBoundary _ ambientAuthorities
-                        | Just aligned <-
-                            resolveFrozenOperatedOccurrenceEndpoint
-                              baseConstraint
-                              ambientAuthorities
-                              ( gaConstructionRouteNodes
-                                  constructionCanonical
-                                  ga
+              ( case exactEndpoint of
+                  Just (RootEdgeExactOperated exactType) ->
+                    -- The endpoint constructor is the positive source
+                    -- construction certificate.  No graph-shape comparison
+                    -- or post-hoc source alias inference is needed here.
+                    Right exactType
+                  _ ->
+                    case selectedExactRequirementType of
+                      Just exactType ->
+                        case boundary of
+                          ConstructionRequirementBoundary _ ambientAuthorities
+                            | Just aligned <-
+                                resolveFrozenOperatedOccurrenceEndpoint
+                                  baseConstraint
+                                  ambientAuthorities
+                                  ( gaConstructionRouteNodes
+                                      constructionCanonical
+                                      ga
+                                      (rrmaOperatedRoot rootAuthority)
+                                  )
                                   (rrmaOperatedRoot rootAuthority)
-                              )
-                              (rrmaOperatedRoot rootAuthority)
-                              exactType
-                              operatedTypeRaw ->
-                            Right aligned
-                      ConstructionRequirementBoundary {}
-                        | Just packet <- selectedPacket
-                        , Just packetScheme <- packetOperatedScheme
-                        , subtermGeneralizationConsumerIdentity packet
-                            == Just
-                              ( typeBinderIdentityFromNode
-                                  (rrmaExterior rootAuthority)
-                              )
-                        , schemeToType packetScheme == operatedTypeRaw ->
-                            -- The selected packet and the checked edge meet
-                            -- at the same exact RaiseMerge consumer identity.
-                            -- That retained ownership route, rather than the
-                            -- packet's possibly stale graph presentation,
-                            -- authorizes the construction to use the checked
-                            -- endpoint as its Gamma bound.
-                            Right exactType
-                      ConstructionRequirementBoundary _ ambientAuthorities
-                        | Just aligned <-
-                            resolveAmbientGammaOperatedEndpoint
-                              ambientAuthorities
-                              exactType
-                              operatedTypeRaw ->
-                            Right aligned
-                      EnclosingRequirementBoundary
-                        | isJust selectedPacket -> do
-                            -- The checked endpoint is Typ(a') after the outer
-                            -- RaiseMerge computation, while an enclosing Gamma
-                            -- entry must bind the selected packet's
-                            -- S'(operated).  These need not have the same
-                            -- surface shape: the endpoint can include lambda
-                            -- domains outside the packet or consume packet
-                            -- quantifiers.  Packet selection already proves
-                            -- the exact edge, consumer identity, and lexical
-                            -- owner, so preserve its operated scheme and use
-                            -- the source sidecar only to align free identities.
-                            resolveConstructionSourceBindersInTypeExcept
-                              ( ownedOperatedDeclarationIdentities
-                                  rootAuthority
-                                  packetOperatedScheme
+                                  exactType
+                                  operatedTypeRaw ->
+                                Right aligned
+                          ConstructionRequirementBoundary {}
+                            | Just packet <- selectedPacket
+                            , Just packetScheme <- packetOperatedScheme
+                            , subtermGeneralizationConsumerIdentity packet
+                                == Just
+                                  ( typeBinderIdentityFromNode
+                                      (rrmaExterior rootAuthority)
+                                  )
+                            , schemeToType packetScheme == operatedTypeRaw ->
+                                -- The selected packet and the checked edge meet
+                                -- at the same exact RaiseMerge consumer identity.
+                                -- That retained ownership route, rather than the
+                                -- packet's possibly stale graph presentation,
+                                -- authorizes the construction to use the checked
+                                -- endpoint as its Gamma bound.
+                                Right exactType
+                          ConstructionRequirementBoundary _ ambientAuthorities
+                            | Just aligned <-
+                                resolveAmbientGammaOperatedEndpoint
+                                  ambientAuthorities
+                                  exactType
+                                  operatedTypeRaw ->
+                                Right aligned
+                          EnclosingRequirementBoundary
+                            | isJust selectedPacket -> do
+                                -- The checked endpoint is Typ(a') after the outer
+                                -- RaiseMerge computation, while an enclosing Gamma
+                                -- entry must bind the selected packet's
+                                -- S'(operated).  These need not have the same
+                                -- surface shape: the endpoint can include lambda
+                                -- domains outside the packet or consume packet
+                                -- quantifiers.  Packet selection already proves
+                                -- the exact edge, consumer identity, and lexical
+                                -- owner, so preserve its operated scheme and use
+                                -- the source sidecar only to align free identities.
+                                resolveConstructionSourceBindersInTypeExcept
+                                  ( ownedOperatedDeclarationIdentities
+                                      rootAuthority
+                                      packetOperatedScheme
+                                      operatedTypeRaw
+                                  )
+                                  identityRepresentative
+                                  sourceBinderRefs
                                   operatedTypeRaw
-                              )
+                          _
+                            | isJust selectedPacket
+                            , packetTypeSpecializesToExactEndpoint
+                                operatedTypeRaw
+                                exactType ->
+                                -- The exact packet/consumer selection above owns
+                                -- this edge.  When its closed S'(operated) packet
+                                -- constructs the independently checked endpoint
+                                -- through a non-identity binder-spine plan, retain
+                                -- that endpoint as the Gamma bound.  Source-binder
+                                -- alignment below proves identity equality only;
+                                -- asking it to equate @sigma@ with the explicit
+                                -- RaiseMerge result @forall (alpha > sigma). alpha@
+                                -- would discard the paper computation that relates
+                                -- them.
+                                Right exactType
+                          _ ->
+                            resolveConstructionSourceBindersInPacketAtExpected
                               identityRepresentative
                               sourceBinderRefs
+                              exactType
                               operatedTypeRaw
-                      _
-                        | isJust selectedPacket
-                        , packetTypeSpecializesToExactEndpoint
-                            operatedTypeRaw
-                            exactType ->
-                            -- The exact packet/consumer selection above owns
-                            -- this edge.  When its closed S'(operated) packet
-                            -- constructs the independently checked endpoint
-                            -- through a non-identity binder-spine plan, retain
-                            -- that endpoint as the Gamma bound.  Source-binder
-                            -- alignment below proves identity equality only;
-                            -- asking it to equate @sigma@ with the explicit
-                            -- RaiseMerge result @forall (alpha > sigma). alpha@
-                            -- would discard the paper computation that relates
-                            -- them.
-                            Right exactType
-                      _ ->
-                        resolveConstructionSourceBindersInPacketAtExpected
+                      Nothing ->
+                        resolveConstructionSourceBindersInTypeExcept
+                          ( ownedOperatedDeclarationIdentities
+                              rootAuthority
+                              packetOperatedScheme
+                              operatedTypeRaw
+                          )
                           identityRepresentative
                           sourceBinderRefs
-                          exactType
                           operatedTypeRaw
-                  Nothing ->
-                    resolveConstructionSourceBindersInTypeExcept
-                      ( ownedOperatedDeclarationIdentities
-                          rootAuthority
-                          packetOperatedScheme
-                          operatedTypeRaw
-                      )
-                      identityRepresentative
-                      sourceBinderRefs
-                      operatedTypeRaw
               )
           structurallyClosedType <-
             resolveStructuralSourceAliasesInType sourceAlignedType
@@ -4745,14 +5510,91 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                     (typeBinderRefsSameIdentity freeRef)
                     (IntMap.elems sourceBinderRefs)
                 ]
+              producerRefProjection ref =
+                inlineBoundVarsTypeWithCanonicalExcept
+                  []
+                  constructionCanonical
+                  presolutionView
+                  (TVarRef ref)
+              producerRefProjectionIsClosed =
+                null . freeTypeVarRefsType . producerRefProjection
+              preparedPacketSchemes packet =
+                [ siScheme (psgSchemeInfo packet)
+                , siScheme (psgOperatedSchemeInfo packet)
+                , psgGammaBoundScheme packet
+                , siScheme (psgConsumerConstructionSchemeInfo packet)
+                ]
+              preparedPacketMentions ref =
+                any
+                  ( \packetScheme ->
+                      let packetType = schemeToType packetScheme
+                       in any
+                            (typeBinderRefsSameIdentity ref)
+                            ( typeBinderDeclarationRefs packetType
+                                ++ freeTypeVarRefsType packetType
+                            )
+                  )
+                  ( concatMap
+                      preparedPacketSchemes
+                      (Map.elems subtermPackets)
+                  )
+              selectedPacketCompletesProjection ref =
+                case selectedPacket of
+                  Nothing -> False
+                  Just packet ->
+                    case
+                        [ bound
+                        | packetScheme <-
+                            [ siScheme (psgSchemeInfo packet)
+                            , siScheme (psgOperatedSchemeInfo packet)
+                            , psgGammaBoundScheme packet
+                            ]
+                        , (packetRef, Just bound) <-
+                            schemeBinderRefs packetScheme
+                        , typeBinderRefsSameIdentity packetRef ref
+                        ]
+                      of
+                      [] -> False
+                      bounds ->
+                        all
+                          ( \bound ->
+                              alphaEqType
+                                (tyToElab bound)
+                                (producerRefProjection ref)
+                          )
+                          bounds
+              exactRequirementProtectedRefs =
+                case (exactEndpoint, selectedExactRequirementType) of
+                  (Just (RootEdgeExactOperated exactType), _) ->
+                    freeTypeVarRefsType exactType
+                  (Just (RootEdgeExactProducer _), Just exactType@TVarRef {}) ->
+                    freeTypeVarRefsType exactType
+                  (Just (RootEdgeExactProducer _), Just exactType) ->
+                    -- Typ(a') is exact as a whole, but a structured producer
+                    -- can still contain result declarations owned by a child
+                    -- construction.  Prepared packets are the positive
+                    -- ownership authority for those nested identities.  Keep
+                    -- any packet-owned occurrence unless the packet selected
+                    -- by this exact edge publishes the same presolution bound
+                    -- in all of its completed views.  A sibling or descendant
+                    -- packet can prove ownership but cannot authorize this
+                    -- edge to consume it.  An open projection must likewise
+                    -- remain in place because moving its free dependencies
+                    -- would cross a local Gamma/lambda boundary.  Projection
+                    -- is therefore limited to closed, unowned occurrences or
+                    -- closed completions certified by this edge's packet.
+                    [ freeRef
+                    | freeRef <- freeTypeVarRefsType exactType
+                    , ( preparedPacketMentions freeRef
+                          && not
+                            (selectedPacketCompletesProjection freeRef)
+                      )
+                        || not (producerRefProjectionIsClosed freeRef)
+                    ]
+                  _ -> []
               operatedType =
                 inlineBoundVarsTypeWithCanonicalExcept
-                  ( maybe
-                      []
-                      freeTypeVarRefsType
-                      selectedExactRequirementType
-                      ++ constructionSourceRefs
-                  )
+                  (exactRequirementProtectedRefs ++ constructionSourceRefs)
                   constructionCanonical
                   presolutionView
                   structurallyClosedType
@@ -4778,22 +5620,107 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
         packetRequirementScheme rootAuthority packet =
           case boundary of
             PacketLocalRequirementBoundary ->
-              schemeInPacketConstructionDomain
-                packet
-                (siScheme (psgOperatedSchemeInfo packet))
+              pure
+                ( schemeInPacketConstructionDomain
+                    packet
+                    (siScheme (psgOperatedSchemeInfo packet))
+                )
             EnclosingRequirementBoundary ->
-              subtermGeneralizationGammaBoundScheme packet
+              pure (subtermGeneralizationGammaBoundScheme packet)
             ConstructionRequirementBoundary activeConsumerKeys _
               | consumerPacketIsActive
                   activeConsumerKeys
                   rootAuthority ->
-                  schemeInPacketConstructionDomain
-                    packet
-                    (siScheme (psgOperatedSchemeInfo packet))
+                  pure
+                    ( schemeInPacketConstructionDomain
+                        packet
+                        (siScheme (psgOperatedSchemeInfo packet))
+                    )
               | otherwise ->
-                  schemeInPacketConstructionDomain
+                  closeLexicalPacketDependencies
                     packet
-                    (subtermGeneralizationGammaBoundScheme packet)
+                    ( schemeInPacketConstructionDomain
+                        packet
+                        (subtermGeneralizationGammaBoundScheme packet)
+                    )
+
+        closeLexicalPacketDependencies packet scheme = do
+          closedBinders <-
+            foldM insertClosure [] lexicalClosures
+          case closedBinders of
+            [] -> pure scheme
+            _ ->
+              case
+                  orderSourceProjectedSchemeBinders
+                    "lexically closed packet Gamma bound"
+                    ( mkElabSchemeWithRefs
+                        (closedBinders ++ schemeBinderRefs scheme)
+                        (schemeBody scheme)
+                    )
+                of
+                  Right closedScheme -> pure closedScheme
+                  Left cause ->
+                    Left
+                      ( ValidationFailed
+                          [ "lexical type abstraction cannot close its prepared packet Gamma bound"
+                          , "  packet authority: "
+                              ++ show (psgConsumerAuthority packet)
+                          , "  packet Gamma bound: " ++ show scheme
+                          , "  lexical closures: " ++ show lexicalClosures
+                          , "  cause: " ++ cause
+                          ]
+                      )
+          where
+            packetFreeRefs =
+              freeTypeVarRefsType (schemeToType scheme)
+            packetDeclaredRefs = map fst (schemeBinderRefs scheme)
+
+            insertClosure closed closure
+              | not (closureMatchesPacket closure) = pure closed
+              | otherwise =
+                  case find (sameBinder binder) closed of
+                    Nothing -> pure (closed ++ [binder])
+                    Just existing
+                      | boundsAgree existing binder -> pure closed
+                      | otherwise ->
+                          Left
+                            ( ValidationFailed
+                                [ "one packet dependency is closed by conflicting lexical type abstractions"
+                                , "  packet authority: "
+                                    ++ show (psgConsumerAuthority packet)
+                                , "  first declaration: " ++ show existing
+                                , "  second declaration: " ++ show binder
+                                ]
+                            )
+              where
+                binder = ltacBinder closure
+
+            closureMatchesPacket closure =
+              let (binderRef, _) = ltacBinder closure
+               in any (typeBinderRefsSameIdentity binderRef) packetFreeRefs
+                    && not
+                      ( any
+                          (typeBinderRefsSameIdentity binderRef)
+                          packetDeclaredRefs
+                      )
+                    && closureOwnsPacketConsumer closure
+
+            closureOwnsPacketConsumer closure =
+              case psgConsumerAuthority packet of
+                Just authority ->
+                  subtermConsumerAuthorityKey authority
+                    `elem` NonEmpty.toList
+                      (ltacEnclosingConsumers closure)
+                Nothing -> False
+
+            sameBinder (leftRef, _) (rightRef, _) =
+              typeBinderRefsSameIdentity leftRef rightRef
+
+            boundsAgree (_, leftBound) (_, rightBound) =
+              let leftTy = maybe TBottom tyToElab leftBound
+                  rightTy = maybe TBottom tyToElab rightBound
+               in alphaEqType leftTy rightTy
+                    || churchAwareEqType leftTy rightTy
 
         constructionAmbientRequirementType rootAuthority =
           case boundary of
@@ -5042,6 +5969,11 @@ generalizationRequirementsForRootEdgesAt boundary identityRepresentative constru
                 (typeBinderIdentityFromNode (rrmaExterior rootAuthority))
             )
             activeConsumerKeys
+
+        exactEndpointIsOperated mbEndpoint =
+          case mbEndpoint of
+            Just RootEdgeExactOperated {} -> True
+            _ -> False
 
         sourceRefForNode node =
           case IntMap.lookup (getNodeId node) sourceBinderRefs of
@@ -5637,11 +6569,8 @@ closedConsumerDischarge consumerAuthority gammaAuthority schemeInfo construction
     (Just authority, Nothing)
       | consumerCanBeAdministrativelyClosed authority
       , null consumerBinderOccurrences
-      , null (freeTypeVarRefsType completeType)
-      , alphaEqType completeType constructionType
-          || packetTypeSpecializesToExactEndpoint
-            constructionType
-            completeType ->
+      , ordinaryClosedDischarge
+          || exactAmbientClosureAfterVacuousConsumer ->
           Just
             ClosedConsumerDischarge
               { ccdAuthority = authority
@@ -5660,6 +6589,67 @@ closedConsumerDischarge consumerAuthority gammaAuthority schemeInfo construction
 
     completeType = schemeToType (siScheme schemeInfo)
     constructionType = schemeToType constructionScheme
+    ordinaryClosedDischarge =
+      null (freeTypeVarRefsType completeType)
+        && ( alphaEqType completeType constructionType
+              || packetTypeSpecializesToExactEndpoint
+                constructionType
+                completeType
+           )
+    -- A crossed lambda can consume its topology result while leaving an
+    -- enclosing lambda parameter free in the emitted packet.  The original
+    -- construction then contains two distinct facts: a vacuous declaration
+    -- for the consumed result and an exact forall closure of every surviving
+    -- ambient dependency.  Remove only that authority-selected vacuous
+    -- declaration and require the remaining spine to close exactly the free
+    -- identities in the packet.  This preserves the lexical construction
+    -- proof without treating an arbitrary open packet as discharged.
+    exactAmbientClosureAfterVacuousConsumer =
+      case consumerDeclarations of
+        [(consumerRef, _)]
+          | not (consumerOccursAfterDeclaration consumerRef) ->
+              exactIdentityClosure
+                constructionWithoutConsumer
+                completeType
+        _ -> False
+    constructionSchemeView = schemeFromType constructionType
+    constructionBinders = schemeBinderRefs constructionSchemeView
+    consumerDeclarations =
+      [ binder
+      | binder@(binderRef, _) <- constructionBinders
+      , any (typeBinderRefsSameIdentity binderRef) consumerRefs
+      ]
+    constructionWithoutConsumer =
+      schemeToType
+        ( mkElabSchemeWithRefs
+            [ binder
+            | binder@(binderRef, _) <- constructionBinders
+            , not
+                ( any
+                    (typeBinderRefsSameIdentity binderRef)
+                    consumerRefs
+                )
+            ]
+            (schemeBody constructionSchemeView)
+        )
+    consumerOccursAfterDeclaration consumerRef =
+      any
+        (typeBinderRefsSameIdentity consumerRef)
+        (freeTypeVarRefsType constructionWithoutConsumer)
+    exactIdentityClosure closed endpoint =
+      peelClosure [] closed
+      where
+        endpointFreeRefs = freeTypeVarRefsType endpoint
+        peelClosure closedRefs current
+          | not (null closedRefs)
+          , alphaEqType current endpoint =
+              sameRefSet closedRefs endpointFreeRefs
+          | TForallRef ref _ body <- current =
+              peelClosure (ref : closedRefs) body
+          | otherwise = False
+        sameRefSet left right =
+          all (\ref -> any (typeBinderRefsSameIdentity ref) right) left
+            && all (\ref -> any (typeBinderRefsSameIdentity ref) left) right
     consumerIdentity = scaConsumerIdentity <$> consumerAuthority
     directConsumerRef = do
       identity <- consumerIdentity
@@ -5854,6 +6844,8 @@ prepareSubtermGeneralizationWithConsumer generator consumerAuthority gammaAuthor
               packetWithLocalResult
               gammaBoundScheme
         , psgExactConsumerSpecialization = Nothing
+        , psgSourceOwnerConsumerCompletion = Nothing
+        , psgSourceOwnerFinalConsumerCompletion = Nothing
         , psgOpaqueResultConstruction = Nothing
         }
     , generator'
@@ -5868,7 +6860,11 @@ prepareSubtermGeneralizationWithConsumer generator consumerAuthority gammaAuthor
             IntMap.union
               ( IntMap.fromList
                   [ (getNodeId node, ref)
-                  | (ref, _) <- schemeBinderRefs (siScheme schemeInfo)
+                  | (ref, _) <-
+                      schemeBinderRefs
+                        ( schemeFromType
+                            (schemeToType (siScheme schemeInfo))
+                        )
                   , Just node <- [typeBinderRefNode ref]
                   ]
               )
@@ -6285,10 +7281,11 @@ mergeSubtermGeneralizations left right =
 -- artifact.
 directLambdaApplicationResultConstructionFor
   :: (TypeBinderRef -> Bool)
+  -> ElabType
   -> AnnExpr
   -> SubtermGeneralizations
-  -> Maybe ElabType
-directLambdaApplicationResultConstructionFor canEliminate ann packets =
+  -> Maybe DirectLambdaApplicationResultConstruction
+directLambdaApplicationResultConstructionFor canEliminate graphResultTy ann packets =
   case ann of
     ALam _ _ _ _ body _ _ -> do
       ownership <- subtermResultOwnershipFor body packets
@@ -6307,14 +7304,122 @@ directLambdaApplicationResultConstructionFor canEliminate ann packets =
                     . snd
                 )
                 (schemeBinderRefs completedScheme)
-      gammaAuthority <- subtermGeneralizationGammaAuthority packet
+      case enclosingConsumerResult ownership packet of
+        Just resultTy ->
+          pure
+            ( DirectLambdaEnclosingConsumerEqFreeResultConstruction
+                resultTy
+            )
+        Nothing ->
+          DirectLambdaPacketGammaResultConstruction
+            <$> packetGammaResult ownership packet completedOccurrenceRefs
+    _ -> Nothing
+  where
+    -- A consumer-only packet has no packet-local Gamma authority: its exact
+    -- consumer-facing bound is constructed by the enclosing source owner.
+    -- When a direct value application exposes that packet transparently, the
+    -- prepared completed-to-bound binder-spine is the positive Eq-Free/N
+    -- construction for the application's result.  Select that construction
+    -- before checking the function child instead of retaining the completed
+    -- packet's now-vacuous administrative forall and trying to remove it
+    -- after EApp.
+    enclosingConsumerResult ownership packet = do
+      authority <- subtermGeneralizationConsumerAuthority packet
+      case authority of
+        EnclosingGammaConsumerAuthority{} -> pure ()
+        _ -> Nothing
+      guard (isNothing (subtermGeneralizationGammaAuthority packet))
+      (certifiedLambdaNode, completedResultTy) <-
+        subtermGeneralizationApplicationSourceLambdaResultConstruction
+          canEliminate
+          packet
+      guard
+        ( certifiedLambdaNode
+            == subtermResultOwnershipLambdaNode ownership
+        )
+      let consumerResultTy =
+            schemeToType
+              (subtermGeneralizationGammaBoundScheme packet)
       guard
         ( all
-            ( (/= gpaConsumerIdentity gammaAuthority)
+            ( (/= scaConsumerIdentity authority)
                 . typeBinderRefIdentity
             )
-            completedOccurrenceRefs
+            (freeTypeVarRefsType consumerResultTy)
         )
+      projectedResultTy <-
+        projectVacuousUnboundedConstructionBinders
+          (subtermGeneralizationSchemeInfo packet)
+          completedResultTy
+      guard
+        ( completedConstructionTypesAgree
+            projectedResultTy
+            consumerResultTy
+        )
+      _ <-
+        planExactBinderSpine
+          completedConstructionTypesAgree
+          completedResultTy
+          consumerResultTy
+      pure consumerResultTy
+
+    -- The enclosing-consumer lane exists for the paper O step that becomes
+    -- available only after the direct value arrow has been removed.  Build
+    -- that projection explicitly: remove at least one unbounded, vacuous
+    -- declaration whose provenance is construction-only.  A bounded
+    -- declaration is an N obligation and remains owned by the ordinary
+    -- packet/Gamma lane, even if packet preparation omitted it from its
+    -- consumer-facing view.
+    projectVacuousUnboundedConstructionBinders
+      schemeInfo
+      completedTy = do
+        let completedScheme = schemeFromType completedTy
+            (retainedBinders, removedBinders) =
+              project
+                (schemeBinderRefs completedScheme)
+            projectedTy =
+              schemeToType
+                ( mkElabSchemeWithRefs
+                    retainedBinders
+                    (schemeBody completedScheme)
+                )
+        guard (not (null removedBinders))
+        pure projectedTy
+      where
+        completedBody = schemeBody (schemeFromType completedTy)
+        sourceRefs =
+          IntMap.elems (siSourceBinderOrderRefs schemeInfo)
+        constructionRefs =
+          IntMap.elems (siConstructionBinderOrderRefs schemeInfo)
+
+        project [] = ([], [])
+        project (binder@(ref, mbBound) : binders) =
+          let (retainedBinders, removedBinders) = project binders
+              retainedTy =
+                schemeToType
+                  ( mkElabSchemeWithRefs
+                      retainedBinders
+                      completedBody
+                  )
+              constructionOwned =
+                any (typeBinderRefsSameIdentity ref) constructionRefs
+              sourceOwned =
+                any (typeBinderRefsSameIdentity ref) sourceRefs
+              vacuous =
+                not
+                  ( any
+                      (typeBinderRefsSameIdentity ref)
+                      (freeTypeVarRefsType retainedTy)
+                  )
+           in if isNothing mbBound
+                && constructionOwned
+                && not sourceOwned
+                && vacuous
+                then (retainedBinders, ref : removedBinders)
+                else (binder : retainedBinders, removedBinders)
+
+    packetGammaResult ownership packet completedOccurrenceRefs = do
+      gammaAuthority <- subtermGeneralizationGammaAuthority packet
       (certifiedLambdaNode, _, _) <-
         subtermGeneralizationApplicationSourceLambdaParameter
           canEliminate
@@ -6323,12 +7428,227 @@ directLambdaApplicationResultConstructionFor canEliminate ann packets =
         ( certifiedLambdaNode
             == subtermResultOwnershipLambdaNode ownership
         )
-      pure
-        ( applicationConstructionTypeWithEliminableBinders
-            canEliminate
+      let completedResultTy =
+            applicationConstructionTypeWithEliminableBinders
+              canEliminate
+              packet
+          consumerIdentity = gpaConsumerIdentity gammaAuthority
+          consumerAlreadyAbsent =
+            all
+              ((/= consumerIdentity) . typeBinderRefIdentity)
+              completedOccurrenceRefs
+          consumerClosedAtBound = do
+            closedResultTy <-
+              eliminateCompletedConsumerAtBound
+                consumerIdentity
+                completedResultTy
+            guard
+              ( alphaEqType
+                  (schemeBody (schemeFromType closedResultTy))
+                  (schemeBody (schemeFromType graphResultTy))
+              )
+            guard
+              ( isJust
+                  ( planExactBinderSpine
+                      completedConstructionTypesAgree
+                      completedResultTy
+                      closedResultTy
+                  )
+              )
+            pure closedResultTy
+      if consumerAlreadyAbsent
+        then pure completedResultTy
+        else consumerClosedAtBound
+
+    -- The packet's Gamma authority identifies the one bounded declaration
+    -- consumed when the direct value lambda is applied.  Replay exactly that
+    -- paper N step beneath any retained leading binders; no other declaration
+    -- is inferred or removed here.  The caller's graph result is checked above
+    -- only as the residual topology of this already-authorized computation.
+    eliminateCompletedConsumerAtBound consumerIdentity ty =
+      case ty of
+        TForallRef ref mbBound bodyTy
+          | typeBinderRefIdentity ref == consumerIdentity -> do
+              bound <- mbBound
+              pure
+                ( substTypeCaptureRef
+                    ref
+                    (tyToElab bound)
+                    bodyTy
+                )
+          | otherwise ->
+              TForallRef ref mbBound
+                <$> eliminateCompletedConsumerAtBound
+                  consumerIdentity
+                  bodyTy
+        _ -> Nothing
+
+-- | Recover the complete result published by an administrative source
+-- lambda.  This is the pre-child counterpart of the checked owner-final
+-- construction: the direct source lambda supplies the value arrow that one
+-- application removes, while the returned-lambda packet supplies the complete
+-- bottom-up codomain construction.
+--
+-- Unlike 'directLambdaApplicationResultConstructionFor', this lane does not
+-- claim that a packet-local Gamma consumer has already been discharged.  It
+-- therefore needs the returned-lambda packet to name the same exact lambda
+-- owner, and is suitable only as an incoming construction endpoint whose
+-- recursively checked lambda must still certify the completed result.  That
+-- staging is observable exactly when the returned value contains a nested
+-- generated declaration owned by the source sidecar: publication may
+-- alpha-freshen that local declaration before the child certificate is
+-- available.  Leading graph declarations belong to an enclosing Gamma and
+-- do not create an application-result claim here.
+directAdministrativeLambdaApplicationResultConstructionFor
+  :: (TypeBinderRef -> Bool)
+  -> IntMap.IntMap TypeBinderRef
+  -> AnnExpr
+  -> SubtermGeneralizations
+  -> Maybe ElabType
+directAdministrativeLambdaApplicationResultConstructionFor canEliminate sourceSidecarRefs ann packets =
+  do
+    (directOwner, ownership, packet) <-
+      directAdministrativeLambdaOwnerPacket ann packets
+    (snd <$> directOpaqueAdministrativeLambdaSourceOwnerCompletion directOwner packet)
+      <|> opaqueSourceCompletedAdministrativeResult ownership packet
+      <|> sourceStagedAdministrativeResult ownership packet
+  where
+    -- An opaque returned-lambda composition is already sealed against the
+    -- exact source lambdas which replace every provisional carrier.  Keep
+    -- that constructed placement (rather than the packet's pre-composition
+    -- binder placement) as the staged result of applying the direct wrapper.
+    -- The terminal packet owner ties it to this transparent result path; the
+    -- application still passes it downward as an administrative marker so
+    -- the recursively checked owners must construct the endpoint.
+    opaqueSourceCompletedAdministrativeResult ownership packet = do
+      (certifiedLambdaNode, _) <-
+        subtermGeneralizationAdministrativeLambdaResultConstruction packet
+      guard
+        (certifiedLambdaNode == subtermResultOwnershipLambdaNode ownership)
+      (constructedTy, sourceLambdaAuthorities) <-
+        subtermGeneralizationOpaqueResultSourceLambdaCompletion packet
+      guard (not (null sourceLambdaAuthorities))
+      pure constructedTy
+
+    -- Packet preparation has already paired this exact source lambda with its
+    -- canonical body and opened the returned-lambda parameter by identity.
+    -- The endpoint remains staged: the recursively elaborated direct lambda
+    -- must still publish an owner-final certificate before the application
+    -- may treat it as constructed.
+    sourceStagedAdministrativeResult ownership packet = do
+      (resultLambdaNode, resultTy) <-
+        subtermGeneralizationApplicationSourceLambdaResultConstruction
+          canEliminate
+          packet
+      guard
+        (resultLambdaNode == subtermResultOwnershipLambdaNode ownership)
+      guard
+        ( administrativeLambdaResultNeedsOwnerConfirmation
+            sourceSidecarRefs
             packet
+            resultTy
+        )
+      pure resultTy
+
+-- | Preserve the complete construction carried by the paired source-owner
+-- certificate for a directly applied administrative lambda.  The first type
+-- is the frozen operated Gamma; the second is the source-constructed result
+-- endpoint.  The application elaborator keeps both in an administrative
+-- expected-term marker so the child may use the endpoint before checking
+-- while owner-final validation still owns the transition from the frozen
+-- Gamma.
+directAdministrativeLambdaApplicationSourceOwnerCompletionFor
+  :: AnnExpr
+  -> SubtermGeneralizations
+  -> Maybe (ElabType, ElabType)
+directAdministrativeLambdaApplicationSourceOwnerCompletionFor ann packets = do
+  (directOwner, _ownership, packet) <-
+    directAdministrativeLambdaOwnerPacket ann packets
+  directOpaqueAdministrativeLambdaSourceOwnerCompletion directOwner packet
+
+directOpaqueAdministrativeLambdaSourceOwnerCompletion
+  :: LocalGammaOwner
+  -> PreparedSubtermGeneralization
+  -> Maybe (ElabType, ElabType)
+directOpaqueAdministrativeLambdaSourceOwnerCompletion directOwner packet = do
+  (authority, certifiedOwner, frozenOperatedType, expectedEndpoint) <-
+    subtermGeneralizationSourceOwnerConsumerCompletion packet
+  guard (certifiedOwner == directOwner)
+  guard (scaEdgeId authority == lgoBoundaryEdge directOwner)
+  let frozenScheme = schemeFromType frozenOperatedType
+  carrierRef <-
+    case schemeBody frozenScheme of
+      TVarRef ref -> pure ref
+      _ -> Nothing
+  guard
+    ( any
+        (typeBinderRefsSameIdentity carrierRef . fst)
+        (schemeBinderRefs frozenScheme)
+    )
+  pure (frozenOperatedType, expectedEndpoint)
+
+directAdministrativeLambdaOwnerPacket
+  :: AnnExpr
+  -> SubtermGeneralizations
+  -> Maybe
+      ( LocalGammaOwner
+      , SubtermResultOwnership
+      , PreparedSubtermGeneralization
+      )
+directAdministrativeLambdaOwnerPacket ann packets =
+  case ann of
+    ALam _ _ _ lambdaScope body bodyEdge lambdaNode -> do
+      ownership <- subtermResultOwnershipFor body packets
+      guard (subtermResultOwnershipHasTransparentPath ownership)
+      let directOwner =
+            LocalGammaOwner
+              { lgoConstructor = LocalLambdaGamma
+              , lgoBoundaryEdge = bodyEdge
+              , lgoTermNode = lambdaNode
+              , lgoScope = GenRef lambdaScope
+              }
+      pure
+        ( directOwner
+        , ownership
+        , subtermResultOwnershipPacket ownership
         )
     _ -> Nothing
+
+administrativeLambdaResultNeedsOwnerConfirmation
+  :: IntMap.IntMap TypeBinderRef
+  -> PreparedSubtermGeneralization
+  -> ElabType
+  -> Bool
+administrativeLambdaResultNeedsOwnerConfirmation sourceSidecarRefs packet resultTy =
+  any sourceOwnsNestedResultDeclaration nestedResultDeclarations
+  where
+    leadingResultDeclarations =
+      map fst (schemeBinderRefs (schemeFromType resultTy))
+    nestedResultDeclarations =
+      [ declaration
+      | declaration <- typeBinderDeclarationRefs resultTy
+      , not
+          ( any
+              (typeBinderRefsSameIdentity declaration)
+              leadingResultDeclarations
+          )
+      ]
+    sourceOwnedDeclarations =
+      IntMap.elems sourceSidecarRefs
+        ++ IntMap.elems
+          ( siSourceBinderOrderRefs
+              (psgSchemeInfo packet)
+          )
+    sourceOwnsNestedResultDeclaration declaration =
+      case
+          typeBinderIdentityGeneratedUnique
+            (typeBinderRefIdentity declaration)
+        of
+          Nothing -> False
+          Just _ ->
+            any
+              (typeBinderRefsSameIdentity declaration)
+              sourceOwnedDeclarations
 
 -- | Recover the lexical path to the already-bottom-up packet that changes an
 -- expression's result type.  The terminal constructor is always the lambda
@@ -6339,7 +7659,29 @@ subtermResultOwnershipFor
   :: AnnExpr
   -> SubtermGeneralizations
   -> Maybe SubtermResultOwnership
-subtermResultOwnershipFor = go TransparentSubtermResultPath
+subtermResultOwnershipFor =
+  subtermResultOwnershipForWith
+    (\_ _ -> False)
+
+-- | The direct-application authority query may follow a let whose result is
+-- exactly that let's resolved binding occurrence back to its RHS.  This is
+-- intentionally separate from ordinary packet ownership: preparation and
+-- closure must not globally move a descendant packet across a let merely
+-- because the let returns the same value.
+subtermResultOwnershipForResolvedLetAlias
+  :: AnnExpr
+  -> SubtermGeneralizations
+  -> Maybe SubtermResultOwnership
+subtermResultOwnershipForResolvedLetAlias =
+  subtermResultOwnershipForWith letBodyReturnsResolvedBinding
+
+subtermResultOwnershipForWith
+  :: (IdDetails -> AnnExpr -> Bool)
+  -> AnnExpr
+  -> SubtermGeneralizations
+  -> Maybe SubtermResultOwnership
+subtermResultOwnershipForWith followsResolvedLetAlias =
+  go TransparentSubtermResultPath
   where
     go path ann packets =
       case ann of
@@ -6361,7 +7703,10 @@ subtermResultOwnershipFor = go TransparentSubtermResultPath
             Nothing -> go OpaqueSubtermResultPath body packets
           where
             ownerKey = idDetailsIdentityKey details
-        ALet _ _ _ _ _ _ _ body _ -> go path body packets
+        ALet _ details _ _ _ _ rhs body _
+          | followsResolvedLetAlias details body ->
+              go path rhs packets
+          | otherwise -> go path body packets
         AExactAnn inner _ _ _ -> go path inner packets
         AAnn inner _ _ -> go path inner packets
         ALetScope inner _ _ -> go path inner packets
@@ -6551,8 +7896,17 @@ data PacketBoundMatch
 -- the enclosing RaiseMerge.  Retaining the lexical scope here lets packet
 -- placement validate that construction without flattening the declaration
 -- into the outer scheme.
-type NestedForallDeclaration =
-  (TypeBinderRef, Maybe BoundType, [TypeBinderRef])
+data NestedForallDeclaration = NestedForallDeclaration
+  { nfdRef :: !TypeBinderRef
+  , nfdBound :: !(Maybe BoundType)
+  , nfdLexicalRefs :: ![TypeBinderRef]
+  -- | The outer scheme declaration whose lower bound contains this nested
+  -- declaration.  Placement replaces that lower bound atomically, so a
+  -- matching nested identity owned by the selected outer consumer is part of
+  -- the provisional construction being replaced, not a second consumer.
+  , nfdOuterBoundOwner :: !(Maybe TypeBinderRef)
+  }
+  deriving (Show)
 
 -- | Collect nested forall declarations without treating ordinary variable
 -- occurrences as declarations.  Bounds see the binders outside their own
@@ -6563,6 +7917,7 @@ nestedForallDeclarationsInScheme
 nestedForallDeclarationsInScheme scheme =
   collectOuterBinders [] (schemeBinderRefs scheme)
     ++ collectNestedForalls
+      Nothing
       (map fst (schemeBinderRefs scheme))
       (schemeBody scheme)
   where
@@ -6570,34 +7925,50 @@ nestedForallDeclarationsInScheme scheme =
     collectOuterBinders lexicalRefs ((ref, mbBound) : rest) =
       maybe
         []
-        (collectNestedForalls lexicalRefs)
+        (collectNestedForalls (Just ref) lexicalRefs)
         mbBound
         ++ collectOuterBinders (lexicalRefs ++ [ref]) rest
 
     collectNestedForalls
-      :: [TypeBinderRef]
+      :: Maybe TypeBinderRef
+      -> [TypeBinderRef]
       -> Ty v
       -> [NestedForallDeclaration]
-    collectNestedForalls lexicalRefs ty =
+    collectNestedForalls outerBoundOwner lexicalRefs ty =
       case ty of
         TVarRef {} -> []
         TArrow domain codomain ->
-          collectNestedForalls lexicalRefs domain
-            ++ collectNestedForalls lexicalRefs codomain
+          collectNestedForalls outerBoundOwner lexicalRefs domain
+            ++ collectNestedForalls outerBoundOwner lexicalRefs codomain
         TConWithIdentity _ _ arguments ->
-          concatMap (collectNestedForalls lexicalRefs) arguments
+          concatMap
+            (collectNestedForalls outerBoundOwner lexicalRefs)
+            arguments
         TVarAppRef _ arguments ->
-          concatMap (collectNestedForalls lexicalRefs) arguments
+          concatMap
+            (collectNestedForalls outerBoundOwner lexicalRefs)
+            arguments
         TBaseWithIdentity {} -> []
         TForallRef ref mbBound body ->
-          (ref, mbBound, lexicalRefs)
+          NestedForallDeclaration
+            { nfdRef = ref
+            , nfdBound = mbBound
+            , nfdLexicalRefs = lexicalRefs
+            , nfdOuterBoundOwner = outerBoundOwner
+            }
             : maybe
               []
-              (collectNestedForalls lexicalRefs)
+              (collectNestedForalls outerBoundOwner lexicalRefs)
               mbBound
-              ++ collectNestedForalls (lexicalRefs ++ [ref]) body
+              ++ collectNestedForalls
+                outerBoundOwner
+                (lexicalRefs ++ [ref])
+                body
         TMuRef ref body ->
-          collectNestedForalls (lexicalRefs ++ [ref]) body
+          collectNestedForalls
+            outerBoundOwner
+            (lexicalRefs ++ [ref])
+            body
         TBottom -> []
 
 -- | Project a frozen/base graph node to the solved construction copy published
@@ -7700,6 +9071,84 @@ placeSubtermGeneralizationBindersWithRoutes consumerRoutes subtermPackets rootSc
       subtermPackets
       rootScheme
 
+-- | Carry the exact construction-order authority of packet binders that
+-- survive placement into the enclosing 'SchemeInfo'.  Packet placement is a
+-- type construction boundary: a fresh bounded exterior may deliberately lose
+-- its graph 'BindParent' after completion, while its position remains fixed by
+-- the prepared packet spine.  Rebuilding a bare scheme/substitution pair at
+-- this boundary would discard that proof and make Phi consult a stale @<P@
+-- relation.
+--
+-- Only a declaration retained in the final scheme and an exact final route
+-- for that same semantic identity are published.  Renamed packet binders are
+-- included only through the packet's explicit construction-renaming
+-- certificate; unrelated graph binders continue to use ordinary @<P@ order.
+publishPlacedSubtermConstructionBinderOrder
+  :: SubtermGeneralizations
+  -> SchemeInfo
+  -> SchemeInfo
+publishPlacedSubtermConstructionBinderOrder packets schemeInfo =
+  schemeInfo
+    { siConstructionBinderOrderRefs =
+        IntMap.union
+          placedPacketOrderRefs
+          (siConstructionBinderOrderRefs schemeInfo)
+    }
+  where
+    declaredRefs =
+      typeBinderDeclarationRefs
+        (schemeToType (siScheme schemeInfo))
+    packetOrderRefs =
+      distinctRefs
+        ( concatMap
+            packetConstructionRefs
+            (Map.elems packets)
+        )
+    packetConstructionRefs packet =
+      let ownedRefs =
+            IntMap.elems
+              ( siConstructionBinderOrderRefs
+                  (subtermGeneralizationSchemeInfo packet)
+              )
+          renamedRefs =
+            [ targetRef
+            | (sourceRef, targetRef) <-
+                subtermGeneralizationConstructionBinderRenames packet
+            , any
+                (typeBinderRefsSameIdentity sourceRef)
+                ownedRefs
+            ]
+       in ownedRefs ++ renamedRefs
+    retainedPacketRefs =
+      [ declaredRef
+      | declaredRef <- declaredRefs
+      , any
+          (typeBinderRefsSameIdentity declaredRef)
+          packetOrderRefs
+      ]
+    placedPacketOrderRefs =
+      IntMap.fromList
+        [ (nodeKey, declaredRef)
+        | declaredRef <- retainedPacketRefs
+        , nodeKey <- orderRouteKeys declaredRef
+        , Just routedRef <-
+            [IntMap.lookup nodeKey (siSubstRefs schemeInfo)]
+        , typeBinderRefsSameIdentity declaredRef routedRef
+        ]
+    orderRouteKeys ref =
+      case typeBinderRefNode ref of
+        Just node -> [getNodeId node]
+        Nothing ->
+          [ nodeKey
+          | (nodeKey, routedRef) <-
+              IntMap.toList (siSubstRefs schemeInfo)
+          , typeBinderRefsSameIdentity ref routedRef
+          ]
+    distinctRefs = foldr insertDistinct []
+    insertDistinct ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
 placeSubtermGeneralizationBindersWithRoutesAndProvenance
   :: IntMap.IntMap TypeBinderRef
   -> SubtermGeneralizations
@@ -7707,27 +9156,30 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenance
   -> Either ElabError PlacedSubtermBinders
 placeSubtermGeneralizationBindersWithRoutesAndProvenance =
   placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy
-    (\_ _ _ _ -> False)
+    (\_ _ _ _ -> Nothing)
 
 -- | Place prepared packets with an additional positive construction proof for
 -- an already completed packet bound.  The callback receives the exact packet,
 -- its selected consumer ref, the packet bound after construction-domain/free
--- reference alignment, and the already constructed target bound.  Returning
--- 'True' keeps that target bound and omits the stale packet forall spine.
--- Callers cannot use this hook to select a consumer or perform alignment;
--- those remain owned by the ordinary checked placement path below.
+-- reference alignment, and the currently constructed target bound.  Returning
+-- a completed endpoint installs that exact bound and omits the stale packet
+-- forall spine.  This lets a source constructor publish the closed endpoint it
+-- has already checked even when the frozen graph still exposes the packet's
+-- open operated view.  Callers cannot use this hook to select a consumer or
+-- perform alignment; those remain owned by the ordinary checked placement
+-- path below.
 placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy
   :: ( PreparedSubtermGeneralization
        -> TypeBinderRef
        -> ElabType
        -> ElabType
-       -> Bool
+       -> Maybe ElabType
      )
   -> IntMap.IntMap TypeBinderRef
   -> SubtermGeneralizations
   -> ElabScheme
   -> Either ElabError PlacedSubtermBinders
-placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches consumerRoutes subtermPackets rootScheme =
+placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundFor consumerRoutes subtermPackets rootScheme =
   placePackets
     rootScheme
     Map.empty
@@ -7903,15 +9355,19 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                 nested ->
                   multipleConsumerFailure [] nested
             [targetRef]
-              | not (null (nestedTargets consumerIdentity)) ->
+              | let competingNestedTargets =
+                      nestedTargetsOutsideTopLevelConsumer
+                        targetRef
+                        consumerIdentity
+              , not (null competingNestedTargets) ->
                   multipleConsumerFailure
                     [targetRef]
-                    (nestedTargets consumerIdentity)
+                    competingNestedTargets
               | forwardsThroughExistingTopologyResult targetRef packet ->
                   Right (scheme0, Nothing, Nothing)
               | otherwise -> do
               validatePacketFreeRefSourceRoutes targetRef
-              targetBound <-
+              provisionalTargetBound <-
                 case find (typeBinderRefsSameIdentity targetRef . fst) binders of
                   Just (_, Just existingBound) -> Right existingBound
                   Just (_, Nothing)
@@ -7939,12 +9395,62 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                           , "  enclosing scheme: " ++ show scheme0
                           ]
                       )
-              let completedBoundAlreadyConstructed =
-                    completedBoundMatches
+              let mbCertifiedCompletedType =
+                    completedBoundFor
                       packet
                       targetRef
                       packetTyUnfreshened
-                      (tyToElab targetBound)
+                      (tyToElab provisionalTargetBound)
+              mbCertifiedCompletedBound <-
+                traverse
+                  ( \completedType0 -> do
+                      let completedType = alignPacketFreeRefs completedType0
+                      case elabToBound completedType of
+                        Right completedBound -> pure completedBound
+                        Left cause ->
+                          Left
+                            ( ValidationFailed
+                                [ "certified completed packet endpoint is not a legal Gamma bound"
+                                , "  consumer: " ++ show targetRef
+                                , "  completed endpoint: " ++ show completedType
+                                , "  cause: " ++ cause
+                                ]
+                            )
+                  )
+                  mbCertifiedCompletedType
+              let completedBoundAlreadyConstructed =
+                    isJust mbCertifiedCompletedBound
+              placementScheme <-
+                case mbCertifiedCompletedBound of
+                  Nothing -> pure scheme
+                  Just completedBound ->
+                    either
+                      (Left . ValidationFailed . pure)
+                      Right
+                      ( orderSourceProjectedSchemeBinders
+                          "certified completed packet construction"
+                          ( mkElabSchemeWithRefs
+                              [ if typeBinderRefsSameIdentity ref targetRef
+                                  then (ref, Just completedBound)
+                                  else binder
+                              | binder@(ref, _) <- binders
+                              ]
+                              (schemeBody scheme)
+                          )
+                      )
+              let placementBinders = schemeBinderRefs placementScheme
+              case mbCertifiedCompletedBound of
+                Nothing -> pure ()
+                Just completedBound ->
+                  validatePacketFreeRefsWithin
+                    targetRef
+                    (bindersBeforeIn placementBinders targetRef)
+                    (freeTypeVarRefsType (tyToElab completedBound))
+              let
+                  targetBound =
+                    fromMaybe
+                      provisionalTargetBound
+                      mbCertifiedCompletedBound
               unless completedBoundAlreadyConstructed $
                 validatePacketFreeRefs targetRef
               let constructionTargetBoundInPacketDomain =
@@ -7957,11 +9463,14 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                     alignPacketFreeRefs constructionTargetBoundInPacketDomain
                   packetOwnedTargetBound =
                     releasePacketFreeBinders constructionTargetBound
-              let boundPlacement =
-                    packetBoundMatch
-                      targetRef
-                      packetOwnedTargetBound
-                      (tyToElab targetBound)
+              let boundPlacement
+                    | completedBoundAlreadyConstructed =
+                        Just PacketBodyBound
+                    | otherwise =
+                        packetBoundMatch
+                          targetRef
+                          packetOwnedTargetBound
+                          (tyToElab targetBound)
               (placedTargetBound, copiedBinderRoutes) <-
                 case boundPlacement of
                   Just PacketBodyBound ->
@@ -7975,7 +9484,7 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                     packetTy <-
                       freshenPacketBoundRefs
                         packetReservedNames
-                        packetTyUnfreshened
+                        packetTypeAtEnclosingSource
                     case elabToBound packetTy of
                       Right packetBound ->
                         pure
@@ -8033,11 +9542,13 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                           then Just placedTargetBound
                           else mbBound
                       )
-                    | (ref, mbBound) <- binders
+                    | (ref, mbBound) <- placementBinders
                     , typeBinderRefsSameIdentity ref targetRef
+                        || isPacketSourceOwned ref
                         || not (isPacketOwned ref)
                     ]
-                  placed = mkElabSchemeWithRefs retained (schemeBody scheme)
+                  placed =
+                    mkElabSchemeWithRefs retained (schemeBody placementScheme)
                   placementProvenance
                     | null copiedBinderRoutes = Nothing
                     | otherwise = Just (targetRef, copiedBinderRoutes)
@@ -8071,8 +9582,10 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                 )
             )
 
-        consumeNestedConsumerBound
-          (targetRef, mbTargetBound, lexicalRefs) = do
+        consumeNestedConsumerBound declaration = do
+            let targetRef = nfdRef declaration
+                mbTargetBound = nfdBound declaration
+                lexicalRefs = nfdLexicalRefs declaration
             case psgConsumerAuthority packet of
               Just authority
                 | subtermConsumerAuthorityIsTopology authority ->
@@ -8170,11 +9683,19 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                     || packetTypeSpecializesToExactEndpoint
                       nestedPacketTy
                       constructionTargetBound
-                    || completedBoundMatches
-                      packet
-                      targetRef
-                      nestedPacketTy
-                      constructionTargetBound
+                    || maybe
+                      False
+                      ( \completedType ->
+                          operationallyMatchesCompletedType
+                            completedType
+                            constructionTargetBound
+                      )
+                      ( completedBoundFor
+                          packet
+                          targetRef
+                          nestedPacketTy
+                          constructionTargetBound
+                      )
             unless matchesNestedConstruction $
               Left
                 ( ValidationFailed
@@ -8473,6 +9994,28 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
               packetTyUnfreshened
               constructionTargetBound =
               Just PacketBodyBound
+          -- A source annotation can already have constructed the selected
+          -- consumer inside its own published lower bound.  The leading
+          -- source declarations stay in the enclosing Gamma, while the
+          -- descendant packet supplies the exact lower bound of the nested
+          -- occurrence of that same consumer.  Validate that ownership by
+          -- identity before retaining the published bound; comparing the
+          -- packet tail with the whole source-prefixed bound would require
+          -- the child to construct declarations it does not own.
+          | publishedBoundContainsPacketConsumer
+              targetRef
+              publishedTargetBound =
+              Just PacketBodyBound
+          -- Source-order declarations are already lexical in the enclosing
+          -- scheme.  Remove only that certified prefix before replaying the
+          -- packet consumer's N step; copying the source declaration into the
+          -- consumer bound would both duplicate its scope and hide the exact
+          -- source identity needed by the constructed bound.
+          | not (null packetSourceBinderRefs)
+          , packetTypeSpecializesToExactEndpoint
+              packetTypeAtEnclosingSource
+              constructionTargetBound =
+              Just PacketBodyBound
           -- The enclosing Gamma can be strictly more general than this
           -- descendant occurrence.  The selected consumer identity fixes the
           -- declaration, and an exact reverse binder-spine plan proves the
@@ -8480,12 +10023,6 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
           | packetTypeSpecializesToExactEndpoint
               constructionTargetBound
               packetTyUnfreshened =
-              Just PacketBodyBound
-          | completedBoundMatches
-              packet
-              targetRef
-              packetTyUnfreshened
-              constructionTargetBound =
               Just PacketBodyBound
           -- The enclosing construction can already have published the
           -- packet's complete bound at this exact consumer.  Re-copying an
@@ -8500,6 +10037,53 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
           | alphaEqType constructionTargetBound packetTyUnfreshened =
               Just WholePacketBound
           | otherwise = Nothing
+
+        publishedBoundContainsPacketConsumer targetRef publishedTargetBound =
+          case consumerDeclarations [] publishedBinders of
+            [(sourcePrefix, Just packetConsumerBound)] ->
+              sourcePrefixOwnedByEnclosingGamma
+                sourcePrefix
+                enclosingPrefix
+                && alphaEqType
+                  (tyToElab packetConsumerBound)
+                  packetTyUnfreshened
+            _ -> False
+          where
+            publishedBinders =
+              schemeBinderRefs (schemeFromType publishedTargetBound)
+            enclosingPrefix =
+              takeWhile
+                (not . typeBinderRefsSameIdentity targetRef . fst)
+                binders
+
+            consumerDeclarations _ [] = []
+            consumerDeclarations prefix (binder@(ref, mbBound) : rest)
+              | typeBinderRefsSameIdentity targetRef ref =
+                  (prefix, mbBound)
+                    : consumerDeclarations (prefix ++ [binder]) rest
+              | otherwise =
+                  consumerDeclarations (prefix ++ [binder]) rest
+
+            sourcePrefixOwnedByEnclosingGamma [] _ = True
+            sourcePrefixOwnedByEnclosingGamma _ [] = False
+            sourcePrefixOwnedByEnclosingGamma
+              sourcePrefix@((sourceRef, sourceBound) : remainingSource)
+              ((enclosingRef, enclosingBound) : remainingEnclosing)
+                | typeBinderRefsSameIdentity sourceRef enclosingRef =
+                    isGeneratedSourceRef sourceRef
+                      && boundsAlphaEquivalent sourceBound enclosingBound
+                      && sourcePrefixOwnedByEnclosingGamma
+                        remainingSource
+                        remainingEnclosing
+                | otherwise =
+                    sourcePrefixOwnedByEnclosingGamma
+                      sourcePrefix
+                      remainingEnclosing
+
+            boundsAlphaEquivalent Nothing Nothing = True
+            boundsAlphaEquivalent (Just left) (Just right) =
+              alphaEqType (tyToElab left) (tyToElab right)
+            boundsAlphaEquivalent _ _ = False
 
         targetBoundWasPublished targetRef publishedTargetBound =
           case find (typeBinderRefsSameIdentity targetRef . fst) binders of
@@ -8537,11 +10121,7 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
             (freeTypeVarRefsType targetBound)
           where
             removedPacketRefs =
-              [ ref
-              | (ref, _) <- binders
-              , not (typeBinderRefsSameIdentity ref targetRef)
-              , isPacketOwned ref
-              ]
+              map fst (removedPacketBinders targetRef)
             removedPacketConstructionRefs =
               removedPacketRefs
                 ++ [ constructionRef
@@ -8564,6 +10144,7 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
           | binder@(ref, _) <- binders
           , not (typeBinderRefsSameIdentity ref targetRef)
           , isPacketOwned ref
+          , not (isPacketSourceOwned ref)
           ]
 
         -- The descendant packet is constructed before the enclosing
@@ -8641,6 +10222,8 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
             )
         packetTyUnfreshened =
           alignPacketFreeRefs (schemeToType packetBoundScheme)
+        packetTypeAtEnclosingSource =
+          releasePacketSourceBinders packetTyUnfreshened
         packetBodyUnfreshened =
           alignPacketFreeRefs (schemeBody packetBoundScheme)
         -- The stored Gamma bound is the outward exact/source view.  Root
@@ -8876,7 +10459,16 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
         -- bottom.  Removal still refers to the packet's original graph
         -- identities; the bound payload above is a fresh copy.
         packetOwnedRefs = boundRefsInType packetTyUnfreshened
+        packetSourceBinderRefs =
+          IntMap.elems
+            ( siSourceBinderOrderRefs
+                (psgConsumerConstructionSchemeInfo packet)
+            )
+            ++ IntMap.elems
+              (siSourceBinderOrderRefs (psgSchemeInfo packet))
         binders = schemeBinderRefs scheme
+        isPacketSourceOwned ref =
+          any (typeBinderRefsSameIdentity ref) packetSourceBinderRefs
         isPacketOwned ref =
           any (typeBinderRefsSameIdentity ref) packetOwnedRefs
             || any
@@ -8901,10 +10493,20 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
         targetRefs = targetRefsIn binders
         nestedTargets consumerIdentity =
           [ declaration
-          | declaration@(ref, mbBound, _) <-
+          | declaration <-
               nestedForallDeclarationsInScheme scheme
-          , isJust mbBound || packetHasTopologyConsumer
-          , consumerTargetsRef consumerIdentity ref
+          , isJust (nfdBound declaration) || packetHasTopologyConsumer
+          , consumerTargetsRef consumerIdentity (nfdRef declaration)
+          ]
+        nestedTargetsOutsideTopLevelConsumer targetRef consumerIdentity =
+          [ declaration
+          | declaration <- nestedTargets consumerIdentity
+          , not
+              ( maybe
+                  False
+                  (typeBinderRefsSameIdentity targetRef)
+                  (nfdOuterBoundOwner declaration)
+              )
           ]
         targetRefsIn candidateBinders consumerIdentity =
           foldr insertDistinctRef [] (directTargets ++ routedTargets)
@@ -9053,10 +10655,13 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
               )
 
         bindersBefore targetRef =
+          bindersBeforeIn binders targetRef
+
+        bindersBeforeIn candidateBinders targetRef =
           map fst
             ( takeWhile
                 (not . typeBinderRefsSameIdentity targetRef . fst)
-                binders
+                candidateBinders
             )
 
         -- A reference that is free in the whole enclosing scheme but also has
@@ -9067,6 +10672,15 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
           filter
             (\freeRef -> not (any (typeBinderRefsSameIdentity freeRef . fst) binders))
             (freeTypeVarRefsType (schemeToType scheme))
+
+        operationallyMatchesCompletedType completedType constructedType =
+          alphaEqType completedType constructedType
+            || packetTypeSpecializesToExactEndpoint
+              completedType
+              constructedType
+            || packetTypeSpecializesToExactEndpoint
+              constructedType
+              completedType
 
         rawPacketFreeRefs =
           freeTypeVarRefsType (schemeToType packetBoundScheme)
@@ -9089,6 +10703,15 @@ placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy completedBoundMatches
                   releasePacketFreeBinders body
             TForallRef ref mbBound body ->
               TForallRef ref mbBound (releasePacketFreeBinders body)
+            _ -> ty
+
+        releasePacketSourceBinders ty =
+          case ty of
+            TForallRef ref _ body
+              | isPacketSourceOwned ref ->
+                  releasePacketSourceBinders body
+            TForallRef ref mbBound body ->
+              TForallRef ref mbBound (releasePacketSourceBinders body)
             _ -> ty
 
 boundRefsInType :: Ty v -> [TypeBinderRef]

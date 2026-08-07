@@ -9,6 +9,7 @@ module MLF.Elab.Run.Instantiation (
     inferInstAppArgsFromSchemeRefs,
     inferInstAppArgsFromSchemeRefsExact,
     constructExactInstantiation,
+    constructExactInstantiationAtSourceArguments,
     resolvedSourceApplicationArgumentEndpoint,
     sourceSchemeConstructsExactEndpoint,
     residualTopologyAgreesExact,
@@ -97,6 +98,11 @@ planExactBinderSpine typesAgree sourceTy targetTy = do
                         sourceBound
                         sourceBody
                         target
+                        <|> consumeAndReintroduceVacuousBinder
+                            sourceRef
+                            sourceBound
+                            source
+                            target
                         <|> specializeLeadingBinder
                             sourceRef
                             sourceBound
@@ -135,6 +141,46 @@ planExactBinderSpine typesAgree sourceTy targetTy = do
                             )
                         )
             _ -> Nothing
+
+    -- A bounded source declaration can be consumed at its bound by N before
+    -- the exact endpoint reintroduces the same positional identity as a
+    -- vacuous unbounded declaration by O.  For example,
+    --
+    --   forall (b >= Bool). t -> b
+    --     <= forall b. t -> Bool.
+    --
+    -- 'retainLeadingBinder' must reject that bound change.  Requiring the
+    -- exact same identity here prevents a general target-vacuous O from
+    -- bypassing the ordinary retained-spine plan.  The final application
+    -- check above still has to reproduce the complete target, so O cannot
+    -- hide a residual body mismatch.
+    consumeAndReintroduceVacuousBinder
+        sourceRef
+        sourceBound
+        source
+        target = do
+            _ <- sourceBound
+            TForallRef targetRef Nothing targetBody <- pure target
+            guard (typeBinderRefsSameIdentity sourceRef targetRef)
+            guard
+                ( not
+                    ( any
+                        (typeBinderRefsSameIdentity targetRef)
+                        (freeTypeVarRefsType targetBody)
+                    )
+                )
+            specializedTy <-
+                either
+                    (const Nothing)
+                    Just
+                    (applyInstantiation source InstElim)
+            (renames, bodyInstantiation) <- go specializedTy targetBody
+            pure
+                ( renames
+                , composeInst
+                    InstElim
+                    (composeInst bodyInstantiation InstIntro)
+                )
 
     retainLeadingBinder sourceRef sourceBound sourceBody target =
         case target of
@@ -323,9 +369,21 @@ constructExactInstantiation typeEnv typesAgree source target = do
     go env sourceTy targetTy
         | typesAgree sourceTy targetTy = Just InstId
         | TVarRef targetRef <- targetTy
-        , Just targetBound <- TypeCheck.lookupTypeBindingRef targetRef env
-        , typesAgree sourceTy targetBound =
-            Just (InstAbstrRef targetRef)
+        , Just targetBound <- TypeCheck.lookupTypeBindingRef targetRef env = do
+            -- Hyp consumes the declaration's bound, not an arbitrary source
+            -- endpoint.  Construct that bound first so an occurrence such as
+            --
+            --   forall alpha. alpha -> alpha  <=  a -> a  <=  b
+            --
+            -- is emitted as @N a; Hyp b@.  Requiring the source to equal the
+            -- bound here would lose the leading specialization and leave a
+            -- bare Hyp that cannot type-check at the occurrence boundary.
+            boundInstantiation <- go env sourceTy targetBound
+            Just
+                ( composeInst
+                    boundInstantiation
+                    (InstAbstrRef targetRef)
+                )
         | TBottom <- sourceTy = Just (InstBot targetTy)
         | TForallRef targetRef mbTargetBound targetBody <- targetTy =
             introduceTargetForall
@@ -407,23 +465,12 @@ constructExactInstantiation typeEnv typesAgree source target = do
             | otherwise = False
 
     applyArgument env (prefix, current) argument = do
-        step <-
-            case current of
-                TForallRef _ Nothing _ -> Just (InstApp argument)
-                TForallRef _ (Just bound) _
-                    | let boundTy = tyToElab bound
-                    , typesAgree argument boundTy ->
-                        Just InstElim
-                    | otherwise -> do
-                        inside <- go env (tyToElab bound) argument
-                        pure (composeInst (InstInside inside) InstElim)
-                _ -> Nothing
-        current' <-
-            either
-                (const Nothing)
-                Just
-                (TypeCheck.checkInstantiation env current step)
-        pure (composeInst prefix step, current')
+        applyExactSourceArgument
+            env
+            typesAgree
+            (go env)
+            (prefix, current)
+            argument
 
     eliminateVacuousForalls env endpoint = advance
       where
@@ -442,6 +489,104 @@ constructExactInstantiation typeEnv typesAgree source target = do
                         (TypeCheck.checkInstantiation env current InstElim)
                 advance (composeInst prefix InstElim) next
             | otherwise = Just (prefix, current)
+
+-- | Construct a complete source-forall specialization at arguments selected
+-- by an external construction certificate.  Unlike
+-- 'constructExactInstantiation', this function does not infer arguments from
+-- the residual target: every leading source declaration must have one exact
+-- supplied argument.  This matters when a declaration is vacuous in the
+-- residual but is still a dependency of a later flexible bound.  The
+-- certificate owns that positional correspondence; each N/bound computation
+-- is nevertheless checked here before the endpoint is returned.
+constructExactInstantiationAtSourceArguments
+    :: TypeCheck.Env
+    -> (ElabType -> ElabType -> Bool)
+    -> ElabType
+    -> [ElabType]
+    -> ElabType
+    -> Maybe Instantiation
+constructExactInstantiationAtSourceArguments
+    typeEnv
+    typesAgree
+    source
+    arguments
+    target = do
+        guard
+            ( length arguments
+                == length (schemeBinderRefs (schemeFromType source))
+            )
+        (instantiation, constructed) <-
+            foldM
+                ( applyExactSourceArgument
+                    typeEnv
+                    typesAgree
+                    (constructExactInstantiation typeEnv typesAgree)
+                )
+                (InstId, source)
+                arguments
+        guard (typesAgree constructed target)
+        checked <-
+            either
+                (const Nothing)
+                Just
+                (TypeCheck.checkInstantiation typeEnv source instantiation)
+        guard (typesAgree checked target)
+        pure instantiation
+
+applyExactSourceArgument
+    :: TypeCheck.Env
+    -> (ElabType -> ElabType -> Bool)
+    -> (ElabType -> ElabType -> Maybe Instantiation)
+    -> (Instantiation, ElabType)
+    -> ElabType
+    -> Maybe (Instantiation, ElabType)
+applyExactSourceArgument
+    env
+    typesAgree
+    constructBound
+    (prefix, current)
+    argument = do
+        step <-
+            case current of
+                TForallRef _ Nothing _ -> Just (InstApp argument)
+                TForallRef _ (Just bound) _
+                    | let boundTy = tyToElab bound
+                    , typesAgree argument boundTy ->
+                        Just InstElim
+                    | TVarRef argumentRef <- argument
+                    , Just argumentBound <-
+                        TypeCheck.lookupTypeBindingRef argumentRef env -> do
+                        -- A flexible binder cannot store a bare type
+                        -- variable as its rewritten bound.  Construct its
+                        -- declared bound to the ambient variable's declared
+                        -- bound first, then perform Hyp inside the flexible
+                        -- binder and N-eliminate that binder.  Building the
+                        -- bound directly to @argument@ would erase the
+                        -- variable-shaped bound to Bottom before N runs.
+                        inside <- constructBound (tyToElab bound) argumentBound
+                        let refineBound =
+                                case inside of
+                                    InstId -> InstId
+                                    _ -> InstInside inside
+                            selectAmbientArgument =
+                                composeInst
+                                    (InstInside (InstAbstrRef argumentRef))
+                                    InstElim
+                        pure
+                            ( composeInst
+                                refineBound
+                                selectAmbientArgument
+                            )
+                    | otherwise -> do
+                        inside <- constructBound (tyToElab bound) argument
+                        pure (composeInst (InstInside inside) InstElim)
+                _ -> Nothing
+        current' <-
+            either
+                (const Nothing)
+                Just
+                (TypeCheck.checkInstantiation env current step)
+        pure (composeInst prefix step, current')
 
 -- | Compare a fully specialized residual function with the application
 -- topology that justified its arguments.  A graph endpoint may retain a
@@ -492,21 +637,76 @@ inferInstAppArgsFromSchemeRefsWith matchRefs typesAgree targetCore binds body ta
                     _ -> False
                 | arg <- args
                 ]
+        -- Source applications may consume only a leading binder prefix.
+        -- Keep that ordering rule and the escaping-identity rejection in one
+        -- constructor so body matching and bound matching cannot drift.
+        validatedPrefixArguments argsMaybe =
+            let (prefixArgs, remainingArgs) = span isPresent argsMaybe
+                args = [ty | Just ty <- prefixArgs]
+            in if any isPresent remainingArgs || argsAreIdentity args
+                then Nothing
+                else Just args
+        isPresent (Just _) = True
+        isPresent Nothing = False
         inferFromBody =
-            let fromMatch =
+            let argumentsFromSubst subst0 = do
+                    subst <- closeDependentBoundSubstitutions subst0
+                    validatedPrefixArguments
+                        (map (`Map.lookup` subst) binderRefs)
+                -- Matching the residual body can determine a later flexible
+                -- binder before an earlier binder that occurs only in that
+                -- binder's bound.  For example,
+                --
+                --   forall d. forall (f >= K d). b -> f
+                --
+                -- at @b -> K t@ first determines @f := K t@.  The declaration
+                -- of @f@ then determines @d := t@.  Propagate those exact
+                -- bound equations to a fixed point before enforcing the
+                -- source-prefix rule.  Every resulting argument is still
+                -- checked by the caller's real N computation, so this adds
+                -- construction evidence rather than a type-shape fallback.
+                closeDependentBoundSubstitutions subst0 = do
+                    subst <- foldM extendFromBound subst0 binds
+                    if Map.size subst == Map.size subst0
+                        then Just subst
+                        else closeDependentBoundSubstitutions subst
+                extendFromBound subst (binderRef, mbBound) =
+                    case (Map.lookup binderRef subst, mbBound) of
+                        (Just argumentTy, Just bound) ->
+                            let boundTy = tyToElab bound
+                                missingDependencies =
+                                    [ dependencyRef
+                                    | dependencyRef <- binderRefs
+                                    , Map.notMember dependencyRef subst
+                                    , any
+                                        (typeBinderRefsSameIdentity dependencyRef)
+                                        (freeTypeVarRefsType boundTy)
+                                    ]
+                                specializedBound =
+                                    substTypeSelectiveRefs [] subst boundTy
+                            in if null missingDependencies
+                                then Just subst
+                                else
+                                    case
+                                        matchRefs
+                                            missingDependencies
+                                            specializedBound
+                                            argumentTy
+                                    of
+                                        Left _ -> Just subst
+                                        Right inferred ->
+                                            foldM mergeExactSubstitution subst (Map.toList inferred)
+                        _ -> Just subst
+                mergeExactSubstitution subst (ref, inferredTy) =
+                    case Map.lookup ref subst of
+                        Nothing -> Just (Map.insert ref inferredTy subst)
+                        Just existingTy
+                            | typesAgree existingTy inferredTy -> Just subst
+                            | otherwise -> Nothing
+                fromMatch =
                     case matchRefs binderRefs body targetCore of
                         Left _ -> Nothing
-                        Right subst ->
-                            let present = map (`Map.member` subst) binderRefs
-                                prefixLen = length (takeWhile id present)
-                                hasOutOfOrder = or (drop prefixLen present)
-                                prefixRefs = take prefixLen binderRefs
-                                args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
-                            in if hasOutOfOrder
-                                then Nothing
-                                else if argsAreIdentity args
-                                    then Nothing
-                                    else Just args
+                        Right subst -> argumentsFromSubst subst
                 fromArrowPrefix =
                     let bindDomain substAcc bodyDom targetDom =
                             case bodyDom of
@@ -528,16 +728,7 @@ inferInstAppArgsFromSchemeRefsWith matchRefs typesAgree targetCore binds body ta
                                 _ -> Just substAcc
                     in do
                         subst <- go Map.empty body targetCore
-                        let present = map (`Map.member` subst) binderRefs
-                            prefixLen = length (takeWhile id present)
-                            hasOutOfOrder = or (drop prefixLen present)
-                            prefixRefs = take prefixLen binderRefs
-                            args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
-                        if hasOutOfOrder
-                            then Nothing
-                            else if argsAreIdentity args
-                                then Nothing
-                                else Just args
+                        argumentsFromSubst subst
             in fromMatch <|> fromArrowPrefix
         inferDefaultEliminations =
             -- A quantified variable may be absent from the body, so matching
@@ -591,16 +782,7 @@ inferInstAppArgsFromSchemeRefsWith matchRefs typesAgree targetCore binds body ta
                                         Nothing -> Just (substTypeSelectiveRefs binderRefs subst boundCore)
                                 else Map.lookup ref subst
                         argsMaybe = map argFor binderRefs
-                        present = map (\arg -> case arg of { Just _ -> True; Nothing -> False }) argsMaybe
-                        prefixLen = length (takeWhile id present)
-                        hasOutOfOrder = or (drop prefixLen present)
-                        prefixArgs = take prefixLen argsMaybe
-                        args = [ty | Just ty <- prefixArgs]
-                    in if hasOutOfOrder
-                        then Nothing
-                        else if argsAreIdentity args
-                            then Nothing
-                            else Just args
+                    in validatedPrefixArguments argsMaybe
     in case body of
         TVarRef ref ->
             case find (typeBinderRefsSameIdentity ref . fst) binds of

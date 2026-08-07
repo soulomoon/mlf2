@@ -1,3 +1,92 @@
+## 2026-08-04 - Construction-directed endpoint completion and final audit
+
+- Fixed the remaining generated bounded-identity counterexample before
+  changing its construction path. The frozen test exercises
+  `forall (a >= forall b. b -> b). a -> a` beneath a let and three nested
+  applications. Its descendant certificate records the complete bounded
+  declaration, while an intermediate application Gamma presents the exact
+  body after opening the leading binder. The installer now closes that view
+  only for a private `BodyConsumerOrdinaryOwnerEmission` whose owner, edge,
+  exterior, incoming endpoint, operated endpoint, and construction endpoint
+  all certify the same declaration. This is a pre-typecheck Gamma transition,
+  not a final-type repair or same-shape fallback.
+- Kept child and enclosing lambda endpoints separate. A locally certified body
+  endpoint cannot discharge an incompatible inherited endpoint belonging to
+  the enclosing lambda's outgoing `Hyp`; only the completed inherited endpoint
+  is consulted there. Conversely, an owner-final child certificate remains the
+  source for the enclosing body construction, so its already-applied M/N/Hyp
+  computation is not replayed. This preserves both the paper K result bound
+  and the nested paper `g g` topology.
+- Made inherited ambient refinement advance the construction identity route at
+  the same boundary that installs its completed declaration. A
+  `BodyConsumerInheritedAmbient` certificate now replaces the provisional
+  graph/semantic aliases with the exact ambient construction ref, composes
+  incoming routes that ended at that placeholder, retires the exact inverse
+  ambient-to-semantic rename, and rejects third-identity or duplicate-binding
+  conflicts. Consequently constrained nullary evidence is constructed under
+  its completed ambient bound instead of later rediscovering a stale
+  `Hyp` at `Bottom`; no authority selector or post-typecheck repair is needed.
+- Froze seed `457459717`'s 53rd generated program, where an applied annotated
+  lambda returns three nested lambdas ending in a source-polymorphic identity.
+  The retained-Gamma endpoint constructor already opened a duplicate
+  same-identity, same-bound declaration at the immediate returned codomain;
+  it now carries that exact certificate through every value-arrow codomain.
+  This prevents an administrative packet from quantifying the same graph
+  binder both outside and inside a deep returned-lambda spine while leaving
+  arrow domains, different identities, and different bounds untouched.
+- The runtime matrix keeps the located package/Prelude boundary through one
+  interpreter/LLVM/native artifact. The formerly duplicated higher-kinded row
+  fell from 42.66 seconds combined to 3.4772 seconds of Hspec time (3.55
+  seconds wall for the full focused command). The shared-Prelude and
+  importless-package cache regressions take 1.9530 and 0.1678 seconds,
+  respectively; the method lowering itself was never the bottleneck.
+- Focused validation passes all 235 fixed annotation examples, the paper K and
+  `BUG-002-V3` regressions, the previously frozen `g g` owner chains, seeds
+  `91774058`, `541689707`, `1070269036`, and `457459717`, and every seed from
+  `1000` through `1020` (2500 generated programs across those 25 seed runs).
+  The complete serialized suite passes all 3977 examples.
+- This establishes the tested construction path for the compiler's supported
+  paper `g g` forms. It remains executable implementation evidence, not a
+  mechanized proof of every eMLF typing, normalization, or soundness theorem.
+
+## 2026-08-02 - Canonical source-type conversion and lower-bound shadowing
+
+- Found a lexical-scope reset in normalized annotation conversion. When a
+  structural lower bound contained `STCon` or `STVarApp`, its argument helper
+  re-entered conversion with an empty bound-name set. A nested `forall a`
+  could therefore reuse the resolver identity carried by an enclosing
+  `forall a`.
+- `MLF.Elab.SourceType` now threads the lexical binder set through every
+  constructor and variable-application argument, including structural lower
+  bounds. The new regression first failed with both binders carrying
+  `GeneratedTypeBinderIdentity 993200` and now proves that the inner binder is
+  distinct while its body occurrences retain that inner identity.
+- Removed the recursive converter copies from annotation elaboration, Algebra,
+  and external-binding preparation. Those owners now delegate to
+  `MLF.Elab.SourceType`; the external-binding seam passes its required free
+  binder order into the owner and receives the exact allocated refs back.
+  This deletes roughly four hundred lines of duplicated traversal and makes
+  the lexical-scope rule single-owner rather than synchronization-by-review.
+- Generated annotation evidence exposed two remaining identity-domain leaks.
+  Root publication was consulting occurrence-local routes from nested source
+  annotations, allowing a child-owned forall to become the root projection;
+  it now carries only the filtered inherited/exact root routes. Separately,
+  direct application Gamma refinement compared a source-identity operated
+  endpoint with a provisional graph-identity bound. The refiner now routes
+  both through the source-construction quotient before choosing the bound, so
+  a checked identity argument publishes its complete annotated forall instead
+  of retaining the open graph body and failing a later claim.
+- Root exact endpoints now distinguish producer `Typ(a')` from an already
+  checked `S'(operated)`. Generalization projects only the former through its
+  packet; application construction rebuilds its requirements from the latter
+  before binder selection and claim validation. This keeps the construction
+  direction explicit rather than inferring it from two untagged types.
+- Focused regressions pass for annotation allocation, constructor-bound
+  shadowing, ordered external-binding allocation, supplied external identities,
+  the paper's checked-IR `g g`, and bare overloaded-method rejection. The
+  importless higher-kinded runtime row still constructs no Prelude and remains
+  sub-second in the already-built test binary.
+
 ## 2026-08-01 - Constructed application endpoints and let ambient re-entry
 
 - A Bottom-backed terminal application result is no longer accepted as exact
@@ -4727,3 +4816,55 @@ This repo’s design is primarily informed by:
   from 42.66 seconds across duplicate lanes to about 1.45 seconds for the
   merged row. A no-Prelude row performs zero Prelude builds, while two
   independent Prelude clients share one semantic Prelude build.
+
+## 2026-08-06 - Exact returned-owner bounds and final eMLF construction gate
+
+- Root closure now applies combined construction authorities in their actual
+  order. An application certificate projects the Gamma emitted by the
+  application; the returned result's `OwnerFinalConstruction` then projects
+  the exact bound payload for a uniquely routed local binder before root/local
+  ownership is partitioned. The planner still owns binder identity, order, and
+  scheme body. Missing or duplicate construction-spine matches fail at that
+  boundary.
+- This replaces the rejected alternative of rewriting the checked lambda body
+  to the root planner's more specialized shape. The owner-emitted bound is the
+  principal bound already validated by the checked xMLF lambda; forcing the
+  specialized root shape would require a function-arrow instantiation that
+  xMLF does not provide.
+- The seed-2147483646 case is frozen as `completes a returned polymorphic
+  parameter before publishing its application owner`. Seed `2040442873` now
+  also freezes cases 16, 44, and 91: an exact paper-`g g` body packet beneath
+  an applied outer lambda; a ground application result completed before outer
+  publication; and a paper-`g g` lambda returned through an application and
+  transparent let. The last two are constructed downward: an independent
+  transparent-let pass authorizes the exact result identity without replacing
+  the graph-selected scheme, and administrative lambda completion follows the
+  exact returned-result chain to one checked lambda owner. Seed `1435051581`
+  case 89 is frozen as `completes a returned higher-rank application result
+  before enclosing lambda Gamma`. A structured exact producer now treats every
+  prepared-packet mention as positive nested-identity ownership evidence, but
+  accepts completion authority only from the packet selected by that exact
+  edge and only when all matching completed views equal the closed presolution
+  projection. Open projections remain at their lexical owner. The matching
+  body-consumer path preserves a specialized endpoint only when the private
+  route's construction-operated declaration is the certificate's completed
+  bound and exact xMLF instantiation of its operated declaration reaches that
+  endpoint. Seed `1120133952` case 100 is frozen as `keeps a multi-use
+  polymorphic let lexical through returned lambda owners`. The failure came
+  from using the softened planning colours for provisional root reification
+  while final reification inlined a reachable rigid variable from the original
+  colours and thereby exposed an unplanned binder identity. `BinderPlanInput`
+  now carries those unsoftened colours explicitly, and binder closure selects
+  the dependencies exposed by each planned rigid inline before final
+  reification. This is construction-time closure, not a final free-variable
+  repair. The complete fixed annotation group passes 268/268, and 37 pinned
+  generated seeds each pass 100 elaboration, xMLF typecheck, and erasure cases
+  (3700 programs total).
+- The slow-test repair remains effective in the final tree: the already-built
+  test binary runs `rejects bare overloaded method use` in 0.16 seconds wall
+  time and the merged interpreter/LLVM/native higher-kinded parity row in 0.75
+  seconds wall time. `cabal build -j1 all`, the serialized 4011-example
+  `cabal test -j1`, and `./scripts/thesis-conformance-gate.sh` all pass. These
+  gates establish the supported compiler constructions, including the paper's
+  Section 15.3.8 `g g` form; they are executable evidence, not a mechanized
+  proof of every eMLF metatheorem.

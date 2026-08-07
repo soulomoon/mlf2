@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 
 -- |
@@ -49,6 +50,7 @@ import MLF.Types.Elab
 import MLF.Types.Identity (typeBinderIdentityGeneratedUnique)
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Graph (reachableFrom)
+import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Util.Names (alphaName)
 import MLF.Util.Trace (traceWhen)
 
@@ -67,6 +69,20 @@ traceBinderPlanEnabledM enabled msg =
 newtype RootBodyClosurePlan = RootBodyClosurePlan
   { rootBodyClosureCandidateNodes :: [NodeId]
   }
+
+-- | Graph nodes that occur as dependencies of a structured Gamma bound.
+-- A bare variable endpoint is the consumer capability itself, not a bound
+-- dependency, and therefore deliberately contributes no excluded keys.
+structuredRequiredGammaDependencyKeys :: RequiredGammaBinder -> IntSet.IntSet
+structuredRequiredGammaDependencyKeys requirement =
+  case rgbOperatedType requirement of
+    TVarRef _ -> IntSet.empty
+    operatedType ->
+      IntSet.fromList
+        [ getNodeId dependencyNode
+        | dependencyRef <- freeTypeVarRefsType operatedType
+        , Just dependencyNode <- [typeBinderRefNode dependencyRef]
+        ]
 
 -- | Quotient dependency-ordered graph binders by semantic identity while
 -- retaining a route for every graph key.  The first key in dependency order
@@ -154,6 +170,7 @@ buildBinderPlan BinderPlanInput {..} = do
       canonical = bpiCanonical
       canonKey = bpiCanonKey
       bindParents = bpiBindParents
+      rigidBindParents = bpiRigidBindParents
       mbBindParentsGa = bpiBindParentsGa
       scopeRootC = bpiScopeRootC
       scopeGen = bpiScopeGen
@@ -1232,7 +1249,16 @@ buildBinderPlan BinderPlanInput {..} = do
           , resultRoot <- NonEmpty.toList (rgbResultRoots requirement)
           , resultAlias <- [resultRoot, canonical resultRoot]
           , let resultAliasKey = getNodeId resultAlias
+          , IntSet.notMember
+              resultAliasKey
+              (structuredRequiredGammaDependencyKeys requirement)
           ]
+      -- A result carrier can also occur free in a structured
+      -- S'(operated).  At that occurrence it is a dependency of the Gamma
+      -- bound, not another route to the exterior declaration.  Substituting
+      -- it with the exterior before reifying the bound would construct an
+      -- illegal self-bound such as @forall d >= ... d ...@.  A bare variable
+      -- endpoint remains the exact consumer route and is therefore retained.
       requiredGammaResultRouteConflicts =
         [ (resultKey, routes)
         | (resultKey, routes@((_, firstRef) : remainingRoutes)) <-
@@ -1296,23 +1322,35 @@ buildBinderPlan BinderPlanInput {..} = do
                   Just representativeKey -> representativeKey
                   Nothing -> key
               Nothing -> key
-      depFromRef ref =
+      dependencyKeyForBoundCandidate binderKey dependencyKey =
+        case IntMap.lookup binderKey requiredGamma of
+          Just requirement
+            | IntSet.member
+                dependencyKey
+                (structuredRequiredGammaDependencyKeys requirement) ->
+                dependencyKey
+          _ -> dependencyKeyForCandidate dependencyKey
+      rawDependencyKeyFromRef ref =
         case
           [ key
             | (key, candidateRef) <- IntMap.toList substDeps,
               typeBinderRefsSameIdentity candidateRef ref
           ]
         of
-          key : _ -> Just (dependencyKeyForCandidate key)
+          key : _ -> Just key
           [] ->
             case typeBinderRefNode ref of
               Nothing -> Nothing
-              Just liveNode ->
-                Just (dependencyKeyForCandidate (getNodeId liveNode))
+              Just liveNode -> Just (getNodeId liveNode)
+      depFromRef ref =
+        dependencyKeyForCandidate <$> rawDependencyKeyFromRef ref
+      boundDepFromRef binderKey ref =
+        dependencyKeyForBoundCandidate binderKey
+          <$> rawDependencyKeyFromRef ref
       depsFromRefs k allowed refs =
         [ dep
           | ref <- refs,
-            Just dep <- [depFromRef ref],
+            Just dep <- [boundDepFromRef k ref],
             dep /= k,
             not
               ( typeBinderRefsSameIdentity
@@ -1354,6 +1392,49 @@ buildBinderPlan BinderPlanInput {..} = do
                   binderKey /= k
               ]
           ]
+      rigidInlineHeadIsStructural node =
+        case
+            IntMap.lookup
+              (nodeRefKey (typeRef node))
+              rigidBindParents
+          of
+            Just (TypeRef parent, _) ->
+              case lookupNodeInMap nodes (canonical parent) of
+                Just TyForall {} -> True
+                Just TyMu {} -> True
+                _ -> False
+            _ -> False
+      -- Final reification inlines every reachable rigid variable.  That
+      -- construction can expose identities which are absent from the
+      -- provisional named-root view used below.  Select those dependencies
+      -- now from the same unsoftened binding colours, so finalization never
+      -- has to discover and repair a free identity after rigid inlining.
+      rigidInlineHeadKeys =
+        IntSet.toList $
+          IntSet.fromList
+            [ key
+            | rigidChild <- IntMapUtils.rigidTypeChildren rigidBindParents
+            , let rigidChildC = canonical rigidChild
+            , let key = getNodeId rigidChildC
+            , IntSet.member key reachableTypeStructural
+            , Just TyVar {} <- [IntMap.lookup key nodes]
+            , not (rigidInlineHeadIsStructural rigidChildC)
+            ]
+      rigidInlineBodyClosureIdsFor key =
+        case VarStore.lookupVarBound constraint (NodeId key) of
+          Nothing -> pure []
+          Just bound -> do
+            boundTy <-
+              reifyBoundWithRefs
+                resForReify
+                (substDepsFor key)
+                (canonical bound)
+            pure
+              ( depsFromRefs
+                  key
+                  dependencyCandidateSet
+                  (freeTypeVarRefsType boundTy)
+              )
       boundRootForDeps bnd0 =
         boundRootWith
           getNodeId
@@ -1589,6 +1670,8 @@ buildBinderPlan BinderPlanInput {..} = do
   closedBinderSet <- closeBinderSet (IntSet.fromList binderIds)
   let provisionalIds = IntSet.toList closedBinderSet
       provisionalSubst = IntMap.fromList [(key, refForDep key) | key <- provisionalIds]
+  rigidInlineBodyClosureIds <-
+    fmap concat (mapM rigidInlineBodyClosureIdsFor rigidInlineHeadKeys)
   bodyClosureIds <- do
     let liveTypeRoot = canonical typeRoot
     case lookupNodeIn (cNodes (pvCanonicalConstraint resForReify)) liveTypeRoot of
@@ -1630,7 +1713,7 @@ buildBinderPlan BinderPlanInput {..} = do
                 -- relying on finalization to repair a free variable.
                 IntSet.member dep dependencyCandidateSet
               ]
-        pure selectedBodyClosureIds
+        pure (selectedBodyClosureIds ++ rigidInlineBodyClosureIds)
   closedBinderSet' <- closeBinderSet (IntSet.union closedBinderSet (IntSet.fromList bodyClosureIds))
   let selectedInheritedRigidAliasRoutes =
         IntMap.restrictKeys

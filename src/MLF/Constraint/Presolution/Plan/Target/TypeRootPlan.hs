@@ -9,6 +9,7 @@ module MLF.Constraint.Presolution.Plan.Target.TypeRootPlan (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (fromMaybe)
 
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 import MLF.Constraint.Presolution.Plan.SchemeRoots
@@ -171,9 +172,9 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         typeRoot0Local =
             case (scopeRootC, targetIsSchemeRootForScope, targetIsTyVar, targetBound) of
                 (GenRef _, True, True, Nothing) ->
-                    case schemeBodyChildUnderGenLocal of
-                        Just child -> child
-                        Nothing -> schemeBodyRootLocal
+                    fromMaybe
+                        schemeBodyRootLocal
+                        schemeBodyChildUnderGenLocal
                 _ ->
                     case (useBoundTypeRootLocal, targetBound) of
                         (True, Just bnd) ->
@@ -226,9 +227,13 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 then Just baseRoot
                 else Nothing
         baseRootNeedsLiveRefinement =
-            case baseStructuralSource of
-                Just baseRoot -> baseRootHasRefinedLiveVariable baseRoot
-                Nothing -> False
+            fromMaybe False $ do
+                baseRoot <- baseStructuralSource
+                ga <- bindParentsGa
+                pure
+                    ( baseRootHasRefinedLiveVariable ga baseRoot
+                        || baseRootStructureDivergesFromLiveRoot ga baseRoot
+                    )
         reifyRootSourceLocal =
             if requiresLiveRefinements
                 || baseRootNeedsLiveRefinement
@@ -267,13 +272,10 @@ buildTypeRootPlan TypeRootPlanInput{..} =
         -- free, while BinderPlan quite correctly plans only the live
         -- declaration tree.  Select the live root here, while both graph
         -- domains and their projection are still available.
-        baseRootHasRefinedLiveVariable baseRoot =
-            case bindParentsGa of
-                Nothing -> False
-                Just ga ->
-                    any
-                        (baseVariableHasLiveRefinement ga)
-                        (baseReachableNodes ga baseRoot)
+        baseRootHasRefinedLiveVariable ga baseRoot =
+            any
+                (baseVariableHasLiveRefinement ga)
+                (baseReachableNodes ga baseRoot)
         baseReachableNodes ga root = go IntSet.empty [root]
           where
             baseNodes = cNodes (gbiBaseConstraint ga)
@@ -283,9 +285,10 @@ buildTypeRootPlan TypeRootPlanInput{..} =
                 | IntSet.member key seen = go seen rest
                 | otherwise =
                     let children =
-                            case lookupNodeIn baseNodes node of
-                                Just tyNode -> structuralChildrenWithBounds tyNode
-                                Nothing -> []
+                            maybe
+                                []
+                                structuralChildrenWithBounds
+                                (lookupNodeIn baseNodes node)
                     in go (IntSet.insert key seen) (children ++ rest)
               where
                 key = getNodeId node
@@ -297,6 +300,64 @@ buildTypeRootPlan TypeRootPlanInput{..} =
             of
                 Just TyVar{} ->
                     any liveNodeIsRefined (liveCandidatesForBase ga baseKey)
+                _ -> False
+        -- Presolution can replace a structural child slot without refining
+        -- the old base variable itself.  For example, a frozen arrow
+        -- @a -> b@ can become @a -> Bool@ while the detached live copy of
+        -- base @b@ remains an unbounded variable.  Checking only that copy
+        -- would incorrectly select the base arrow and publish @b@ free.
+        --
+        -- Follow matching structural slots until a frozen variable is
+        -- reached, then compare that variable through the recorded
+        -- base-to-solved projection.  A replaced variable slot is positive
+        -- evidence that the live structural root, rather than its stale
+        -- frozen source, owns the result type.  A different structural
+        -- presentation by itself is not such evidence: in particular, a
+        -- legal mu/forall representation boundary must not redirect the
+        -- whole root merely because its child layout differs.
+        baseRootStructureDivergesFromLiveRoot ga baseRoot
+            | not liveRootExists = False
+            | otherwise = baseVariableSlotWasReplaced ga baseRoot typeRootCLocal
+        baseVariableSlotWasReplaced ga baseNodeId liveNodeId =
+            case
+                ( lookupNodeIn
+                    (cNodes (gbiBaseConstraint ga))
+                    baseNodeId
+                , IntMap.lookup (canonKey liveNodeId) nodes
+                )
+            of
+                (Just TyVar{}, Just _) ->
+                    case
+                        IntMap.lookup
+                            (getNodeId baseNodeId)
+                            (gbiBaseToSolved ga)
+                    of
+                        Just projectedNode ->
+                            canonical projectedNode /= canonical liveNodeId
+                                && liveNodeIsRefined liveNodeId
+                        Nothing -> False
+                (Just baseNode, Just liveNode)
+                    | structuralShapesAgree baseNode liveNode ->
+                        let baseChildren = structuralChildrenWithBounds baseNode
+                            liveChildren = structuralChildrenWithBounds liveNode
+                        in length baseChildren == length liveChildren
+                            && or
+                                ( zipWith
+                                    (baseVariableSlotWasReplaced ga)
+                                    baseChildren
+                                    liveChildren
+                                )
+                _ -> False
+        structuralShapesAgree baseNode liveNode =
+            case (baseNode, liveNode) of
+                (TyArrow{}, TyArrow{}) -> True
+                (TyCon{tnConIdentity = baseIdentity}, TyCon{tnConIdentity = liveIdentity}) ->
+                    baseIdentity == liveIdentity
+                (TyVarApp{}, TyVarApp{}) -> True
+                (TyForall{}, TyForall{}) -> True
+                (TyExp{tnExpVar = baseExp}, TyExp{tnExpVar = liveExp}) ->
+                    baseExp == liveExp
+                (TyMu{}, TyMu{}) -> True
                 _ -> False
         liveCandidatesForBase ga baseKey =
             directCandidate ++ reverseCandidates

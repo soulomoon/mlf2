@@ -858,6 +858,7 @@ planGeneralizeAt
             bpiCanonKey = canonKey,
             bpiIsTyVarKey = isTyVarKey,
             bpiBindParents = bindParents,
+            bpiRigidBindParents = bindParents0,
             bpiBindParentsGa = mbBindParentsGaInfo,
             bpiScopeRootC = scopeRootC,
             bpiScopeGen = scopeGen,

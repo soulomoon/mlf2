@@ -27,6 +27,7 @@ module MLF.Elab.Elaborate.Algebra.TestSupport
     inheritNestedApplicationZeroLocalResidualAuthorityForTest,
     inferExactTransportArgumentsForTest,
     inferInstAppArgsFromSchemeRefsForTest,
+    completeExactLambdaParamBoundaryBoundForTest,
     installConstructedLambdaParamBoundaryForTest,
     installExactLambdaParamBoundaryForTest,
     lambdaBodyConstructionRenamesForTest,
@@ -37,6 +38,7 @@ module MLF.Elab.Elaborate.Algebra.TestSupport
     localGammaConstructionProvenanceForTest,
     mergeConstructionBinderBoundsByProvenanceForTest,
     mkApplicationPendingLocalResultSourcePacketForTest,
+    mkSourceBinderAuthorityForTest,
     operationalEndpointTypesAgreeForTest,
     validateBodyConsumerCheckedSourceProjectionForTest,
     validatedBodyConsumerLeadingEliminationForTest,
@@ -44,6 +46,7 @@ module MLF.Elab.Elaborate.Algebra.TestSupport
     projectValidatedAmbientConsumerBoundForTest,
     projectBodyConsumerBoundWithCertificateForTest,
     attachBodyConsumerBoundRefinementForTest,
+    alphaRenameBodyConsumerBoundRefinementTransitionForTest,
     finalizeBodyConsumerBoundRefinementsForTest,
     selectBodyConsumerRouteForTest,
     selectBodyConsumerRouteWithPacketForTest,
@@ -73,6 +76,7 @@ import MLF.Constraint.Presolution.Plan.Requirements
   )
 import MLF.Elab.Elaborate.Algebra.ConstructionGamma
   ( FrozenEndpointCertificate (..),
+    BodyConsumerBoundRefinementCertificate,
     ConstructionBinderBoundProvenance (..),
     DirectAmbientGammaAuthorityProvenance (..),
     PendingLocalResultSourcePacket,
@@ -80,6 +84,8 @@ import MLF.Elab.Elaborate.Algebra.ConstructionGamma
     LambdaParamBoundaryInstallation (..),
     OrdinaryGammaPacketConstruction (..),
     authorizeBodyConsumerDeclaration,
+    alphaRenameBodyConsumerBoundRefinementCertificate,
+    bodyConsumerBoundRefinementCertifiesTransition,
     buildAmbientGammaAuthorities,
     bodyConsumerProjectionProvenance,
     bodyConsumerRouteProjectionProvenance,
@@ -88,6 +94,7 @@ import MLF.Elab.Elaborate.Algebra.ConstructionGamma
     certifiedSourceOccurrenceRenames,
     certifiedSourceOccurrenceRoutes,
     constructOrdinaryGammaPacket,
+    completeLambdaParamBoundaryBound,
     constructionProtectedIdentities,
     constructionRefAlreadyInGamma,
     constructionRouteBoundCompatible,
@@ -149,6 +156,8 @@ import MLF.Elab.Run.Generalize.Types
   ( DirectApplicationAmbientGammaClaim (..),
     DirectApplicationGammaClaim (..),
     LocalGammaConstructionCertificate,
+    SourceBinderAuthority,
+    mkSourceBinderAuthority,
   )
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Types
@@ -182,6 +191,12 @@ closedTermTypeChecksForTest term =
   case TypeCheck.typeCheck term of
     Right _ -> True
     Left _ -> False
+
+mkSourceBinderAuthorityForTest
+  :: TypeBinderRef
+  -> TypeBinderRef
+  -> SourceBinderAuthority
+mkSourceBinderAuthorityForTest = mkSourceBinderAuthority
 
 selectBodyConsumerRouteForTest
   :: LocalGammaOwner
@@ -581,6 +596,28 @@ inferExactTransportArgumentsForTest
 inferExactTransportArgumentsForTest =
   inferExactTransportArguments
 
+completeExactLambdaParamBoundaryBoundForTest
+  :: NodeId
+  -> ElabType
+  -> ElabType
+  -> Either ElabError ElabType
+completeExactLambdaParamBoundaryBoundForTest paramNode exactTy candidate = do
+  installation <-
+    installLambdaParamBoundary
+      paramNode
+      ( ExactSourceLambdaParamBoundary
+          exactTy
+          Nothing
+          []
+      )
+      IntMap.empty
+      Map.empty
+  pure
+    ( completeLambdaParamBoundaryBound
+        [lambdaParamBoundaryCertificate installation]
+        candidate
+    )
+
 installExactLambdaParamBoundaryForTest
   :: NodeId
   -> ElabType
@@ -598,7 +635,11 @@ installExactLambdaParamBoundaryForTest paramNode exactTy constructedTy aliases b
   installation <-
     installLambdaParamBoundary
       paramNode
-      (ExactSourceLambdaParamBoundary exactTy constructedTy)
+      ( ExactSourceLambdaParamBoundary
+          exactTy
+          constructedTy
+          []
+      )
       aliases
       bindings
   pure
@@ -844,6 +885,61 @@ attachBodyConsumerBoundRefinementForTest
   -> OwnerFinalConstruction
   -> Either ElabError OwnerFinalConstruction
 attachBodyConsumerBoundRefinementForTest provenance localBinders routeView projectedType ambientBindings ownerCertificate = do
+  certificate <-
+    mkBodyConsumerBoundRefinementForTest
+      provenance
+      localBinders
+      routeView
+      projectedType
+      ambientBindings
+  pure
+    ownerCertificate
+      { ofcBodyConsumerBoundRefinements =
+          ofcBodyConsumerBoundRefinements ownerCertificate
+            ++ [certificate]
+      }
+
+-- | Exercise the lexical alpha-copy lane without exposing the private
+-- refinement-certificate constructor.  The expected transition includes the
+-- exact free identities, so a global substitution cannot satisfy this check.
+alphaRenameBodyConsumerBoundRefinementTransitionForTest
+  :: [(TypeBinderRef, TypeBinderRef)]
+  -> DirectAmbientGammaAuthorityProvenance
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> BodyConsumerRouteTestView
+  -> ElabType
+  -> Map.Map TypeBinderRef ElabType
+  -> TypeBinderRef
+  -> ElabType
+  -> ElabType
+  -> Either ElabError Bool
+alphaRenameBodyConsumerBoundRefinementTransitionForTest renames provenance localBinders routeView projectedType ambientBindings expectedTarget expectedPrevious expectedCompleted = do
+  certificate <-
+    mkBodyConsumerBoundRefinementForTest
+      provenance
+      localBinders
+      routeView
+      projectedType
+      ambientBindings
+  pure
+    ( bodyConsumerBoundRefinementCertifiesTransition
+        expectedTarget
+        expectedPrevious
+        expectedCompleted
+        ( alphaRenameBodyConsumerBoundRefinementCertificate
+            renames
+            certificate
+        )
+    )
+
+mkBodyConsumerBoundRefinementForTest
+  :: DirectAmbientGammaAuthorityProvenance
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> BodyConsumerRouteTestView
+  -> ElabType
+  -> Map.Map TypeBinderRef ElabType
+  -> Either ElabError BodyConsumerBoundRefinementCertificate
+mkBodyConsumerBoundRefinementForTest provenance localBinders routeView projectedType ambientBindings = do
   declarationAuthority <-
     authorizeBodyConsumerDeclaration
       IntMap.empty
@@ -873,21 +969,14 @@ attachBodyConsumerBoundRefinementForTest provenance localBinders routeView proje
       declarationAuthority
       projection
       ambientBindings
-  certificate <-
-    maybe
-      ( Left
-          ( ValidationFailed
-              ["test body-consumer route did not refine an ambient declaration"]
-          )
-      )
-      Right
-      mbCertificate
-  pure
-    ownerCertificate
-      { ofcBodyConsumerBoundRefinements =
-          ofcBodyConsumerBoundRefinements ownerCertificate
-            ++ [certificate]
-      }
+  maybe
+    ( Left
+        ( ValidationFailed
+            ["test body-consumer route did not refine an ambient declaration"]
+        )
+    )
+    Right
+    mbCertificate
   where
     route = bodyConsumerRouteFromTestView routeView
 

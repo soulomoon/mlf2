@@ -10,6 +10,8 @@ module MLF.Elab.SourceBinder
     typeBinderDeclarationRefs,
     orderSourceProjectedSchemeBinders,
     publishSourceBinderOrderFromProvenance,
+    projectSourceBinderDeclarationsInBound,
+    projectSourceBinderDeclarationsInBounds,
     resolveSourceBinderAliasesInType,
     resolveSourceBinderAliasesInTypeExcept,
     sourceBinderAliasSubstitution,
@@ -25,7 +27,8 @@ import Data.Maybe (catMaybes, isJust, listToMaybe)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
 import MLF.Elab.Types
-  ( ElabScheme,
+  ( BoundType,
+    ElabScheme,
     ElabType,
     SchemeInfo (..),
     Ty (..),
@@ -34,7 +37,9 @@ import MLF.Elab.Types
     mkElabSchemeWithRefs,
     schemeBinderRefs,
     schemeBody,
+    schemeFromType,
     schemeInfoBinderRefSubst,
+    schemeInfoFromRefSubst,
     rebuildSchemeInfoFromRefSubst,
     typeBinderRefIdentity,
     typeBinderRefNode,
@@ -78,6 +83,168 @@ typeBinderDeclarationRefs ty =
           ++ typeBinderDeclarationRefs body
     TMuRef ref body ->
       ref : typeBinderDeclarationRefs body
+
+-- | Project flexible declarations that occur inside explicit binder bounds
+-- through source-identity authority before the enclosing endpoint enters
+-- Gamma.  The endpoint's own forall declarations retain their construction
+-- identity; only their bounds are recursively projected.
+--
+-- A bound may have been frozen while one source forall was still represented
+-- by several solved graph declarations.  Every graph declaration is routed
+-- only when the immutable source sidecar and the caller's lexical identity
+-- set select one source identity for its solved class.  'schemeInfoFromRefSubst'
+-- then forms the declaration quotient, so for example
+--
+-- @forall p q. p -> q@
+--
+-- becomes @forall a. a -> a@ before N/Hyp construction sees the bound.
+-- Ambiguous source authority is rejected instead of choosing by traversal
+-- order or type shape.
+projectSourceBinderDeclarationsInBounds
+  :: Set.Set TypeBinderIdentity
+  -> (NodeId -> NodeId)
+  -> IntMap.IntMap TypeBinderRef
+  -> ElabType
+  -> Either String ElabType
+projectSourceBinderDeclarationsInBounds sourceIdentities representative sourceBinderRefs =
+  projectEndpoint
+  where
+    projectEndpoint ty =
+      case ty of
+        TVarRef ref -> pure (TVarRef ref)
+        TArrow domain codomain ->
+          TArrow
+            <$> projectEndpoint domain
+            <*> projectEndpoint codomain
+        TConWithIdentity identity constructor arguments ->
+          TConWithIdentity identity constructor
+            <$> traverse projectEndpoint arguments
+        TVarAppRef ref arguments ->
+          TVarAppRef ref <$> traverse projectEndpoint arguments
+        TBaseWithIdentity identity base ->
+          pure (TBaseWithIdentity identity base)
+        TBottom -> pure TBottom
+        TForallRef ref mbBound body ->
+          TForallRef ref
+            <$> traverse projectBound mbBound
+            <*> projectEndpoint body
+        TMuRef ref body ->
+          TMuRef ref <$> projectEndpoint body
+
+    projectBound :: BoundType -> Either String BoundType
+    projectBound bound = do
+      projected <-
+        projectSourceBinderDeclarationsInBound
+          sourceIdentities
+          representative
+          sourceBinderRefs
+          (tyToElab bound)
+      elabToBound projected
+
+-- | Project a type that itself occupies a Gamma bound.  Unlike
+-- 'projectSourceBinderDeclarationsInBounds', the leading forall spine belongs
+-- to the bound and is therefore projected too.
+projectSourceBinderDeclarationsInBound
+  :: Set.Set TypeBinderIdentity
+  -> (NodeId -> NodeId)
+  -> IntMap.IntMap TypeBinderRef
+  -> ElabType
+  -> Either String ElabType
+projectSourceBinderDeclarationsInBound sourceIdentities representative sourceBinderRefs =
+  projectBoundType
+  where
+    -- Within a bound, every nested forall is part of the bound's own lexical
+    -- construction. Project a complete leading spine at once so declarations
+    -- that route to the same source identity are quotiented atomically.
+    projectBoundType ty =
+      case schemeBinderRefs scheme0 of
+        [] -> projectBoundBody ty
+        binders -> do
+          projectedBinders <- traverse projectBinder binders
+          projectedBody <- projectBoundType (schemeBody scheme0)
+          routes <- sourceProjectionFor (map fst projectedBinders)
+          let projectedScheme =
+                mkElabSchemeWithRefs projectedBinders projectedBody
+          pure
+            ( if IntMap.null routes
+                then schemeToType projectedScheme
+                else
+                  schemeToType
+                    (siScheme (schemeInfoFromRefSubst projectedScheme routes))
+            )
+      where
+        scheme0 = schemeFromType ty
+
+    projectBinder (ref, mbBound) =
+      (,) ref <$> traverse projectNestedBound mbBound
+
+    projectNestedBound :: BoundType -> Either String BoundType
+    projectNestedBound bound = do
+      projected <- projectBoundType (tyToElab bound)
+      elabToBound projected
+
+    projectBoundBody ty =
+      case ty of
+        TVarRef ref -> pure (TVarRef ref)
+        TArrow domain codomain ->
+          TArrow
+            <$> projectBoundType domain
+            <*> projectBoundType codomain
+        TConWithIdentity identity constructor arguments ->
+          TConWithIdentity identity constructor
+            <$> traverse projectBoundType arguments
+        TVarAppRef ref arguments ->
+          TVarAppRef ref <$> traverse projectBoundType arguments
+        TBaseWithIdentity identity base ->
+          pure (TBaseWithIdentity identity base)
+        TBottom -> pure TBottom
+        TForallRef {} ->
+          -- A non-empty leading forall spine is handled by
+          -- 'projectBoundType' before this branch is selected.
+          pure ty
+        TMuRef ref body ->
+          TMuRef ref <$> projectBoundType body
+
+    sourceProjectionFor =
+      foldM insertProjection IntMap.empty
+
+    insertProjection routes targetRef =
+      case typeBinderRefNode targetRef of
+        Nothing -> pure routes
+        Just targetNode ->
+          case sourceCandidates targetNode of
+            [] -> pure routes
+            [sourceRef] ->
+              pure
+                ( IntMap.insert
+                    (getNodeId targetNode)
+                    sourceRef
+                    routes
+                )
+            sourceRefs ->
+              Left
+                ( "source-bound declaration has ambiguous source identity authority: declaration="
+                    ++ show targetRef
+                    ++ ", candidates="
+                    ++ show sourceRefs
+                )
+
+    sourceCandidates targetNode =
+      distinctIdentityRefs
+        [ candidateRef
+        | (sourceNodeKey, candidateRef) <- IntMap.toList sourceBinderRefs
+        , Set.member
+            (typeBinderRefIdentity candidateRef)
+            sourceIdentities
+        , representative (NodeId sourceNodeKey)
+            == representative targetNode
+        ]
+
+    distinctIdentityRefs = foldr insertDistinctIdentity []
+
+    insertDistinctIdentity ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
 
 -- | Publish the exact occurrence routes whose quantifier order is already
 -- owned by source-binder provenance.  Generalization can retain a graph

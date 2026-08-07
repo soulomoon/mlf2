@@ -1,7 +1,7 @@
 # Identity/String Reference Audit
 
 - **Created:** 2026-07-05
-- **Last reviewed:** 2026-07-27
+- **Last reviewed:** 2026-08-06
 - **Status:** Implemented in the current working tree
 - **Canonical decisions:**
   `docs/adr/2026-06-18-resolved-xmlf-identity-ir.md` and
@@ -125,7 +125,12 @@ resolver-owned head and binder identity maps and constructs `ElabType`
 directly. It does not allocate a rigid root when a binder lookup fails, and it
 does not recover a head or binder by matching its spelling. A genuinely free
 source variable is allocated once as a flexible existential; a lexical
-`forall` or `mu` enters its carried source identity.
+`forall` or `mu` enters its carried source identity. The lexical binder set is
+threaded through constructor and variable-application arguments even when
+they occur inside a structural lower bound, so a nested same-spelled binder is
+freshened rather than reusing an enclosing resolver identity. Annotation
+preparation, Algebra elaboration, and external-binding scheme construction all
+delegate to this owner; there is no second recursive converter to drift.
 
 Compiler-exact preparation keeps strict merging for identities established in
 the same source-binder domain. When preparation enters a nested exact
@@ -133,6 +138,26 @@ annotation, it uses an explicit left-biased lexical operation so the inner
 source binder shadows the outer route for that subtree. This is not conflict
 recovery: each domain has already proved its own one-to-one
 source-to-construction quotient, and a same-layer disagreement still fails.
+
+Root-edge construction also preserves whether an exact type is still the
+producer's `Typ(a')` or is already the checked source occurrence's
+`S'(operated)`. Application Gamma refinement converts provisional graph bounds
+and exact operated endpoints into the same source-construction identity domain
+before selecting a declaration. A checked identity argument can therefore
+close an annotation-owned `forall` directly; it cannot be misclassified as a
+specialization to an open graph body and repaired later during claim checking.
+Root publication uses only its filtered inherited/exact source routes, so a
+nested annotation's occurrence-local forall route cannot capture the root.
+
+When root closure combines an application certificate with the owner-final
+certificate of its returned result, the two authorities remain ordered and
+disjoint. The application first projects the Gamma that it emitted. The
+returned owner then replaces only the bound payload of a planned declaration
+that has one exact local route into its certified construction spine. Binder
+identity, order, and the scheme body remain planner-owned; a missing or
+duplicate construction entry is rejected. This prevents an outer application
+from specializing a principal bound emitted by its returned lambda and avoids
+repairing that lambda after construction.
 
 Owner-final let publication distinguishes an exact ambient Gamma declaration
 from a graph alias that is merely reachable in the type environment. Ambient
@@ -142,6 +167,24 @@ proves the declaration. A construction-local bounded declaration instead
 produces the matching type substitution and explicit `Lambda`/`N`
 specialization together. The published term and scheme therefore agree by
 construction; no later closure pass invents or repairs a binder.
+
+Inherited ambient packet refinement also updates the identity route at the
+same construction boundary that installs its completed declaration. Its
+private `BodyConsumerInheritedAmbient` certificate proves the semantic
+exterior, exact ambient construction target, previous/completed bounds, and
+unique bindings. Only then may construction aliases advance from the
+provisional semantic ref to the ambient ref; incoming routes are composed, the
+exact inverse rename is retired, and any third-identity route is rejected.
+Construction Gamma therefore cannot later rediscover the stale graph binder
+by spelling or compatible type shape.
+
+Administrative returned-lambda endpoints apply the same rule recursively
+along value-arrow codomains. If an outer construction-Gamma binder and a
+nested codomain declaration have the exact same identity and bound, the
+nested declaration is opened under that already-owned Gamma; declarations in
+arrow domains and declarations with a different identity or bound are not
+touched. This prevents repeated identities in deep returned-lambda binder
+spines without introducing name- or shape-based deduplication.
 
 ### Backend IR and structural matching
 
@@ -266,12 +309,40 @@ cover the exact paper `g g` term together with ambient-Γ, locally closed Γ,
 explicit positional-forall regressions, nested owner chains, source-owned
 application Gamma, bounded owner-final publication, principal identity-argument
 selection over provisional results, and certificate-driven ambient re-entry at
-both let checking boundaries. Generated Chapter-15 properties independently
-exercise the same construction families over randomized graph identities and
-shapes. The required completion gate is:
+both let checking boundaries. They also distinguish a local child endpoint
+from its enclosing lambda's inherited endpoint and carry a bounded identity
+annotation through nested application Gamma by closing only the exact
+certificate-authorized opened declaration. The constrained-nullary evidence
+regression additionally proves that inherited ambient refinement advances the
+construction route before `Hyp` emission rather than correcting it after
+checking. A frozen three-returned-lambda regression proves that retained Gamma
+opening follows codomain arrows and cannot publish one binder identity at two
+lexical depths. A frozen seed-2147483646 regression proves that a returned
+polymorphic parameter publishes its owner-final bound before the enclosing
+application partitions root ownership. Generated Chapter-15 properties
+independently exercise the same construction families over randomized graph
+identities and shapes. Seed `2040442873` additionally freezes an exact body
+packet under an applied outer lambda, a ground result completed before outer
+publication, and the paper `g g` lambda carried through an application/let
+returned-owner chain. The transparent-let prepass authorizes the inherited
+result identity without publishing its specialized scheme, and administrative
+lambda completion follows only the exact returned-result certificates to a
+unique lambda owner. Seed `1435051581` freezes a higher-rank application whose
+completed child result must enter the returned-function declaration before the
+enclosing lambda Gamma is checked. Its structured producer keeps every
+packet-owned or open nested identity at its owner; only the exact edge-selected
+packet may certify a closed presolution projection. Seed `1120133952` freezes a
+multi-use polymorphic let returned through nested lambda owners. Binder closure
+uses the same unsoftened binding colours as final rigid inlining and selects
+dependencies exposed by those rigid bounds before final reification, rather
+than repairing a residual free identity afterwards. The final focused set
+contains 268 fixed cases, and 37 pinned generated seeds cover 3700 programs.
+The required completion gate is:
 
 ```sh
-cabal build all && cabal test
+cabal build -j1 all
+cabal test -j1
+./scripts/thesis-conformance-gate.sh
 ```
 
 The final serialized completion result is recorded in `implementation_notes.md`

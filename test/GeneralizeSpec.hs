@@ -2652,12 +2652,20 @@ spec = do
                     Right info -> pure info
             IntMap.lookup (getNodeId resultRoot) (siSubstRefs published)
                 `shouldBe` Just exteriorRef
+            let constructed =
+                    published
+                        { siConstructionBinderOrderRefs =
+                            IntMap.insert
+                                (getNodeId exterior)
+                                exteriorRef
+                                (siConstructionBinderOrderRefs published)
+                        }
             prepareRootRaiseMergeScheme
                 resultArtifacts
                 ann
                 (requirementsFor resultRoot (tyToElab resultBound))
                 published
-                `shouldBe` Right published
+                `shouldBe` Right constructed
 
         it "installs a packet-owned exterior absent from the root scheme" $ do
             let resultRoot = NodeId 18
@@ -2863,12 +2871,19 @@ spec = do
                         ("expected result-only lambda-owner rejection, got " ++ show other)
 
         it "accepts the same result-only scheme at the expression-result edge boundary" $ do
+            let expectedInfo =
+                    resultOnlySchemeInfo
+                        { siConstructionBinderOrderRefs =
+                            IntMap.singleton
+                                (getNodeId exterior)
+                                resultOnlyExteriorRef
+                        }
             prepareRootRaiseMergeSchemeAtEdge
                 artifacts
                 edgeId
                 (requirementsFor exterior (tyToElab resultBound))
                 resultOnlySchemeInfo
-                `shouldBe` Right resultOnlySchemeInfo
+                `shouldBe` Right expectedInfo
 
         it "accepts an omitted exterior bound exactly when S(operated) is bottom" $ do
             let exteriorRef = typeRef 17 "result"
@@ -2879,12 +2894,19 @@ spec = do
                             (lambdaOwnerBody (tVarWithRef exteriorRef))
                         )
                         (IntMap.singleton (getNodeId exterior) exteriorRef)
+                expectedInfo =
+                    schemeInfo
+                        { siConstructionBinderOrderRefs =
+                            IntMap.singleton
+                                (getNodeId exterior)
+                                exteriorRef
+                        }
             prepareRootRaiseMergeScheme
                 artifacts
                 ann
                 (requirementsFor exterior TBottom)
                 schemeInfo
-                `shouldBe` Right schemeInfo
+                `shouldBe` Right expectedInfo
 
         it "rejects an omitted exterior bound when S(operated) is non-bottom" $ do
             let exteriorRef = typeRef 17 "result"
@@ -5259,6 +5281,57 @@ spec = do
                     Right (Just scheme) -> pure scheme
             consumerBoundScheme `shouldBe` siScheme kConstructionInfo
 
+        it "keeps construction-owned dependencies closed in an enclosing operated bound" $ do
+            let parameterRef = typeRef 123 "parameter"
+                dependencyRef = typeRef 124 "dependency"
+                consumerRef = typeRef 125 "result"
+                dependentConstructionInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [ (parameterRef, Nothing)
+                            , (dependencyRef, Nothing)
+                            ]
+                            ( TArrow
+                                (tVarWithRef parameterRef)
+                                (tVarWithRef dependencyRef)
+                            )
+                        )
+                        IntMap.empty
+                openOperatedInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [(parameterRef, Nothing)]
+                            ( TArrow
+                                (tVarWithRef parameterRef)
+                                (tVarWithRef dependencyRef)
+                            )
+                        )
+                        IntMap.empty
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        ( EnclosingConsumerPacket
+                            (typeBinderRefIdentity consumerRef)
+                            (EdgeId 125)
+                            testEnclosingConsumerOwner
+                        )
+                        dependentConstructionInfo
+                        openOperatedInfo
+                of
+                    Left err -> expectationFailure (show err) >> fail "dependent packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            consumerBoundScheme <-
+                case
+                    subtermGeneralizationGammaBoundSchemeForConsumer
+                        (typeBinderRefIdentity consumerRef)
+                        (Map.singleton producer packet)
+                of
+                    Left err -> expectationFailure (show err) >> fail "dependent consumer packet lookup failed"
+                    Right Nothing -> expectationFailure "dependent consumer packet was not found" >> fail "dependent consumer packet lookup failed"
+                    Right (Just scheme) -> pure scheme
+            consumerBoundScheme `shouldBe` siScheme dependentConstructionInfo
+
         it "retains the Gamma edge and its lexical owner as one authority" $ do
             (packet, _) <- prepareGammaPacket
             subtermGeneralizationGammaAuthority packet
@@ -6436,6 +6509,26 @@ spec = do
                 (tVarWithRef refA)
                 (TestElab.tBase (BaseTy "Int"))
                 `shouldBe` Nothing
+
+        it "infers an earlier exact argument through a later dependent bound" $ do
+            let refD = typeRef 31 "d"
+                refF = typeRef 32 "f"
+                refB = typeRef 33 "b"
+                intTy = TestElab.tBase (BaseTy "Int")
+                dependentBound :: BoundType
+                dependentBound =
+                    TArrow (tVarWithRef refD) (tVarWithRef refD)
+                sourceBody =
+                    TArrow (tVarWithRef refB) (tVarWithRef refF)
+                exactArgument = TArrow intTy intTy
+                exactTarget = TArrow (tVarWithRef refB) exactArgument
+            inferInstAppArgsFromSchemeRefsExact
+                [ (refD, Nothing)
+                , (refF, Just dependentBound)
+                ]
+                sourceBody
+                exactTarget
+                `shouldBe` Just [intTy, exactArgument]
 
         it "rejects residual specialization when only the terminal result agrees" $ do
             let refB = typeRef 37 "b"

@@ -89,6 +89,7 @@ import MLF.Elab.Elaborate.Algebra.TestSupport
     DirectAmbientGammaAuthorityProvenance (..),
     DirectApplicationAmbientGammaClaim (..),
     DirectApplicationGammaClaim (..),
+    alphaRenameBodyConsumerBoundRefinementTransitionForTest,
     attachBodyConsumerBoundRefinementForTest,
     bodyConsumerLocallyEmittedRouteProjectionProvenanceForTest,
     bodyConsumerProjectionProvenanceForTest,
@@ -101,6 +102,7 @@ import MLF.Elab.Elaborate.Algebra.TestSupport
     inheritNestedApplicationZeroLocalResidualAuthorityForTest,
     lambdaParamLocalGammaRenamesForTest,
     mkApplicationPendingLocalResultSourcePacketForTest,
+    mkSourceBinderAuthorityForTest,
     operationalEndpointTypesAgreeForTest,
     selectLocalGammaClosureOwnerLaneForTest,
     selectDirectAmbientGammaAuthorityForTest,
@@ -415,14 +417,13 @@ containsGroundIntApplication = go []
               [] -> ty
         _ -> ty
 
-containsIdentityLinkedConstructionBridge :: Elab.XmlfTerm -> Bool
-containsIdentityLinkedConstructionBridge term =
+containsIdentityLinkedConstruction :: Elab.XmlfTerm -> Bool
+containsIdentityLinkedConstruction term =
   case term of
-    Elab.ETyAbsRef binderRef (Just _) body ->
+    Elab.ETyAbsRef binderRef _ body ->
       any (instantiationAppliesBinder binderRef) (termInstantiations body)
-        && any (instantiationAbstractsBinder binderRef) (termInstantiations body)
-        || any containsIdentityLinkedConstructionBridge (termChildren body)
-    _ -> any containsIdentityLinkedConstructionBridge (termChildren term)
+        || any containsIdentityLinkedConstruction (termChildren body)
+    _ -> any containsIdentityLinkedConstruction (termChildren term)
 
 instantiationAppliesBinder :: TypeBinderRef -> Elab.Instantiation -> Bool
 instantiationAppliesBinder binderRef inst =
@@ -434,18 +435,6 @@ instantiationAppliesBinder binderRef inst =
     Elab.InstSeq left right ->
       instantiationAppliesBinder binderRef left
         || instantiationAppliesBinder binderRef right
-    _ -> False
-
-instantiationAbstractsBinder :: TypeBinderRef -> Elab.Instantiation -> Bool
-instantiationAbstractsBinder binderRef inst =
-  case inst of
-    Elab.InstAbstrRef abstractedRef ->
-      typeBinderRefsSameIdentity binderRef abstractedRef
-    Elab.InstUnderRef _ inner -> instantiationAbstractsBinder binderRef inner
-    Elab.InstInside inner -> instantiationAbstractsBinder binderRef inner
-    Elab.InstSeq left right ->
-      instantiationAbstractsBinder binderRef left
-        || instantiationAbstractsBinder binderRef right
     _ -> False
 
 termInstantiations :: Elab.XmlfTerm -> [Elab.Instantiation]
@@ -4541,17 +4530,25 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               { ofcOwner = owner,
                 ofcTransparentResultOwners = [],
                 ofcConstructedType = constructedType,
+                ofcExactEndpointCompletion = Nothing,
                 ofcLocallyEmittedBinders =
                   [(emittedLocalRef, Nothing)],
+                ofcConsumedLocalBinders = [],
                 ofcLocalBinderRoutes =
                   IntMap.singleton
                     (getNodeId plannedLocalNode)
                     emittedLocalRef,
+                ofcCarriedResultBinders = [],
+                ofcCarriedResultBinderRoutes = IntMap.empty,
+                ofcCarriedResultTypeAbstractionRefs = [],
+                ofcReturnedResultConstruction = Nothing,
                 ofcUsedAmbientBinderRefs = [],
                 ofcUsedSourceBinderAuthorities = IntMap.empty,
                 ofcAmbientDeclarationAuthorities = [],
                 ofcAuthoritativeAmbientDeclarations = [],
                 ofcLambdaParamBoundaryCertificates = [],
+                ofcOwnLambdaParamBoundaryCertificate = Nothing,
+                ofcOpenValueLambdaParameterRefs = [],
                 ofcBodyConsumerBoundRefinements = []
               }
           expectCertificateFailure label result =
@@ -5323,10 +5320,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 { ofcOwner = refinementOwner,
                   ofcTransparentResultOwners = [],
                   ofcConstructedType = refinementConstructedType,
+                  ofcExactEndpointCompletion = Nothing,
                   ofcLocallyEmittedBinders =
                     [(semanticRef, Nothing)],
+                  ofcConsumedLocalBinders = [],
                   ofcLocalBinderRoutes =
                     IntMap.singleton 991883 semanticRef,
+                  ofcCarriedResultBinders = [],
+                  ofcCarriedResultBinderRoutes = IntMap.empty,
+                  ofcCarriedResultTypeAbstractionRefs = [],
+                  ofcReturnedResultConstruction = Nothing,
                   ofcUsedAmbientBinderRefs =
                     [dependencyRef, provisionalRef],
                   ofcUsedSourceBinderAuthorities = IntMap.empty,
@@ -5336,6 +5339,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     ],
                   ofcAuthoritativeAmbientDeclarations = [],
                   ofcLambdaParamBoundaryCertificates = [],
+                  ofcOwnLambdaParamBoundaryCertificate = Nothing,
+                  ofcOpenValueLambdaParameterRefs = [],
                   ofcBodyConsumerBoundRefinements = []
                 }
             refinementSubst =
@@ -5454,6 +5459,62 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           (Map.singleton provisionalRef provisionalBound)
           refinementOwnerCertificate
           `shouldSatisfy` isLeft
+
+      it "alpha-copies a nested body declaration without renaming its free ambient dependency" $ do
+        let ambientDependencyRef = graphRef (NodeId 991894) "a"
+            copiedDeclarationRef = graphRef (NodeId 991895) "a"
+            constructionRef = graphRef (NodeId 991896) "consumer"
+            semanticNode = NodeId 991897
+            semanticRef = graphRef semanticNode "consumer"
+            previousBound = TBottom
+            completedBound =
+              TArrow
+                (tVarWithRef ambientDependencyRef)
+                ( TForallRef
+                    ambientDependencyRef
+                    Nothing
+                    (tVarWithRef ambientDependencyRef)
+                )
+            expectedAlphaCopy =
+              TArrow
+                (tVarWithRef ambientDependencyRef)
+                ( TForallRef
+                    copiedDeclarationRef
+                    Nothing
+                    (tVarWithRef copiedDeclarationRef)
+                )
+            globallyRenamed =
+              TArrow
+                (tVarWithRef copiedDeclarationRef)
+                ( TForallRef
+                    copiedDeclarationRef
+                    Nothing
+                    (tVarWithRef copiedDeclarationRef)
+                )
+            route =
+              BodyConsumerRouteTestView
+                { bcrtvEdgeId = lgoBoundaryEdge owner,
+                  bcrtvOwner = owner,
+                  bcrtvExteriorNode = semanticNode,
+                  bcrtvSemanticRef = semanticRef,
+                  bcrtvConstructionRef = constructionRef,
+                  bcrtvOperatedType = completedBound,
+                  bcrtvConstructionOperatedType = completedBound
+                }
+        completedBoundTy <- requireRight (elabToBound completedBound)
+        let transitionFor expectedCompleted =
+              alphaRenameBodyConsumerBoundRefinementTransitionForTest
+                [(ambientDependencyRef, copiedDeclarationRef)]
+                DirectAmbientProvisionalNestedResult
+                [(constructionRef, Just completedBoundTy)]
+                route
+                completedBound
+                (Map.singleton constructionRef previousBound)
+                constructionRef
+                previousBound
+                expectedCompleted
+        transitionFor expectedAlphaCopy `shouldBe` Right True
+        transitionFor globallyRenamed `shouldBe` Right False
 
       it "uses the typed owner's route when the root substitution omits the local binder" $ do
         closed <-
@@ -5679,7 +5740,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   lgccLocalBinderRoutes =
                     IntMap.singleton localRouteKey emittedLocalRef,
                   lgccSourceBinderAuthorities =
-                    IntMap.singleton localRouteKey emittedLocalRef,
+                    IntMap.singleton
+                      localRouteKey
+                      ( mkSourceBinderAuthorityForTest
+                          emittedLocalRef
+                          emittedLocalRef
+                      ),
                   lgccUsedAmbientBinderRefs = [ambientRef],
                   lgccEnclosingTypeAbsBinders = [],
                   lgccUsedSourceBinderAuthorities = IntMap.empty
@@ -11472,6 +11538,50 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       advancedGenerator
         `shouldBe` identityGeneratorAfter [UniqueIdentity 43]
 
+    it "keeps shadowed annotation binders distinct inside constructor lower bounds" $ do
+      let outerIdentity =
+            typeBinderIdentityFromUnique (UniqueIdentity 993200)
+          sourceType =
+            STForall
+              "a"
+              Nothing
+              ( STForall
+                  "b"
+                  ( Just
+                      ( SrcBound
+                          ( STCon
+                              "Box"
+                              (STForall "a" Nothing (STVar "a") :| [])
+                          )
+                      )
+                  )
+                  (STVar "b")
+              )
+      (expectedType, _) <-
+        requireRight
+          ( sourceTypeToElabTypeWithIdentitiesFromSupply
+              (identityGeneratorAfter [])
+              (Map.singleton "Box" (testTypeIdentity "Box"))
+              (Map.singleton "a" outerIdentity)
+              sourceType
+          )
+      case expectedType of
+        TForallRef outerRef Nothing
+          ( TForallRef _
+              ( Just
+                  ( TConWithIdentity _ (BaseTy "Box")
+                      (TForallRef innerRef Nothing (TVarRef bodyRef) :| [])
+                    )
+                )
+              _
+            ) -> do
+              typeBinderRefIdentity outerRef `shouldBe` outerIdentity
+              typeBinderRefIdentity innerRef `shouldNotBe` outerIdentity
+              typeBinderRefIdentity bodyRef `shouldBe` typeBinderRefIdentity innerRef
+        other ->
+          expectationFailure
+            ("expected constructor-bound shadowing with distinct refs, got " ++ show other)
+
     it "quotients a source-local forall only through its exact inferred occurrence" $ do
       let sourceRef =
             typeBinderRefFromIdentity
@@ -12773,9 +12883,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             TForallRef schemeBinderRef Nothing _ -> do
               typeBinderRefsSameIdentity schemeBinderRef resultBinderRef `shouldBe` True
               unless
-                (containsIdentityLinkedConstructionBridge c1Rhs)
+                (containsIdentityLinkedConstruction c1Rhs)
                 ( expectationFailure
-                    ( "Expected c1 construction to retain an identity-linked abstraction/instantiation bridge: "
+                    ( "Expected c1 construction to retain its identity-linked abstraction/instantiation path: "
                         ++ show c1Rhs
                     )
                 )

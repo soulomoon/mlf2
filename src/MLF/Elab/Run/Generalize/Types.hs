@@ -24,6 +24,11 @@ module MLF.Elab.Run.Generalize.Types (
     localGammaConsumedBinders,
     DirectApplicationGammaClaim(..),
     DirectApplicationAmbientGammaClaim(..),
+    SourceBinderAuthority,
+    mkSourceBinderAuthority,
+    sourceBinderAuthoritySidecarRef,
+    sourceBinderAuthorityConstructionRef,
+    mapSourceBinderAuthorityConstructionRef,
     LocalGammaConstructionCertificate(..),
     localGammaConstructionCertificateResidualType
 ) where
@@ -215,6 +220,45 @@ data DirectApplicationAmbientGammaClaim = DirectApplicationAmbientGammaClaim
     }
     deriving (Eq, Show)
 
+-- | Proof that one source-sidecar occurrence denotes one identity in the
+-- current checked construction.  The two refs are deliberately distinct:
+-- entering a packet quotient or a lexical alpha-copy changes the construction
+-- identity without changing which source declaration authorized it.
+--
+-- Keeping both halves in one value prevents certificate transport from
+-- rewriting source provenance after the fact merely because the checked xMLF
+-- payload moved into a fresh identity domain.
+data SourceBinderAuthority = SourceBinderAuthority
+    { sbaSidecarRef :: !TypeBinderRef
+    , sbaConstructionRef :: !TypeBinderRef
+    }
+    deriving (Eq, Show)
+
+mkSourceBinderAuthority
+    :: TypeBinderRef
+    -> TypeBinderRef
+    -> SourceBinderAuthority
+mkSourceBinderAuthority = SourceBinderAuthority
+
+sourceBinderAuthoritySidecarRef
+    :: SourceBinderAuthority
+    -> TypeBinderRef
+sourceBinderAuthoritySidecarRef = sbaSidecarRef
+
+sourceBinderAuthorityConstructionRef
+    :: SourceBinderAuthority
+    -> TypeBinderRef
+sourceBinderAuthorityConstructionRef = sbaConstructionRef
+
+mapSourceBinderAuthorityConstructionRef
+    :: (TypeBinderRef -> TypeBinderRef)
+    -> SourceBinderAuthority
+    -> SourceBinderAuthority
+mapSourceBinderAuthorityConstructionRef f authority =
+    authority
+        { sbaConstructionRef = f (sbaConstructionRef authority)
+        }
+
 -- | Post-environment evidence produced by the exact application constructor.
 -- A non-empty local construction covers its complete prepared Gamma,
 -- including consumed binders.  An ambient construction carries no routes and
@@ -249,8 +293,10 @@ data LocalGammaConstructionCertificate = LocalGammaConstructionCertificate
     -- discharged by this constructor.
     , lgccLocalBinderRoutes :: !(IntMap.IntMap TypeBinderRef)
     -- | Source-owned dependency binders, indexed by the exact source sidecar
-    -- occurrence that authorized them.
-    , lgccSourceBinderAuthorities :: !(IntMap.IntMap TypeBinderRef)
+    -- occurrence that authorized them.  Each authority preserves both the
+    -- immutable sidecar identity and its current construction identity.
+    , lgccSourceBinderAuthorities
+        :: !(IntMap.IntMap SourceBinderAuthority)
     -- | Exact ambient identities used freely by the checked application term,
     -- its checked result type, or an ambient declaration's bound.
     , lgccUsedAmbientBinderRefs :: ![TypeBinderRef]
@@ -266,8 +312,11 @@ data LocalGammaConstructionCertificate = LocalGammaConstructionCertificate
     -- introduced by a nested source annotation rather than by the enclosing
     -- root Gamma.  These routes are distinct from
     -- 'lgccSourceBinderAuthorities': they authorize an already-bound
-    -- dependency and never authorize a local Gamma binder.
-    , lgccUsedSourceBinderAuthorities :: !(IntMap.IntMap TypeBinderRef)
+    -- dependency and never authorize a local Gamma binder.  Their source
+    -- identities remain stable while their construction identities follow
+    -- checked packet quotients and lexical alpha-copies.
+    , lgccUsedSourceBinderAuthorities
+        :: !(IntMap.IntMap SourceBinderAuthority)
     }
     deriving (Eq, Show)
 

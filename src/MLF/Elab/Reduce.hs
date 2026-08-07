@@ -4,8 +4,12 @@ module MLF.Elab.Reduce
   ( step,
     normalize,
     reduceLeadingTypeInstantiationRedexes,
+    normalizeCheckedTypeRedexesWithEnv,
     freeResolvedTermVars,
     collectApplicationSpineThroughHeadTypeRedexes,
+    replaceAbstrInTermRef,
+    freeInstantiationAbstractionRefsTerm,
+    freeTypeVarRefsInst,
     freeTypeVarRefsTerm,
     isValue,
   )
@@ -14,12 +18,17 @@ where
 import Data.Functor.Foldable (Recursive (project), para)
 import qualified Data.Set as Set
 import MLF.Elab.Inst (applyInstantiation, renameInstBoundRef, schemeToType)
-import MLF.Elab.TypeCheck (typeCheck)
+import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarRefsType, substTypeCaptureRef)
+import MLF.Reify.TypeOps
+  ( alphaEqType,
+    churchAwareEqType,
+    freeTypeVarRefsType,
+    substTypeCaptureRef,
+  )
 import MLF.Types.Identity (IdDetails (..), primitiveRefSymbol)
 import MLF.Util.RecursionSchemes (cataMaybe, foldXmlfTerm, foldInstantiation)
 
@@ -84,7 +93,7 @@ step term = case term of
         case step e of
           Just e' -> Just (EUnroll e')
           Nothing ->
-            case typeCheck e of
+            case TypeCheck.typeCheck e of
               Right TMuRef {} -> Nothing
               Right _ -> Just e
               Left _ -> Nothing
@@ -92,7 +101,7 @@ step term = case term of
         case e of
           ERoll _ body | isValue body -> Just body
           _ ->
-            case typeCheck e of
+            case TypeCheck.typeCheck e of
               Right TMuRef {} -> Nothing
               Right _ -> Just e
               Left _ -> Nothing
@@ -156,6 +165,103 @@ reduceLeadingTypeInstantiationRedexes term =
                         Nothing -> (innerChanged, rebuilt)
                   | otherwise -> (innerChanged, rebuilt)
         _ -> (False, current)
+
+-- | Normalize proof-only type redexes throughout a checked term without
+-- evaluating value-level lets or applications.  Each rewrite is validated in
+-- its exact lexical environment and may not introduce a generated identity.
+-- Keep a redex that carries an explicit @Hyp@ for its own abstraction: that
+-- pair is positive construction evidence consumed by backend lowering.
+normalizeCheckedTypeRedexesWithEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
+normalizeCheckedTypeRedexesWithEnv = go
+  where
+    go env = reduceHere env . descend env
+
+    descend env term =
+      case term of
+        EVarNode {} -> term
+        ELit {} -> term
+        ELam resolved body ->
+          let env' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved
+                  (resolvedVarType resolved)
+                  env
+           in ELam resolved (go env' body)
+        EApp fun arg -> EApp (go env fun) (go env arg)
+        ELet resolved scheme rhs body ->
+          let env' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved
+                  (schemeToType scheme)
+                  env
+           in ELet resolved scheme (go env' rhs) (go env' body)
+        ETyAbsRef ref mbBound body ->
+          let boundTy = maybe TBottom tyToElab mbBound
+              env' = TypeCheck.insertTypeBindingRef ref boundTy env
+           in ETyAbsRef ref mbBound (go env' body)
+        ETyInst inner inst -> ETyInst (go env inner) inst
+        ERoll ty body -> ERoll ty (go env body)
+        EUnroll inner -> EUnroll (go env inner)
+
+    reduceHere env term
+      | typeRedexCarriesExplicitHyp term = term
+      | otherwise =
+          case reduceLeadingTypeInstantiationRedexes term of
+            Just reduced
+              | generatedIdentitiesIn reduced
+                  `Set.isSubsetOf` generatedIdentitiesIn term
+              , reductionPreservesType env term reduced ->
+                  go env reduced
+            _ -> term
+
+    generatedIdentitiesIn = Set.fromList . generatedIdentitiesInTerm
+
+    reductionPreservesType env original reduced =
+      case
+          ( TypeCheck.typeCheckWithEnv env original
+          , TypeCheck.typeCheckWithEnv env reduced
+          )
+        of
+          (Right originalTy, Right reducedTy) ->
+            alphaEqType originalTy reducedTy
+              || churchAwareEqType originalTy reducedTy
+          _ -> False
+
+    typeRedexCarriesExplicitHyp term =
+      case term of
+        ETyInst (ETyAbsRef ref _ body) _ ->
+          termContainsExplicitHypFor ref body
+        _ -> False
+
+    termContainsExplicitHypFor target = goTerm
+      where
+        goTerm term =
+          case term of
+            EVarNode {} -> False
+            ELit {} -> False
+            ELam _ body -> goTerm body
+            EApp fun arg -> goTerm fun || goTerm arg
+            ELet _ _ rhs body -> goTerm rhs || goTerm body
+            ETyAbsRef ref _ body
+              | typeBinderRefsSameIdentity target ref -> False
+              | otherwise -> goTerm body
+            ETyInst inner inst -> goTerm inner || goInst inst
+            ERoll _ body -> goTerm body
+            EUnroll inner -> goTerm inner
+
+        goInst inst =
+          case inst of
+            InstId -> False
+            InstApp _ -> False
+            InstBot _ -> False
+            InstIntro -> False
+            InstElim -> False
+            InstAbstrRef ref -> typeBinderRefsSameIdentity target ref
+            InstUnderRef ref inner
+              | typeBinderRefsSameIdentity target ref -> False
+              | otherwise -> goInst inner
+            InstInside inner -> goInst inner
+            InstSeq left right -> goInst left || goInst right
 
 -- | Collect one value-application spine modulo explicit type beta reduction
 -- at its function head.  An elaborated partial application may be generalized
@@ -563,6 +669,52 @@ replaceAbstrInTermRef target replacement = para alg
           inst' -> ETyInst (snd e) inst'
       ERollF ty body -> ERoll ty (snd body)
       EUnrollF body -> EUnroll (snd body)
+
+-- | Free @Hyp@ references in a term's instantiation computations.  A type
+-- abstraction binds the same identity in its body, so references below that
+-- abstraction are lexical rather than construction-Gamma capabilities.
+freeInstantiationAbstractionRefsTerm :: XmlfTerm -> [TypeBinderRef]
+freeInstantiationAbstractionRefsTerm = go []
+  where
+    go bound term =
+      case term of
+        EVarNode {} -> []
+        ELit {} -> []
+        ELam _ body -> go bound body
+        EApp fun arg -> mergeRefs (go bound fun) (go bound arg)
+        ELet _ _ rhs body -> mergeRefs (go bound rhs) (go bound body)
+        ETyAbsRef ref _ body -> go (ref : bound) body
+        ETyInst inner inst ->
+          mergeRefs
+            (go bound inner)
+            [ ref
+            | ref <- freeHypRefs [] inst
+            , not (any (typeBinderRefsSameIdentity ref) bound)
+            ]
+        ERoll _ body -> go bound body
+        EUnroll body -> go bound body
+
+    mergeRefs left right = foldr insertRef right left
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
+    freeHypRefs instBound inst =
+      case inst of
+        InstId -> []
+        InstApp _ -> []
+        InstBot _ -> []
+        InstIntro -> []
+        InstElim -> []
+        InstAbstrRef ref
+          | any (typeBinderRefsSameIdentity ref) instBound -> []
+          | otherwise -> [ref]
+        InstInside inner -> freeHypRefs instBound inner
+        InstSeq left right ->
+          mergeRefs
+            (freeHypRefs instBound left)
+            (freeHypRefs instBound right)
+        InstUnderRef ref inner -> freeHypRefs (ref : instBound) inner
 
 replaceAbstrInInstRef :: TypeBinderRef -> Instantiation -> Instantiation -> Instantiation
 replaceAbstrInInstRef target replacement = para alg

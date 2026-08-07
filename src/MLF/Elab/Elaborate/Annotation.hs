@@ -72,10 +72,12 @@ import MLF.Constraint.Presolution.Base
     lookupEdgeArtifact,
     rootWeakenRaiseMergeTraceAuthority,
   )
-import MLF.Constraint.Presolution.Plan.Requirements (GeneralizationRequirements (..))
+import MLF.Constraint.Presolution.Plan.Requirements
+  ( GeneralizationRequirements (..),
+    RequiredGammaBinder (..),
+  )
 import MLF.Constraint.Types.Graph
-  ( BaseTy (..),
-    BindingError (..),
+  ( BindingError (..),
     EdgeId (..),
     NodeId (..),
     genRef,
@@ -104,6 +106,7 @@ import MLF.Elab.Generalize
     generalizationRequirementsForRootEdgesInConstruction,
     localGammaOwnerOccursIn,
     placeSubtermGeneralizationBindersWithRoutes,
+    publishPlacedSubtermConstructionBinderOrder,
     publishSourceLambdaTopologyConsumerRoute,
     publishTopologyConsumerRoutes,
     prepareRootRaiseMergeScheme,
@@ -117,6 +120,7 @@ import MLF.Elab.Generalize
     subtermGeneralizationConstructionBinderRenames,
     subtermGeneralizationGammaAuthority,
     subtermGeneralizationSchemeInfo,
+    subtermGeneralizationSourceLambdaResultConstruction,
     subtermGeneralizationsOwnedBy,
     sourceLambdaGeneralizedResultRouteRequest,
   )
@@ -152,6 +156,7 @@ import MLF.Elab.Run.Instantiation
     planExactBinderSpine,
   )
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeWithContext)
+import qualified MLF.Elab.SourceType as SourceType
 import MLF.Elab.SourceBinder
   ( publishSourceBinderOrderFromProvenance,
     resolveConstructionSourceBindersInSchemeInfoExcept,
@@ -170,8 +175,7 @@ import MLF.Elab.TermClosure
 import MLF.Elab.TypeCheck (typeCheck)
 import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
-  ( BoundType,
-    ElabError (..),
+  ( ElabError (..),
     ElabScheme,
     XmlfTerm (..),
     XmlfTermF (..),
@@ -182,8 +186,6 @@ import MLF.Elab.Types
     Ty (..),
     elabToBound,
     eTyAbsWithRef,
-    sourceTypeBinderRefsFromIdentities,
-    sourceTypeBinderRefOrFreshInScope,
     instAbstrWithRef,
     instUnderWithRef,
     mapResolvedVarType,
@@ -216,16 +218,11 @@ import MLF.Frontend.ConstraintGen.Types
     instantiationSiteSource,
     instantiationSiteTarget,
   )
-import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (resolvedSourceTypeToElabType)
-import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias)
+import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax
   ( NormSrcType,
-    ResolvedSrcType,
-    SrcBound (..),
-    SrcNorm (NormN),
-    SrcTy (..),
-    StructBound
+    ResolvedSrcType
   )
 import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Reify.TypeOps
@@ -241,11 +238,7 @@ import MLF.Types.Identity
   ( IdDetails,
     IdentityGenerator,
     TypeBinderIdentity,
-    advanceIdentityGeneratorPastMany,
     idDetailsIdentityKey,
-    identityGeneratorAfter,
-    symbolGeneratedIdentities,
-    typeBinderGeneratedIdentities,
   )
 import MLF.Util.Trace (TraceConfig, traceElab)
 
@@ -714,10 +707,10 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
         Just funScheme -> do
           funInst <-
             case
-                reifyInst
+                reifyInstFromSourceScheme
                   annotationContext
                   namedSetReify
-                  resolvedLookup
+                  funScheme
                   sourceFunAnn
                   funEid
               of
@@ -769,12 +762,37 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
               (not . consumedByLocalSourceConstructor)
               ownedPackets
           consumedByLocalSourceConstructor packet =
-            case
-                subtermGeneralizationConsumerAuthority packet
-                  >>= subtermConsumerAuthorityEnclosingOwner
-              of
-                Just owner -> localGammaOwnerOccursIn owner sourceAnn
-                Nothing -> False
+            consumerOwnerOccursInSource
+              || packetConstructsThisSourceLambda
+            where
+              consumerOwnerOccursInSource =
+                case
+                    subtermGeneralizationConsumerAuthority packet
+                      >>= subtermConsumerAuthorityEnclosingOwner
+                  of
+                    Just owner -> localGammaOwnerOccursIn owner sourceAnn
+                    Nothing -> False
+
+              packetConstructsThisSourceLambda =
+                sourceLambdaPacketOwnedByConstructor packet
+          -- A packet whose exact source-lambda certificate names this
+          -- constructor already is the constructor's completed result.
+          -- Placing or publishing that packet into the same lambda's
+          -- generalized codomain would duplicate the whole value lambda
+          -- beneath itself.  The stable lambda-node certificate is the
+          -- positive ownership proof; an enclosing packet for a descendant
+          -- lambda remains available for placement.
+          sourceLambdaPacketOwnedByConstructor packet =
+            case sourceAnn of
+              ALam _ _ _ _ _ _ lambdaNode ->
+                case
+                    subtermGeneralizationSourceLambdaResultConstruction
+                      packet
+                  of
+                    Just (certifiedLambdaNode, _) ->
+                      certifiedLambdaNode == lambdaNode
+                    Nothing -> False
+              _ -> False
           constructionRouteNodes =
             gaConstructionRouteNodes
               (scCanonical scopeContext)
@@ -877,10 +895,14 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
               )
       case generalizationResult of
         Right (scheme, subst, generalizedResultRoute) -> do
-          let normalized =
+          let normalized0 =
                 publishSourceBinderOrderFromProvenance
                   (grSourceBinderRefs requirements)
                   (schemeInfoFromRefSubst scheme subst)
+              normalized =
+                publishRequiredGammaBinderOrder
+                  requirements
+                  normalized0
           prepared <-
             case
                 prepareRootRaiseMergeScheme
@@ -943,10 +965,13 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                         ]
                     )
           let placedInfo =
-                rebuildSchemeInfoFromRefSubst
-                  preparedWithSourceTopologyRoute
-                  placed
-                  (siSubstRefs preparedWithConsumerRoutes)
+                publishPlacedSubtermConstructionBinderOrder
+                  placementPackets
+                  ( rebuildSchemeInfoFromRefSubst
+                      preparedWithSourceTopologyRoute
+                      placed
+                      (siSubstRefs preparedWithConsumerRoutes)
+                  )
           publishedInfo <-
             case (boundary, mRootAuthority) of
               ( ActiveConstructionSchemeBoundary {}
@@ -961,11 +986,20 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                       ]
                     of
                     [] -> pure placedInfo
-                    [packet] ->
-                      publishSubtermGammaConstructionSourceSchemeInfo
-                        rootEdge
-                        packet
-                        placedInfo
+                    [packet]
+                      | sourceLambdaPacketOwnedByConstructor packet ->
+                          -- This packet is the exact completed construction
+                          -- of the source lambda itself.  Its SchemeInfo owns
+                          -- the complete binder spine and route sidecars.
+                          -- Specializing a graph result variable in
+                          -- @placedInfo@ with the packet's whole Gamma bound
+                          -- would insert the lambda beneath its own codomain.
+                          pure (subtermGeneralizationSchemeInfo packet)
+                      | otherwise ->
+                          publishSubtermGammaConstructionSourceSchemeInfo
+                            rootEdge
+                            packet
+                            placedInfo
                     packets ->
                       Left
                         ( ValidationFailed
@@ -978,6 +1012,34 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
           pure (Just publishedInfo)
         Left _ -> pure Nothing
       where
+        -- A requirements-aware generalization can complete a fresh exterior
+        -- after the presolution's <P order keys were frozen.  The exact
+        -- RequiredGammaBinder plus the final exterior route owns that
+        -- declaration's position in the constructed scheme.  Publish this
+        -- sidecar at scheme construction time so Phi preserves the certified
+        -- spine instead of asking the stale graph for an order key.
+        publishRequiredGammaBinderOrder requirements schemeInfo =
+          schemeInfo
+            { siConstructionBinderOrderRefs =
+                IntMap.union
+                  ( IntMap.fromList
+                      [ (exteriorKey, exteriorRef)
+                      | requirement <- grRequiredGammaBinders requirements
+                      , let exteriorKey =
+                              getNodeId (rgbExteriorNode requirement)
+                      , Just exteriorRef <-
+                          [ IntMap.lookup
+                              exteriorKey
+                              (siSubstRefs schemeInfo)
+                          ]
+                      , any
+                          (typeBinderRefsSameIdentity exteriorRef . fst)
+                          (schemeBinderRefs (siScheme schemeInfo))
+                      ]
+                  )
+                  (siConstructionBinderOrderRefs schemeInfo)
+            }
+
         sourceGeneralizationScope
           requirements
           sourceExpr
@@ -1177,7 +1239,8 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                 (sourceResultAnnotatedScheme rhsAnn)
                 ( pure
                     ( case generalizeAtNode scopeContext schemeRootId of
-                        Right (scheme, subst) -> Just (schemeInfoFromRefSubst scheme subst)
+                        Right (scheme, subst) ->
+                          Just (schemeInfoFromRefSubst scheme subst)
                         Left _ -> Nothing
                     )
                 )
@@ -2583,7 +2646,27 @@ elaborateAnnotationTerm boundaryRole annotationContext namedSetReify resolvedLoo
                 pure (ConstructedAnnotationInstantiation InstId)
               else
                 EdgeAnnotationInstantiation
-                  <$> reifyInst annotationContext namedSetReify resolvedLookup exprAnn eid
+                  <$> case sourceSchemeInfo of
+                    Just sourceScheme ->
+                      -- Source-scheme recovery above already crossed the
+                      -- enclosing-annotation boundary and placed its packets.
+                      -- Re-entering generic reification here would recover the
+                      -- same expression at a packet-local boundary and lose
+                      -- the enclosing consumer declaration.  Translate the
+                      -- edge from the exact recovered scheme instead.
+                      reifyInstFromSourceScheme
+                        annotationContext
+                        namedSetReify
+                        sourceScheme
+                        exprAnn
+                        eid
+                    Nothing ->
+                      reifyInst
+                        annotationContext
+                        namedSetReify
+                        resolvedLookup
+                        exprAnn
+                        eid
   inst <-
     case instAuthority of
       ConstructedAnnotationInstantiation constructedInst ->
@@ -3098,6 +3181,7 @@ reifyInstWithFrozenEndpointsFromCheckedSource ::
   Either ElabError Instantiation
 reifyInstWithFrozenEndpointsFromCheckedSource annotationContext =
   reifyInstWithFrozenEndpointsFromCheckedSourceUsing
+    (schemeInfoForInstantiation annotationContext)
     ( \_edgeId checkedSchemeInfo ->
         pure
           ( scGeneralizeAtWith (acScopeContext annotationContext),
@@ -3115,18 +3199,25 @@ reifyInstWithFrozenEndpointsFromCheckedSource annotationContext =
 -- finalization to recover its binders from residual free references.
 reifyInstWithFrozenEndpointsFromCheckedSourceInConstructionGamma ::
   AnnotationContext p ->
+  Maybe SubtermConsumerAuthority ->
+  Maybe SubtermConsumerAuthority ->
   IntSet.IntSet ->
   IntMap.IntMap TypeBinderRef ->
   GeneralizationRequirements ->
-  PhiEndpointShapeAuthority ->
+  Maybe PhiEndpointShapeAuthority ->
   (IdDetails -> Maybe SchemeInfo) ->
   IntMap.IntMap ElabType ->
   ElabType ->
   AnnExpr ->
   EdgeId ->
   Either ElabError Instantiation
-reifyInstWithFrozenEndpointsFromCheckedSourceInConstructionGamma annotationContext namedSetReify constructionAliases requirements endpointShapeAuthority =
+reifyInstWithFrozenEndpointsFromCheckedSourceInConstructionGamma annotationContext currentConsumer enclosingConsumer namedSetReify constructionAliases requirements endpointShapeAuthority =
   reifyInstWithFrozenEndpointsFromCheckedSourceUsing
+    ( sourceSchemeInfoForConstruction
+        currentConsumer
+        enclosingConsumer
+        annotationContext
+    )
     ( \edgeId checkedSchemeInfo -> do
         (replayRequirements, replaySchemeInfo) <-
           mergeOccurrenceSchemeInfoIntoReplayRequirements
@@ -3147,11 +3238,16 @@ reifyInstWithFrozenEndpointsFromCheckedSourceInConstructionGamma annotationConte
             replaySchemeInfo
           )
     )
-    (Just endpointShapeAuthority)
+    endpointShapeAuthority
     annotationContext
     namedSetReify
 
 reifyInstWithFrozenEndpointsFromCheckedSourceUsing ::
+  ( IntSet.IntSet ->
+    (IdDetails -> Maybe SchemeInfo) ->
+    AnnExpr ->
+    Either ElabError (Maybe SchemeInfo)
+  ) ->
   ( EdgeId ->
     SchemeInfo ->
     Either
@@ -3167,10 +3263,9 @@ reifyInstWithFrozenEndpointsFromCheckedSourceUsing ::
   AnnExpr ->
   EdgeId ->
   Either ElabError Instantiation
-reifyInstWithFrozenEndpointsFromCheckedSourceUsing replayCapabilityFor endpointShapeAuthority annotationContext namedSetReify resolvedLookup frozenEndpointTypes checkedSourceType funAnn edgeId = do
+reifyInstWithFrozenEndpointsFromCheckedSourceUsing recoverSourceScheme replayCapabilityFor endpointShapeAuthority annotationContext namedSetReify resolvedLookup frozenEndpointTypes checkedSourceType funAnn edgeId = do
   recoveredSchemeInfo <-
-    schemeInfoForInstantiation
-      annotationContext
+    recoverSourceScheme
       namedSetReify
       resolvedLookup
       funAnn
@@ -4251,238 +4346,24 @@ renameTypeVarInTerm oldRef newRef term =
         EUnrollF body -> EUnroll (renameTypeVarInTerm oldRef newRef body)
 
 -- | Convert a normalized source annotation while preserving the semantic
--- identities chosen by source resolution.  Preparation uses the same helper
--- as term elaboration so an expected type cannot silently acquire a second
--- spelling-derived binder identity.
+-- identities chosen by source resolution.  The conversion algorithm is owned
+-- by 'MLF.Elab.SourceType' so every annotation consumer shares one lexical
+-- scope implementation.
 sourceTypeToElabTypeWithIdentities
   :: Map.Map String SymbolIdentity
   -> Map.Map String TypeBinderIdentity
   -> NormSrcType
   -> Either ElabError ElabType
-sourceTypeToElabTypeWithIdentities headIdentities binderIdentities ty =
-  fmap fst
-    ( sourceTypeToElabTypeWithIdentitiesFromSupply
-        (identityGeneratorAfter [])
-        headIdentities
-        binderIdentities
-        ty
-    )
+sourceTypeToElabTypeWithIdentities =
+  SourceType.sourceTypeToElabTypeWithIdentities
 
--- | Convert a normalized source annotation by allocating every source-local
--- binder from the caller's identity supply.  Annotation conversion happens
--- immediately before packet preparation, so returning the advanced supply is
--- part of the construction contract: preparation must not reuse an identity
--- consumed by a lexical @forall@ or @mu@ here.
+-- | Convert a normalized source annotation and return the identity supply
+-- after allocating every source-local binder.
 sourceTypeToElabTypeWithIdentitiesFromSupply
   :: IdentityGenerator
   -> Map.Map String SymbolIdentity
   -> Map.Map String TypeBinderIdentity
   -> NormSrcType
   -> Either ElabError (ElabType, IdentityGenerator)
-sourceTypeToElabTypeWithIdentitiesFromSupply generator0 headIdentities binderIdentities ty =
-  let generator1 =
-        advanceSourceTypeIdentityGeneratorPast
-          headIdentities
-          binderIdentities
-          ty
-          generator0
-      (refs, generator2) =
-        sourceTypeBinderRefsFromIdentities
-          binderIdentities
-          (Set.toList (freeSrcTypeVars ty))
-          generator1
-   in srcTypeToElabTypeWith headIdentities binderIdentities refs generator2 ty
-
-advanceSourceTypeIdentityGeneratorPast
-  :: Map.Map String SymbolIdentity
-  -> Map.Map String TypeBinderIdentity
-  -> NormSrcType
-  -> IdentityGenerator
-  -> IdentityGenerator
-advanceSourceTypeIdentityGeneratorPast sourceHeadIdentities sourceBinderIdentities ty =
-  advanceIdentityGeneratorPastMany
-    ( concatMap symbolGeneratedIdentities (Map.elems headIdentities)
-        ++ concatMap typeBinderGeneratedIdentities (Map.elems sourceBinderIdentities)
-    )
-  where
-    headIdentities =
-      Map.union
-        sourceHeadIdentities
-        (Builtins.builtinSourceTypeHeadIdentities ty)
-
-freeSrcTypeVars :: SrcTy n v -> Set.Set String
-freeSrcTypeVars ty =
-  go Set.empty ty
-  where
-    go :: Set.Set String -> SrcTy n0 v0 -> Set.Set String
-    go bound srcTy =
-      case srcTy of
-        STVar name
-          | name `Set.member` bound -> Set.empty
-          | otherwise -> Set.singleton name
-        STArrow dom cod -> go bound dom `Set.union` go bound cod
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap (go bound) args
-        STVarApp name args ->
-          let headVars =
-                if name `Set.member` bound
-                  then Set.empty
-                  else Set.singleton name
-           in headVars `Set.union` foldMap (go bound) args
-        STTyLam name body -> go (Set.insert name bound) body
-        STTyApp fun arg -> go bound fun `Set.union` go bound arg
-        STForall name mb body ->
-          maybe Set.empty (go bound . unSrcBound) mb
-            `Set.union` go (Set.insert name bound) body
-        STMu name body -> go (Set.insert name bound) body
-        STBottom -> Set.empty
-
-requireSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Either ElabError SymbolIdentity
-requireSourceTypeHeadIdentity headIdentities name =
-  case lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name of
-    Just identity -> Right identity
-    Nothing -> Left (InstantiationError ("unresolved source type head `" ++ name ++ "` reached annotation elaboration"))
-
-srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWith =
-  srcTypeToElabTypeWithBound Set.empty
-
-srcTypeToElabTypeWithBound ::
-  Set.Set String ->
-  Map.Map String SymbolIdentity ->
-  Map.Map String TypeBinderIdentity ->
-  Map.Map String TypeBinderRef ->
-  IdentityGenerator ->
-  NormSrcType ->
-  Either ElabError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator ty = case ty of
-  STVar name -> do
-    ref <- sourceTypeBinderRef refs name
-    Right (TVarRef ref, generator)
-  STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator1 cod
-    Right (TArrow dom' cod', generator2)
-  STCon name args -> do
-    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
-    identity <- requireSourceTypeHeadIdentity headIdentities name
-    Right (TConWithIdentity identity (builtinBaseTy name) args', generator')
-  STVarApp name args -> do
-    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
-    ref <- sourceTypeBinderRef refs name
-    Right (TVarAppRef ref args', generator')
-  STTyLam {} ->
-    Left (InstantiationError "residual type lambda reached elaboration")
-  STTyApp {} ->
-    Left (InstantiationError "residual type application reached elaboration")
-  STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        refs' = Map.insert name ref refs
-        boundNames' = Set.insert name boundNames
-     in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator2 body
-          Right (TForallRef ref mb' body', generator3)
-  STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        boundNames' = Set.insert name boundNames
-     in do
-          (body', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities (Map.insert name ref refs) generator1 body
-          Right (TMuRef ref body', generator2)
-  STBase name -> do
-    identity <- requireSourceTypeHeadIdentity headIdentities name
-    Right (TBaseWithIdentity identity (builtinBaseTy name), generator)
-  STBottom -> Right (TBottom, generator)
-  where
-    sourceTypeBinderRef env name =
-      case Map.lookup name env of
-        Just ref -> Right ref
-        Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
-
-    srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
-      (argsRev, generator') <-
-        foldM
-          ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 gen next
-              Right (next' : acc, gen')
-          )
-          ([], generator1)
-          args
-      Right (arg' :| reverse argsRev, generator')
-
-srcBoundToElabBoundWithBound ::
-  Set.Set String ->
-  Map.Map String SymbolIdentity ->
-  Map.Map String TypeBinderIdentity ->
-  Map.Map String TypeBinderRef ->
-  IdentityGenerator ->
-  SrcBound 'NormN ->
-  Either ElabError (Maybe BoundType, IdentityGenerator)
-srcBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs generator bound = case bound of
-  SrcBound ty -> structBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs generator ty
-
-structBoundToElabBoundWithBound ::
-  Set.Set String ->
-  Map.Map String SymbolIdentity ->
-  Map.Map String TypeBinderIdentity ->
-  Map.Map String TypeBinderRef ->
-  IdentityGenerator ->
-  StructBound ->
-  Either ElabError (Maybe BoundType, IdentityGenerator)
-structBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs generator bTy = case bTy of
-  STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator1 cod
-    Right (Just (TArrow dom' cod'), generator2)
-  STBase name -> do
-    identity <- requireSourceTypeHeadIdentity headIdentities name
-    Right (Just (TBaseWithIdentity identity (builtinBaseTy name)), generator)
-  STCon name args -> do
-    (args', generator1) <- srcTypesToElabTypesWith refs generator args
-    identity <- requireSourceTypeHeadIdentity headIdentities name
-    Right (Just (TConWithIdentity identity (builtinBaseTy name) args'), generator1)
-  STVarApp name args -> do
-    (args', generator1) <- srcTypesToElabTypesWith refs generator args
-    ref <- sourceTypeBinderRef refs name
-    Right (Just (TVarAppRef ref args'), generator1)
-  STTyLam {} ->
-    Left (InstantiationError "residual type lambda reached elaboration")
-  STTyApp {} ->
-    Left (InstantiationError "residual type application reached elaboration")
-  STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        refs' = Map.insert name ref refs
-        boundNames' = Set.insert name boundNames
-     in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator2 body
-          Right (Just (TForallRef ref mb' body'), generator3)
-  STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
-        boundNames' = Set.insert name boundNames
-     in do
-      (body', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities (Map.insert name ref refs) generator1 body
-      Right (Just (TMuRef ref body'), generator2)
-  STBottom -> Right (Nothing, generator)
-  where
-    sourceTypeBinderRef env name =
-      case Map.lookup name env of
-        Just ref -> Right ref
-        Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
-
-    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 generator0 arg
-      (argsRev, generator') <-
-        foldM
-          ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 gen next
-              Right (next' : acc, gen')
-          )
-          ([], generator1)
-          args
-      Right (arg' :| reverse argsRev, generator')
-
-builtinBaseTy :: String -> BaseTy
-builtinBaseTy =
-  BaseTy . Builtins.normalizeBuiltinTypeReference
+sourceTypeToElabTypeWithIdentitiesFromSupply =
+  SourceType.sourceTypeToElabTypeWithIdentitiesFromSupply

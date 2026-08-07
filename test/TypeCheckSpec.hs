@@ -49,10 +49,12 @@ import MLF.Elab.Run.Pipeline.TestSupport
     , unionPreparedExternalBindings
     )
 import MLF.Elab.TermClosure
-    ( alignTermTypeVarsToScheme
+    ( alphaRenameTermTypeBinderScopes
+    , alignTermTypeVarsToScheme
     , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
-    , constructTermWithSchemeSubstRefsAtPublication
+    , constructTermWithCertifiedResultSchemeAtPublicationWithRoutes
+    , constructTermWithSchemeSubstRefsAtPublicationWithRoutes
     , constructTermWithSchemeSubstRefsByBinderRoutes
     , substInTermRefs
     )
@@ -1893,8 +1895,8 @@ spec = describe "Phase 7 typecheck" $ do
                     [(outerRef, Nothing), (innerRef, Nothing)]
                     (TArrow (tVarWithRef outerRef) (tVarWithRef outerRef))
             emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
-            published =
-                constructTermWithSchemeSubstRefsAtPublication
+            (published, publicationRoutes) =
+                constructTermWithSchemeSubstRefsAtPublicationWithRoutes
                     emptyTcEnv
                     IntMap.empty
                     scheme
@@ -1915,7 +1917,147 @@ spec = describe "Phase 7 typecheck" $ do
                         `shouldBe` True
                     ElabTypes.typeBinderRefsSameIdentity producerRef outerRef
                         `shouldBe` False
+                    publicationRoutes
+                        `shouldSatisfy` any
+                            ( \(sourceRef, targetRef) ->
+                                ElabTypes.typeBinderRefsSameIdentity sourceRef producerRef
+                                    && ElabTypes.typeBinderRefsSameIdentity targetRef outerRef
+                            )
             _ -> expectationFailure ("unexpected publication term: " ++ show published)
+
+    it "publishes a certified identity result through a retained nested forall" $ do
+        let outerRef = typeRef 674 "outer"
+            returnedRef = typeRef 675 "returned"
+            retainedRef = typeRef 676 "retained"
+            vacuousRef = typeRef 677 "vacuous"
+            outerParam =
+                generatedResolvedLocal
+                    678
+                    "$outer#0"
+                    "outer"
+                    (tVarWithRef outerRef)
+            returnedParam =
+                generatedResolvedLocal
+                    679
+                    "$returned#0"
+                    "returned"
+                    (tVarWithRef returnedRef)
+            retainedParam =
+                generatedResolvedLocal
+                    680
+                    "$retained#0"
+                    "retained"
+                    (tVarWithRef retainedRef)
+            ignored =
+                generatedResolvedLocal
+                    681
+                    "$ignored#0"
+                    "ignored"
+                    builtinIntTy
+            nestedProducer =
+                EApp
+                    ( ELam
+                        ignored
+                        ( eTyAbsWithRef
+                            retainedRef
+                            Nothing
+                            ( eTyAbsWithRef
+                                vacuousRef
+                                Nothing
+                                ( ELam
+                                    returnedParam
+                                    (ELam retainedParam (EVarNode outerParam))
+                                )
+                            )
+                        )
+                    )
+                    (ELit (LInt 0))
+            returnedTy =
+                tForallWithRef
+                    returnedRef
+                    Nothing
+                    ( TArrow
+                        (tVarWithRef outerRef)
+                        ( tForallWithRef
+                            retainedRef
+                            Nothing
+                            ( tForallWithRef
+                                vacuousRef
+                                Nothing
+                                ( TArrow
+                                    (tVarWithRef returnedRef)
+                                    ( TArrow
+                                        (tVarWithRef retainedRef)
+                                        (tVarWithRef outerRef)
+                                    )
+                                )
+                            )
+                        )
+                    )
+            identity =
+                generatedResolvedLocal
+                    682
+                    "$identity#0"
+                    "identity"
+                    returnedTy
+            producer =
+                eTyAbsWithRef
+                    outerRef
+                    Nothing
+                    ( EApp
+                        (ELam identity (EVarNode identity))
+                        ( eTyAbsWithRef
+                            returnedRef
+                            Nothing
+                            (ELam outerParam nestedProducer)
+                        )
+                    )
+            scheme =
+                mkElabSchemeWithRefs
+                    [(outerRef, Nothing), (returnedRef, Nothing)]
+                    ( TArrow
+                        (tVarWithRef outerRef)
+                        ( tForallWithRef
+                            retainedRef
+                            Nothing
+                            ( TArrow
+                                (tVarWithRef returnedRef)
+                                ( TArrow
+                                    (tVarWithRef retainedRef)
+                                    (tVarWithRef outerRef)
+                                )
+                            )
+                        )
+                    )
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+            (published, _) =
+                constructTermWithCertifiedResultSchemeAtPublicationWithRoutes
+                    emptyTcEnv
+                    IntMap.empty
+                    scheme
+                    producer
+            typeAbsRefs term =
+                case term of
+                    EVarNode {} -> []
+                    ELit {} -> []
+                    ELam _ body -> typeAbsRefs body
+                    EApp function argument ->
+                        typeAbsRefs function ++ typeAbsRefs argument
+                    ELet _ _ rhs body -> typeAbsRefs rhs ++ typeAbsRefs body
+                    ETyAbsRef ref _ body -> ref : typeAbsRefs body
+                    ETyInst inner _ -> typeAbsRefs inner
+                    ERoll _ body -> typeAbsRefs body
+                    EUnroll body -> typeAbsRefs body
+            declarationsOf targetRef =
+                length
+                    ( filter
+                        (`ElabTypes.typeBinderRefsSameIdentity` targetRef)
+                        (typeAbsRefs published)
+                    )
+        typeCheckWithEnv emptyTcEnv published
+            `shouldBe` Right (schemeToType scheme)
+        declarationsOf outerRef `shouldBe` 1
+        declarationsOf returnedRef `shouldBe` 1
 
     it "constructs a missing bounded forall after an existing abstraction prefix" $ do
         let sourceOuter = typeRef 649 "source-a"
@@ -2217,6 +2359,39 @@ spec = describe "Phase 7 typecheck" $ do
                 typeBinderRefIdentity firstRef `shouldNotBe` typeBinderRefIdentity secondRef
             other -> expectationFailure ("Expected two freshened root binders, got: " ++ show other)
 
+    it "preserves a nested forall shadow inside a freshened abstraction bound" $ do
+        let outerRef = typeRef 991873 "a"
+            consumerRef = typeRef 991874 "consumer"
+            captured =
+                generatedResolvedLocal
+                    991875
+                    "$captured#0"
+                    "captured"
+                    (tVarWithRef outerRef)
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    [(captured, tVarWithRef outerRef)]
+                    Map.empty
+            shadowedBound =
+                TForallRef
+                    outerRef
+                    Nothing
+                    (TArrow (tVarWithRef outerRef) intTy)
+            term =
+                eTyAbsWithRef
+                    outerRef
+                    Nothing
+                    (eTyAbsWithRef consumerRef (Just shadowedBound) (ELit (LInt 1)))
+        case freshenTypeAbsAgainstEnv env term of
+            ETyAbsRef freshOuterRef Nothing (ETyAbsRef consumerRef' (Just bound') _) -> do
+                typeBinderRefIdentity freshOuterRef
+                    `shouldNotBe` typeBinderRefIdentity outerRef
+                consumerRef' `shouldBe` consumerRef
+                bound' `shouldBe` shadowedBound
+            other ->
+                expectationFailure
+                    ("Expected a freshened abstraction with an intact shadowed bound, got: " ++ show other)
+
     it "freshens type abstraction displays away from visible stable aliases" $ do
         let reserved = typeRef 61 "captured"
             stableAlias = typeBinderIdentityStableName (typeBinderRefIdentity reserved)
@@ -2253,6 +2428,36 @@ spec = describe "Phase 7 typecheck" $ do
                 resolvedVarType localOccurrence `shouldBe` tVarWithRef freshRef
                 resolvedVarType capturedOccurrence `shouldBe` tVarWithRef capturedRef
             other -> expectationFailure ("Expected environment-aware freshening, got: " ++ show other)
+
+    it "alpha-copies a lexical forall without capturing its ambient InstApp argument" $ do
+        let ambientRef = typeRef 991876 "a"
+            copiedRef = typeRef 991877 "a"
+            gTy = tForallWithRef ambientRef Nothing (TArrow (tVarWithRef ambientRef) (tVarWithRef ambientRef))
+            g = generatedResolvedLocal 991878 "$g#0" "g" gTy
+            term =
+                ELam
+                    g
+                    (ETyInst (EVarNode g) (InstApp (tVarWithRef ambientRef)))
+            renamed =
+                alphaRenameTermTypeBinderScopes
+                    [(ambientRef, copiedRef)]
+                    term
+            expectedCopiedTy =
+                tForallWithRef
+                    copiedRef
+                    Nothing
+                    (TArrow (tVarWithRef copiedRef) (tVarWithRef copiedRef))
+            env = insertTypeBindingRef ambientRef TBottom (mkTypeCheckEnvWithResolvedTerms [] Map.empty)
+        case renamed of
+            ELam g' (ETyInst (EVarNode occurrence) (InstApp argumentTy)) -> do
+                resolvedVarType g' `shouldBe` expectedCopiedTy
+                resolvedVarType occurrence `shouldBe` expectedCopiedTy
+                argumentTy `shouldBe` tVarWithRef ambientRef
+                typeCheckWithEnv env renamed
+                    `shouldBe` Right (TArrow expectedCopiedTy (TArrow (tVarWithRef ambientRef) (tVarWithRef ambientRef)))
+            other ->
+                expectationFailure
+                    ("Expected a scoped forall copy with an ambient InstApp argument, got: " ++ show other)
 
     it "typechecks applications" $ do
         let term = EApp (mkTestLocalLam "x" intTy (mkTestDeferredVar "x")) (ELit (LInt 1))

@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Consolidated normalized source-type conversion under
+  `MLF.Elab.SourceType`. Annotation preparation, Algebra term elaboration, and
+  external-binding scheme construction now share one identity-supply and
+  lexical-scope implementation instead of maintaining three recursive copies.
+  Constructor and variable-application arguments inside structural lower
+  bounds retain the enclosing binder scope, so a nested same-spelled
+  `forall` receives a fresh shadow identity rather than reusing the outer
+  resolver identity. A focused regression exercises this previously reachable
+  collision through the production annotation entry point.
 - Completed the identity-authoritative construction path for the paper's
   annotated self-application family. Normalized source annotations now become
   `ElabType` through one owner that requires carried head and binder identities;
@@ -22,9 +31,48 @@
   keep their checked principal endpoint over a provisional result
   specialization, and both RHS publication and the enclosing let-Gamma recheck
   reinstall the exact owner-final ambient declarations before checking an
-  emitted `InstAbstr`. The fixed annotation slice passes all 148 examples,
-  eight pinned generated seeds pass 800 programs, and the full serialized
-  3883-example suite passes.
+  emitted `InstAbstr`. Exact root edges distinguish producer types from
+  already-checked operated endpoints; direct application Gamma refinement
+  compares provisional bounds in that endpoint's source-identity domain, and
+  root publication excludes occurrence-local routes owned by nested source
+  annotations. A lambda body's local construction endpoint is kept separate
+  from the completed inherited endpoint consumed by its enclosing lambda, and
+  an owner-final child certificate replaces stale body-edge replay. A future
+  ordinary owner can close an opened leading bounded declaration only from its
+  exact owner/edge/exterior completion certificate. An inherited ambient
+  packet certificate now installs its completed graph-to-ambient construction
+  aliases before Gamma planning, composes routes ending at the provisional
+  semantic binder, and retires the exact inverse rename; conflicting routes
+  fail at that boundary instead of being repaired after term construction.
+  Retained Gamma declarations now open an exact same-identity, same-bound
+  declaration anywhere along a returned-lambda codomain spine, preventing a
+  deep administrative packet from publishing the same binder both outside
+  and inside its value arrows. When an application returns a locally
+  constructed polymorphic owner, the application certificate first projects
+  its own Gamma and the owner-final certificate then supplies the exact bound
+  payload for its uniquely routed declaration before root ownership is
+  partitioned. The root plan retains binder identity, order, and body; missing
+  or duplicate construction entries fail instead of triggering a later lambda
+  rewrite. A transparent returned-lambda let now uses its independent RHS
+  owner certificate only to authorize an inherited exact result identity; it
+  leaves scheme selection to the graph plan and constructs the RHS once in
+  that complete Gamma. Administrative child-lambda completion can follow an
+  application/let returned-result certificate chain to the unique checked
+  lambda owner, so the paper's `b > sigma`, `b -> b`, `sigma -> b` construction
+  remains downward even through result wrappers. For a structured exact
+  producer, prepared packets now prove ownership of nested result identities,
+  while only the packet selected by that exact edge may certify that its
+  closed presolution projection has already been completed. Open projections
+  remain at their lexical owner. A body-consumer route accepts a specialized
+  owner endpoint only when its construction-operated declaration is the
+  certificate's completed bound and an exact xMLF instantiation reaches that
+  endpoint. Binder closure planning now reads the same unsoftened binding
+  colours as final rigid inlining and selects every identity exposed by an
+  inlined rigid bound before final reification; a multi-use polymorphic let
+  therefore stays lexical through returned lambda owners without any
+  post-finalization free-variable repair. The fixed annotation slice passes
+  all 268 examples, 37 pinned generated seeds pass 3700 programs, and the
+  full serialized 4011-example suite passes.
 - Made the annotation-type/replay boundary construction-owned. Generalization
   preparation now validates all canonical roots once and seals their
   occurrence-owned annotation types together with the complete
@@ -151,8 +199,8 @@
   is owned once by the program types layer and shared by the cache and backend.
   Backend preparation is lazy, so interpreter-only assertions do not force
   LLVM/native work. The former duplicate higher-kinded runtime lanes now run as
-  one checked parity artifact, reducing the focused 42.66-second pair to under
-  one second in the final focused validation.
+  one checked parity artifact, reducing the focused 42.66-second pair to 0.68
+  seconds of Hspec time (0.75 seconds wall) in the final validation.
 - Made eMLF annotations construct the thesis coercion shape directly: rigid
   annotated domains and independently flexible codomains are direct graphic
   copies, with no synthetic `forall (beta >= sigma). beta` Eq-Var wrapper.
