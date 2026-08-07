@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Encoded body-consumer owner progress in the private
+  `BodyConsumerBoundRefinementCertificate` constructors. All validated
+  refinement producers now share one pending smart constructor, and
+  `finalizeBodyConsumerBoundRefinementAtOwner` is the sole transition to the
+  finalized state. This removes the independently writable finalized Boolean
+  that could disagree with declaration authority; a repository guard prevents
+  that partial-state representation from returning.
 - Consolidated normalized source-type conversion under
   `MLF.Elab.SourceType`. Annotation preparation, Algebra term elaboration, and
   external-binding scheme construction now share one identity-supply and
@@ -72,7 +79,7 @@
   therefore stays lexical through returned lambda owners without any
   post-finalization free-variable repair. The fixed annotation slice passes
   all 268 examples, 37 pinned generated seeds pass 3700 programs, and the
-  full serialized 4011-example suite passes.
+  full serialized 4012-example suite passes.
 - Made the annotation-type/replay boundary construction-owned. Generalization
   preparation now validates all canonical roots once and seals their
   occurrence-owned annotation types together with the complete

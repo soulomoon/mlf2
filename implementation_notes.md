@@ -1,3 +1,24 @@
+## 2026-08-07 - Construction-encoded body-consumer owner progress
+
+- Revalidated the runtime-test repair before continuing eMLF work. The merged
+  higher-kinded interpreter/LLVM/native row takes 3.8242 seconds of Hspec time,
+  plain lambda/application takes 0.4485 seconds, and bare overloaded-method
+  rejection takes 0.0912 seconds. The package regressions prove that two
+  independent runtime artifacts and interpreter/backend consumers share one
+  builtin Prelude semantic build, while the importless higher-kinded artifact
+  performs zero Prelude builds.
+- Replaced `BodyConsumerBoundRefinementCertificate`'s independently writable
+  owner-finalized Boolean with private pending and finalized constructors.
+  Nine validated producers now use one pending smart constructor, and the
+  owner-boundary function is the sole constructor of finalized certificates.
+  Authority reclassification and lifecycle advancement therefore happen as
+  one transition instead of record-updating two fields that could disagree.
+- Added a repository guard for the opaque constructor boundary and the absence
+  of the old Boolean field. Focused owner-final construction tests pass (34
+  examples), as do all 40 tests whose names exercise the paper `g g` family.
+  `cabal build -j1 all` and the complete serialized suite pass (4012 examples,
+  0 failures); `./scripts/thesis-conformance-gate.sh` also passes in full.
+
 ## 2026-08-04 - Construction-directed endpoint completion and final audit
 
 - Fixed the remaining generated bounded-identity counterexample before

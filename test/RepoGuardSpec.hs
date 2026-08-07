@@ -129,6 +129,25 @@ spec = describe "Repository guardrails" $ do
     pipelineSource
       `shouldNotContain` "validateElaborationWithEnv"
 
+  it "body-consumer owner progress is encoded by certificate state" $ do
+    constructionGammaSource <-
+      readFileStrict
+        "src/MLF/Elab/Elaborate/Algebra/ConstructionGamma.hs"
+    let constructionGammaExports =
+          unlines (takeWhile (/= "where") (lines constructionGammaSource))
+    constructionGammaExports
+      `shouldContain` "BodyConsumerBoundRefinementCertificate,"
+    constructionGammaExports
+      `shouldNotContain` "BodyConsumerBoundRefinementCertificate (..)"
+    constructionGammaSource
+      `shouldContain` "PendingBodyConsumerBoundRefinementCertificate"
+    constructionGammaSource
+      `shouldContain` "FinalizedBodyConsumerBoundRefinementCertificate"
+    constructionGammaSource
+      `shouldNotContain` "bcbrOwnerFinalized :: !Bool"
+    constructionGammaSource
+      `shouldNotContain` "bcbrOwnerFinalized ="
+
   it "normalized witness publication is construction-closed" $ do
     cabalSrc <- readFileStrict "mlf2.cabal"
     driverSource <- readFileStrict "src/MLF/Constraint/Presolution/Driver.hs"

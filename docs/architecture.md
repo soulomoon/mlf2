@@ -747,6 +747,10 @@ semantics that are not represented elsewhere just as explicitly.”
   child publishes an owner-final construction certificate, that endpoint is
   the enclosing constructor's body source; its earlier graph-edge computation
   is not replayed. A descendant `BodyConsumerBoundRefinementCertificate` may
+  be created only in its private pending state, and only the owner-boundary
+  transition can construct its finalized state. Declaration authority and
+  owner progress therefore cannot be assembled as an authority beside an
+  independently mutable Boolean. A descendant certificate may
   close an opened leading bounded declaration only when its private ordinary
   owner route records the same completed declaration as the incoming,
   operated, and construction-operated endpoint. The same private route may

@@ -4108,7 +4108,7 @@ certifyExactLambdaConstructionAtLambdaType
           , (expectedRef, Nothing) <- expectedBinders
           , typeBinderRefsSameIdentity candidateRef expectedRef
           , certificate <- bodyRefinements
-          , bcbrOwnerFinalized certificate
+          , bodyConsumerBoundRefinementOwnerFinalized certificate
           , BodyConsumerEnclosingAmbient route declarationBound <-
               [bcbrDeclarationAuthority certificate]
           , bcrOwner route == certifiedLambdaBodyOwner bodyConstruction
@@ -4219,7 +4219,7 @@ certifyExactLambdaConstructionAtLambdaType
                 (bcbrDeclarationAuthority certificate)
             previousBound = bcbrPreviousBound certificate
             completedBound = bcbrCompletedBound certificate
-      , not (bcbrOwnerFinalized certificate)
+      , not (bodyConsumerBoundRefinementOwnerFinalized certificate)
       , bcrOwner route == owner
       , typeBinderRefsSameIdentity
           (bcrConstructionRef route)
@@ -5849,14 +5849,12 @@ certifyExactLambdaConstructionAtLambdaType
                 , bcrConstructionOperatedType = completedBound
                 }
         pure
-          BodyConsumerBoundRefinementCertificate
-            { bcbrDeclarationAuthority =
-                BodyConsumerLocallyEmitted route completedBound
-            , bcbrOwnerFinalized = False
-            , bcbrAmbientRef = ambientRef
-            , bcbrPreviousBound = previousBound
-            , bcbrCompletedBound = completedBound
-            }
+          ( pendingBodyConsumerBoundRefinementCertificate
+              (BodyConsumerLocallyEmitted route completedBound)
+              ambientRef
+              previousBound
+              completedBound
+          )
 
     -- An inherited exact endpoint can open a packet-owned result declaration
     -- before the lambda that consumes it is constructed.  This lambda does
@@ -5947,14 +5945,12 @@ certifyExactLambdaConstructionAtLambdaType
                 , bcrConstructionOperatedType = completedBound
                 }
         pure
-          BodyConsumerBoundRefinementCertificate
-            { bcbrDeclarationAuthority =
-                BodyConsumerInheritedAmbient route previousBound
-            , bcbrOwnerFinalized = False
-            , bcbrAmbientRef = ambientRef
-            , bcbrPreviousBound = previousBound
-            , bcbrCompletedBound = completedBound
-            }
+          ( pendingBodyConsumerBoundRefinementCertificate
+              (BodyConsumerInheritedAmbient route previousBound)
+              ambientRef
+              previousBound
+              completedBound
+          )
 
     ensureDistinct role refs =
       case
@@ -6030,14 +6026,15 @@ data BodyConsumerDeclarationAuthority
 
 -- | Recover the declaration and completed bound only after its exact local
 -- owner has finished emitting it.  Pending and ordinary owner-emission states
--- deliberately retain their provenance constructor after finalization; the
--- finalized bit proves that the future-owner state has crossed its owner
--- boundary.  Ambient and consumed states are excluded by construction.
+-- deliberately retain their authority constructor after finalization; the
+-- certificate's finalized constructor proves that the future-owner state has
+-- crossed its owner boundary.  Ambient and consumed states are excluded by
+-- construction.
 finalizedLocalBodyConsumerDeclaration
   :: BodyConsumerBoundRefinementCertificate
   -> Maybe (BodyConsumerRoute, ElabType)
 finalizedLocalBodyConsumerDeclaration certificate
-  | not (bcbrOwnerFinalized certificate) = Nothing
+  | not (bodyConsumerBoundRefinementOwnerFinalized certificate) = Nothing
   | otherwise =
       case bcbrDeclarationAuthority certificate of
         BodyConsumerLocallyEmitted route declaredBound
@@ -6053,27 +6050,59 @@ finalizedLocalBodyConsumerDeclaration certificate
     completedBound = bcbrCompletedBound certificate
 
 -- | A construction proof that one provisional declaration was completed by
--- the exact lambda-body consumer that owns it.  The constructor is private: a
--- caller can obtain this value only by joining either a validated body
--- projection with its declaration authority or a packet-local pending
--- declaration with the recursively checked child that completed it.  Root
--- planning and enclosing packet placement may therefore replay the completed
--- bound without inferring it from the finished term or from type shape.
-data BodyConsumerBoundRefinementCertificate =
-  BodyConsumerBoundRefinementCertificate
-    { bcbrDeclarationAuthority :: !BodyConsumerDeclarationAuthority,
-      -- | Whether the exact route owner has completed its constructor.
-      -- Before this point an enclosing wrapper must preserve the certificate
-      -- even when its own result does not mention the provisional
-      -- declaration: the declaration still belongs to a future owner.  After
-      -- this point the first boundary that no longer carries the identity may
-      -- convert it to historical packet-completion provenance.
-      bcbrOwnerFinalized :: !Bool,
-      bcbrAmbientRef :: !TypeBinderRef,
-      bcbrPreviousBound :: !ElabType,
-      bcbrCompletedBound :: !ElabType
-    }
+-- the exact lambda-body consumer that owns it.  Owner progress is represented
+-- by the constructor, not by a Boolean that can disagree with declaration
+-- authority.  A caller can therefore obtain a pending certificate only from a
+-- validating construction seam, and can cross the owner boundary only through
+-- 'finalizeBodyConsumerBoundRefinementAtOwner'.
+data BodyConsumerBoundRefinementCertificate
+  = PendingBodyConsumerBoundRefinementCertificate
+      { bcbrDeclarationAuthority :: !BodyConsumerDeclarationAuthority,
+        bcbrAmbientRef :: !TypeBinderRef,
+        bcbrPreviousBound :: !ElabType,
+        bcbrCompletedBound :: !ElabType
+      }
+  | FinalizedBodyConsumerBoundRefinementCertificate
+      { bcbrDeclarationAuthority :: !BodyConsumerDeclarationAuthority,
+        bcbrAmbientRef :: !TypeBinderRef,
+        bcbrPreviousBound :: !ElabType,
+        bcbrCompletedBound :: !ElabType
+      }
   deriving (Eq, Show)
+
+pendingBodyConsumerBoundRefinementCertificate
+  :: BodyConsumerDeclarationAuthority
+  -> TypeBinderRef
+  -> ElabType
+  -> ElabType
+  -> BodyConsumerBoundRefinementCertificate
+pendingBodyConsumerBoundRefinementCertificate authority ambientRef previousBound completedBound =
+  PendingBodyConsumerBoundRefinementCertificate
+    { bcbrDeclarationAuthority = authority,
+      bcbrAmbientRef = ambientRef,
+      bcbrPreviousBound = previousBound,
+      bcbrCompletedBound = completedBound
+    }
+
+bodyConsumerBoundRefinementOwnerFinalized
+  :: BodyConsumerBoundRefinementCertificate
+  -> Bool
+bodyConsumerBoundRefinementOwnerFinalized certificate =
+  case certificate of
+    PendingBodyConsumerBoundRefinementCertificate {} -> False
+    FinalizedBodyConsumerBoundRefinementCertificate {} -> True
+
+finalizedBodyConsumerBoundRefinementCertificate
+  :: BodyConsumerDeclarationAuthority
+  -> BodyConsumerBoundRefinementCertificate
+  -> BodyConsumerBoundRefinementCertificate
+finalizedBodyConsumerBoundRefinementCertificate authority certificate =
+  FinalizedBodyConsumerBoundRefinementCertificate
+    { bcbrDeclarationAuthority = authority,
+      bcbrAmbientRef = bcbrAmbientRef certificate,
+      bcbrPreviousBound = bcbrPreviousBound certificate,
+      bcbrCompletedBound = bcbrCompletedBound certificate
+    }
 
 -- | A refinement is part of an owner's final construction certificate only
 -- when its exact declaration identity remains live, either as a binder the
@@ -6307,7 +6336,7 @@ completeConsumedResultOwnerEndpointFromBodyConsumerRefinement
   certificate
   provisionalEndpoint
   ownerConstructedEndpoint = do
-    guard (bcbrOwnerFinalized certificate)
+    guard (bodyConsumerBoundRefinementOwnerFinalized certificate)
     (route, declaredBound) <-
       case bcbrDeclarationAuthority certificate of
         BodyConsumerConsumedAtOwner consumedRoute bound ->
@@ -6468,7 +6497,7 @@ bodyConsumerBoundRefinementConsumesAny
   -> BodyConsumerBoundRefinementCertificate
   -> Bool
 bodyConsumerBoundRefinementConsumesAny refs certificate =
-  bcbrOwnerFinalized certificate
+  bodyConsumerBoundRefinementOwnerFinalized certificate
     && bodyConsumerBoundRefinementConsumed certificate
     && bodyConsumerBoundRefinementTargetsAny refs certificate
 
@@ -6481,7 +6510,7 @@ bodyConsumerBoundRefinementConsumedDependencies
   :: BodyConsumerBoundRefinementCertificate
   -> [TypeBinderRef]
 bodyConsumerBoundRefinementConsumedDependencies certificate
-  | bcbrOwnerFinalized certificate
+  | bodyConsumerBoundRefinementOwnerFinalized certificate
   , bodyConsumerBoundRefinementConsumed certificate =
       freeTypeVarRefsType (bcbrCompletedBound certificate)
   | otherwise = []
@@ -6525,7 +6554,7 @@ bodyConsumerBoundRefinementConsumedReplayRoutes =
                         )
 
     consumedReplayRoute certificate
-      | bcbrOwnerFinalized certificate
+      | bodyConsumerBoundRefinementOwnerFinalized certificate
       , BodyConsumerConsumedAtOwner route consumedBound <-
           bcbrDeclarationAuthority certificate
       , typeBinderRefsSameIdentity
@@ -6824,7 +6853,7 @@ bodyConsumerBoundRefinementsCompletePacketBound owner ambientRefs packet targetR
                 )
 
         finalizedLocalBinder refinement
-          | not (bcbrOwnerFinalized refinement) = False
+          | not (bodyConsumerBoundRefinementOwnerFinalized refinement) = False
           | otherwise =
               case bcbrDeclarationAuthority refinement of
                 BodyConsumerLocallyEmitted {} -> True
@@ -7033,40 +7062,39 @@ finalizeBodyConsumerBoundRefinementAtOwner owner localRefs ambientRefs certifica
       -- the ownership transition explicitly.  Otherwise an enclosing
       -- application will try to reinstall the now lexically bound identity as
       -- ambient Gamma.
-      certificate
-        { bcbrDeclarationAuthority =
-            BodyConsumerLocallyEmitted
-              route
-              (bcbrCompletedBound certificate)
-        , bcbrOwnerFinalized = True
-        }
+      finalizedBodyConsumerBoundRefinementCertificate
+        ( BodyConsumerLocallyEmitted
+            route
+            (bcbrCompletedBound certificate)
+        )
+        certificate
   | ownerHasCompleted
   , not targetRemainsLocal
   , targetRemainsAmbient =
-      certificate
-        { bcbrDeclarationAuthority =
-            BodyConsumerEnclosingAmbient
-              route
-              ( authorizedBodyConsumerDeclarationBound
-                  (bcbrDeclarationAuthority certificate)
-              )
-        , bcbrOwnerFinalized = True
-        }
+      finalizedBodyConsumerBoundRefinementCertificate
+        ( BodyConsumerEnclosingAmbient
+            route
+            ( authorizedBodyConsumerDeclarationBound
+                (bcbrDeclarationAuthority certificate)
+            )
+        )
+        certificate
   | ownerHasCompleted
   , not (targetRemainsLocal || targetRemainsAmbient) =
-      certificate
-        { bcbrDeclarationAuthority =
-            BodyConsumerConsumedAtOwner
-              route
-              (bcbrCompletedBound certificate)
-        , bcbrOwnerFinalized = True
-        }
+      finalizedBodyConsumerBoundRefinementCertificate
+        ( BodyConsumerConsumedAtOwner
+            route
+            (bcbrCompletedBound certificate)
+        )
+        certificate
   | bcrOwner route == owner =
-      certificate {bcbrOwnerFinalized = True}
+      finalizedBodyConsumerBoundRefinementCertificate
+        (bcbrDeclarationAuthority certificate)
+        certificate
   | otherwise = certificate
   where
     ownerHasCompleted =
-      bcbrOwnerFinalized certificate
+      bodyConsumerBoundRefinementOwnerFinalized certificate
         || bcrOwner route == owner
     targetRemainsLocal =
       bodyConsumerBoundRefinementTargetsAny
@@ -7241,7 +7269,7 @@ bodyConsumerBoundRefinementCompletedTopologyEndpoint packet certificate = do
   authority <- subtermGeneralizationConsumerAuthority packet
   guard (subtermConsumerAuthorityIsTopology authority)
   owner <- subtermConsumerAuthorityEnclosingOwner authority
-  guard (bcbrOwnerFinalized certificate)
+  guard (bodyConsumerBoundRefinementOwnerFinalized certificate)
   guard (bodyConsumerBoundRefinementConsumed certificate)
   let route =
         authorizedBodyConsumerRoute
@@ -7462,14 +7490,11 @@ materializeLocalTopologyResultBound owner bodyEdge packet completedBound schemeI
                       , bcrConstructionOperatedType = completedBound
                       }
                   certificate =
-                    BodyConsumerBoundRefinementCertificate
-                      { bcbrDeclarationAuthority =
-                          BodyConsumerLocallyEmitted route completedBound
-                      , bcbrOwnerFinalized = False
-                      , bcbrAmbientRef = resultRef
-                      , bcbrPreviousBound = previousBound
-                      , bcbrCompletedBound = completedBound
-                      }
+                    pendingBodyConsumerBoundRefinementCertificate
+                      (BodyConsumerLocallyEmitted route completedBound)
+                      resultRef
+                      previousBound
+                      completedBound
               pure (completedSchemeInfo, Just certificate)
       where
         consumerIdentity = scaConsumerIdentity authority
@@ -7597,14 +7622,12 @@ certifyAmbientTopologyResultBoundRefinement typeEnv owner bodyEdge packet ambien
           , bcrConstructionOperatedType = completedBound
           }
   pure
-    BodyConsumerBoundRefinementCertificate
-      { bcbrDeclarationAuthority =
-          BodyConsumerInheritedAmbient route previousBound
-      , bcbrOwnerFinalized = False
-      , bcbrAmbientRef = ambientRef
-      , bcbrPreviousBound = previousBound
-      , bcbrCompletedBound = completedBound
-      }
+    ( pendingBodyConsumerBoundRefinementCertificate
+        (BodyConsumerInheritedAmbient route previousBound)
+        ambientRef
+        previousBound
+        completedBound
+    )
   where
     failure :: [String] -> Either ElabError a
     failure details =
@@ -7804,14 +7827,15 @@ certifyLocalPacketBodyConsumerBoundRefinement
             , bcrConstructionOperatedType = completedBoundAtConstruction
             }
     pure
-      BodyConsumerBoundRefinementCertificate
-        { bcbrDeclarationAuthority =
-            BodyConsumerLocallyEmitted route completedBoundAtConstruction
-        , bcbrOwnerFinalized = False
-        , bcbrAmbientRef = completedRef
-        , bcbrPreviousBound = previousBound
-        , bcbrCompletedBound = completedBoundAtConstruction
-        }
+      ( pendingBodyConsumerBoundRefinementCertificate
+          ( BodyConsumerLocallyEmitted
+              route
+              completedBoundAtConstruction
+          )
+          completedRef
+          previousBound
+          completedBoundAtConstruction
+      )
   where
     selectDeclaration label requireBound exterior semanticRef schemeInfo =
       case
@@ -7911,7 +7935,7 @@ installBodyConsumerConstructionRoutes certificates initialAliases initialRenames
     install (aliases, renames) certificate =
       case bcbrDeclarationAuthority certificate of
         BodyConsumerInheritedAmbient route declaredBound
-          | not (bcbrOwnerFinalized certificate) -> do
+          | not (bodyConsumerBoundRefinementOwnerFinalized certificate) -> do
               let semanticRef = bcrSemanticRef route
                   constructionRef = bcrConstructionRef route
                   targetRef = bcbrAmbientRef certificate
@@ -8291,7 +8315,7 @@ installBodyConsumerBoundRefinementsWithOwner mbOwner closures certificates initi
     ordinaryOwnerCertificateClosesOpenedDeclaration certificate currentBound =
       case bcbrDeclarationAuthority certificate of
         BodyConsumerOrdinaryOwnerEmission route ->
-          not (bcbrOwnerFinalized certificate)
+          not (bodyConsumerBoundRefinementOwnerFinalized certificate)
             && operationalEndpointTypesAgree
               (bcbrPreviousBound certificate)
               completedBound
@@ -8345,7 +8369,7 @@ installBodyConsumerBoundRefinementsWithOwner mbOwner closures certificates initi
     pendingOwnerClosureAuthorizesProvisionalReplacement certificate =
       case bcbrDeclarationAuthority certificate of
         BodyConsumerPendingOwnerEmission route
-          | not (bcbrOwnerFinalized certificate)
+          | not (bodyConsumerBoundRefinementOwnerFinalized certificate)
           , pendingOrForwardedCompletedState certificate ->
               case pendingOwnerClosuresFor route certificate of
                 [closure] -> pendingClosureDeclaresExactRoute closure route certificate
@@ -8503,7 +8527,7 @@ installBodyConsumerBoundRefinementsWithOwner mbOwner closures certificates initi
         _ -> False
 
     finalizedLocalDeclaration certificate
-      | not (bcbrOwnerFinalized certificate) = False
+      | not (bodyConsumerBoundRefinementOwnerFinalized certificate) = False
       | otherwise =
           case bcbrDeclarationAuthority certificate of
             BodyConsumerLocallyEmitted {} -> True
@@ -9454,14 +9478,11 @@ certifyAmbientPacketGammaConsumerBoundRefinement
             , bcrConstructionOperatedType = completedBound
             }
         certificate =
-          BodyConsumerBoundRefinementCertificate
-            { bcbrDeclarationAuthority =
-                BodyConsumerInheritedAmbient route previousBound
-            , bcbrOwnerFinalized = False
-            , bcbrAmbientRef = ambientRef
-            , bcbrPreviousBound = previousBound
-            , bcbrCompletedBound = completedBound
-            }
+          pendingBodyConsumerBoundRefinementCertificate
+            (BodyConsumerInheritedAmbient route previousBound)
+            ambientRef
+            previousBound
+            completedBound
     pure (ambientRef, completedBound, certificate)
   where
     requireExteriorRoute label exterior schemeInfo =
@@ -9983,21 +10004,19 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
             , bcrOperatedType = checkedBodyType
             , bcrConstructionOperatedType = completedGammaBound
             }
-        declarationAuthority =
-          if pendingOwnerEmission
-            then BodyConsumerPendingOwnerEmission route
-            else
-              if deferredEnclosingDeclaration
-                then BodyConsumerOrdinaryOwnerEmission route
-                else BodyConsumerEnclosingAmbient route previousBound
+        declarationAuthority
+          | pendingOwnerEmission =
+              BodyConsumerPendingOwnerEmission route
+          | deferredEnclosingDeclaration =
+              BodyConsumerOrdinaryOwnerEmission route
+          | otherwise =
+              BodyConsumerEnclosingAmbient route previousBound
         certificate =
-          BodyConsumerBoundRefinementCertificate
-            { bcbrDeclarationAuthority = declarationAuthority
-            , bcbrOwnerFinalized = False
-            , bcbrAmbientRef = ambientRef
-            , bcbrPreviousBound = previousBound
-            , bcbrCompletedBound = completedGammaBound
-            }
+          pendingBodyConsumerBoundRefinementCertificate
+            declarationAuthority
+            ambientRef
+            previousBound
+            completedGammaBound
     pure
       ( ambientRef
       , completedGammaBound
@@ -10846,13 +10865,11 @@ projectValidatedAmbientConsumerBoundWithCertificate provenance declarationAuthor
   where
     route = authorizedBodyConsumerRoute declarationAuthority
     certificate ambientRef previousBound =
-      BodyConsumerBoundRefinementCertificate
-        { bcbrDeclarationAuthority = declarationAuthority,
-          bcbrOwnerFinalized = False,
-          bcbrAmbientRef = ambientRef,
-          bcbrPreviousBound = previousBound,
-          bcbrCompletedBound = vbcpProjectedType projection
-        }
+      pendingBodyConsumerBoundRefinementCertificate
+        declarationAuthority
+        ambientRef
+        previousBound
+        (vbcpProjectedType projection)
 
     certificateFailure detail =
       Left
@@ -10985,7 +11002,7 @@ consumeCertifiedBodyConsumerEndpointScheme certificates scheme =
     consumedEndpointCertificates =
       filter
         ( \certificate ->
-            bcbrOwnerFinalized certificate
+            bodyConsumerBoundRefinementOwnerFinalized certificate
               && bodyConsumerBoundRefinementConsumed certificate
               && bodyConsumerBoundRefinementTargetsAny
                 endpointRefs
@@ -11334,7 +11351,7 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
     validateConsumedAuthority certificate =
       case bcbrDeclarationAuthority certificate of
         BodyConsumerConsumedAtOwner _ authorityBound
-          | bcbrOwnerFinalized certificate
+          | bodyConsumerBoundRefinementOwnerFinalized certificate
           , operationalEndpointTypesAgree
               authorityBound
               (bcbrCompletedBound certificate) ->
@@ -11897,7 +11914,7 @@ completeCertifiedSourceOpenBodyConsumerBounds sourceRefs certificates initialBin
               (tyToElab currentBound)
               certificate
           )
-      , bcbrOwnerFinalized certificate
+      , bodyConsumerBoundRefinementOwnerFinalized certificate
       , BodyConsumerEnclosingAmbient route declaredBound <-
           [bcbrDeclarationAuthority certificate]
       , let completedBound = bcbrCompletedBound certificate
@@ -12157,7 +12174,7 @@ projectCertifiedBodyConsumerBound requireTarget binders certificate = do
     previousBound = bcbrPreviousBound certificate
     completedBound = bcbrCompletedBound certificate
     finalizedLocalDeclarationOwnsCompletion =
-      bcbrOwnerFinalized certificate
+      bodyConsumerBoundRefinementOwnerFinalized certificate
         && case bcbrDeclarationAuthority certificate of
           BodyConsumerLocallyEmitted _ declarationBound ->
             operationalEndpointTypesAgree
