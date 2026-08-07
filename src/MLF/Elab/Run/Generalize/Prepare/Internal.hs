@@ -209,14 +209,13 @@ import MLF.Elab.Generalize
     , LocalGammaClosure(..)
     , LocalGammaOwner(..)
     , PreparedSubtermGeneralization
+    , RootEdgeExactEndpoint(..)
     , RootRaiseMergeAuthority(..)
     , SubtermPacketPlacement(..)
     , SubtermGeneralizations
     , SubtermResultOwnership
     , mergeSubtermGeneralizations
     , pairSubtermGeneralizationRoots
-    , placeSubtermGeneralizationBindersWithRoutes
-    , placeSubtermGeneralizationBindersWithRoutesAndProvenance
     , placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy
     , placedSubtermBinderScheme
     , placedSubtermCopiedBinderRoutes
@@ -241,7 +240,7 @@ import MLF.Elab.Generalize
     , localGammaOwnerScope
     , selectLocalGammaEdgeOwnership
     , mkIdentityTopologyConsumerAuthority
-    , generalizationRequirementsForEnclosingRootEdges
+    , generalizationRequirementsForEnclosingRootExactEdges
     , subtermGeneralizationsOwnedBy
     , scaConsumerIdentity
     , scaEdgeId
@@ -261,6 +260,7 @@ import MLF.Elab.Generalize
     , subtermGeneralizationInheritedGammaRoutes
     , subtermGeneralizationLocalResultAuthority
     , subtermGeneralizationOpaqueResultConstruction
+    , subtermGeneralizationSourceOwnerConsumerCompletion
     , subtermGeneralizationSourceLambdaResultConstruction
     , subtermGeneralizationGammaAuthority
     , subtermGeneralizationGammaBoundScheme
@@ -949,15 +949,15 @@ sourcePacketExpectedTypeWith constructor ty =
     -- sees the lambda body before the annotation wrapper emits that spine, so
     -- carry the declarations as lexical ambient authority alongside genuinely
     -- free source binders.
-    (leadingBinders, _) = splitForallsRefs ty
+    (sourceBinders, _) = splitForallsRefs ty
     ambientBinders =
-        leadingBinders
+        sourceBinders
             ++ [ (ref, Nothing)
                | ref <- distinctTypeBinderRefs (freeTypeVarRefsType ty)
                , not
                     ( any
                         (typeBinderRefsSameIdentity ref . fst)
-                        leadingBinders
+                        sourceBinders
                     )
                ]
 
@@ -999,7 +999,7 @@ generalizationRequirementsForOwnedScope
     -> IntMap.IntMap ElabType
     -> IntMap.IntMap TypeBinderRef
     -> SubtermGeneralizations
-    -> [(EdgeId, Maybe ElabType)]
+    -> [(EdgeId, Maybe RootEdgeExactEndpoint)]
     -> Maybe ElabType
     -> AnnExpr
     -> Either ElabError GeneralizationRequirements
@@ -1887,6 +1887,10 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             edgeArtifacts
             (Map.elems allSubtermPackets)
             ann
+    let explicitProducerEdges =
+            [ (edgeId, RootEdgeExactProducer <$> mbEndpoint)
+            | (edgeId, mbEndpoint) <- explicitEdges
+            ]
     rootRequirements <-
         generalizationRequirementsForScopeEdges
             []
@@ -1900,7 +1904,7 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             exactProducerTypes
             sourceBinderRefs
             subtermPackets
-            explicitEdges
+            explicitProducerEdges
             expectedType
             ann
     let resultLocalEdges =
@@ -1928,7 +1932,7 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             exactProducerTypes
             sourceBinderRefs
             subtermPackets
-            explicitEdges
+            explicitProducerEdges
             expectedType
             ann
     let closureMatchesRequirement closure requirement =
@@ -2933,7 +2937,7 @@ generalizationRequirementsForScopeEdges
     -> IntMap.IntMap ElabType
     -> IntMap.IntMap TypeBinderRef
     -> SubtermGeneralizations
-    -> [(EdgeId, Maybe ElabType)]
+    -> [(EdgeId, Maybe RootEdgeExactEndpoint)]
     -> Maybe ElabType
     -> AnnExpr
     -> Either ElabError GeneralizationRequirements
@@ -2942,7 +2946,7 @@ generalizationRequirementsForScopeEdges localEdges edgeSelector identityRepresen
     selectedEdges <- edgeSelector ann
     ownedEdges <- filterM ownsEdge selectedEdges
     let inferredEdges =
-            [ (edgeId, exactFor edgeId)
+            [ (edgeId, RootEdgeExactProducer <$> exactFor edgeId)
             | edgeId <- ownedEdges
             ]
         exactFor edgeId
@@ -2956,7 +2960,7 @@ generalizationRequirementsForScopeEdges localEdges edgeSelector identityRepresen
                 | (edgeId, mbExact) <- inferredEdges ++ explicitEdges
                 ]
     case
-        generalizationRequirementsForEnclosingRootEdges
+        generalizationRequirementsForEnclosingRootExactEdges
             identityRepresentative
             constructionCanonical
             ga
@@ -5560,9 +5564,98 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                                 (gaConstructionRouteNodes constructionCanonical bindParentsGa)
                                 ownedDescendants
                                 bodyPacketConstruction0
+                        let sourceOwnerCompletedDescendantBound
+                                packet
+                                targetRef
+                                packetBound
+                                _constructedBound =
+                                    directCompletion packet targetRef
+                                        <|> sharedCompletion
+                                            packet
+                                            targetRef
+                                            packetBound
+
+                            directCompletion packet targetRef = do
+                                (_, completedEndpoint) <-
+                                    certifiedTransition targetRef packet
+                                pure completedEndpoint
+
+                            sharedCompletion packet targetRef packetBound = do
+                                authority <-
+                                    subtermGeneralizationConsumerAuthority packet
+                                owner <-
+                                    subtermConsumerAuthorityEnclosingOwner
+                                        authority
+                                guard (owner == currentConstructionOwner)
+                                guard
+                                    ( typeBinderRefsSameIdentity
+                                        targetRef
+                                        ( typeBinderRefFromIdentity
+                                            (scaConsumerIdentity authority)
+                                            "$consumer"
+                                        )
+                                    )
+                                firstTransition : remainingTransitions <-
+                                    pure
+                                        ( mapMaybe
+                                            (certifiedTransition targetRef)
+                                            ( Map.elems
+                                                descendantsPlacedByCurrentConstruction
+                                            )
+                                        )
+                                let (frozenOperatedType, completedEndpoint) =
+                                        firstTransition
+                                guard
+                                    ( all
+                                        ( \(otherFrozen, otherCompleted) ->
+                                            endpointTypesAgree
+                                                frozenOperatedType
+                                                otherFrozen
+                                                && endpointTypesAgree
+                                                    completedEndpoint
+                                                    otherCompleted
+                                        )
+                                        remainingTransitions
+                                    )
+                                guard
+                                    ( endpointTypesAgree
+                                        packetBound
+                                        frozenOperatedType
+                                    )
+                                pure completedEndpoint
+
+                            certifiedTransition targetRef packet = do
+                                ( authority
+                                  , certifiedOwner
+                                  , frozenOperatedType
+                                  , completedEndpoint
+                                  ) <-
+                                    subtermGeneralizationSourceOwnerConsumerCompletion
+                                        packet
+                                guard
+                                    ( certifiedOwner
+                                        == currentConstructionOwner
+                                    )
+                                guard
+                                    ( typeBinderRefsSameIdentity
+                                        targetRef
+                                        ( typeBinderRefFromIdentity
+                                            (scaConsumerIdentity authority)
+                                            "$consumer"
+                                        )
+                                    )
+                                pure
+                                    ( frozenOperatedType
+                                    , completedEndpoint
+                                    )
+
+                            endpointTypesAgree left right =
+                                alphaEqType left right
+                                    || churchAwareEqType left right
                         bodyBinderPlacement <-
                             case
-                                placeSubtermGeneralizationBindersWithRoutesAndProvenance
+                                placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy
+                                    sourceOwnerCompletedDescendantBound
                                     (siSubstRefs bodyPacketConstruction)
                                     descendantsPlacedByCurrentConstruction
                                     (siScheme bodyPacketConstruction)
@@ -5641,12 +5734,17 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                                     . schemeToType
                         operatedScheme <-
                             case
-                                placeSubtermGeneralizationBindersWithRoutes
+                                placeSubtermGeneralizationBindersWithRoutesAndProvenanceBy
+                                    sourceOwnerCompletedDescendantBound
                                     (siSubstRefs operatedPacketWithConsumerRoutes)
                                     operatedViewDescendants
                                     operatedSchemeOrdered
                             of
-                                Right placed -> pure placed
+                                Right placement ->
+                                    pure
+                                        ( placedSubtermBinderScheme
+                                            placement
+                                        )
                                 Left cause ->
                                     Left
                                         ( ValidationFailed
@@ -5717,7 +5815,7 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                                         (siSubstRefs operatedPacketWithConsumerRoutes)
                                     )
                                 )
-                        constructionPacket <-
+                        constructionPacket0 <-
                             completeAdministrativeSourceConstruction
                                 mbRequiredLambdaParam
                                 operatedExpectedType
@@ -5729,7 +5827,8 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                                 constructionBinderRenames
                                 bodyPacket
                                 operatedPacket
-                        let bodyScheme = siScheme constructionPacket
+                        let constructionPacket = constructionPacket0
+                            bodyScheme = siScheme constructionPacket
                         let needsPacket =
                                 isJust mbConsumer
                                     || isJust packetTopologyAuthority
@@ -8653,6 +8752,54 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
             Just gammaAuthority -> do
                 let authorityEdge = gpaEdgeId gammaAuthority
                     authorityScope = genRef (gpaOwnerGen gammaAuthority)
+                    -- A Gamma packet must construct its Hyp before Gen can
+                    -- compose an opaque result carrier.  Only this branch has
+                    -- such a pending Hyp: a direct packet first generalizes
+                    -- its ordinary result and composes the opaque construction
+                    -- afterwards.  Keeping the certificate branch-local makes
+                    -- it impossible to publish a descendant operated endpoint
+                    -- as an enclosing direct-packet requirement.
+                    opaqueResultOperatedEdges =
+                        [ ( scaEdgeId authority
+                          , Just
+                                ( RootEdgeExactOperated
+                                    constructedType
+                                )
+                          )
+                        | (_, constructedType, packet) <-
+                            opaqueResultConstructions
+                        , Just (sourceLambdaNode, certifiedType) <-
+                            [ subtermGeneralizationSourceLambdaResultConstruction
+                                packet
+                            ]
+                        , operationalEndpointTypesAgree
+                            certifiedType
+                            constructedType
+                        , Just authority <-
+                            [subtermGeneralizationConsumerAuthority packet]
+                        , Just enclosingOwner <-
+                            [ subtermConsumerAuthorityEnclosingOwner
+                                authority
+                            ]
+                        , scaEdgeId authority
+                            == lgoBoundaryEdge enclosingOwner
+                        , sourceLambdaNode /= lgoTermNode enclosingOwner
+                        , Just rootAuthority <-
+                            [ either
+                                (const Nothing)
+                                id
+                                ( rootRaiseMergeAuthorityFor
+                                    edgeArtifacts
+                                    (scaEdgeId authority)
+                                )
+                            ]
+                        , rrmaOperatedRoot rootAuthority
+                            == sourceLambdaNode
+                        , null
+                            ( schemeBinderRefs
+                                (schemeFromType constructedType)
+                            )
+                        ]
                 authority <-
                     rootRaiseMergeAuthorityFor edgeArtifacts authorityEdge
                         >>= maybe
@@ -8675,7 +8822,7 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                         exactProducerTypes
                         localSourceBinderRefs
                         requirementDescendants
-                        []
+                        opaqueResultOperatedEdges
                         expectedElabType
                         generalizationSource
                 let operatedRequirements =
@@ -8745,10 +8892,14 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
                         exactProducerTypes
                         localSourceBinderRefs
                         requirementDescendants
-                        [ ( authorityEdge
-                          , Just (schemeToType (siScheme operatedSchemeInfo))
+                        ( ( authorityEdge
+                          , Just
+                              ( RootEdgeExactProducer
+                                  (schemeToType (siScheme operatedSchemeInfo))
+                              )
                           )
-                        ]
+                            : opaqueResultOperatedEdges
+                        )
                         Nothing
                         generalizationSource
                 let requirements =
@@ -10336,12 +10487,13 @@ generalizePreparedRootDetailedWithConstructionAnn artifact constructionAnnCanon 
         Nothing
         []
 
--- | Complete an enclosing-root RaiseMerge requirement from the exact local
--- constructor that emitted its exterior declaration.  The owner certificate
--- records the binder spine before the term is built and validates that same
--- spine against the checked term afterwards.  It can therefore supply
--- @S'(operated)@ for its own edge without re-reading either the mutable graph
--- or the final type by shape.
+-- | Complete an enclosing-root RaiseMerge requirement from the exact checked
+-- construction that owns its exterior declaration.  The current owner may
+-- have emitted that declaration locally, or it may carry the exact child
+-- declaration through a result-transparent boundary.  Both paths retain
+-- binder identity and graph-occurrence routes before the final type is
+-- checked, so they can supply @S'(operated)@ without re-reading the mutable
+-- graph or recovering a declaration from type shape.
 completeOwnerFinalRootGammaRequirements
     :: Maybe OwnerFinalConstruction
     -> GeneralizationRequirements
@@ -10363,12 +10515,19 @@ completeOwnerFinalRootGammaRequirements (Just certificate) requirements = do
     ownerScope = localGammaOwnerScope owner
 
     completeRequirement requirement
-        | ownerEdge `notElem` NonEmpty.toList (rgbEdgeIds requirement) =
-            pure requirement
         | not (ownerPlacementMatches requirement) =
             pure requirement
-        | otherwise =
-            case matchingConstructionBinders requirement of
+        | otherwise = do
+            carriedBinders <- matchingCarriedConstructionBinders requirement
+            let localBinders
+                    | ownerEdge
+                        `elem` NonEmpty.toList (rgbEdgeIds requirement) =
+                        matchingLocalConstructionBinders requirement
+                    | otherwise = []
+                constructionBinders =
+                    distinctConstructionBinders
+                        (localBinders ++ carriedBinders)
+            case constructionBinders of
                 [] -> pure requirement
                 [(_, constructionBound)] ->
                     pure
@@ -10379,7 +10538,7 @@ completeOwnerFinalRootGammaRequirements (Just certificate) requirements = do
                 matches ->
                     completionFailure
                         requirement
-                        [ "owner certificate contains duplicate exterior declarations"
+                        [ "owner certificate contains conflicting exterior declarations"
                         , "  matching binders: " ++ show matches
                         ]
 
@@ -10389,13 +10548,86 @@ completeOwnerFinalRootGammaRequirements (Just certificate) requirements = do
             RequiredGammaAtNestedScope scope -> scope == ownerScope
             RequiredGammaAtCurrentScope -> False
 
-    matchingConstructionBinders requirement =
+    matchingLocalConstructionBinders requirement =
         [ binder
         | binder@(ref, _) <- ofcLocallyEmittedBinders certificate
         , typeBinderRefsSameIdentity
             ref
             (requirementConstructionRef requirement)
         ]
+
+    matchingCarriedConstructionBinders requirement =
+        case routedRefs of
+            [] -> pure []
+            firstRef : remainingRefs
+                | all
+                    (typeBinderRefsSameIdentity firstRef)
+                    remainingRefs ->
+                    case
+                        [ binder
+                        | binder@(ref, _) <-
+                            ofcCarriedResultBinders certificate
+                        , typeBinderRefsSameIdentity ref firstRef
+                        ]
+                    of
+                        [] ->
+                            completionFailure
+                                requirement
+                                [ "owner certificate carried route has no declaration"
+                                , "  routed ref: " ++ show firstRef
+                                , "  carried binders: "
+                                    ++ show
+                                        (ofcCarriedResultBinders certificate)
+                                ]
+                        matches -> pure matches
+                | otherwise ->
+                    completionFailure
+                        requirement
+                        [ "owner certificate has conflicting carried-result routes"
+                        , "  routed refs: " ++ show routedRefs
+                        , "  carried routes: "
+                            ++ show
+                                (ofcCarriedResultBinderRoutes certificate)
+                        ]
+      where
+        routedRefs =
+            foldr insertDistinctRef []
+                [ routedRef
+                | routeNode <-
+                    [ rgbExteriorNode requirement
+                    , rgbOperatedRoot requirement
+                    ]
+                , routedRef <-
+                    maybeToList
+                        ( IntMap.lookup
+                            (getNodeId routeNode)
+                            (ofcCarriedResultBinderRoutes certificate)
+                        )
+                ]
+
+    distinctConstructionBinders =
+        foldl insertConstructionBinder []
+
+    insertConstructionBinder binders incoming@(incomingRef, incomingBound) =
+        case
+            find
+                (typeBinderRefsSameIdentity incomingRef . fst)
+                binders
+        of
+            Nothing -> binders ++ [incoming]
+            Just (_, existingBound)
+                | constructionBoundsAgree existingBound incomingBound ->
+                    binders
+                | otherwise -> binders ++ [incoming]
+
+    constructionBoundsAgree left right =
+        operationalEndpointTypesAgree
+            (maybe TBottom tyToElab left)
+            (maybe TBottom tyToElab right)
+
+    insertDistinctRef ref refs
+        | any (typeBinderRefsSameIdentity ref) refs = refs
+        | otherwise = ref : refs
 
     requirementConstructionRef requirement =
         fromMaybe
@@ -10744,7 +10976,7 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
                     )
                 )
             ]
-        rootGeneralizationRequirements =
+        rootGeneralizationRequirements0 =
             constructionRequirements
                 { grTermUsedRootBinderRefs = termUsedRootBinderRefs
                 }
@@ -11254,6 +11486,10 @@ generalizePreparedRootDetailedWithConstructionResult artifact constructionAnnCan
                     && any
                         (typeBinderRefsSameIdentity ref)
                         certificateAmbientRefs
+    rootGeneralizationRequirements <-
+        completeOwnerFinalRootGammaRequirements
+            rootOwnerFinalConstruction
+            rootGeneralizationRequirements0
     resultRequirements <-
         completeOwnerFinalRootGammaRequirements
             rootOwnerFinalConstruction
@@ -15004,6 +15240,16 @@ prepareRootConstructionScopeWithRequirementEvidence
                 Nothing -> pure (binders ++ [binder])
                 Just (_, existingBound)
                     | boundsAgree existingBound mbBound -> pure binders
+                    -- An unbounded dependency proves lexical availability;
+                    -- it carries no refinement that could replace a bound
+                    -- already constructed for the same exact identity.
+                    | isNothing mbBound -> pure binders
+                    -- Conversely, explicit requirement evidence completes a
+                    -- root declaration that the closure still presents as
+                    -- unbounded.  Refine that declaration in place so its
+                    -- existing identity/order/aliases remain authoritative.
+                    | isNothing existingBound ->
+                        pure (map refineMatchingBinder binders)
                     | otherwise ->
                         Left
                             ( ValidationFailed
@@ -15013,6 +15259,11 @@ prepareRootConstructionScopeWithRequirementEvidence
                                 , "  dependency bound: " ++ show mbBound
                                 ]
                             )
+          where
+            refineMatchingBinder existing@(existingRef, _)
+                | typeBinderRefsSameIdentity existingRef ref =
+                    (existingRef, mbBound)
+                | otherwise = existing
 
         insertEvidenceAlias binderRefs aliases (key, ref)
             | isLocal ref = pure aliases

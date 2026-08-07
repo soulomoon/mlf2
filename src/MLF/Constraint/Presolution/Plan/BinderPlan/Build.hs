@@ -1176,6 +1176,149 @@ buildBinderPlan BinderPlanInput {..} = do
               node
               == Nothing
           _ -> False
+      -- A generated source identity can occur at several solved graph nodes.
+      -- Its local declaration is the frozen variable owned by the matching
+      -- source forall/mu node, so keep declaration authority indexed by both
+      -- semantic identity and frozen base node.  The same source scheme can
+      -- be copied into several lexical declarations; collapsing those copies
+      -- by identity would either reject a valid program or let graph-key order
+      -- choose the wrong owner.
+      sourceDeclarationAuthorityGroups =
+        case mbBindParentsGa of
+          Nothing -> Map.empty
+          Just ga ->
+            Map.fromListWith
+              (IntMap.unionWith (++))
+              [ ( typeBinderRefIdentity sourceRef
+                , IntMap.singleton
+                    (getNodeId baseBinder)
+                    [candidateKey]
+                )
+              | candidateKey <- dependencyCandidateIds
+              , Just sourceRef <- [sourceRefForLiveKey candidateKey]
+              , Just _ <-
+                  [ typeBinderIdentityGeneratedUnique
+                      (typeBinderRefIdentity sourceRef)
+                  ]
+              , Just baseBinder <-
+                  [frozenBaseNodeForLive ga (NodeId candidateKey)]
+              , Just TyVar {} <-
+                  [ lookupNodeIn
+                      (cNodes (gbiBaseConstraint ga))
+                      baseBinder
+                  ]
+              , Just (TypeRef owner, BindFlex) <-
+                  [ IntMap.lookup
+                      (nodeRefKey (typeRef baseBinder))
+                      (gbiBindParentsBase ga)
+                  ]
+              , Just ownerNode <-
+                  [lookupNodeIn (cNodes (gbiBaseConstraint ga)) owner]
+              , case ownerNode of
+                  TyForall {} -> True
+                  TyMu {} -> True
+                  _ -> False
+              ]
+      sourceDeclarationAuthorities =
+        case mbBindParentsGa of
+          Nothing -> Map.empty
+          Just ga ->
+            Map.map
+              ( IntMap.mapMaybeWithKey
+                  ( \baseKey candidateKeys ->
+                      let preferredKeys =
+                            baseKey
+                              : case
+                                  IntMap.lookup
+                                    baseKey
+                                    (gbiBaseToSolved ga)
+                                of
+                                Just solved ->
+                                  [ getNodeId solved
+                                  , getNodeId (canonical solved)
+                                  ]
+                                Nothing -> []
+                          preferredCandidates =
+                            [ preferred
+                            | preferred <- preferredKeys
+                            , preferred `elem` candidateKeys
+                            ]
+                       in case preferredCandidates of
+                            declarationKey : _ ->
+                              Just (declarationKey, NodeId baseKey)
+                            [] ->
+                              case candidateKeys of
+                                [declarationKey] ->
+                                  Just (declarationKey, NodeId baseKey)
+                                -- Several live aliases of one frozen base are
+                                -- not enough to choose declaration authority.
+                                -- Without an exact base/solved route, fail
+                                -- closed instead of using graph-key order.
+                                _ -> Nothing
+                  )
+              )
+              sourceDeclarationAuthorityGroups
+      sourceDeclarationAuthorityForCandidate ga key sourceRef = do
+        declarationBase <- frozenBaseNodeForLive ga (NodeId key)
+        declarationsByBase <-
+          Map.lookup
+            (typeBinderRefIdentity sourceRef)
+            sourceDeclarationAuthorities
+        case
+            IntMap.lookup
+              (getNodeId declarationBase)
+              declarationsByBase
+          of
+          Just declaration -> Just declaration
+          Nothing ->
+            -- Occurrence carriers are often separate frozen variables from
+            -- their enclosing source forall.  A sole declaration is still
+            -- exact authority for that identity.  With several copied
+            -- declarations, however, only an exact frozen-base match may
+            -- choose one; semantic identity alone cannot select a lexical
+            -- owner.
+            case IntMap.elems declarationsByBase of
+              [declaration] -> Just declaration
+              _ -> Nothing
+      sourceDeclarationOwnerForCandidate key = do
+        ga <- mbBindParentsGa
+        sourceRef <- sourceRefForLiveKey key
+        (declarationKey, declarationBase) <-
+          sourceDeclarationAuthorityForCandidate ga key sourceRef
+        guard (isUnboundedBaseVar ga declarationBase)
+        -- Merely copying a source identity into a required Gamma bound does
+        -- not make the frozen source declaration its local owner.  Authority
+        -- is needed only when solving has routed another occurrence of that
+        -- declaration through a live bound; that is the back-edge for which
+        -- the frozen declaration must precede the Gamma consumer.
+        guard
+          ( any
+              ( \candidateKey ->
+                  candidateKey /= declarationKey
+                    && case sourceRefForLiveKey candidateKey of
+                      Just candidateRef ->
+                        typeBinderRefsSameIdentity sourceRef candidateRef
+                          && case
+                              VarStore.lookupVarBound
+                                constraint
+                                (canonical (NodeId candidateKey))
+                            of
+                            Just _ -> True
+                            Nothing -> False
+                      Nothing -> False
+              )
+              dependencyCandidateIds
+          )
+        guard
+          ( any
+              ( any
+                  (typeBinderRefsSameIdentity sourceRef)
+                  . freeTypeVarRefsType
+                  . rgbOperatedType
+              )
+              (IntMap.elems requiredGamma)
+          )
+        pure declarationKey
       inheritedRigidAliasFor sourceKey = do
         ga <- mbBindParentsGa
         let source = canonical (NodeId sourceKey)
@@ -1308,6 +1451,8 @@ buildBinderPlan BinderPlanInput {..} = do
         | Just (requiredKey, _) <-
             IntMap.lookup key requiredGammaResultRoutes = requiredKey
         | IntMap.member key termUsedRootBinderRefsByKey = key
+        | Just declarationKey <-
+            sourceDeclarationOwnerForCandidate key = declarationKey
         | Just _ <- sourceRefForLiveKey key = key
         | otherwise =
             case IntMap.lookup key solvedToBasePref of
@@ -1444,6 +1589,110 @@ buildBinderPlan BinderPlanInput {..} = do
           (`IntMap.lookup` schemeRootByBody)
           False
           bnd0
+      baseBoundDepsForCandidate ga k baseBinder =
+        let baseConstraint = gbiBaseConstraint ga
+            baseNodes = cNodes baseConstraint
+            boundRootForDepsBase bnd0 =
+              boundRootWith
+                getNodeId
+                id
+                (\key -> lookupNodeIn baseNodes (NodeId key))
+                (VarStore.lookupVarBound baseConstraint)
+                (`IntMap.lookup` schemeRootByBodyBase)
+                False
+                bnd0
+         in case VarStore.lookupVarBound baseConstraint baseBinder of
+              Nothing -> do
+                let boundTy = TVarRef (refForDep k)
+                    freeRefs = freeTypeVarRefsType boundTy
+                    deps = depsFromRefs k dependencyCandidateSet freeRefs
+                pure deps
+              Just bnd -> do
+                let bndRoot = boundRootForDepsBase bnd
+                boundTy <-
+                  reifyBoundWithRefsOnConstraint
+                    baseConstraint
+                    substDepsBase
+                    bndRoot
+                let bndRootKey = getNodeId bndRoot
+                    freeRefs0 = freeTypeVarRefsType boundTy
+                    freeRefs =
+                      case (boundTy, lookupNodeIn baseNodes bndRoot, VarStore.lookupVarBound baseConstraint bndRoot) of
+                        (TBottom, Just TyVar {}, Nothing) ->
+                          [refForDep bndRootKey]
+                        _ -> freeRefs0
+                    deps = depsFromRefs k dependencyCandidateSet freeRefs
+                traceGeneralizeM
+                  ( "generalizeAt: base boundDeps k="
+                      ++ show k
+                      ++ " bndRoot="
+                      ++ show bndRoot
+                      ++ " boundTy="
+                      ++ show boundTy
+                      ++ " freeRefs="
+                      ++ show freeRefs
+                      ++ " deps="
+                      ++ show deps
+                  )
+                pure deps
+      -- A source declaration used by a required Gamma bound precedes that
+      -- Gamma construction.  Solving may later route the declaration's live
+      -- occurrence through the Gamma result, but the frozen source binder
+      -- remains the authority for its bound.  The older operated-to-result
+      -- case is retained as the same ordering fact when the dependency is
+      -- represented by the operated root rather than a free occurrence.
+      sourceDeclarationBaseBeforeGammaConsumer k = do
+        ga <- mbBindParentsGa
+        sourceRef <- sourceRefForLiveKey k
+        let sourceIdentityFeedsGamma requirement =
+              any
+                (typeBinderRefsSameIdentity sourceRef)
+                (freeTypeVarRefsType (rgbOperatedType requirement))
+            sourceFeedsGamma =
+              any
+                sourceIdentityFeedsGamma
+                (IntMap.elems requiredGamma)
+        case sourceDeclarationAuthorityForCandidate ga k sourceRef of
+          Just (_, declarationBase)
+            | sourceFeedsGamma ->
+                pure (ga, declarationBase, sourceRef)
+          _ -> do
+            liveBound <-
+              VarStore.lookupVarBound
+                constraint
+                (canonicalBinder (NodeId k))
+            baseBinder <- frozenBaseNodeForLive ga (NodeId k)
+            let liveBoundC = canonical liveBound
+                isExactOperatedToResult requirement =
+                  baseBinder == rgbOperatedRoot requirement
+                    && any
+                      ((== liveBoundC) . canonical)
+                      (rgbResultRoots requirement)
+            guard
+              ( any
+                  isExactOperatedToResult
+                  (IntMap.elems requiredGamma)
+              )
+            pure (ga, baseBinder, sourceRef)
+      sourceDeclarationBaseIsUnbounded ga sourceRef =
+        go IntSet.empty
+        where
+          baseConstraint = gbiBaseConstraint ga
+          go visited node
+            | IntSet.member nodeKey visited = False
+            | otherwise =
+                case lookupNodeIn (cNodes baseConstraint) node of
+                  Just TyVar {}
+                    | Just routedRef <-
+                        IntMap.lookup nodeKey sourceBinderRefs
+                    , typeBinderRefsSameIdentity routedRef sourceRef ->
+                        case VarStore.lookupVarBound baseConstraint node of
+                          Nothing -> True
+                          Just bound ->
+                            go (IntSet.insert nodeKey visited) bound
+                  _ -> False
+            where
+              nodeKey = getNodeId node
       boundDepsForCandidate k =
         let liveBinder = canonicalBinder (NodeId k)
             mbLiveBound = VarStore.lookupVarBound constraint liveBinder
@@ -1487,7 +1736,7 @@ buildBinderPlan BinderPlanInput {..} = do
                 Nothing -> False
          in case
               ( IntMap.lookup k requiredGamma
-              , IntMap.lookup k sourceDependencyRefs
+              , sourceRefForLiveKey k
               , mbBindParentsGa
               )
             of
@@ -1512,6 +1761,14 @@ buildBinderPlan BinderPlanInput {..} = do
                     [ "root RaiseMerge binder ordering requires the frozen base graph"
                     , "  requirement: " ++ show requirement
                     ])
+              -- A source-sidecar normally follows its completed live bound.
+              -- A required Gamma dependency instead follows its frozen source
+              -- declaration.  The Gamma result consumes that declaration; it
+              -- does not redefine the declaration's source-owned bound.
+              (Nothing, Just _, _)
+                | Just (ga, baseBinder, _) <-
+                    sourceDeclarationBaseBeforeGammaConsumer k ->
+                    baseBoundDepsForCandidate ga k baseBinder
               (Nothing, Just _, _) -> do
                 let sourceCarrier = canonical (NodeId k)
                     sourceBoundRoot =
@@ -1534,51 +1791,7 @@ buildBinderPlan BinderPlanInput {..} = do
                 | Just baseK <- IntMap.lookup k solvedToBasePref,
                   isBaseRep,
                   baseBoundEligible ->
-                    let baseConstraint = gbiBaseConstraint ga
-                        baseNodes = cNodes baseConstraint
-                        boundRootForDepsBase bnd0 =
-                          boundRootWith
-                            getNodeId
-                            id
-                            (\key -> lookupNodeIn baseNodes (NodeId key))
-                            (VarStore.lookupVarBound baseConstraint)
-                            (`IntMap.lookup` schemeRootByBodyBase)
-                            False
-                            bnd0
-                     in case VarStore.lookupVarBound baseConstraint baseK of
-                          Nothing -> do
-                            let boundTy = TVarRef (refForDep k)
-                                freeRefs = freeTypeVarRefsType boundTy
-                                deps = depsFromRefs k dependencyCandidateSet freeRefs
-                            pure deps
-                          Just bnd -> do
-                            let bndRoot = boundRootForDepsBase bnd
-                            boundTy <-
-                              reifyBoundWithRefsOnConstraint
-                                baseConstraint
-                                substDepsBase
-                                bndRoot
-                            let bndRootKey = getNodeId bndRoot
-                                freeRefs0 = freeTypeVarRefsType boundTy
-                                freeRefs =
-                                  case (boundTy, lookupNodeIn baseNodes bndRoot, VarStore.lookupVarBound baseConstraint bndRoot) of
-                                    (TBottom, Just TyVar {}, Nothing) ->
-                                      [refForDep bndRootKey]
-                                    _ -> freeRefs0
-                                deps = depsFromRefs k dependencyCandidateSet freeRefs
-                            traceGeneralizeM
-                              ( "generalizeAt: boundDeps k="
-                                  ++ show k
-                                  ++ " bndRoot="
-                                  ++ show bndRoot
-                                  ++ " boundTy="
-                                  ++ show boundTy
-                                  ++ " freeRefs="
-                                  ++ show freeRefs
-                                  ++ " deps="
-                                  ++ show deps
-                              )
-                            pure deps
+                    baseBoundDepsForCandidate ga k baseK
               (Nothing, Nothing, _) -> do
                 let subst = substDepsFor k
                 case VarStore.lookupVarBound constraint (canonical (NodeId k)) of
@@ -1666,8 +1879,20 @@ buildBinderPlan BinderPlanInput {..} = do
         deps <- fmap concat $ mapM boundDepsForCandidate (IntSet.toList current)
         let next = IntSet.union current (IntSet.fromList deps)
         if next == current then pure current else closeBinderSet next
+      addSourceDeclarationOwners keys =
+        IntSet.union
+          keys
+          ( IntSet.fromList
+              [ declarationKey
+              | key <- IntSet.toList keys
+              , Just declarationKey <-
+                  [sourceDeclarationOwnerForCandidate key]
+              ]
+          )
 
-  closedBinderSet <- closeBinderSet (IntSet.fromList binderIds)
+  closedBinderSet <-
+    closeBinderSet
+      (addSourceDeclarationOwners (IntSet.fromList binderIds))
   let provisionalIds = IntSet.toList closedBinderSet
       provisionalSubst = IntMap.fromList [(key, refForDep key) | key <- provisionalIds]
   rigidInlineBodyClosureIds <-
@@ -1714,7 +1939,11 @@ buildBinderPlan BinderPlanInput {..} = do
                 IntSet.member dep dependencyCandidateSet
               ]
         pure (selectedBodyClosureIds ++ rigidInlineBodyClosureIds)
-  closedBinderSet' <- closeBinderSet (IntSet.union closedBinderSet (IntSet.fromList bodyClosureIds))
+  closedBinderSet' <-
+    closeBinderSet
+      ( addSourceDeclarationOwners
+          (IntSet.union closedBinderSet (IntSet.fromList bodyClosureIds))
+      )
   let selectedInheritedRigidAliasRoutes =
         IntMap.restrictKeys
           inheritedRigidAliasRoutes
@@ -1739,14 +1968,37 @@ buildBinderPlan BinderPlanInput {..} = do
         case requiredDeclarationOwnerFor key of
           Just requiredKey -> key /= requiredKey
           Nothing -> False
+      binderIsShadowedBySourceDeclaration key =
+        case sourceDeclarationOwnerForCandidate key of
+          Just declarationKey -> key /= declarationKey
+          Nothing -> False
       binderIdsForOrdering =
         filter
-          (not . binderIsShadowedByRequiredDeclaration)
+          ( \key ->
+              not (binderIsShadowedByRequiredDeclaration key)
+                && not (binderIsShadowedBySourceDeclaration key)
+          )
           binderIdsClosed
       requiredDeclarationAliasKeys =
         filter
           binderIsShadowedByRequiredDeclaration
           binderIdsClosed
+      sourceDeclarationAliasKeys =
+        filter
+          binderIsShadowedBySourceDeclaration
+          binderIdsClosed
+      sourceDeclarationsBeforeRequiredGamma =
+        IntSet.fromList
+          [ key
+          | key <- binderIdsClosed
+          , sourceDeclarationOwnerForCandidate key == Just key
+          , Just (ga, baseBinder, sourceRef) <-
+              [sourceDeclarationBaseBeforeGammaConsumer key]
+          , sourceDeclarationBaseIsUnbounded
+              ga
+              sourceRef
+              baseBinder
+          ]
 
   ordered0 <- orderBinders binderIdsForOrdering
   traceGeneralizeM
@@ -1789,10 +2041,27 @@ buildBinderPlan BinderPlanInput {..} = do
           , Just declarationRef <-
               [IntMap.lookup declarationKey localBinderRefRoutes]
           ]
+      sourceDeclarationAliasRoutes =
+        IntMap.fromList
+          [ (aliasKey, declarationRef)
+          | aliasKey <- sourceDeclarationAliasKeys
+          , Just declarationKey <-
+              [sourceDeclarationOwnerForCandidate aliasKey]
+          , Just declarationRef <-
+              [IntMap.lookup declarationKey localBinderRefRoutes]
+          ]
+      missingSourceDeclarationAliasRoutes =
+        [ (aliasKey, declarationKey)
+        | aliasKey <- sourceDeclarationAliasKeys
+        , Just declarationKey <-
+            [sourceDeclarationOwnerForCandidate aliasKey]
+        , IntMap.notMember aliasKey sourceDeclarationAliasRoutes
+        ]
       binderRefRoutes =
         IntMap.unions
           [ selectedInheritedRigidAliasRoutes
           , requiredDeclarationAliasRoutes
+          , sourceDeclarationAliasRoutes
           , localBinderRefRoutes
           , frozenExpansionAliasRoutes
           , ambientBinderRefRoutes
@@ -1803,6 +2072,16 @@ buildBinderPlan BinderPlanInput {..} = do
       Left
         ( ValidationFailed
             ("invalid semantic binder identity quotient" : errors)
+        )
+  case missingSourceDeclarationAliasRoutes of
+    [] -> pure ()
+    missingRoutes ->
+      Left
+        ( ValidationFailed
+            [ "source declaration aliases lack a local declaration route"
+            , "  missing aliases: " ++ show missingRoutes
+            , "  local binder routes: " ++ show localBinderRefRoutes
+            ]
         )
   let distinctTermUsedRefs =
         termUsedRequestedAuthorities
@@ -1879,6 +2158,8 @@ buildBinderPlan BinderPlanInput {..} = do
         bpOrderBinders = orderBinders,
         bpRequiredGamma = requiredGamma,
         bpSourceBinderRefs = sourceBinderRefs,
+        bpSourceDeclarationsBeforeRequiredGamma =
+          sourceDeclarationsBeforeRequiredGamma,
         bpAmbientBinderRefs = bpiAmbientBinderRefs,
         bpTermUsedRootBinderRefs = termUsedRootBinderRefs
       }

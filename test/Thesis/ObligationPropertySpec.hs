@@ -846,6 +846,96 @@ spec = do
     it "preserves a source boundary around an applied paper g g lambda" $
       expectElabAnnotationErasure
         paperGgThroughAppliedSourceBoundaryExpr
+    it "publishes an identity-applied paper g g lambda through a returned let" $
+      expectElabAnnotationErasure
+        paperGgThroughIdentityAppliedReturnedLetExpr
+    it "returns an annotated ground identity application through nested lets" $
+      expectElabAnnotationErasure
+        annotatedGroundIdentityApplicationThroughNestedLetsExpr
+    it "returns an annotated ground result through an applied lambda spine" $
+      expectElabAnnotationErasure
+        annotatedGroundResultThroughAppliedLambdaSpineExpr
+    it "projects a consumed polymorphic bound through nested applied lambdas" $
+      expectElabAnnotationErasure
+        consumedPolymorphicBoundThroughNestedAppliedLambdasExpr
+    it "coalesces sibling application Gamma bounds around returned paper g g" $
+      expectElabAnnotationErasure
+        paperGgThroughSharedNestedApplicationExteriorExpr
+    it "coalesces identity and annotated application stages at a returned let" $
+      expectElabAnnotationErasure
+        annotatedApplicationThroughSharedReturnedLetExteriorExpr
+    it "carries a higher-rank result through an applied identity spine" $
+      expectElabAnnotationErasure
+        higherRankResultThroughAppliedIdentitySpineExpr
+    it "constructs paper g g through a direct identity application and let" $
+      expectElabAnnotationErasure
+        paperGgThroughDirectIdentityApplicationAndLetExpr
+    it "returns paper g g through an annotated application and transparent lets" $
+      expectElabAnnotationErasure
+        paperGgThroughAnnotatedApplicationAndTransparentLetsExpr
+    it "returns an annotated identity through a partially applied lambda spine" $
+      expectElabAnnotationErasure
+        annotatedIdentityThroughPartiallyAppliedLambdaSpineExpr
+    it "returns paper g g through nested identities under an applied annotation" $
+      expectElabAnnotationErasure
+        paperGgThroughNestedIdentitiesUnderAppliedAnnotationExpr
+    it "returns a bounded identity through nested applications under an applied annotation" $
+      expectElabAnnotationErasure
+        boundedIdentityThroughNestedApplicationsUnderAppliedAnnotationExpr
+    it "carries a bounded identity through a partially constructed forall declaration" $
+      expectElabAnnotationErasure
+        boundedIdentityThroughPartiallyConstructedForallExpr
+    it "closes a child-constructed forall spine beneath a partially applied lambda tail" $
+      expectElabAnnotationErasure
+        childConstructedForallSpineThroughPartiallyAppliedLambdaTailExpr
+    it "generalizes a source-polymorphic let through an identity-applied nested lambda" $
+      expectElabAnnotationErasure
+        sourcePolymorphicLetThroughIdentityAppliedNestedLambdaExpr
+    it "closes a mixed-annotation dependency through an identity-applied let alias" $
+      expectElabAnnotationErasure
+        mixedAnnotationDependencyThroughIdentityAppliedLetAliasExpr
+    it "returns paper g g through an applied lambda beneath unused let owners" $
+      expectElabAnnotationErasure
+        paperGgThroughAppliedLambdaBeneathUnusedLetOwnersExpr
+    it "coalesces sequential application Gamma states beneath a let publication" $
+      expectElabAnnotationErasure
+        paperGgThroughSequentialApplicationsBeneathLetPublicationExpr
+    it "carries a specialized higher-rank parameter through nested owners" $
+      expectElabAnnotationErasure
+        specializedHigherRankParameterThroughNestedOwnersExpr
+    it "retains a source forall in a root RaiseMerge bound" $
+      expectElabAnnotationErasure
+        sourceForallThroughRootRaiseMergeExpr
+    it "retains a local consumer through nested applications around paper g g" $
+      expectElabAnnotationErasure
+        paperGgLocalConsumerThroughNestedApplicationsExpr
+    it "completes a multi-use polymorphic result through nested identities" $
+      expectElabAnnotationErasure
+        multiUsePolymorphicResultThroughNestedIdentitiesExpr
+    it "carries a mixed source declaration through nested lambda application" $
+      expectElabAnnotationErasure
+        mixedSourceDeclarationThroughNestedLambdaApplicationExpr
+    it "advances paper g g through nested applied lambda owners" $
+      expectElabAnnotationErasure
+        paperGgThroughNestedAppliedLambdaOwnersExpr
+    it "aligns a shared application closure through nested identity lets" $
+      expectElabAnnotationErasure
+        sharedApplicationClosureThroughNestedIdentityLetsExpr
+    it "retains a constructed root bound beside an unbounded dependency" $
+      expectElabAnnotationErasure
+        constructedRootBoundBesideUnboundedDependencyExpr
+    it "constructs a returned paper g g lambda through applied owners" $
+      expectElabAnnotationErasure
+        returnedPaperGgLambdaThroughAppliedOwnersExpr
+    it "completes an unbounded enclosing consumer before wrapper publication" $
+      expectElabAnnotationErasure
+        unboundedEnclosingConsumerThroughAppliedWrappersExpr
+    it "retains an opaque mixed-annotation result through application requirements" $
+      expectElabAnnotationErasure
+        opaqueMixedAnnotationResultThroughApplicationsExpr
+    it "reorders a pending owner declaration before its terminal Hyp" $
+      expectElabAnnotationErasure
+        reorderedPendingOwnerDeclarationBeforeHypExpr
 
   describe "Thesis generated annotation evidence" $
     it "O15-ELAB-GENERATED: generated closed annotated programs elaborate, typecheck, and erase" $
@@ -5932,6 +6022,1152 @@ paperGgThroughIdentityAppliedDeepLambdaSpineExpr =
         )
     )
     (Surf.ELit (Surf.LInt (-7)))
+
+-- Minimized from the 35th case of generated seed 20260807.  Two transparent
+-- lets and two unapplied lambda owners publish the result of applying the
+-- ordinary identity function to a let-wrapped paper @g g@ lambda.  Removing
+-- either outer let avoids the failing owner chain; construction must carry the
+-- paper binder through the complete chain instead of leaving its rigid result
+-- free.
+paperGgThroughIdentityAppliedReturnedLetExpr :: Surf.SurfaceExpr
+paperGgThroughIdentityAppliedReturnedLetExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.ELit (Surf.LBool True))
+        ( Surf.ELet
+            "_generatedWrap3"
+            (Surf.ELit (Surf.LBool False))
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap6"
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap7"
+                            (Surf.ELit (Surf.LInt 4))
+                            ( Surf.ELamAnn
+                                "g"
+                                sigmaIdSource
+                                ( Surf.EApp
+                                    (Surf.EVar "g")
+                                    (Surf.EVar "g")
+                                )
+                            )
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap5")
+                )
+            )
+        )
+    )
+
+-- Frozen from the 82nd case of generated seed 20260807.  The inner annotated
+-- Int lambda and annotated Int argument construct the same arrow endpoint,
+-- then an ordinary identity application returns the enclosing lambda through
+-- two transparent lets.  The completed xMLF term must compare those endpoints
+-- in one binder-identity domain instead of rejecting two identical printed
+-- types at the final application check.
+annotatedGroundIdentityApplicationThroughNestedLetsExpr :: Surf.SurfaceExpr
+annotatedGroundIdentityApplicationThroughNestedLetsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.EAnn (Surf.ELit (Surf.LBool False)) (Surf.STBase "Bool"))
+    ( Surf.ELet
+        "_generatedWrap2"
+        (Surf.EAnn (Surf.ELit (Surf.LBool True)) (Surf.STBase "Bool"))
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EVar "_generatedWrap3")
+            )
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.EApp
+                        ( Surf.ELamAnn
+                            "_generatedWrap6"
+                            (Surf.STBase "Int")
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    (Surf.EVar "_generatedWrap7")
+                                )
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LInt 4))
+                                    (Surf.STBase "Int")
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LInt 10))
+                    )
+                    (Surf.EVar "_generatedWrap5")
+                )
+            )
+        )
+    )
+
+-- Frozen from the 95th case of generated seed 20260807.  The applied annotated
+-- Int lambda returns a lambda whose body completes a bounded Bool result
+-- through two applications.  The enclosing lambda construction must carry
+-- that completed body endpoint into its own exact forall spine rather than
+-- replacing it with an unrelated provisional result binder.
+annotatedGroundResultThroughAppliedLambdaSpineExpr :: Surf.SurfaceExpr
+annotatedGroundResultThroughAppliedLambdaSpineExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                ( Surf.EAnn
+                                    (Surf.ELit (Surf.LBool False))
+                                    (Surf.STBase "Bool")
+                                )
+                            )
+                            (Surf.ELit (Surf.LBool True))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+        (Surf.ELit (Surf.LInt (-1)))
+    )
+
+-- Frozen from the 26th case of generated seed 20260808.  The innermost
+-- annotated Int result completes a polymorphic body-consumer bound, then two
+-- applied lambdas consume that declaration before the outer application is
+-- constructed.  Root construction must project the certified consumed state
+-- instead of demanding that the no-longer-live declaration remain in Gamma.
+consumedPolymorphicBoundThroughNestedAppliedLambdasExpr :: Surf.SurfaceExpr
+consumedPolymorphicBoundThroughNestedAppliedLambdasExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap4"
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                ( Surf.EApp
+                                    ( Surf.ELam
+                                        "_generatedWrap6"
+                                        ( Surf.EAnn
+                                            (Surf.ELit (Surf.LInt (-3)))
+                                            (Surf.STBase "Int")
+                                        )
+                                    )
+                                    (Surf.ELit (Surf.LBool True))
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+-- Frozen from the 32nd case of generated seed 20260808.  Three nested
+-- applications share one exterior while progressively constructing the
+-- returned paper @g g@ value.  Their requirement bounds are stages of the
+-- same identity-authoritative construction, so packet preparation must
+-- coalesce them through the certified computation instead of requiring raw
+-- type equality between the stages.
+paperGgThroughSharedNestedApplicationExteriorExpr :: Surf.SurfaceExpr
+paperGgThroughSharedNestedApplicationExteriorExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap5"
+                                ( Surf.EApp
+                                    ( Surf.ELamAnn
+                                        "_generatedWrap6"
+                                        (Surf.STBase "Int")
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            ( Surf.ELamAnn
+                                                "g"
+                                                sigmaIdSource
+                                                ( Surf.EApp
+                                                    (Surf.EVar "g")
+                                                    (Surf.EVar "g")
+                                                )
+                                            )
+                                        )
+                                    )
+                                    (Surf.ELit (Surf.LInt 11))
+                                )
+                            )
+                            (Surf.ELit (Surf.LBool False))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool False))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt 5))
+
+-- Frozen from the 54th case of generated seed 20260808.  The outer returned
+-- let owns one exterior reached first through an identity application and
+-- later through a source-annotated polymorphic application.  Those bounds are
+-- stages of the same owner-final computation, so packet grouping must select
+-- the declaration certified by that source owner rather than comparing the
+-- intermediate operated types directly.
+annotatedApplicationThroughSharedReturnedLetExteriorExpr :: Surf.SurfaceExpr
+annotatedApplicationThroughSharedReturnedLetExteriorExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    (Surf.ELit (Surf.LInt 16))
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            (Surf.ELit (Surf.LInt 1))
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap7"
+                                    (Surf.STBase "Int")
+                                    ( Surf.ELamAnn
+                                        "_generatedSeedPoly"
+                                        ( Surf.STForall
+                                            "a"
+                                            Nothing
+                                            ( Surf.STArrow
+                                                (Surf.STVar "a")
+                                                (Surf.STVar "a")
+                                            )
+                                        )
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedPoly")
+                                            (Surf.ELit (Surf.LInt 3))
+                                        )
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 12))
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+-- Frozen from the 84th case of generated seed 20260808.  The applied outer
+-- lambda returns a higher-rank annotated function through three identity
+-- applications and an unrelated let.  Construction must carry the nested
+-- source-owned result endpoint through the outer application's already-open
+-- Gamma instead of rebuilding it from the final type.
+higherRankResultThroughAppliedIdentitySpineExpr :: Surf.SurfaceExpr
+higherRankResultThroughAppliedIdentitySpineExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EAnn
+                (Surf.ELit (Surf.LBool True))
+                (Surf.STBase "Bool")
+            )
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                        ( Surf.EApp
+                            ( Surf.ELamAnn
+                                "_generatedWrap6"
+                                (Surf.STBase "Int")
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    ( Surf.ELamAnn
+                                        "_generatedSeedPoly"
+                                        ( Surf.STForall
+                                            "a"
+                                            Nothing
+                                            ( Surf.STArrow
+                                                (Surf.STVar "a")
+                                                (Surf.STVar "a")
+                                            )
+                                        )
+                                        ( Surf.EApp
+                                            (Surf.EVar "_generatedSeedPoly")
+                                            (Surf.ELit (Surf.LInt 15))
+                                        )
+                                    )
+                                )
+                            )
+                            (Surf.ELit (Surf.LInt 0))
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
+-- Frozen from the 100th case of generated seed 20260809.  The direct identity
+-- application and its returned let share one application declaration.  The
+-- owner-selected stage is initially unbounded, while the checked argument
+-- constructs the exact paper @g g@ bound before that declaration is
+-- published.
+paperGgThroughDirectIdentityApplicationAndLetExpr :: Surf.SurfaceExpr
+paperGgThroughDirectIdentityApplicationAndLetExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELet
+        "_generatedWrap2"
+        ( Surf.EApp
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EVar "_generatedWrap3")
+            )
+            annotatedSelfAppExpr
+        )
+        (Surf.EVar "_generatedWrap2")
+    )
+
+-- Frozen from the 18th case of generated seed 20260810.  Two transparent
+-- lets return paper @g g@ as the result of an applied annotated lambda.  The
+-- child's closed ambient declaration and the enclosing application's opened
+-- view are stages of one exact owner construction; let publication must carry
+-- the certificate across that boundary rather than compare the two bounds as
+-- unrelated Gamma entries.
+paperGgThroughAnnotatedApplicationAndTransparentLetsExpr :: Surf.SurfaceExpr
+paperGgThroughAnnotatedApplicationAndTransparentLetsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    annotatedSelfAppExpr
+                    (Surf.EVar "_generatedWrap4")
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LInt 14))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+-- Frozen from the 97th case of generated seed 20260813.  An explicitly
+-- polymorphic identity passes through a direct identity application and is
+-- returned by a partially applied three-lambda spine.  The prepared endpoint
+-- keeps the complete source forall while the incoming body-owner endpoint is
+-- its opened view; endpoint selection must compose the recorded owner
+-- completion instead of treating the two construction stages as peers.
+annotatedIdentityThroughPartiallyAppliedLambdaSpineExpr :: Surf.SurfaceExpr
+annotatedIdentityThroughPartiallyAppliedLambdaSpineExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 9))
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        (Surf.ELit (Surf.LInt 0))
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    (Surf.EVar "_generatedWrap7")
+                                )
+                                ( Surf.EAnn
+                                    ( Surf.ELam
+                                        "_generatedSeedX"
+                                        (Surf.EVar "_generatedSeedX")
+                                    )
+                                    sigmaIdSource
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+-- Frozen from the 20th case of generated seed 20260814.  Paper @g g@ is
+-- returned through two direct identity applications and a transparent let by
+-- an applied lambda whose parameter is annotated at @Int@.  The child owner
+-- completes the shared application declaration before the enclosing lambda
+-- installs that descendant refinement; installation must follow the recorded
+-- declaration construction rather than require the earlier ambient
+-- presentation to remain unchanged.
+paperGgThroughNestedIdentitiesUnderAppliedAnnotationExpr :: Surf.SurfaceExpr
+paperGgThroughNestedIdentitiesUnderAppliedAnnotationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                (Surf.EVar "_generatedWrap6")
+                            )
+                            annotatedSelfAppExpr
+                        )
+                        (Surf.EVar "_generatedWrap5")
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LInt (-12)))
+    )
+
+-- The second minimized counterexample exposed by generated seed 20260814
+-- after fixing case 20.  The inner application returns a bounded identity
+-- annotation through an identity application and a let.  Its descendant
+-- certificate reaches the enclosing lambda while that owner's requirement
+-- still carries Bottom, so owner inheritance must use the exact declaration
+-- states already recorded by construction rather than require only the
+-- certificate's original or completed presentation.
+boundedIdentityThroughNestedApplicationsUnderAppliedAnnotationExpr
+  :: Surf.SurfaceExpr
+boundedIdentityThroughNestedApplicationsUnderAppliedAnnotationExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            (Surf.ELit (Surf.LInt 9))
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                (Surf.ELit (Surf.LBool False))
+                                (Surf.STBase "Bool")
+                            )
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap7"
+                                    boundedIdentityAnnotationExpr
+                                )
+                                (Surf.ELit (Surf.LBool True))
+                            )
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-2)))
+
+-- The first minimized counterexample exposed by generated seed 20260817.
+-- Constructing the bounded annotation completes the body of its outer
+-- quantifier before that quantifier itself is emitted.  The resulting arrow
+-- is an exact Figure 15.3 declaration stage, so a descendant certificate must
+-- carry it through the enclosing application/let spine instead of recognizing
+-- it later from type shape alone.
+boundedIdentityThroughPartiallyConstructedForallExpr :: Surf.SurfaceExpr
+boundedIdentityThroughPartiallyConstructedForallExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    (Surf.ELit (Surf.LInt 10))
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    ( Surf.ELamAnn
+                        "_generatedWrap4"
+                        (Surf.STBase "Int")
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.EApp
+                                ( Surf.ELam
+                                    "_generatedWrap6"
+                                    ( Surf.EApp
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            (Surf.EVar "_generatedWrap7")
+                                        )
+                                        boundedIdentityAnnotationExpr
+                                    )
+                                )
+                                (Surf.ELit (Surf.LBool True))
+                            )
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                    )
+                    (Surf.ELit (Surf.LInt (-3)))
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+-- The second counterexample exposed by generated seed 20260817.  The checked
+-- innermost lambda owns the complete @forall t10. forall a >= sigma-id@ body
+-- spine, while the enclosing prepared lambda endpoint still presents @t10@
+-- and @a@ freely in its codomain.  The child owner-final certificate must
+-- close that exact spine beneath the parent value arrow before publication.
+childConstructedForallSpineThroughPartiallyAppliedLambdaTailExpr
+  :: Surf.SurfaceExpr
+childConstructedForallSpineThroughPartiallyAppliedLambdaTailExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            boundedIdentityAnnotationExpr
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+
+-- Minimized from the 65th case of generated seed 20260818.  A source-owned
+-- polymorphic let is returned by a lambda which itself passes through an
+-- identity application.  The application-result node and its constructed
+-- bound can share a solved representative, but they remain two stages of one
+-- declaration rather than a cyclic pair of local Gamma binders.
+sourcePolymorphicLetThroughIdentityAppliedNestedLambdaExpr
+  :: Surf.SurfaceExpr
+sourcePolymorphicLetThroughIdentityAppliedNestedLambdaExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELam
+                    "_generatedWrap4"
+                    ( Surf.ELet
+                        "_generatedWrap5"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool True))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap6"
+                            ( Surf.EAnn
+                                ( Surf.ELam
+                                    "_generatedSeedX"
+                                    (Surf.EVar "_generatedSeedX")
+                                )
+                                sigmaIdSource
+                            )
+                            (Surf.EVar "_generatedWrap6")
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+-- Minimized from the 94th case of generated seed 20260819.  The let-bound
+-- mixed annotation is returned by its exact resolved identity and then passed
+-- through an identity application beneath two lambdas.  The application
+-- Gamma bound mentions the annotation's implicit @beta@ declaration, so the
+-- prepared construction must carry that source dependency before checking
+-- the enclosing lambda spine.
+mixedAnnotationDependencyThroughIdentityAppliedLetAliasExpr
+  :: Surf.SurfaceExpr
+mixedAnnotationDependencyThroughIdentityAppliedLetAliasExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    mixedAnnotationExpr
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+
+-- Minimized from the 46th case of generated seed 20260821.  A lambda applies
+-- an unused parameter around the paper @g g@ result and publishes that result
+-- through a let alias beneath otherwise ground let owners.
+paperGgThroughAppliedLambdaBeneathUnusedLetOwnersExpr
+  :: Surf.SurfaceExpr
+paperGgThroughAppliedLambdaBeneathUnusedLetOwnersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap4"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap5"
+                    ( Surf.ELet
+                        "_generatedWrap7"
+                        (Surf.ELit (Surf.LInt (-2)))
+                        annotatedSelfAppExpr
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+            (Surf.EVar "_generatedWrap4")
+        )
+    )
+
+-- Frozen from the 90th case of generated seed 20260821.  Two applications
+-- carry successive construction states of the same paper @g g@ result to an
+-- enclosing let owner; their shared Gamma exterior must retain that directed
+-- construction progress instead of being rejected as two unrelated bounds.
+paperGgThroughSequentialApplicationsBeneathLetPublicationExpr
+  :: Surf.SurfaceExpr
+paperGgThroughSequentialApplicationsBeneathLetPublicationExpr =
+  Surf.ELet
+    "_generatedWrap2"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap4"
+                    (Surf.STBase "Int")
+                    annotatedSelfAppExpr
+                )
+                (Surf.ELit (Surf.LInt (-11)))
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+    (Surf.EVar "_generatedWrap2")
+
+-- Frozen from the 17th case of generated seed 20260822.  A higher-rank
+-- parameter is specialized inside an applied discarded lambda, forwarded by
+-- an identity application and a let, then returned through an unapplied
+-- lambda beneath an applied annotated lambda.
+specializedHigherRankParameterThroughNestedOwnersExpr
+  :: Surf.SurfaceExpr
+specializedHigherRankParameterThroughNestedOwnersExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                ( Surf.EApp
+                    (Surf.ELam "_generatedWrap4" (Surf.EVar "_generatedWrap4"))
+                    ( Surf.EApp
+                        ( Surf.ELam
+                            "_generatedWrap5"
+                            ( Surf.ELamAnn
+                                "_generatedSeedPoly"
+                                sigmaIdSource
+                                ( Surf.EApp
+                                    (Surf.EVar "_generatedSeedPoly")
+                                    (Surf.ELit (Surf.LInt (-1)))
+                                )
+                            )
+                        )
+                        (Surf.ELit (Surf.LBool False))
+                    )
+                )
+                (Surf.EVar "_generatedWrap3")
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-15)))
+
+-- Frozen from the 79th case of generated seed 20260823.  Three transparent
+-- root applications return a lambda whose result packet begins with a source
+-- forall.  Root RaiseMerge must retain that complete constructed bound rather
+-- than compare it with the opened body stored at the exterior graph node.
+sourceForallThroughRootRaiseMergeExpr :: Surf.SurfaceExpr
+sourceForallThroughRootRaiseMergeExpr =
+  Surf.EApp
+    identityLambda
+    ( Surf.EApp
+        identityLambda
+        ( Surf.ELam
+            "_generatedWrap4"
+            ( Surf.ELet
+                "_generatedWrap6"
+                ( Surf.EAnn
+                    (Surf.ELit (Surf.LBool True))
+                    (Surf.STBase "Bool")
+                )
+                ( Surf.ELam
+                    "_generatedWrap7"
+                    ( Surf.ELamAnn
+                        "_generatedSeedPoly"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "_generatedSeedPoly")
+                            (Surf.ELit (Surf.LInt (-6)))
+                        )
+                    )
+                )
+            )
+        )
+    )
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedIdentity"
+        (Surf.EVar "_generatedIdentity")
+
+-- Frozen from the 31st case of generated seed 20260826.  The paper @g g@
+-- lambda is returned beneath an unused annotated let and an applied unused
+-- lambda, then carried through an outer identity application.  Its exact
+-- lambda consumer remains the authority for the source-polymorphic packet
+-- while the surrounding applications construct the enclosing result.
+paperGgLocalConsumerThroughNestedApplicationsExpr :: Surf.SurfaceExpr
+paperGgLocalConsumerThroughNestedApplicationsExpr =
+  Surf.EApp
+    identityLambda
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                (Surf.ELit (Surf.LBool True))
+                annotatedSelfAppExpr
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedIdentity"
+        (Surf.EVar "_generatedIdentity")
+
+-- Frozen from the 24th case of generated seed 20260827.  A multi-use
+-- polymorphic identity is specialized to both @Int@ and @Bool@; the returned
+-- @Bool@ result then crosses an applied unused lambda, a returned let, an
+-- unapplied lambda, and two identity applications.
+multiUsePolymorphicResultThroughNestedIdentitiesExpr :: Surf.SurfaceExpr
+multiUsePolymorphicResultThroughNestedIdentitiesExpr =
+  Surf.EApp
+    identityLambda
+    ( Surf.EApp
+        identityLambda
+        ( Surf.ELam
+            "_generatedWrap3"
+            ( Surf.ELet
+                "_generatedWrap5"
+                (multiUseAnnotatedIdentitySeedWith 8 False)
+                (Surf.EVar "_generatedWrap5")
+            )
+        )
+    )
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedIdentity"
+        (Surf.EVar "_generatedIdentity")
+
+-- Frozen from the 43rd case of generated seed 20260827.  The annotation's
+-- implicit @beta@ declaration is carried through an identity application,
+-- three enclosing lambda owners, and the outer application boundary.
+mixedSourceDeclarationThroughNestedLambdaApplicationExpr :: Surf.SurfaceExpr
+mixedSourceDeclarationThroughNestedLambdaApplicationExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELam
+                "_generatedWrap3"
+                (Surf.EApp identityLambda mixedAnnotationExpr)
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedIdentity"
+        (Surf.EVar "_generatedIdentity")
+
+-- Frozen from the 45th case of generated seed 20260828.  The completed
+-- consumer bound for paper @g g@ crosses an applied annotated lambda, an
+-- unapplied lambda, an unrelated let, and an applied lambda owner.
+paperGgThroughNestedAppliedLambdaOwnersExpr :: Surf.SurfaceExpr
+paperGgThroughNestedAppliedLambdaOwnersExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.ELet
+                "_generatedWrap3"
+                (Surf.ELit (Surf.LBool False))
+                ( Surf.EApp
+                    (Surf.ELam "_generatedWrap4" annotatedSelfAppExpr)
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LInt (-1)))
+
+-- Frozen from the 96th case of generated seed 20260829.  A polymorphic
+-- identity crosses two identity applications inside a returned let before
+-- the outer identity application publishes their shared application Gamma.
+-- The forwarded and direct members see different intermediate
+-- specializations of the same exact declaration bound.
+sharedApplicationClosureThroughNestedIdentityLetsExpr :: Surf.SurfaceExpr
+sharedApplicationClosureThroughNestedIdentityLetsExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        outerIdentityLambda
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EApp
+                innerIdentityLambda
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap5"
+                        ( Surf.EApp
+                            ( Surf.ELam
+                                "_generatedWrap6"
+                                annotatedIdentity
+                            )
+                            (Surf.ELit (Surf.LBool True))
+                        )
+                    )
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+            (Surf.EVar "_generatedWrap3")
+        )
+    )
+    (Surf.ELit (Surf.LBool False))
+  where
+    outerIdentityLambda =
+      Surf.ELam
+        "_generatedWrap2"
+        (Surf.EVar "_generatedWrap2")
+    innerIdentityLambda =
+      Surf.ELam
+        "_generatedWrap4"
+        (Surf.EVar "_generatedWrap4")
+    annotatedIdentity =
+      Surf.EAnn
+        (Surf.ELam "_generatedSeedX" (Surf.EVar "_generatedSeedX"))
+        sigmaIdSource
+
+-- Frozen from the 58th case of generated seed 20260830.  The returned lambda
+-- carries paper @g g@ through two identity applications and an unrelated let.
+-- Its root result binder is already bounded by the checked construction when
+-- inherited dependency evidence encounters the same identity as an
+-- unbounded lexical declaration.
+constructedRootBoundBesideUnboundedDependencyExpr :: Surf.SurfaceExpr
+constructedRootBoundBesideUnboundedDependencyExpr =
+  Surf.ELet
+    "_generatedWrap2"
+    ( Surf.EApp
+        outerIdentityLambda
+        ( Surf.ELam
+            "_generatedWrap4"
+            ( Surf.ELet
+                "_generatedWrap5"
+                (Surf.ELit (Surf.LInt 0))
+                (Surf.EApp resultIdentityLambda annotatedSelfAppExpr)
+            )
+        )
+    )
+    (Surf.EVar "_generatedWrap2")
+  where
+    outerIdentityLambda =
+      Surf.ELam "_generatedWrap3" (Surf.EVar "_generatedWrap3")
+    resultIdentityLambda =
+      Surf.ELam "_generatedWrap7" (Surf.EVar "_generatedWrap7")
+
+-- Frozen from the 89th case of generated seed 20260831.  A let-aliased paper
+-- @g g@ lambda is returned through an applied unused lambda, a returned
+-- lambda, an applied annotated lambda, a let, and the outer application.
+-- The function constructor must consume the packet selected for that complete
+-- result route before checking the outer application endpoint.
+returnedPaperGgLambdaThroughAppliedOwnersExpr :: Surf.SurfaceExpr
+returnedPaperGgLambdaThroughAppliedOwnersExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap3"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap5"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap6"
+                    ( Surf.ELet
+                        "_generatedWrap7"
+                        annotatedSelfAppExpr
+                        (Surf.EVar "_generatedWrap7")
+                    )
+                )
+                (Surf.ELit (Surf.LBool True))
+            )
+            (Surf.EVar "_generatedWrap5")
+        )
+    )
+    (Surf.ELit (Surf.LInt 6))
+
+-- Frozen from the 33rd case of generated seed 1151810963.  The checked mixed
+-- annotation completes a consumer that still belongs to an enclosing lambda;
+-- nested applied wrappers must carry that completion to the exact owner
+-- before the surrounding lets publish their results.
+unboundedEnclosingConsumerThroughAppliedWrappersExpr :: Surf.SurfaceExpr
+unboundedEnclosingConsumerThroughAppliedWrappersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EAnn
+        (Surf.ELit (Surf.LBool False))
+        (Surf.STBase "Bool")
+    )
+    ( Surf.EApp
+        ( Surf.ELamAnn
+            "_generatedWrap2"
+            (Surf.STBase "Int")
+            ( Surf.EApp
+                ( Surf.ELamAnn
+                    "_generatedWrap3"
+                    (Surf.STBase "Int")
+                    ( Surf.ELet
+                        "_generatedWrap4"
+                        ( Surf.EAnn
+                            (Surf.ELit (Surf.LBool True))
+                            (Surf.STBase "Bool")
+                        )
+                        ( Surf.ELet
+                            "_generatedWrap5"
+                            ( Surf.EApp
+                                ( Surf.ELamAnn
+                                    "_generatedWrap6"
+                                    (Surf.STBase "Int")
+                                    ( Surf.EApp
+                                        ( Surf.ELam
+                                            "_generatedWrap7"
+                                            ( Surf.ELet
+                                                "k"
+                                                mixedAnnotationExpr
+                                                ( Surf.EApp
+                                                    ( Surf.EApp
+                                                        (Surf.EVar "k")
+                                                        (Surf.ELit (Surf.LInt 1))
+                                                    )
+                                                    (Surf.ELit (Surf.LBool True))
+                                                )
+                                            )
+                                        )
+                                        (Surf.ELit (Surf.LBool False))
+                                    )
+                                )
+                                (Surf.ELit (Surf.LInt 12))
+                            )
+                            (Surf.EVar "_generatedWrap5")
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LInt 5))
+            )
+        )
+        (Surf.ELit (Surf.LInt 6))
+    )
+
+-- Frozen from the 54th case of generated seed 1151810963.  An applied lambda
+-- returns the source-annotated value opaquely, so the enclosing application
+-- requirements do not expose its result declaration directly.  The checked
+-- child construction remains the positive authority for that declaration.
+opaqueMixedAnnotationResultThroughApplicationsExpr :: Surf.SurfaceExpr
+opaqueMixedAnnotationResultThroughApplicationsExpr =
+  Surf.EApp
+    identityLambda
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                innerIdentityLambda
+                ( Surf.EApp
+                    (Surf.ELam "_generatedWrap4" mixedAnnotationExpr)
+                    (Surf.ELit (Surf.LBool True))
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedWrap1"
+        (Surf.EVar "_generatedWrap1")
+    innerIdentityLambda =
+      Surf.ELam
+        "_generatedWrap3"
+        (Surf.EVar "_generatedWrap3")
+
+-- Frozen from the 81st case of generated seed 1151810963.  The recursively
+-- checked body orders the annotation identities by dependency as
+-- @forall alpha. forall beta@, while the pending owner declaration retains
+-- source order @forall beta. forall alpha@.  The owner must select the
+-- completed declaration first, so Figure 15.3.4 constructs the explicit
+-- reordering before the terminal Hyp.
+reorderedPendingOwnerDeclarationBeforeHypExpr :: Surf.SurfaceExpr
+reorderedPendingOwnerDeclarationBeforeHypExpr =
+  Surf.EApp
+    ( Surf.ELamAnn
+        "_generatedWrap1"
+        (Surf.STBase "Int")
+        ( Surf.ELet
+            "_generatedWrap2"
+            ( Surf.EApp
+                identityLambda
+                (Surf.EApp secondIdentityLambda mixedAnnotationExpr)
+            )
+            (Surf.EVar "_generatedWrap2")
+        )
+    )
+    (Surf.ELit (Surf.LInt (-8)))
+  where
+    identityLambda =
+      Surf.ELam
+        "_generatedWrap3"
+        (Surf.EVar "_generatedWrap3")
+    secondIdentityLambda =
+      Surf.ELam
+        "_generatedWrap4"
+        (Surf.EVar "_generatedWrap4")
 
 -- Frozen from the 100th case of generated seed 42.  The applied body completes
 -- an internal declaration carried by the paper @g g@ result, while an outer

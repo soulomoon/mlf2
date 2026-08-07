@@ -3913,6 +3913,46 @@ spec = do
                 enclosingScheme
                 `shouldBe` Right enclosingScheme
 
+        it "discharges an open topology packet through exact enclosing lexical routes" $ do
+            let ambientRef = typeRef 116 "a"
+                openInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            []
+                            ( TArrow
+                                (tVarWithRef ambientRef)
+                                (tVarWithRef ambientRef)
+                            )
+                        )
+                        (IntMap.singleton 116 ambientRef)
+                enclosingScheme =
+                    mkElabSchemeWithRefs
+                        [(ambientRef, Nothing)]
+                        (TestElab.tBase (BaseTy "Bool"))
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    (EdgeId 117)
+                    (NodeId 118)
+                    (NodeId 119)
+            packet <-
+                prepareTopologyPacketForTest
+                    topologyAuthority
+                    openInfo
+            let packets =
+                    Map.singleton
+                        (ownerKey 117 "lexically-closed-owner")
+                        packet
+            placeSubtermGeneralizationBindersWithRoutes
+                IntMap.empty
+                packets
+                enclosingScheme
+                `shouldSatisfy` isLeft
+            placeSubtermGeneralizationBindersWithRoutes
+                (IntMap.singleton 116 ambientRef)
+                packets
+                enclosingScheme
+                `shouldBe` Right enclosingScheme
+
         it "rejects an unplaced topology consumer that remains free in its packet" $ do
             let consumerRef = typeRef 119 "result"
                 openInfo =

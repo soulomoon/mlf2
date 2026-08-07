@@ -108,6 +108,8 @@ planReify _ plan = do
           bpAliasBinderBases = aliasBinderBasesPlan,
           bpRequiredGamma = requiredGammaPlan,
           bpSourceBinderRefs = sourceBinderRefsPlan,
+          bpSourceDeclarationsBeforeRequiredGamma =
+            sourceDeclarationsBeforeRequiredGamma,
           bpOrderBinders = orderBinders
         } = binderPlan
   let subst0' = binderRefRoutes
@@ -167,6 +169,8 @@ planReify _ plan = do
               , Reify.rpiRequiredGamma = requiredGammaPlan
               , Reify.rpiLocallyClosedGammaKeys = locallyClosedGammaKeys
               , Reify.rpiSourceBinderRefs = sourceBinderRefsPlan
+              , Reify.rpiSourceDeclarationsBeforeRequiredGamma =
+                  sourceDeclarationsBeforeRequiredGamma
             }
   pure
     ReifyPlan

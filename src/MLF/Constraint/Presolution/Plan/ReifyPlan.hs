@@ -207,6 +207,7 @@ data ReifyPlan = ReifyPlan
     rpContainsForall :: ElabType -> Bool
     , rpRequiredGamma :: IntMap.IntMap RequiredGammaBinder
     , rpSourceBinderRefs :: IntMap.IntMap TypeBinderRef
+    , rpSourceDeclarationsBeforeRequiredGamma :: IntSet.IntSet
     , rpExternalSourceBinderKeys :: IntSet.IntSet
     , rpExternalSourceBinderBaseKeys :: IntSet.IntSet
     , rpStructuralSourceBinders :: IntMap.IntMap [NodeId]
@@ -262,6 +263,7 @@ data ReifyPlanInput p = ReifyPlanInput
     , rpiRequiredGamma :: IntMap.IntMap RequiredGammaBinder
     , rpiLocallyClosedGammaKeys :: IntSet.IntSet
     , rpiSourceBinderRefs :: IntMap.IntMap TypeBinderRef
+    , rpiSourceDeclarationsBeforeRequiredGamma :: IntSet.IntSet
   }
 
 data ReifyBindingEnv p = ReifyBindingEnv
@@ -1523,6 +1525,8 @@ buildReifyPlan ReifyPlanInput {..} =
           rpContainsForall = containsForall
           , rpRequiredGamma = rpiRequiredGamma
           , rpSourceBinderRefs = rpiSourceBinderRefs
+          , rpSourceDeclarationsBeforeRequiredGamma =
+              rpiSourceDeclarationsBeforeRequiredGamma
           , rpExternalSourceBinderKeys = externalSourceBinderKeysLocal
           , rpExternalSourceBinderBaseKeys = externalSourceBinderBaseKeysLocal
           , rpStructuralSourceBinders = structuralSourceBindersLocal
@@ -1585,6 +1589,8 @@ bindingFor env plan (binderRef0, nidInt) = do
           rpSubstForBound = substForBound,
           rpSubstForBoundBase = substForBoundBase,
           rpRequiredGamma = requiredGamma,
+          rpSourceDeclarationsBeforeRequiredGamma =
+            sourceDeclarationsBeforeRequiredGamma,
           rpExternalSourceBinderKeys = externalSourceBinderKeys,
           rpExternalSourceBinderBaseKeys = externalSourceBinderBaseKeys,
           rpStructuralSourceBinders = structuralSourceBinders,
@@ -1758,6 +1764,16 @@ bindingFor env plan (binderRef0, nidInt) = do
                 "  requirement: " ++ show requirement
               ]
           )
+      (Nothing, _, _)
+        | IntSet.member
+            binderKey
+            sourceDeclarationsBeforeRequiredGamma ->
+            -- BinderPlan proved from the frozen graph and exact source
+            -- sidecar that this unbounded declaration is consumed by a
+            -- required Gamma bound.  Its live solved bound may already route
+            -- back through that Gamma result; preserve the source declaration
+            -- instead of constructing a dependency cycle.
+            pure TBottom
       (Nothing, Just ga, Just baseRoot) ->
         reifyBoundWithExternalRefsOnConstraint
           (gbiBaseConstraint ga)

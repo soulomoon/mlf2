@@ -5108,6 +5108,67 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         wrongBinders `shouldBe` []
         wrongAliases `shouldBe` IntMap.empty
 
+        -- An unbounded dependency records only that the exact identity is in
+        -- lexical scope.  It must not erase an explicit bound already
+        -- constructed for that same root binder.
+        let completedDependencyScheme =
+              mkElabSchemeWithRefs
+                [(dependencyRef, Just dependencyBound)]
+                (tVarWithRef dependencyRef)
+        (completedBinders, completedAliases) <-
+          requireRight
+            ( prepareProvisionalLocalGammaRootConstructionScopeWithRequirementEvidenceForTest
+                [closure]
+                []
+                [(dependencyRef, Nothing)]
+                IntMap.empty
+                constructionSubst
+                completedDependencyScheme
+            )
+        completedBinders
+          `shouldBe` [(dependencyRef, Just dependencyBound)]
+        completedAliases
+          `shouldBe` IntMap.singleton
+            (getNodeId dependencyNode)
+            dependencyRef
+
+        let unboundedDependencyScheme =
+              mkElabSchemeWithRefs
+                [(dependencyRef, Nothing)]
+                (tVarWithRef dependencyRef)
+        (refinedBinders, _) <-
+          requireRight
+            ( prepareProvisionalLocalGammaRootConstructionScopeWithRequirementEvidenceForTest
+                [closure]
+                []
+                [(dependencyRef, Just dependencyBound)]
+                IntMap.empty
+                constructionSubst
+                unboundedDependencyScheme
+            )
+        refinedBinders
+          `shouldBe` [(dependencyRef, Just dependencyBound)]
+
+        conflictingBound <-
+          requireRight
+            ( elabToBound
+                ( TArrow
+                    (tVarWithRef dependencyRef)
+                    ( TArrow
+                        (tVarWithRef dependencyRef)
+                        (tVarWithRef dependencyRef)
+                    )
+                )
+            )
+        prepareProvisionalLocalGammaRootConstructionScopeWithRequirementEvidenceForTest
+          [closure]
+          []
+          [(dependencyRef, Just conflictingBound)]
+          IntMap.empty
+          constructionSubst
+          completedDependencyScheme
+          `shouldSatisfy` isLeft
+
       it "authorizes only the exact ambient identity in a locally emitted bound" $ do
         let dependencyRef = graphRef (NodeId 991877) "a"
             sameNamedWrongDependencyRef =

@@ -921,9 +921,25 @@ constructTermWithSchemeSubstRefsAtResult
   -> XmlfTerm
   -> XmlfTerm
 constructTermWithSchemeSubstRefsAtResult env subst scheme term =
-  let (subst', scheme', renames) =
-        freshenSchemeAndSubstAgainstTerm term subst scheme
-      termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
+  let schemeScopeEnv =
+        foldr
+          ( \(ref, mbBound) ->
+              insertTypeBindingRef
+                ref
+                (maybe TBottom tyToElab mbBound)
+          )
+          env
+          (schemeBinderRefs scheme)
+      producer =
+        freshenTypeAbsIdentitiesAgainstEnv
+          schemeScopeEnv
+          term
+      (subst', scheme', renames) =
+        freshenSchemeAndSubstAgainstTerm producer subst scheme
+      termSubst =
+        renameTermTypeVars
+          renames
+          (substInTermRefs subst' producer)
       termConstructed =
         case typeCheckWithEnv env termSubst of
           Right actualTy ->
@@ -1309,6 +1325,41 @@ constructTermToTypeWithRoutes
 constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expectedTy term
   | alphaEqType actualTy expectedTy || churchAwareEqType actualTy expectedTy =
       Just (ConstructedTerm term [])
+  | ConstructLambdaResults <- lambdaResultConstruction
+  , ELet resolved scheme rhs (EVarNode occurrence) <- term
+  , resolvedVarSameIdentity resolved occurrence
+  , not
+      ( any
+          (resolvedVarSameIdentity resolved)
+          (Reduce.freeResolvedTermVars rhs)
+      )
+  , let schemeTy = schemeToType scheme
+  , alphaEqType schemeTy actualTy || churchAwareEqType schemeTy actualTy = do
+      -- A checked non-recursive @let x = producer in x@ is a syntactic
+      -- returned-value boundary.  Construct the certified result in the RHS
+      -- and advance the binding scheme and its exact occurrence together.
+      -- This preserves the erased let while avoiding an eta-expansion around
+      -- a polymorphic returned function.
+      construction <-
+        constructTermToTypeWithRoutes
+          lambdaResultConstruction
+          binders
+          actualTy
+          expectedTy
+          rhs
+      let resolvedAtExpected =
+            mapResolvedVarType (const expectedTy) resolved
+          occurrenceAtExpected =
+            mapResolvedVarType (const expectedTy) occurrence
+      pure
+        construction
+          { constructedTerm =
+              ELet
+                resolvedAtExpected
+                (schemeFromType expectedTy)
+                (constructedTerm construction)
+                (EVarNode occurrenceAtExpected)
+          }
   | ELet resolved scheme rhs body <- term =
       mapConstructedTerm (ELet resolved scheme rhs)
         <$> constructTermToTypeWithRoutes
@@ -1317,6 +1368,18 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
           actualTy
           expectedTy
           body
+  | ConstructLambdaResults <- lambdaResultConstruction
+  , Just reducedTerm <- Reduce.reduceLeadingTypeInstantiationRedexes term =
+      -- Type-only redexes may hide the exact returned constructor behind a
+      -- vacuous administrative abstraction.  Removing them preserves erasure
+      -- and exposes the already checked result path; the caller rechecks the
+      -- complete constructed term at the target endpoint.
+      constructTermToTypeWithRoutes
+        lambdaResultConstruction
+        binders
+        actualTy
+        expectedTy
+        reducedTerm
   | ConstructLambdaResults <- lambdaResultConstruction
   , EApp
       (ELam parameter (EVarNode occurrence))
@@ -1346,6 +1409,22 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
               actualTy
               expectedTy
               argument
+  | ConstructLambdaResults <- lambdaResultConstruction
+  , EApp (ELam parameter body) argument <- term =
+      -- An immediate lambda application exposes its lambda body's exact
+      -- result without changing the erased term shape.  The certified-result
+      -- caller is the positive authority for descending this path; ordinary
+      -- publication never takes this branch.  The domain and argument stay
+      -- fixed, while the transformed body is rechecked as the application's
+      -- new result before publication succeeds.
+      mapConstructedTerm
+        (\constructedBody -> EApp (ELam parameter constructedBody) argument)
+        <$> constructTermToTypeWithRoutes
+          lambdaResultConstruction
+          binders
+          actualTy
+          expectedTy
+          body
   | ConstructLambdaResults <- lambdaResultConstruction
   , ELam resolved body <- term
   , TArrow actualDomain actualCodomain <- actualTy

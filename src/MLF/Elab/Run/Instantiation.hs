@@ -91,30 +91,34 @@ planExactBinderSpine typesAgree sourceTy targetTy = do
   where
     go source target =
         introduceExactFlexibleEndpoint source target
-            <|> case source of
-                TForallRef sourceRef sourceBound sourceBody ->
-                    retainLeadingBinder
+            <|> constructFromSourceSpine source target
+            <|> introduceExactUnboundedEndpoint source target
+
+    constructFromSourceSpine source target =
+        case source of
+            TForallRef sourceRef sourceBound sourceBody ->
+                retainLeadingBinder
+                    sourceRef
+                    sourceBound
+                    sourceBody
+                    target
+                    <|> consumeAndReintroduceVacuousBinder
+                        sourceRef
+                        sourceBound
+                        source
+                        target
+                    <|> specializeLeadingBinder
                         sourceRef
                         sourceBound
                         sourceBody
+                        source
                         target
-                        <|> consumeAndReintroduceVacuousBinder
-                            sourceRef
-                            sourceBound
-                            source
-                            target
-                        <|> specializeLeadingBinder
-                            sourceRef
-                            sourceBound
-                            sourceBody
-                            source
-                            target
-                TBottom
-                    | not (typesAgree TBottom target) ->
-                        Just ([], InstBot target)
-                _
-                    | typesAgree source target -> Just ([], InstId)
-                    | otherwise -> Nothing
+            TBottom
+                | not (typesAgree TBottom target) ->
+                    Just ([], InstBot target)
+            _
+                | typesAgree source target -> Just ([], InstId)
+                | otherwise -> Nothing
 
     -- Root RaiseMerge may publish the checked source as the exact bound of a
     -- fresh flexible result, @forall (alpha > source). alpha@.  Construct
@@ -141,6 +145,36 @@ planExactBinderSpine typesAgree sourceTy targetTy = do
                             )
                         )
             _ -> Nothing
+
+    -- Quant-Intro can first place a fresh target declaration outside the
+    -- source and then run the remaining construction beneath it.  This is
+    -- the exact computation needed when a later source binder becomes the
+    -- common specialization of an earlier one, for example
+    --
+    --   forall a. forall b. a -> b
+    --     <= forall c. c -> c.
+    --
+    -- The body plan is written using the target binder as its lexical
+    -- argument.  'InstUnderRef' routes that reference to the fresh binder
+    -- actually introduced by O; the final replay check above must still
+    -- reproduce the complete target.  Trying source retention and
+    -- specialization first keeps O as the construction of last resort.
+    introduceExactUnboundedEndpoint source target = do
+        TForallRef targetRef Nothing targetBody <- pure target
+        guard
+            ( not
+                ( any
+                    (typeBinderRefsSameIdentity targetRef)
+                    (freeTypeVarRefsType source)
+                )
+            )
+        (renames, bodyInstantiation) <- go source targetBody
+        pure
+            ( renames
+            , composeInst
+                InstIntro
+                (instUnderWithRef targetRef bodyInstantiation)
+            )
 
     -- A bounded source declaration can be consumed at its bound by N before
     -- the exact endpoint reintroduces the same positional identity as a

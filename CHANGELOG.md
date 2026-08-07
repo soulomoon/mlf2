@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Changed
+- Completed the construction-directed source-declaration path needed by the
+  paper's annotated `g g` family. Frozen source declarations are selected by
+  semantic binder identity together with their frozen declaration base; a
+  copied scheme may therefore have several lexical declarations without being
+  collapsed, while an occurrence may fall back to identity alone only when
+  exactly one declaration exists. Declaration selection prefers exact
+  base/solved provenance and fails closed instead of using graph-key order.
+  Required Gamma planning records when that declaration must precede its
+  consumer, and reification keeps the source-owned unbounded declaration at
+  `Bottom` until the certified `Lambda(Gamma)`/`Hyp` construction consumes it.
+  Exact source-root completion closes an opened sibling body before applying
+  remaining occurrence routes, and returned-lambda endpoint selection uses
+  the explicit binder-spine construction (including vacuous-forall
+  elimination) rather than reconciling types after elaboration. The fixed
+  annotation evidence now passes 298 examples; twelve consecutive generated
+  seeds pass 1200 programs; the complete serialized suite passes 4043
+  examples; and the thesis conformance gate remains green. These results
+  establish the compiler's tested construction path for the covered `g g`
+  forms, not a mechanized proof of every eMLF metatheorem.
 - Encoded body-consumer owner progress in the private
   `BodyConsumerBoundRefinementCertificate` constructors. All validated
   refinement producers now share one pending smart constructor, and

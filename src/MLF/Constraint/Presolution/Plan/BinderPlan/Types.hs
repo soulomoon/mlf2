@@ -107,6 +107,11 @@ data BinderPlan = BinderPlan
     , bpOrderBinders :: [Int] -> Either ElabError [Int]
     , bpRequiredGamma :: IntMap.IntMap RequiredGammaBinder
     , bpSourceBinderRefs :: IntMap.IntMap TypeBinderRef
+    -- | Exact source declarations whose frozen binder is unbounded and whose
+    -- identity occurs in a required Gamma bound.  The required declaration
+    -- consumes these binders; a later solved result must not be reinterpreted
+    -- as their source bound.
+    , bpSourceDeclarationsBeforeRequiredGamma :: IntSet.IntSet
     , bpAmbientBinderRefs :: [TypeBinderRef]
     -- | Construction-used refs matched to declarations already selected by
     -- this plan.  Finalization may preserve these declarations, but cannot

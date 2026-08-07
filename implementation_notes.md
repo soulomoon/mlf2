@@ -1,3 +1,36 @@
+## 2026-08-07 - Source-declaration construction and paper `g g` completion
+
+- Fixed the mixed-source declaration cycle at binder-plan construction time.
+  A frozen unbounded source declaration is authoritative only when a solved
+  occurrence creates the required-Gamma back-edge and the operated bound uses
+  that exact semantic identity. The plan records the declaration-before-Gamma
+  ordering fact, and reification leaves its source-owned bound at `Bottom` for
+  the later certified `Lambda(Gamma)`/`Hyp` computation instead of repairing a
+  free variable after finalization.
+- Made source declaration lookup lexical as well as semantic. Authority is
+  indexed by `(TypeBinderIdentity, frozen base node)`, so legitimate copies of
+  one source scheme remain distinct declarations. An occurrence can use the
+  identity-only route only when the declaration is globally unique; with
+  multiple copies, only exact frozen-base provenance can select an owner.
+  Within one frozen declaration, the planner prefers the base or explicit
+  base-to-solved route and refuses ambiguous live aliases rather than choosing
+  the smallest `NodeId`.
+- Completed exact source-root lambda boundaries before substituting remaining
+  routed parameter occurrences. This constructs `a -> (a -> a)` as
+  `N -> N`, where `N = forall a. a -> a`, instead of duplicating the completed
+  sibling body into `N -> N -> N`. Independently frozen and inherited lambda
+  endpoints now reconcile only through the explicit value-lambda binder-spine
+  construction; eliminating a vacuous unbounded forall is one such checked
+  construction, not a broad type-shape equivalence.
+- The focused evidence includes 298 fixed annotation examples and twelve
+  consecutive generated seeds (`20260819` through `20260830`, 1200 programs).
+  The complete serialized suite passes 4043 examples with zero failures, and
+  `./scripts/thesis-conformance-gate.sh` passes. The repaired runtime harness
+  remains fast: higher-kinded method resolution is sub-second in the built
+  test binary, and Prelude sharing is still checked at the package boundary.
+  This is finite executable evidence for the compiler's supported paper
+  `g g` constructions, not a universal or mechanized proof of eMLF.
+
 ## 2026-08-07 - Construction-encoded body-consumer owner progress
 
 - Revalidated the runtime-test repair before continuing eMLF work. The merged
