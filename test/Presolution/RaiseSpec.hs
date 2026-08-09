@@ -48,6 +48,66 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 spec :: Spec
 spec = do
     describe "Phase 4 — OpRaise for interior nodes" $ do
+        let orderSourceFirst = NodeId 0
+            orderSourceSecond = NodeId 1
+            orderMetaFirst = NodeId 2
+            orderMetaSecond = NodeId 3
+            orderEdgeRoot = NodeId 4
+            binderOrderNodes =
+                nodeMapFromList
+                    [ (getNodeId orderSourceFirst, TyVar orderSourceFirst Nothing)
+                    , (getNodeId orderSourceSecond, TyVar orderSourceSecond Nothing)
+                    , (getNodeId orderMetaFirst, TyVar orderMetaFirst Nothing)
+                    , (getNodeId orderMetaSecond, TyVar orderMetaSecond Nothing)
+                    -- Deliberately put the second source binder's copy on the
+                    -- left.  Destination layout must not reverse the source
+                    -- binder order already certified by <P.
+                    , ( getNodeId orderEdgeRoot
+                      , TyArrow orderEdgeRoot orderMetaSecond orderMetaFirst
+                      )
+                    ]
+            binderOrderConstraint =
+                rootedConstraint emptyConstraint
+                    { cNodes = binderOrderNodes
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (orderMetaFirst, orderEdgeRoot, BindFlex)
+                            , (orderMetaSecond, orderEdgeRoot, BindFlex)
+                            ]
+                    }
+            binderOrderInterior =
+                IntSet.fromList (map getNodeId [orderMetaFirst, orderMetaSecond])
+
+        it "orders binder merges from frozen source order, not copied-meta layout" $ do
+            let action =
+                    runEdgeUnifyWithBinderMetasForTest
+                        orderEdgeRoot
+                        binderOrderInterior
+                        [ (orderSourceFirst, orderMetaFirst)
+                        , (orderSourceSecond, orderMetaSecond)
+                        ]
+                        orderMetaFirst
+                        orderMetaSecond
+
+            case runPresolutionM defaultTraceConfig (stateFor binderOrderConstraint 5) action of
+                Left err -> expectationFailure ("edge-local binder merge failed: " ++ show err)
+                Right (ops, _st1) ->
+                    ops `shouldBe` [OpMerge orderSourceSecond orderSourceFirst]
+
+        it "rejects duplicate binders while freezing source order" $ do
+            let action =
+                    runEdgeUnifyWithBinderMetasForTest
+                        orderEdgeRoot
+                        binderOrderInterior
+                        [ (orderSourceFirst, orderMetaFirst)
+                        , (orderSourceFirst, orderMetaSecond)
+                        ]
+                        orderMetaFirst
+                        orderMetaSecond
+
+            runPresolutionM defaultTraceConfig (stateFor binderOrderConstraint 5) action
+                `shouldBe` Left (DuplicateEdgeBinderOrderEntry orderSourceFirst)
+
         it "rejects a locked bounded variable without explicit Eq-Var authority" $ do
             let rootGen = GenNodeId 0
                 rigidBinder = NodeId 0

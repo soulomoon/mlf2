@@ -346,6 +346,11 @@ runtime invariants as compile-time types:
 - `MLF.Pipeline` exposes only the canonical public elaboration entrypoints (`runPipelineElab`, `runPipelineElabWithConfig`). Internal checker-authoritative aliases have also been retired; parity probes call the canonical entrypoint directly. The detailed unchecked elaboration path remains separate only because it exposes distinct `.mlfp` finalization behavior rather than an alias for the checked pipeline.
 - The old public program re-export shim has been retired. `.mlfp` parsing and pretty-printing are owned by `MLF.API`; `.mlfp` checking and runtime are owned by `MLF.Pipeline`.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
+- `MLF.Constraint.Presolution.EdgeUnify.State` owns the frozen source-binder
+  order used by edge witness Merge selection.  It constructs that authority
+  once from the `<P`-sorted binder arguments and fails closed on duplicate or
+  uncovered binders; copied-meta layout and numeric node IDs are not ordering
+  authorities.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
 - `MLF.Elab.SourceType` is the sole normalized source-type to `ElabType`
   conversion owner. Annotation preparation and Algebra delegate directly;

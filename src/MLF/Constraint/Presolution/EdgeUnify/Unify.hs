@@ -43,6 +43,7 @@ import MLF.Constraint.Presolution.EdgeUnify.State (
     EdgeUnifyState(..),
     MonadEdgeUnify(..),
     clearEdgeUnifyStructureCache,
+    compareEdgeBinderOrder,
     deleteInteriorKey,
     insertInteriorKey,
     isEliminated,
@@ -336,23 +337,8 @@ requireBinderMeta binder = do
                 (InternalError ("requireBinderMeta: missing copy for binder " ++ show binder))
 
 compareBinderIdsByPrec :: Int -> Int -> EdgeUnifyM p Ordering
-compareBinderIdsByPrec bid1 bid2 = do
-    mbKeys <- gets eusOrderKeys
-    binderMeta <- gets eusBinderMeta
-    let keyFor bid = do
-            keys <- mbKeys
-            meta <- IntMap.lookup bid binderMeta
-            IntMap.lookup (getNodeId meta) keys
-        k1 = keyFor bid1
-        k2 = keyFor bid2
-    pure $ case (k1, k2) of
-        (Just a, Just b) ->
-            case Order.compareOrderKey a b of
-                EQ -> compare bid1 bid2
-                other -> other
-        (Just _, Nothing) -> LT
-        (Nothing, Just _) -> GT
-        (Nothing, Nothing) -> compare bid1 bid2
+compareBinderIdsByPrec bid1 bid2 =
+    compareEdgeBinderOrder (NodeId bid1) (NodeId bid2)
 
 pickRepBinderId :: IntSet.IntSet -> EdgeUnifyM p Int
 pickRepBinderId bs =

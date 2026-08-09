@@ -1,3 +1,27 @@
+## 2026-08-10 - Frozen source-binder order for edge Merge construction
+
+- Found a second ordering recovery after delayed-`Weaken` normalization was
+  made fail closed.  Edge-local unification selected a Merge representative by
+  computing `<P` keys over copied metas in the destination graph, then fell
+  back to meta reachability and numeric source-binder IDs when those keys were
+  incomplete.  That could reverse a source witness solely because copying
+  placed the corresponding metas in a different structural order.
+- `EdgeUnifyState` now constructs a private `EdgeBinderOrder` from the
+  source-binder list already sorted by `instantiationBindersFromGenM`.  Merge
+  selection can compare only through this frozen authority.  Duplicate
+  binders reject state construction, and a later binder absent from the
+  authority rejects witness construction instead of acquiring a positional or
+  numeric order.
+- Removed the destination `eusOrderKeys` cache, the copied-root recovery used
+  only to populate it, and the unused `MonadEdgeUnify.getOrderKeys` method.
+  Focused regressions prove that copied-meta layout cannot reverse `OpMerge`
+  and that duplicate source binders fail before unification begins.
+- Validation: `cabal build all -j1`, the complete serialized suite
+  (`4045 examples, 0 failures`), and `scripts/thesis-conformance-gate.sh` all
+  pass.  As a prerequisite regression check, the already-repaired merged
+  higher-kinded interpreter/LLVM/native runtime row remains at 3.64 seconds of
+  Hspec time without recompiling Prelude per consumer.
+
 ## 2026-08-10 - Construction-authoritative delayed-Weaken ordering
 
 - Found a remaining fallback in witness normalization: when incomparable

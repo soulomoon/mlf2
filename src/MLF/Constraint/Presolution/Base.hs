@@ -475,6 +475,12 @@ data PresolutionError
       -- ^ Installing a bound during chi_e attempted to Raise nodes outside
       -- the edge's source interior.  Such a mutation cannot be represented by
       -- that edge's source-domain witness and must fail transactionally.
+    | DuplicateEdgeBinderOrderEntry NodeId
+      -- ^ Edge-local construction received the same source binder twice, so
+      -- it could not freeze a unique paper <P order for Merge selection.
+    | MissingEdgeBinderOrderEntry NodeId
+      -- ^ Edge-local Merge selection referenced a binder absent from the
+      -- source order authority frozen when the edge state was constructed.
     | IdentityExpansionHasBaseOps EdgeId [InstanceOp]
       -- ^ ExpIdentity has no Omega construction steps.  Reaching execution
       -- with base operations means the witness plan and expansion disagree.

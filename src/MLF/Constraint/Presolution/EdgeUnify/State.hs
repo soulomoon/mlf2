@@ -33,6 +33,7 @@ module MLF.Constraint.Presolution.EdgeUnify.State (
     recordEdgeUnifyStatN,
     recordCurrentInteriorRaises,
     recordRaisesFromTrace,
+    compareEdgeBinderOrder,
     sourceWitnessNode,
     sourceWitnessNodeFor,
     sourceWitnessNodeIgnoringAmbiguity,
@@ -46,7 +47,7 @@ import Control.Monad.State
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Word (Word64)
 
 import qualified MLF.Binding.Tree as Binding
@@ -86,7 +87,6 @@ import MLF.Constraint.Presolution.StateAccess (
 import MLF.Constraint.Presolution.Witness (EdgeWitnessOp(..), edgeWitnessInstanceOp)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import qualified MLF.Util.Order as Order
 import qualified MLF.Witness.OmegaExec as OmegaExec
 
 data EdgeUnifyStats = EdgeUnifyStats
@@ -136,6 +136,40 @@ addEdgeUnifyStats a b =
         , eusUnifyStructureChildEdges = eusUnifyStructureChildEdges a + eusUnifyStructureChildEdges b
         }
 
+-- | The paper's source-binder <P order, frozen before edge-local graph
+-- mutation.  The constructor stays private so copied-meta layout and numeric
+-- node IDs cannot become accidental ordering authorities.
+newtype EdgeBinderOrder = EdgeBinderOrder (IntMap Int)
+
+{- Note [Freeze source binder order for edge witnesses]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The binder arguments supplied to edge execution follow the binder list built
+by 'instantiationBindersFromGenM', which has already been sorted by the
+paper's source-side <P relation.  Expansion copying preserves list alignment
+between each source binder and its fresh meta, but it does not preserve a
+structural path from the destination root to every meta.
+
+Merge direction is a source-witness decision.  Freeze the ordered binder list
+as ranks when constructing 'EdgeUnifyState', reject duplicate source binders,
+and require every later binder comparison to be covered by those ranks.  In
+particular, do not reconstruct the order from copied-meta reachability or fall
+back to numeric 'NodeId' order after graph mutation.
+-}
+
+mkEdgeBinderOrder
+    :: [(NodeId, NodeId)]
+    -> Either PresolutionError EdgeBinderOrder
+mkEdgeBinderOrder binderArgs =
+    EdgeBinderOrder . fst <$> foldM addBinder (IntMap.empty, 0) binderArgs
+  where
+    addBinder (ranks, rank) (binder, _meta)
+        | IntMap.member binderKey ranks =
+            Left (DuplicateEdgeBinderOrderEntry binder)
+        | otherwise =
+            Right (IntMap.insert binderKey rank ranks, rank + 1)
+      where
+        binderKey = getNodeId binder
+
 data EdgeUnifyState = EdgeUnifyState
     { eusInteriorRoots :: InteriorNodes
     , eusBindersByRoot :: IntMap IntSet.IntSet
@@ -154,7 +188,7 @@ data EdgeUnifyState = EdgeUnifyState
     , eusOriginallyBoundBinders :: IntSet.IntSet
     , eusScheduledWeakenMetas :: IntSet.IntSet
     , eusBinderMetaRoots :: IntSet.IntSet
-    , eusOrderKeys :: Maybe (IntMap Order.OrderKey)
+    , eusBinderOrder :: EdgeBinderOrder
     , eusPendingWeakenOwner :: PendingWeakenOwner
     , eusOps :: [EdgeWitnessOp]
     , eusCopyMap :: CopyMap
@@ -322,7 +356,6 @@ class MonadPresolution m => MonadEdgeUnify m where
     getInteriorRoots :: m InteriorNodes
     getEdgeRoot :: m NodeId
     getBinderMeta :: m (IntMap NodeId)
-    getOrderKeys :: m (Maybe (IntMap Order.OrderKey))
     recordInstanceOp :: EdgeWitnessOp -> m ()
     liftPresolution :: PresolutionM (PresolutionPhaseOf m) a -> m a
     findRootM :: NodeId -> m NodeId
@@ -341,7 +374,6 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
     getInteriorRoots = gets eusInteriorRoots
     getEdgeRoot = gets eusEdgeRoot
     getBinderMeta = gets eusBinderMeta
-    getOrderKeys = gets eusOrderKeys
     recordInstanceOp op = modify' $ \st -> st { eusOps = op : eusOps st }
     liftPresolution = lift
     findRootM nid = do
@@ -412,6 +444,16 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
     queuePendingWeakenM nid = do
         owner <- gets eusPendingWeakenOwner
         liftPresolution $ queuePendingWeakenWithOwner owner nid
+
+compareEdgeBinderOrder :: NodeId -> NodeId -> EdgeUnifyM p Ordering
+compareEdgeBinderOrder left right
+    | left == right = pure EQ
+    | otherwise = do
+        EdgeBinderOrder ranks <- gets eusBinderOrder
+        case (IntMap.lookup (getNodeId left) ranks, IntMap.lookup (getNodeId right) ranks) of
+            (Just leftRank, Just rightRank) -> pure (compare leftRank rightRank)
+            (Nothing, _) -> throwPresolutionErrorM (MissingEdgeBinderOrderEntry left)
+            (_, Nothing) -> throwPresolutionErrorM (MissingEdgeBinderOrderEntry right)
 
 -- | Build an ω executor environment for χe base ops (Graft/Merge/Weaken).
 --
@@ -768,6 +810,7 @@ initEdgeUnifyStateWithStatsAndCopyMap
     -> PresolutionM p EdgeUnifyState
 initEdgeUnifyStateWithStatsAndCopyMap collectStats copyMap sourceNodeKeys mbSourceDomain binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
+    binderOrder <- either throwError pure (mkEdgeBinderOrder binderArgs)
     uf <- gets psUnionFind
     let interiorRootEntries = [(i, UnionFind.frWith uf (NodeId i)) | i <- IntSet.toList interior]
     let interiorRoots =
@@ -829,30 +872,7 @@ initEdgeUnifyStateWithStatsAndCopyMap collectStats copyMap sourceNodeKeys mbSour
                     IntSet.filter
                         (hasStandaloneRaiseAuthority constraint sourceRootForAuthority . NodeId)
                         frozenSourceKeys
-    let interiorRootRef =
-            case Binding.lookupBindParent constraint (typeRef edgeRoot) of
-                Just (parent, _) -> parent
-                Nothing -> typeRef edgeRoot
-        interiorRoot =
-            case interiorRootRef of
-                TypeRef nid -> nid
-                GenRef gid ->
-                    case NodeAccess.lookupGenNode constraint gid of
-                        Just genNode ->
-                            let schemes = gnSchemes genNode
-                                pick =
-                                    listToMaybe
-                                        [ r
-                                        | r <- schemes
-                                        , Binding.isUpper constraint (typeRef r) (typeRef edgeRoot)
-                                        ]
-                            in fromMaybe edgeRoot pick
-                        Nothing -> edgeRoot
-        binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderArgs]
-    let keys =
-            if length binderArgs <= 1
-                then Nothing
-                else Just (Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing)
+    let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderArgs]
     pure EdgeUnifyState
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot
@@ -874,7 +894,7 @@ initEdgeUnifyStateWithStatsAndCopyMap collectStats copyMap sourceNodeKeys mbSour
         , eusOriginallyBoundBinders = originallyBoundBinders
         , eusScheduledWeakenMetas = IntSet.empty
         , eusBinderMetaRoots = binderMetaRoots
-        , eusOrderKeys = keys
+        , eusBinderOrder = binderOrder
         , eusPendingWeakenOwner = pendingOwner
         , eusOps = []
         , eusCopyMap = copyMap

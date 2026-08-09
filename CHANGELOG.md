@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Froze the paper's source-binder `<P` order when constructing edge-local
+  unification state.  Merge representative selection now consumes that
+  construction authority directly instead of recomputing order from copied
+  metas, whose destination layout may reverse the source order or omit a
+  structural path.  Duplicate source binders are rejected before the state is
+  published, and an uncovered later comparison fails closed; numeric node IDs
+  are no longer an ordering fallback.  This also removes the unused
+  destination order-key cache and its graph-root recovery logic.
 - Made delayed-`Weaken` normalization fail closed when two incomparable
   operations need a binder-order decision but the `<P` order authority is
   missing or contradictory.  The previous pure comparator silently replaced
