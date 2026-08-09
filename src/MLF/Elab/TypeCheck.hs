@@ -20,6 +20,7 @@ module MLF.Elab.TypeCheck
     typeCheckWithResolvedEnv,
     canonicalizeResolvedTermTypes,
     checkInstantiation,
+    literalType,
   )
 where
 
@@ -186,7 +187,7 @@ typeCheckWithEnvSummary :: TypeCheckEnvSummary -> ResolvedTermEnv -> Env -> Xmlf
 typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
   EVarNode resolved ->
     lookupResolvedTermEnv resolvedEnv resolved
-  ELit lit -> Right (litType lit)
+  ELit lit -> Right (literalType lit)
   ELam resolved body -> do
     let ty = resolvedVarType resolved
     ensureContractiveType ty
@@ -402,8 +403,8 @@ checkInstantiation env ty inst =
           renameBound = renameInstBoundRef
         }
 
-litType :: Lit -> ElabType
-litType = \case
+literalType :: Lit -> ElabType
+literalType = \case
   LInt _ -> builtinLiteralType "Int"
   LBool _ -> builtinLiteralType "Bool"
   LChar _ -> builtinLiteralType "Char"

@@ -131,11 +131,17 @@ obligations.each do |o|
   elsif matcher != id
     groups['matcher-id-mismatch'] << "#{id}: test matcher must be the obligation id, got #{matcher.inspect}"
   end
-  if kind != 'quickcheck'
-    groups['evidence-kind'] << "#{id}: expected test_anchor.kind=quickcheck, got #{kind.inspect}"
+  unless %w[fixed quickcheck].include?(kind)
+    groups['evidence-kind'] << "#{id}: expected test_anchor.kind=fixed or quickcheck, got #{kind.inspect}"
   end
   unless min_success.is_a?(Integer) && min_success.positive?
     groups['min-success'] << "#{id}: expected positive integer test_anchor.min_success, got #{min_success.inspect}"
+  end
+  if kind == 'fixed' && min_success != 1
+    groups['min-success'] << "#{id}: fixed evidence must have min_success=1, got #{min_success.inspect}"
+  end
+  if kind == 'quickcheck' && min_success.to_i < 100
+    groups['min-success'] << "#{id}: quickcheck evidence must have min_success>=100, got #{min_success.inspect}"
   end
   if test_file.empty?
     groups['unmapped-rules'] << "#{id}: blank test file"
@@ -177,17 +183,13 @@ if groups.values.any? { |entries| !entries.empty? }
 end
 
 obligations.each do |o|
-  puts [o['id'], o.dig('test_anchor', 'matcher'), o.dig('test_anchor', 'file'), o.dig('test_anchor', 'min_success')].join("\t")
+  puts [o['id'], o.dig('test_anchor', 'matcher'), o.dig('test_anchor', 'file'), o.dig('test_anchor', 'kind'), o.dig('test_anchor', 'min_success')].join("\t")
 end
 RUBY
 
-echo "[thesis-obligations] Executing anchor matchers"
-command_failures=()
-parse_failures=()
-zero_examples=()
-test_failures=()
-missing_property_success=()
-insufficient_property_success=()
+echo "[thesis-obligations] Executing all obligation evidence in one test process"
+missing_evidence_success=()
+insufficient_evidence_success=()
 
 hspec_summary_line() {
   ruby -pe '$_.gsub!(/\e\[[0-9;?]*[ -\/]*[@-~]/, "")' "$1" |
@@ -238,80 +240,58 @@ puts max
 RUBY
 }
 
-while IFS=$'\t' read -r id matcher _file min_success; do
-  [[ -n "${id}" ]] || continue
-  log_file="$(mktemp)"
-  trap 'rm -f "${tmp_rows}" "${log_file}"' EXIT
+log_file="$(mktemp)"
+trap 'rm -f "${tmp_rows}" "${log_file}"' EXIT
 
-  echo
-  echo "==> [thesis-obligations] ${id} (--match \"${matcher}\")"
-  if ! cabal test mlf2-test --test-show-details=direct --test-options="--match \"${matcher}\" --format specdoc" >"${log_file}" 2>&1; then
-    cat "${log_file}"
-    command_failures+=("${id}")
-    rm -f "${log_file}"
-    continue
-  fi
-
+if ! cabal test mlf2-test --test-show-details=direct --test-options='--match "Thesis obligation property evidence" --format specdoc' >"${log_file}" 2>&1; then
   cat "${log_file}"
+  echo "[thesis-obligations] FAILED: obligation evidence test process failed"
+  exit 1
+fi
 
-  summary_line="$(hspec_summary_line "${log_file}")"
-  if [[ -z "${summary_line}" ]]; then
-    parse_failures+=("${id}")
-    rm -f "${log_file}"
-    continue
-  fi
+cat "${log_file}"
 
-  examples="$(printf '%s\n' "${summary_line}" | sed -E 's/^([0-9]+) examples?, ([0-9]+) failures$/\1/')"
-  failures="$(printf '%s\n' "${summary_line}" | sed -E 's/^([0-9]+) examples?, ([0-9]+) failures$/\2/')"
+summary_line="$(hspec_summary_line "${log_file}")"
+if [[ -z "${summary_line}" ]]; then
+  echo "[thesis-obligations] FAILED: could not parse Hspec summary"
+  exit 1
+fi
 
-  if [[ -z "${examples}" || -z "${failures}" ]]; then
-    parse_failures+=("${id}")
-    rm -f "${log_file}"
-    continue
-  fi
+examples="$(printf '%s\n' "${summary_line}" | sed -E 's/^([0-9]+) examples?, ([0-9]+) failures$/\1/')"
+failures="$(printf '%s\n' "${summary_line}" | sed -E 's/^([0-9]+) examples?, ([0-9]+) failures$/\2/')"
+if [[ -z "${examples}" || -z "${failures}" ]]; then
+  echo "[thesis-obligations] FAILED: invalid Hspec summary: ${summary_line}"
+  exit 1
+fi
+if (( examples < 107 )); then
+  echo "[thesis-obligations] FAILED: matched ${examples} examples; expected at least 107"
+  exit 1
+fi
+if (( failures != 0 )); then
+  echo "[thesis-obligations] FAILED: obligation evidence reported ${failures} failures"
+  exit 1
+fi
 
-  if (( examples < 1 )); then
-    zero_examples+=("${id}")
+while IFS=$'\t' read -r id _matcher _file kind min_success; do
+  [[ -n "${id}" ]] || continue
+  evidence_passes="$(quickcheck_pass_count "${id}" "${log_file}")"
+  if (( evidence_passes < 1 )); then
+    missing_evidence_success+=("${id} (${kind})")
+  elif (( evidence_passes < min_success )); then
+    insufficient_evidence_success+=("${id} (${kind}): passed ${evidence_passes}, required ${min_success}")
   fi
-  if (( failures != 0 )); then
-    test_failures+=("${id}")
-  fi
-  quickcheck_passes="$(quickcheck_pass_count "${id}" "${log_file}")"
-  if (( quickcheck_passes < 1 )); then
-    missing_property_success+=("${id}")
-  elif (( quickcheck_passes < min_success )); then
-    insufficient_property_success+=("${id}: passed ${quickcheck_passes}, required ${min_success}")
-  fi
-
-  rm -f "${log_file}"
 done <"${tmp_rows}"
 
-if (( ${#command_failures[@]} > 0 || ${#parse_failures[@]} > 0 || ${#zero_examples[@]} > 0 || ${#test_failures[@]} > 0 || ${#missing_property_success[@]} > 0 || ${#insufficient_property_success[@]} > 0 )); then
+if (( ${#missing_evidence_success[@]} > 0 || ${#insufficient_evidence_success[@]} > 0 )); then
   echo
   echo "[thesis-obligations] FAILED: executable anchor checks"
-  if (( ${#command_failures[@]} > 0 )); then
-    echo "- matcher command failures:"
-    printf '  - %s\n' "${command_failures[@]}"
+  if (( ${#missing_evidence_success[@]} > 0 )); then
+    echo "- missing evidence success lines:"
+    printf '  - %s\n' "${missing_evidence_success[@]}"
   fi
-  if (( ${#parse_failures[@]} > 0 )); then
-    echo "- unparseable hspec summary:"
-    printf '  - %s\n' "${parse_failures[@]}"
-  fi
-  if (( ${#zero_examples[@]} > 0 )); then
-    echo "- zero matched examples:"
-    printf '  - %s\n' "${zero_examples[@]}"
-  fi
-  if (( ${#test_failures[@]} > 0 )); then
-    echo "- matcher failures:"
-    printf '  - %s\n' "${test_failures[@]}"
-  fi
-  if (( ${#missing_property_success[@]} > 0 )); then
-    echo "- missing QuickCheck success lines:"
-    printf '  - %s\n' "${missing_property_success[@]}"
-  fi
-  if (( ${#insufficient_property_success[@]} > 0 )); then
-    echo "- insufficient QuickCheck success counts:"
-    printf '  - %s\n' "${insufficient_property_success[@]}"
+  if (( ${#insufficient_evidence_success[@]} > 0 )); then
+    echo "- insufficient evidence success counts:"
+    printf '  - %s\n' "${insufficient_evidence_success[@]}"
   fi
   exit 1
 fi

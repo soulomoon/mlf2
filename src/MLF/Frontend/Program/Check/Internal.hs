@@ -46,6 +46,7 @@ module MLF.Frontend.Program.Check.Internal
     checkLocatedProgramPackageWithBuiltinPreludeCheckCacheForTest,
     checkLocatedProgramPackageWithTimingAndBuiltinPreludeCheckCacheForTest,
     nextClientIdentityAfterCachedBuiltinPreludeForTest,
+    splitContiguousEligibleBatch,
   )
 where
 
@@ -1771,7 +1772,7 @@ finalizeDefWorkItemsWithTiming timing moduleName0 generator0 finalizeContext mod
     go generator acc (workItem : rest) = do
       result <- finalizeDefWorkItemWithTimingFromSupply timing moduleName0 generator finalizeContext moduleContext nonRecursiveIdentities workItem
       case result of
-        Left err -> pure (Left err)
+        Left err -> pure (Left (annotateDefWorkItemPipelineError workItem err))
         Right (binding, generator') -> go generator' (binding : acc) rest
 
 finalizeDefWorkItemLayersWithTiming ::
@@ -1862,7 +1863,7 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 generator0 finalizeContex
               nonRecursiveIdentities
               workItem
           case result of
-            Left err -> pure (Left err)
+            Left err -> pure (Left (annotateDefWorkItemPipelineError workItem err))
             Right (checked, generator2) ->
               checked `seq` goLayer generator2 (checked : acc) (itemIndex + 1) rest
 
@@ -1871,9 +1872,10 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 generator0 finalizeContex
     finalizeFallbackItems generator checkedByIdentity workItems0@(workItem : rest)
       | moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities workItem = do
           let (deferredLayer, remaining) =
-                splitAt
+                splitContiguousEligibleBatch
                   batchSize
-                  (takeWhile (moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities) workItems0)
+                  (moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities)
+                  workItems0
           if length deferredLayer <= 1
             then finalizeFallbackItem generator checkedByIdentity workItem rest
             else do
@@ -1909,12 +1911,24 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 generator0 finalizeContex
           nonRecursiveIdentities
           workItem
       case result of
-        Left err -> pure (Left err)
+        Left err -> pure (Left (annotateDefWorkItemPipelineError workItem err))
         Right (checked, generator') ->
           finalizeFallbackItems generator' (Map.insert (defWorkItemIdentity workItem) checked checkedByIdentity) rest
 
 defWorkItemName :: DefWorkItem -> String
 defWorkItemName = P.refDisplayName . P.defDeclName . defWorkItemDecl
+
+annotateDefWorkItemPipelineError :: DefWorkItem -> ProgramError -> ProgramError
+annotateDefWorkItemPipelineError workItem err =
+  case err of
+    ProgramPipelineError message ->
+      ProgramPipelineError
+        ( "definition `"
+            ++ defWorkItemName workItem
+            ++ "`: "
+            ++ message
+        )
+    _ -> err
 
 moduleLayerEligibleDefWorkItem :: DefWorkItem -> Bool
 moduleLayerEligibleDefWorkItem workItem =
@@ -2018,8 +2032,18 @@ moduleDefBatchSize = do
   mbValue <- lookupEnv "MLF_MODULE_DEF_BATCH_SIZE"
   pure $
     case mbValue >>= readMaybe of
-      Just n | n > 1 -> n
+      Just n | n > 0 -> n
       _ -> 16
+
+-- | Take one bounded batch from the eligible prefix without dropping the
+-- first ineligible item or anything after it.  Fallback work mixes deferred
+-- non-recursive definitions with recursive/unsupported definitions, so the
+-- untouched suffix must remain in the work queue.
+splitContiguousEligibleBatch :: Int -> (a -> Bool) -> [a] -> ([a], [a])
+splitContiguousEligibleBatch batchSize eligible items =
+  let (eligiblePrefix, suffix) = span eligible items
+      (batch, eligibleRemainder) = splitAt batchSize eligiblePrefix
+   in (batch, eligibleRemainder ++ suffix)
 
 moduleContextEligibleDefWorkItem :: Set.Set SymbolIdentity -> DefWorkItem -> Bool
 moduleContextEligibleDefWorkItem nonRecursiveIdentities workItem =

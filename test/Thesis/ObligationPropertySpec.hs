@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Thesis.ObligationPropertySpec (spec) where
@@ -43,6 +44,7 @@ import MLF.Constraint.Presolution.TestSupport
     lookupCopy,
     processInstEdge,
     runPresolutionM,
+    unifyStructureForTest,
     unifyAcyclic,
     validateNormalizedWitness,
     validateTranslatablePresolution,
@@ -104,13 +106,18 @@ normalizeInstanceOpsForTest env ops =
 spec :: Spec
 spec = do
   describe "Thesis obligation property evidence" $
-    forM_ obligations $ \obligation ->
-      it (obligationId obligation) $
-        property $
-          withMaxSuccess 100 $
-            forAll (chooseInt (3, 16)) $ \size ->
-              counterexample (obligationId obligation ++ " failed at size " ++ show size) $
-                obligationProperty obligation size
+    forM_ obligations $ \case
+      FixedObligation obligationId fixedEvidence ->
+        it obligationId $
+          property $
+            once (fixedEvidence 0)
+      SizedObligation obligationId sizedEvidence ->
+        it obligationId $
+          property $
+            withMaxSuccess 100 $
+              forAll (chooseInt (3, 16)) $ \size ->
+                counterexample (obligationId ++ " failed at size " ++ show size) $
+                  sizedEvidence size
 
   describe "Thesis fixed annotation evidence" $ do
     forM_ (zip [1 :: Int ..] annotationErasureCases) $ \(caseIndex, expr) ->
@@ -351,6 +358,9 @@ spec = do
     it "advances a zero-local application from its completed mixed bound" $
       expectElabAnnotationErasure
         zeroLocalApplicationWithCompletedMixedBoundExpr
+    it "publishes a source-renamed local application binder as exact Gamma authority" $
+      expectElabAnnotationErasure
+        sourceRenamedLocalApplicationBinderAuthorityExpr
     it "consumes a pending root declaration after its owner finalizes it" $
       expectElabAnnotationErasure
         consumedPendingRootAfterOwnerFinalizationExpr
@@ -651,6 +661,15 @@ spec = do
     it "completes a returned higher-rank application result before enclosing lambda Gamma" $
       expectElabAnnotationErasure
         returnedHigherRankApplicationBeforeEnclosingLambdaGammaExpr
+    it "keeps a returned higher-rank parameter beneath ignored application and let publication" $
+      expectElabAnnotationErasure
+        returnedHigherRankParameterBeneathIgnoredApplicationExpr
+    it "keeps repeated source occurrences distinct beneath partially applied wrappers" $
+      expectElabAnnotationErasure
+        repeatedSourceOccurrencesBeneathPartialWrappersExpr
+    it "constructs a completed returned-function bound beneath nested value lambdas" $
+      expectElabAnnotationErasure
+        completedReturnedFunctionBoundBeneathNestedLambdasExpr
     it "keeps a multi-use polymorphic let lexical through returned lambda owners" $
       expectElabAnnotationErasure
         multiUsePolymorphicLetThroughReturnedLambdaOwnersExpr
@@ -970,120 +989,119 @@ spec = do
                       === eraseSurfaceAnnotations expr
                   ]
 
-data Obligation = Obligation
-  { obligationId :: String,
-    obligationProperty :: Int -> Property
-  }
+data Obligation
+  = FixedObligation String (Int -> Property)
+  | SizedObligation String (Int -> Property)
 
 obligations :: [Obligation]
 obligations =
-  [ Obligation "O14-WF-EMPTY" propWfEmpty,
-    Obligation "O14-WF-TVAR" propWfTVar,
-    Obligation "O14-WF-VAR" propWfVar,
-    Obligation "O14-INST-REFLEX" propInstReflex,
-    Obligation "O14-INST-TRANS" propInstTrans,
-    Obligation "O14-INST-BOT" propInstBot,
-    Obligation "O14-INST-HYP" propInstHyp,
-    Obligation "O14-INST-INNER" propInstInner,
-    Obligation "O14-INST-OUTER" propInstOuter,
-    Obligation "O14-INST-QUANT-ELIM" propInstQuantElim,
-    Obligation "O14-INST-QUANT-INTRO" propInstQuantIntro,
-    Obligation "O14-T-VAR" propTypingVar,
-    Obligation "O14-T-ABS" propTypingAbs,
-    Obligation "O14-T-APP" propTypingApp,
-    Obligation "O14-T-TABS" propTypingTAbs,
-    Obligation "O14-T-TAPP" propTypingTApp,
-    Obligation "O14-T-LET" propTypingLet,
-    Obligation "O14-RED-BETA" propRedBeta,
-    Obligation "O14-RED-BETALET" propRedBetaLet,
-    Obligation "O14-RED-REFLEX" propRedReflex,
-    Obligation "O14-RED-TRANS" propRedTrans,
-    Obligation "O14-RED-QUANT-INTRO" propRedQuantIntro,
-    Obligation "O14-RED-QUANT-ELIM" propRedQuantElim,
-    Obligation "O14-RED-INNER" propRedInner,
-    Obligation "O14-RED-OUTER" propRedOuter,
-    Obligation "O14-RED-CONTEXT" propRedContext,
-    Obligation "O14-APPLY-N" propApplyN,
-    Obligation "O14-APPLY-O" propApplyO,
-    Obligation "O14-APPLY-SEQ" propApplySeq,
-    Obligation "O14-APPLY-INNER" propApplyInner,
-    Obligation "O14-APPLY-OUTER" propApplyOuter,
-    Obligation "O14-APPLY-HYP" propApplyHyp,
-    Obligation "O14-APPLY-BOT" propApplyBot,
-    Obligation "O14-APPLY-ID" propApplyId,
-    Obligation "O15-TRANS-NO-INERT-LOCKED" propTransNoInertLocked,
-    Obligation "O15-TRANS-SCHEME-ROOT-RIGID" propTransSchemeRootRigid,
-    Obligation "O15-TRANS-ARROW-RIGID" propTransArrowRigid,
-    Obligation "O15-TRANS-NON-INTERIOR-RIGID" propTransNonInteriorRigid,
-    Obligation "O15-REORDER-REQUIRED" propSigmaReorderRequired,
-    Obligation "O15-REORDER-IDENTITY" propSigmaReorderIdentity,
-    Obligation "O15-CONTEXT-FIND" propContextFind,
-    Obligation "O15-CONTEXT-REJECT" propContextReject,
-    Obligation "O15-EDGE-TRANSLATION" propEdgeTranslation,
-    Obligation "O15-ELAB-LAMBDA-VAR" propElabLambdaVar,
-    Obligation "O15-ELAB-LET-VAR" propElabLetVar,
-    Obligation "O15-ELAB-ABS" propElabAbs,
-    Obligation "O15-ELAB-APP" propElabApp,
-    Obligation "O15-ELAB-LET" propElabLet,
-    Obligation "O15-ENV-LAMBDA" propEnvLambda,
-    Obligation "O15-ENV-LET" propEnvLet,
-    Obligation "O15-ENV-WF" propEnvWf,
-    Obligation "O15-TR-SEQ-EMPTY" propTrSeqEmpty,
-    Obligation "O15-TR-SEQ-CONS" propTrSeqCons,
-    Obligation "O15-TR-RIGID-RAISE" propTrRigidRaise,
-    Obligation "O15-TR-RIGID-MERGE" propTrRigidMerge,
-    Obligation "O15-TR-RIGID-RAISEMERGE" propTrRigidRaiseMerge,
-    Obligation "O15-TR-ROOT-GRAFT" propTrRootGraft,
-    Obligation "O15-TR-ROOT-RAISEMERGE" propTrRootRaiseMerge,
-    Obligation "O15-TR-ROOT-WEAKEN" propTrRootWeaken,
-    Obligation "O15-TR-NODE-GRAFT" propTrNodeGraft,
-    Obligation "O15-TR-NODE-MERGE" propTrNodeMerge,
-    Obligation "O15-TR-NODE-RAISEMERGE" propTrNodeRaiseMerge,
-    Obligation "O15-TR-NODE-WEAKEN" propTrNodeWeaken,
-    Obligation "O15-TR-NODE-RAISE" propTrNodeRaise,
-    Obligation "O04-BIND-FLEX-CHILDREN" propBindingFlexChildren,
-    Obligation "O04-BIND-INTERIOR" propBindingInterior,
-    Obligation "O04-BIND-ORDER" propBindingOrder,
-    Obligation "O04-OP-WEAKEN" propGraphWeaken,
-    Obligation "O04-OP-RAISE-STEP" propGraphRaiseStep,
-    Obligation "O04-OP-RAISE-TO" propGraphRaiseTo,
-    Obligation "O05-INERT-NODES" propInertNodes,
-    Obligation "O05-INERT-LOCKED" propInertLocked,
-    Obligation "O05-WEAKEN-INERT" propInertWeaken,
-    Obligation "O07-UNIF-CORE" propUnifyDecompose,
-    Obligation "O07-UNIF-PRESOL" propPresolutionUnify,
-    Obligation "O07-REBIND" propRebindHarmonize,
-    Obligation "O07-GENUNIF" propGeneralizedUnify,
-    Obligation "O08-REIFY-TYPE" propReifyType,
-    Obligation "O08-REIFY-NAMES" propReifyNames,
-    Obligation "O08-BIND-MONO" propBindMono,
-    Obligation "O08-SYN-TO-GRAPH" propSynToGraph,
-    Obligation "O08-REIFY-INLINE" propReifyInline,
-    Obligation "O08-INLINE-PRED" propInlinePred,
-    Obligation "O09-CGEN-ROOT" propCgenRoot,
-    Obligation "O09-CGEN-EXPR" propCgenExpr,
-    Obligation "O10-EXP-DECIDE" propExpDecide,
-    Obligation "O10-EXP-APPLY" propExpApply,
-    Obligation "O10-PROP-SOLVE" propPropSolve,
-    Obligation "O10-PROP-WITNESS" propPropWitness,
-    Obligation "O10-COPY-SCHEME" propCopyScheme,
-    Obligation "O11-UNIFY-STRUCT" propUnifyDecompose,
-    Obligation "O11-WITNESS-NORM" propWitnessNorm,
-    Obligation "O11-WITNESS-COALESCE" propWitnessCoalesce,
-    Obligation "O11-WITNESS-REORDER" propWitnessReorder,
-    Obligation "O12-SOLVE-UNIFY" propSolveVar,
-    Obligation "O12-ACYCLIC-CHECK" propAcyclicCheck,
-    Obligation "O12-ACYCLIC-TOPO" propAcyclicTopo,
-    Obligation "O12-COPY-INST" propCopyInst,
-    Obligation "O12-NORM-GRAFT" propNormGraft,
-    Obligation "O12-NORM-MERGE" propNormMerge,
-    Obligation "O12-NORM-DROP" propNormDrop,
-    Obligation "O12-NORM-FIXPOINT" propNormFixpoint,
-    Obligation "O12-SOLVE-VAR-BASE" propSolveVarBase,
-    Obligation "O12-SOLVE-VAR-VAR" propSolveVarVar,
-    Obligation "O12-SOLVE-HARMONIZE" propSolveHarmonize,
-    Obligation "O12-SOLVE-ARROW" propSolveArrow,
-    Obligation "O12-SOLVE-VALIDATE" propSolveValidate
+  [ FixedObligation "O14-WF-EMPTY" propWfEmpty,
+    FixedObligation "O14-WF-TVAR" propWfTVar,
+    FixedObligation "O14-WF-VAR" propWfVar,
+    FixedObligation "O14-INST-REFLEX" propInstReflex,
+    FixedObligation "O14-INST-TRANS" propInstTrans,
+    FixedObligation "O14-INST-BOT" propInstBot,
+    FixedObligation "O14-INST-HYP" propInstHyp,
+    FixedObligation "O14-INST-INNER" propInstInner,
+    FixedObligation "O14-INST-OUTER" propInstOuter,
+    FixedObligation "O14-INST-QUANT-ELIM" propInstQuantElim,
+    FixedObligation "O14-INST-QUANT-INTRO" propInstQuantIntro,
+    FixedObligation "O14-T-VAR" propTypingVar,
+    FixedObligation "O14-T-ABS" propTypingAbs,
+    FixedObligation "O14-T-APP" propTypingApp,
+    FixedObligation "O14-T-TABS" propTypingTAbs,
+    FixedObligation "O14-T-TAPP" propTypingTApp,
+    FixedObligation "O14-T-LET" propTypingLet,
+    FixedObligation "O14-RED-BETA" propRedBeta,
+    FixedObligation "O14-RED-BETALET" propRedBetaLet,
+    FixedObligation "O14-RED-REFLEX" propRedReflex,
+    FixedObligation "O14-RED-TRANS" propRedTrans,
+    FixedObligation "O14-RED-QUANT-INTRO" propRedQuantIntro,
+    FixedObligation "O14-RED-QUANT-ELIM" propRedQuantElim,
+    FixedObligation "O14-RED-INNER" propRedInner,
+    FixedObligation "O14-RED-OUTER" propRedOuter,
+    FixedObligation "O14-RED-CONTEXT" propRedContext,
+    FixedObligation "O14-APPLY-N" propApplyN,
+    FixedObligation "O14-APPLY-O" propApplyO,
+    FixedObligation "O14-APPLY-SEQ" propApplySeq,
+    FixedObligation "O14-APPLY-INNER" propApplyInner,
+    FixedObligation "O14-APPLY-OUTER" propApplyOuter,
+    FixedObligation "O14-APPLY-HYP" propApplyHyp,
+    FixedObligation "O14-APPLY-BOT" propApplyBot,
+    FixedObligation "O14-APPLY-ID" propApplyId,
+    SizedObligation "O15-TRANS-NO-INERT-LOCKED" propTransNoInertLocked,
+    FixedObligation "O15-TRANS-SCHEME-ROOT-RIGID" propTransSchemeRootRigid,
+    FixedObligation "O15-TRANS-ARROW-RIGID" propTransArrowRigid,
+    FixedObligation "O15-TRANS-NON-INTERIOR-RIGID" propTransNonInteriorRigid,
+    FixedObligation "O15-REORDER-REQUIRED" propSigmaReorderRequired,
+    FixedObligation "O15-REORDER-IDENTITY" propSigmaReorderIdentity,
+    SizedObligation "O15-CONTEXT-FIND" propContextFind,
+    SizedObligation "O15-CONTEXT-REJECT" propContextReject,
+    FixedObligation "O15-EDGE-TRANSLATION" propEdgeTranslation,
+    FixedObligation "O15-ELAB-LAMBDA-VAR" propElabLambdaVar,
+    FixedObligation "O15-ELAB-LET-VAR" propElabLetVar,
+    FixedObligation "O15-ELAB-ABS" propElabAbs,
+    FixedObligation "O15-ELAB-APP" propElabApp,
+    FixedObligation "O15-ELAB-LET" propElabLet,
+    FixedObligation "O15-ENV-LAMBDA" propEnvLambda,
+    FixedObligation "O15-ENV-LET" propEnvLet,
+    FixedObligation "O15-ENV-WF" propEnvWf,
+    FixedObligation "O15-TR-SEQ-EMPTY" propTrSeqEmpty,
+    FixedObligation "O15-TR-SEQ-CONS" propTrSeqCons,
+    FixedObligation "O15-TR-RIGID-RAISE" propTrRigidRaise,
+    FixedObligation "O15-TR-RIGID-MERGE" propTrRigidMerge,
+    FixedObligation "O15-TR-RIGID-RAISEMERGE" propTrRigidRaiseMerge,
+    FixedObligation "O15-TR-ROOT-GRAFT" propTrRootGraft,
+    FixedObligation "O15-TR-ROOT-RAISEMERGE" propTrRootRaiseMerge,
+    FixedObligation "O15-TR-ROOT-WEAKEN" propTrRootWeaken,
+    FixedObligation "O15-TR-NODE-GRAFT" propTrNodeGraft,
+    SizedObligation "O15-TR-NODE-MERGE" propTrNodeMerge,
+    SizedObligation "O15-TR-NODE-RAISEMERGE" propTrNodeRaiseMerge,
+    FixedObligation "O15-TR-NODE-WEAKEN" propTrNodeWeaken,
+    FixedObligation "O15-TR-NODE-RAISE" propTrNodeRaise,
+    FixedObligation "O04-BIND-FLEX-CHILDREN" propBindingFlexChildren,
+    SizedObligation "O04-BIND-INTERIOR" propBindingInterior,
+    SizedObligation "O04-BIND-ORDER" propBindingOrder,
+    SizedObligation "O04-OP-WEAKEN" propGraphWeaken,
+    SizedObligation "O04-OP-RAISE-STEP" propGraphRaiseStep,
+    SizedObligation "O04-OP-RAISE-TO" propGraphRaiseTo,
+    SizedObligation "O05-INERT-NODES" propInertNodes,
+    SizedObligation "O05-INERT-LOCKED" propInertLocked,
+    SizedObligation "O05-WEAKEN-INERT" propInertWeaken,
+    SizedObligation "O07-UNIF-CORE" propUnifyCore,
+    FixedObligation "O07-UNIF-PRESOL" propPresolutionUnify,
+    SizedObligation "O07-REBIND" propRebindHarmonize,
+    FixedObligation "O07-GENUNIF" propGeneralizedUnify,
+    FixedObligation "O08-REIFY-TYPE" propReifyType,
+    FixedObligation "O08-REIFY-NAMES" propReifyNames,
+    FixedObligation "O08-BIND-MONO" propBindMono,
+    SizedObligation "O08-SYN-TO-GRAPH" propSynToGraph,
+    FixedObligation "O08-REIFY-INLINE" propReifyInline,
+    FixedObligation "O08-INLINE-PRED" propInlinePred,
+    FixedObligation "O09-CGEN-ROOT" propCgenRoot,
+    FixedObligation "O09-CGEN-EXPR" propCgenExpr,
+    SizedObligation "O10-EXP-DECIDE" propExpDecide,
+    FixedObligation "O10-EXP-APPLY" propExpApply,
+    FixedObligation "O10-PROP-SOLVE" propPropSolve,
+    FixedObligation "O10-PROP-WITNESS" propPropWitness,
+    SizedObligation "O10-COPY-SCHEME" propCopyScheme,
+    SizedObligation "O11-UNIFY-STRUCT" propPresolutionUnifyStructure,
+    SizedObligation "O11-WITNESS-NORM" propWitnessNorm,
+    SizedObligation "O11-WITNESS-COALESCE" propWitnessCoalesce,
+    SizedObligation "O11-WITNESS-REORDER" propWitnessReorder,
+    FixedObligation "O12-SOLVE-UNIFY" propSolveVar,
+    SizedObligation "O12-ACYCLIC-CHECK" propAcyclicCheck,
+    SizedObligation "O12-ACYCLIC-TOPO" propAcyclicTopo,
+    SizedObligation "O12-COPY-INST" propCopyInst,
+    SizedObligation "O12-NORM-GRAFT" propNormGraft,
+    SizedObligation "O12-NORM-MERGE" propNormMerge,
+    SizedObligation "O12-NORM-DROP" propNormDrop,
+    SizedObligation "O12-NORM-FIXPOINT" propNormFixpoint,
+    FixedObligation "O12-SOLVE-VAR-BASE" propSolveVarBase,
+    FixedObligation "O12-SOLVE-VAR-VAR" propSolveVarVar,
+    FixedObligation "O12-SOLVE-HARMONIZE" propSolveHarmonize,
+    FixedObligation "O12-SOLVE-ARROW" propSolveArrow,
+    FixedObligation "O12-SOLVE-VALIDATE" propSolveValidate
   ]
 
 propBindingFlexChildren :: Int -> Property
@@ -1175,12 +1193,55 @@ propInertWeaken size =
         Right c' -> Inert.inertLockedNodes c' === Right IntSet.empty
         Left err -> counterexample (show err) False
 
-propUnifyDecompose :: Int -> Property
-propUnifyDecompose size =
+propUnifyCore :: Int -> Property
+propUnifyCore size =
   let lhs = TyArrow (NodeId 0) (NodeId 1) (NodeId 2)
       rhs = TyArrow (NodeId 3) (NodeId (size + 10)) (NodeId (size + 11))
    in decomposeUnifyChildren lhs rhs
         === Right [UnifyEdge (NodeId 1) (NodeId (size + 10)), UnifyEdge (NodeId 2) (NodeId (size + 11))]
+
+propPresolutionUnifyStructure :: Int -> Property
+propPresolutionUnifyStructure size =
+  let base = max 3 size * 10
+      root = NodeId 0
+      leftArrow = NodeId (base + 1)
+      leftDomain = NodeId (base + 2)
+      leftCodomain = NodeId (base + 3)
+      rightArrow = NodeId (base + 4)
+      rightDomain = NodeId (base + 5)
+      rightCodomain = NodeId (base + 6)
+      c =
+        rootedConstraintLocal
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (getNodeId root, TestTyCon root (BaseTy "Pair") (leftArrow :| [rightArrow])),
+                    (getNodeId leftArrow, TyArrow leftArrow leftDomain leftCodomain),
+                    (getNodeId leftDomain, TyVar leftDomain Nothing),
+                    (getNodeId leftCodomain, TyVar leftCodomain Nothing),
+                    (getNodeId rightArrow, TyArrow rightArrow rightDomain rightCodomain),
+                    (getNodeId rightDomain, TyVar rightDomain Nothing),
+                    (getNodeId rightCodomain, TyVar rightCodomain Nothing)
+                  ],
+              cBindParents =
+                bindParentsFromPairs
+                  [ (leftArrow, root, BindFlex),
+                    (leftDomain, leftArrow, BindFlex),
+                    (leftCodomain, leftArrow, BindFlex),
+                    (rightArrow, root, BindFlex),
+                    (rightDomain, rightArrow, BindFlex),
+                    (rightCodomain, rightArrow, BindFlex)
+                  ]
+            }
+   in case runPresolutionM defaultTraceConfig (emptyPresolutionState c) (unifyStructureForTest leftArrow rightArrow) of
+        Right ((), st) ->
+          let canonical = canonicalPresolutionNode (psUnionFind st)
+           in conjoin
+                [ canonical leftArrow === canonical rightArrow,
+                  canonical leftDomain === canonical rightDomain,
+                  canonical leftCodomain === canonical rightCodomain
+                ]
+        Left err -> counterexample (show err) False
 
 propSolveVar :: Int -> Property
 propSolveVar _size =
@@ -1283,11 +1344,38 @@ propWfEmpty _size =
 
 propWfTVar :: Int -> Property
 propWfTVar _size =
-  typeCheckShouldMatch (Elab.typeCheck polyId) polyIdTy
+  let outerRef = elabTypeRef 1289 "outer"
+      innerRef = elabTypeRef 1290 "inner"
+      innerBound = Elab.TVarRef outerRef
+      env =
+        Elab.insertTypeBindingRef innerRef innerBound
+          $ Elab.insertTypeBindingRef outerRef Elab.TBottom emptyTypeCheckEnv
+      freeBoundRefs = TypeOps.freeTypeVarRefsType innerBound
+   in conjoin
+        [ Map.size (Elab.typeEnv env) === 2,
+          Map.lookup outerRef (Elab.typeEnv env) === Just Elab.TBottom,
+          Map.lookup innerRef (Elab.typeEnv env) === Just innerBound,
+          counterexample (show freeBoundRefs) $
+            length freeBoundRefs == 1
+              && any (ElabTypes.typeBinderRefsSameIdentity outerRef) freeBoundRefs,
+          Elab.checkInstantiation env innerBound (ElabTypes.instAbstrWithRef innerRef)
+            === Right (Elab.TVarRef innerRef)
+        ]
 
 propWfVar :: Int -> Property
 propWfVar _size =
-  Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
+  let variableTypeRef = elabTypeRef 1293 "a"
+      variableTy = Elab.TVarRef variableTypeRef
+      resolved = generatedResolvedLocal 1293 "x" "x" variableTy
+      env =
+        Elab.insertResolvedTermBinding resolved variableTy
+          $ Elab.insertTypeBindingRef variableTypeRef Elab.TBottom emptyTypeCheckEnv
+      entries = Elab.resolvedTermEnvEntries (Elab.resolvedTermEnv env)
+   in conjoin
+        [ Map.size (Elab.typeEnv env) === 1,
+          length entries === 1,
+          Elab.typeCheckWithEnv env (Elab.EVarNode resolved) === Right variableTy
+        ]
 
 propInstReflex :: Int -> Property
 propInstReflex _size =
@@ -1299,7 +1387,14 @@ propInstTrans _size =
 
 propInstBot :: Int -> Property
 propInstBot _size =
-  applyShouldBe Elab.TBottom (Elab.InstBot intTy) intTy
+  let env = emptyTypeCheckEnv
+   in conjoin
+        [ Elab.checkInstantiation env Elab.TBottom (Elab.InstBot intTy) === Right intTy,
+          counterexample "Inst-Bot accepted a non-bottom source" $
+            case Elab.checkInstantiation env boolTy (Elab.InstBot intTy) of
+              Left _ -> property True
+              Right result -> counterexample (show result) False
+        ]
 
 propInstHyp :: Int -> Property
 propInstHyp _size =
@@ -1320,11 +1415,12 @@ propInstOuter _size =
 
 propInstQuantElim :: Int -> Property
 propInstQuantElim _size =
-  applyShouldBe forallA Elab.InstElim Elab.TBottom
+  Elab.checkInstantiation emptyTypeCheckEnv forallA Elab.InstElim
+    === Right Elab.TBottom
 
 propInstQuantIntro :: Int -> Property
 propInstQuantIntro _size =
-  case Elab.applyInstantiation intTy Elab.InstIntro of
+  case Elab.checkInstantiation emptyTypeCheckEnv intTy Elab.InstIntro of
     Right (Elab.TForallRef _ Nothing body) -> body === intTy
     other -> counterexample (show other) False
 
@@ -3881,6 +3977,113 @@ returnedHigherRankApplicationBeforeEnclosingLambdaGammaExpr =
             )
         )
         (Surf.EVar "_generatedWrap2")
+    )
+
+-- Frozen from case 33 of generated seed 195565654.  The two identity
+-- applications preserve a lambda whose parameter is explicitly higher-rank;
+-- an enclosing ignored-argument application and let publication must not move
+-- that source forall from the parameter into the returned function's outer
+-- binder spine.
+returnedHigherRankParameterBeneathIgnoredApplicationExpr :: Surf.SurfaceExpr
+returnedHigherRankParameterBeneathIgnoredApplicationExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.EApp
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        (Surf.EVar "_generatedWrap4")
+                    )
+                    ( Surf.ELamAnn
+                        "_generatedSeedPoly"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "_generatedSeedPoly")
+                            (Surf.ELit (Surf.LInt 10))
+                        )
+                    )
+                )
+            )
+        )
+        (Surf.ELit (Surf.LBool False))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+-- Frozen from case 58 of generated seed 937635187.  The annotated identity's
+-- source forall is copied into two graph occurrences while the surrounding
+-- wrapper remains partially applied.  Those occurrences may share one solved
+-- representative, but endpoint projection must retain source authority until
+-- the current SchemeInfo supplies an exact occurrence route rather than
+-- require the representative to have only one outward binder globally.
+repeatedSourceOccurrencesBeneathPartialWrappersExpr :: Surf.SurfaceExpr
+repeatedSourceOccurrencesBeneathPartialWrappersExpr =
+  Surf.ELet
+    "_generatedWrap1"
+    ( Surf.EApp
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    ( Surf.ELam
+                        "_generatedWrap4"
+                        ( Surf.EAnn
+                            ( Surf.ELam
+                                "_generatedSeedX"
+                                (Surf.EVar "_generatedSeedX")
+                            )
+                            sigmaIdSource
+                        )
+                    )
+                )
+                (Surf.ELit (Surf.LBool False))
+            )
+        )
+        (Surf.ELit (Surf.LBool True))
+    )
+    (Surf.EVar "_generatedWrap1")
+
+-- Frozen from case 66 of generated seed 449181304.  The returned inner
+-- function first owns a flexible result bounded by the complete polymorphic
+-- identity, while the enclosing exact Gamma specializes that bound beneath
+-- an ignored value lambda.  The certified computation must be applied at the
+-- returned lambda's codomain before the enclosing declaration is published;
+-- an xMLF instantiation cannot cross the value arrow by itself.
+completedReturnedFunctionBoundBeneathNestedLambdasExpr :: Surf.SurfaceExpr
+completedReturnedFunctionBoundBeneathNestedLambdasExpr =
+  Surf.ELam
+    "_generatedWrap1"
+    ( Surf.ELam
+        "_generatedWrap2"
+        ( Surf.ELet
+            "_generatedWrap3"
+            ( Surf.EAnn
+                (Surf.ELit (Surf.LBool True))
+                (Surf.STBase "Bool")
+            )
+            ( Surf.ELam
+                "_generatedWrap4"
+                ( Surf.ELet
+                    "_generatedWrap5"
+                    ( Surf.ELamAnn
+                        "g"
+                        sigmaIdSource
+                        ( Surf.EApp
+                            (Surf.EVar "g")
+                            (Surf.EVar "g")
+                        )
+                    )
+                    (Surf.EVar "_generatedWrap5")
+                )
+            )
+        )
     )
 
 -- Frozen from the third seed-1006 counterexample.  The exact polymorphic
@@ -8991,6 +9194,34 @@ zeroLocalApplicationWithCompletedMixedBoundExpr =
         (Surf.ELit (Surf.LInt (-1)))
     )
 
+sourceRenamedLocalApplicationBinderAuthorityExpr :: Surf.SurfaceExpr
+sourceRenamedLocalApplicationBinderAuthorityExpr =
+  Surf.EApp
+    ( Surf.ELam
+        "_generatedWrap1"
+        ( Surf.ELam
+            "_generatedWrap2"
+            ( Surf.EApp
+                ( Surf.ELam
+                    "_generatedWrap3"
+                    (Surf.EVar "_generatedWrap3")
+                )
+                ( Surf.ELet
+                    "_generatedWrap4"
+                    ( Surf.EAnn
+                        ( Surf.ELam
+                            "_generatedSeedX"
+                            (Surf.EVar "_generatedSeedX")
+                        )
+                        sigmaIdSource
+                    )
+                    (Surf.EVar "_generatedWrap4")
+                )
+            )
+        )
+    )
+    (Surf.ELit (Surf.LBool True))
+
 consumedPendingRootAfterOwnerFinalizationExpr :: Surf.SurfaceExpr
 consumedPendingRootAfterOwnerFinalizationExpr =
   Surf.ELet
@@ -12280,11 +12511,38 @@ expectAnnotatedSelfAppShape term =
 
 propEnvLambda :: Int -> Property
 propEnvLambda _size =
-  Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
+    Right (term, ty) ->
+      case findLambdaBindingEvidence "x" term of
+        Just (binder, occurrence) ->
+          conjoin
+            [ ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails binder)
+                === ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails occurrence),
+              typeShouldMatch
+                (ElabTypes.resolvedVarType binder)
+                (ElabTypes.resolvedVarType occurrence),
+              typeCheckShouldMatch (Elab.typeCheck term) ty
+            ]
+        Nothing -> counterexample ("missing live lambda binding evidence: " ++ show term) False
+    Left err -> counterexample (Elab.renderPipelineError err) False
 
 propEnvLet :: Int -> Property
 propEnvLet _size =
-  Elab.typeCheck (mkTestLocalLet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (mkTestDeferredVar "x")) === Right intTy
+  let expr = Surf.ELet "id" (Surf.ELam "x" (Surf.EVar "x")) (Surf.EVar "id")
+   in case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+        Right (term, ty) ->
+          case findLetBindingEvidence "id" term of
+            Just (binder, scheme, occurrence) ->
+              let schemeTy = Elab.schemeToType scheme
+               in conjoin
+                    [ ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails binder)
+                        === ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails occurrence),
+                      typeShouldMatch schemeTy (ElabTypes.resolvedVarType binder),
+                      typeShouldMatch schemeTy (ElabTypes.resolvedVarType occurrence),
+                      typeCheckShouldMatch (Elab.typeCheck term) ty
+                    ]
+            Nothing -> counterexample ("missing live let binding evidence: " ++ show term) False
+        Left err -> counterexample (Elab.renderPipelineError err) False
 
 propEnvWf :: Int -> Property
 propEnvWf _size =
@@ -14159,6 +14417,70 @@ typeCheckShouldMatch actual expected =
     Right ty -> typeShouldMatch ty expected
     Left err -> counterexample (show err) False
 
+findLambdaBindingEvidence :: String -> Elab.XmlfTerm -> Maybe (ElabTypes.ResolvedVar, ElabTypes.ResolvedVar)
+findLambdaBindingEvidence targetName = go
+  where
+    go term =
+      case term of
+        Elab.ELam binder body
+          | ElabTypes.resolvedVarReferenceName binder == targetName ->
+              fmap (\occurrence -> (binder, occurrence)) (findResolvedOccurrence binder body)
+          | otherwise -> go body
+        Elab.EApp fun arg -> firstJust (go fun) (go arg)
+        Elab.ELet _ _ rhs body -> firstJust (go rhs) (go body)
+        Elab.ETyAbsRef _ _ body -> go body
+        Elab.ETyInst body _ -> go body
+        Elab.ERoll _ body -> go body
+        Elab.EUnroll body -> go body
+        Elab.EVarNode _ -> Nothing
+        Elab.ELit _ -> Nothing
+
+findLetBindingEvidence :: String -> Elab.XmlfTerm -> Maybe (ElabTypes.ResolvedVar, Elab.ElabScheme, ElabTypes.ResolvedVar)
+findLetBindingEvidence targetName = go
+  where
+    go term =
+      case term of
+        Elab.ELet binder scheme rhs body
+          | ElabTypes.resolvedVarReferenceName binder == targetName ->
+              fmap
+                (\occurrence -> (binder, scheme, occurrence))
+                (findResolvedOccurrence binder body)
+          | otherwise -> firstJust (go rhs) (go body)
+        Elab.ELam _ body -> go body
+        Elab.EApp fun arg -> firstJust (go fun) (go arg)
+        Elab.ETyAbsRef _ _ body -> go body
+        Elab.ETyInst body _ -> go body
+        Elab.ERoll _ body -> go body
+        Elab.EUnroll body -> go body
+        Elab.EVarNode _ -> Nothing
+        Elab.ELit _ -> Nothing
+
+findResolvedOccurrence :: ElabTypes.ResolvedVar -> Elab.XmlfTerm -> Maybe ElabTypes.ResolvedVar
+findResolvedOccurrence binder = go
+  where
+    binderKey = ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails binder)
+
+    go term =
+      case term of
+        Elab.EVarNode occurrence
+          | ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails occurrence) == binderKey ->
+              Just occurrence
+          | otherwise -> Nothing
+        Elab.ELam _ body -> go body
+        Elab.EApp fun arg -> firstJust (go fun) (go arg)
+        Elab.ELet _ _ rhs body -> firstJust (go rhs) (go body)
+        Elab.ETyAbsRef _ _ body -> go body
+        Elab.ETyInst body _ -> go body
+        Elab.ERoll _ body -> go body
+        Elab.EUnroll body -> go body
+        Elab.ELit _ -> Nothing
+
+firstJust :: Maybe a -> Maybe a -> Maybe a
+firstJust first second =
+  case first of
+    Just value -> Just value
+    Nothing -> second
+
 propPresolutionClearsEdges :: Surf.SurfaceExpr -> Property
 propPresolutionClearsEdges expr =
   case runToPresolutionDefault Set.empty expr of
@@ -14288,6 +14610,18 @@ emptyPresolutionState c =
     IntMap.empty
     IntMap.empty
     IntMap.empty
+
+canonicalPresolutionNode :: IntMap.IntMap NodeId -> NodeId -> NodeId
+canonicalPresolutionNode parents = go IntSet.empty
+  where
+    go seen current
+      | IntSet.member (getNodeId current) seen = current
+      | otherwise =
+          case IntMap.lookup (getNodeId current) parents of
+            Just parent
+              | parent /= current ->
+                  go (IntSet.insert (getNodeId current) seen) parent
+            _ -> current
 
 identityPresolutionView :: Constraint 'Raw -> PresolutionView 'Raw
 identityPresolutionView c =
@@ -14592,6 +14926,9 @@ inertConstraint size =
 
 intTy :: Elab.ElabType
 intTy = TestElab.tBase (BaseTy "Int")
+
+emptyTypeCheckEnv :: Elab.Env
+emptyTypeCheckEnv = Elab.mkTypeCheckEnvWithResolvedTerms [] Map.empty
 
 builtinIntTy :: Elab.ElabType
 builtinIntTy = ElabTypes.TBaseWithIdentity (Builtins.builtinTypeIdentity "Int") (BaseTy "Int")

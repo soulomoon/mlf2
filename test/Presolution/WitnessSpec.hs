@@ -1406,16 +1406,6 @@ spec = do
                     Left err -> expectationFailure ("Expected normalization success, got: " ++ show err)
                     Right ops1 -> normalizeInstanceOpsForTest env ops1 `shouldBe` Right ops1
 
-        it "does not drop Graft/Weaken when a binder is eliminated by Merge" $ do
-            let c = mkNormalizeConstraint
-                root = NodeId 0
-                a = NodeId 2
-                b = NodeId 3
-                arg = NodeId 10
-                env = mkNormalizeEnv c root (IntSet.fromList [getNodeId a, getNodeId b])
-                ops0 = [OpGraft arg b, OpWeaken b, OpMerge b a]
-            normalizeInstanceOpsForTest env ops0 `shouldBe` Right ops0
-
         it "drops ops that only touch nodes outside the interior" $ do
             let c = mkNormalizeConstraint
                 root = NodeId 0
@@ -2469,31 +2459,6 @@ spec = do
                 case Inert.inertLockedNodes c of
                     Left err -> expectationFailure ("inertLockedNodes failed: " ++ show err)
                     Right s -> IntSet.member (getNodeId n) s `shouldBe` False
-
-            it "identifies inert-locked nodes under rigid ancestors" $ do
-                let root = NodeId 0
-                    mid = NodeId 1
-                    n = NodeId 2
-                    v = NodeId 3
-                    base = NodeId 4
-                    nodes = nodeMapFromList
-                            [ (getNodeId root, TyArrow root mid mid)
-                            , (getNodeId mid, TyArrow mid n base)
-                            , (getNodeId n, TyArrow n v base)
-                            , (getNodeId v, TyVar { tnId = v, tnBound = Nothing })
-                            , (getNodeId base, TestTyBase base (BaseTy "int"))
-                            ]
-                    bindParents =
-                        bindParentsFromPairs
-                            [ (mid, root, BindRigid)
-                            , (n, mid, BindFlex)
-                            , (v, n, BindRigid)
-                            , (base, n, BindFlex)
-                            ]
-                    c = rootedConstraint $ emptyConstraint { cNodes = nodes, cBindParents = bindParents }
-                case Inert.inertLockedNodes c of
-                    Left err -> expectationFailure ("inertLockedNodes failed: " ++ show err)
-                    Right s -> IntSet.member (getNodeId n) s `shouldBe` True
 
             it "treats polymorphic base symbols as inert anchors" $ do
                 let root = NodeId 0

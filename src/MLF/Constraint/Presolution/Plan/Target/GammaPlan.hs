@@ -608,7 +608,15 @@ buildGammaPlan GammaPlanInput{..} = do
                     , IntMap.empty
                     )
         requiredBasePreferences =
-            IntMap.fromList
+            foldl
+                ( \preferences (resultKey, exterior) ->
+                    IntMap.insertWith
+                        (\_ existing -> existing)
+                        resultKey
+                        exterior
+                        preferences
+                )
+                IntMap.empty
                 (concatMap requiredBasePreference (IntMap.toList requiredGamma))
         requiredBasePreference (requirementKey, requirement) =
             case rgbPlacement requirement of
@@ -1130,7 +1138,10 @@ buildGammaPlan GammaPlanInput{..} = do
                         , Just sourceNode <- [typeBinderRefNode sourceRef]
                         ]
                     nestedRouteCandidates =
-                        sourceRouteKeys ++ [getNodeId requirementExterior]
+                        sourceRouteKeys
+                            ++ [ getNodeId requirementExterior
+                               , getNodeId operatedRoot
+                               ]
                     nestedRouteKey =
                         listToMaybe
                             [ candidate
@@ -1148,6 +1159,33 @@ buildGammaPlan GammaPlanInput{..} = do
                                 case nestedRouteKey of
                                     Just key -> key
                                     Nothing -> primaryResultKey
+                    overlappingRequirement =
+                        find
+                            ( \(_, existing) ->
+                                rgbPlacement existing == rgbPlacement requirement
+                                    && requirementsOverlapResults resultKeys existing
+                            )
+                            (IntMap.toList acc)
+                    alternateRequirementKey =
+                        listToMaybe
+                            [ candidate
+                            | candidate <- liveAlternateRequirementKeys
+                            , IntMap.notMember candidate acc
+                            ]
+                    liveAlternateRequirementKeys =
+                        [ candidate
+                        | candidate <- nestedRouteCandidates
+                        , candidate /= requirementKey
+                        , case IntMap.lookup candidate gpiNodes of
+                            Just TyVar{} -> True
+                            _ -> False
+                        ]
+                    requiredBoundsAgree left right =
+                        alphaEqType
+                            (rgbOperatedType left)
+                            (rgbOperatedType right)
+                            || rgbOperatedType left == TBottom
+                            || rgbOperatedType right == TBottom
                 case IntMap.lookup globalKey gpiNodes of
                     Just _ -> pure ()
                     Nothing ->
@@ -1170,28 +1208,68 @@ buildGammaPlan GammaPlanInput{..} = do
                                         , "  trace result: " ++ show resultC
                                         ]))
                     resultEntries
-                -- Current-scope requirements route through the witness result.
-                -- A nested Figure 15.3.5 constructor instead retains its own
-                -- live source/exterior key in the enclosing closure scheme.
-                -- This lets two lexical Gammas share a solved result without
-                -- collapsing their distinct binder identities.
-                case
-                    find
-                        ( \(_, existing) ->
-                            rgbPlacement existing == rgbPlacement requirement
-                                && requirementsOverlapResults resultKeys existing
-                        )
-                        (IntMap.toList acc)
-                  of
-                    Just (existingKey, existing) ->
-                        Left
-                            (ValidationFailed
-                                [ "multiple root RaiseMerge Gamma entries in one construction scope collapse to one edge-local result"
-                                , "  result roots: " ++ show resultEntries
-                                , "  existing binder key: " ++ show (NodeId existingKey)
-                                , "  first: " ++ show existing
-                                , "  second: " ++ show requirement
-                                ])
+                -- A solved monomorphic result can be shared by several
+                -- independent Figure 15.3.5 edges in the same construction
+                -- (for example two nested String append results).  The result
+                -- is still one outward type occurrence, but every root
+                -- RaiseMerge exterior remains a distinct local declaration
+                -- used by its own edge computation.  Keep the first
+                -- declaration on the result key and retain later declarations
+                -- on exact live source/exterior routes.  Binder planning can
+                -- then emit both declarations while publishing only the first
+                -- one as the outward result alias.  If solving has erased
+                -- every alternate flexible route, the exteriors no longer
+                -- denote distinct live declarations.  In that case coalesce
+                -- their edge provenance on the primary declaration instead
+                -- of inventing an identity from a rigid/base node.
+                case overlappingRequirement of
+                    Just (existingKey, existing)
+                        | requiredBoundsAgree existing requirement ->
+                            case alternateRequirementKey of
+                                Just alternateKey ->
+                                    pure
+                                        (IntMap.insert alternateKey requirement acc)
+                                Nothing
+                                    | null liveAlternateRequirementKeys
+                                    , globalKey == primaryResultKey
+                                    , exactOperatedRoutesAgree
+                                        existing
+                                        requirement ->
+                                        pure
+                                            ( IntMap.adjust
+                                                (mergeSharedResultRequirement requirement)
+                                                existingKey
+                                                acc
+                                            )
+                                Nothing ->
+                                    Left
+                                        (ValidationFailed
+                                            [ "multiple root RaiseMerge Gamma entries sharing one result have no distinct live routing keys"
+                                            , "  result roots: " ++ show resultEntries
+                                            , "  existing binder key: " ++ show (NodeId existingKey)
+                                            , "  source route candidates: " ++ show (map NodeId nestedRouteCandidates)
+                                            , "  occupied requirement routes: "
+                                                ++ show
+                                                    [ ( NodeId key
+                                                      , rgbExteriorNode occupied
+                                                      , rgbOperatedRoot occupied
+                                                      , rgbResultRoots occupied
+                                                      , rgbPlacement occupied
+                                                      )
+                                                    | (key, occupied) <- IntMap.toList acc
+                                                    ]
+                                            , "  first: " ++ show existing
+                                            , "  second: " ++ show requirement
+                                            ])
+                        | otherwise ->
+                            Left
+                                (ValidationFailed
+                                    [ "multiple root RaiseMerge Gamma entries sharing one result require incompatible bounds"
+                                    , "  result roots: " ++ show resultEntries
+                                    , "  existing binder key: " ++ show (NodeId existingKey)
+                                    , "  first: " ++ show existing
+                                    , "  second: " ++ show requirement
+                                    ])
                     Nothing ->
                         case IntMap.lookup requirementKey acc of
                             Nothing ->
@@ -1205,6 +1283,30 @@ buildGammaPlan GammaPlanInput{..} = do
                                         , "  first: " ++ show existing
                                         , "  second: " ++ show requirement
                                         ])
+    exactOperatedRoutesAgree left right =
+        case
+            ( rgbExactOperatedOccurrenceRef left
+            , rgbExactOperatedOccurrenceRef right
+            )
+          of
+            (Nothing, Nothing) -> True
+            (Just leftRef, Just rightRef) ->
+                typeBinderRefsSameIdentity leftRef rightRef
+            _ -> False
+
+    mergeSharedResultRequirement incoming existing =
+        existing
+            { rgbEdgeIds =
+                foldl
+                    appendEdgeId
+                    (rgbEdgeIds existing)
+                    (NonEmpty.toList (rgbEdgeIds incoming))
+            , rgbResultRoots =
+                foldl
+                    appendResultRoot
+                    (rgbResultRoots existing)
+                    (NonEmpty.toList (rgbResultRoots incoming))
+            }
 
     requirementsOverlapResults resultKeys requirement =
         any

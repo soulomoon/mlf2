@@ -165,6 +165,7 @@ import MLF.Elab.Run.Generalize.Prepare.TestSupport
     rootRequirementOwnershipAllowsLocalGammaClosureForTest,
     validateLocalApplicationCertificatesForTest,
     unclaimedEdgesOutsideLocalGammaClosuresForTest,
+    placeRootGammaRequirementsForTest,
     placeFrozenRootGammaRequirementsForTest,
   )
 import MLF.Elab.Run.Pipeline.TestSupport
@@ -2032,6 +2033,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   (ownerParent, BindFlex)
                 )
               ]
+          localClosure owner =
+            LocalGammaClosure
+              { lgcEdgeIds = rgbEdgeIds requirement,
+                lgcDirectApplicationEdgeIds = [],
+                lgcForwardedResultEdgeIds = [],
+                lgcExteriorNode = exterior,
+                lgcConsumerIdentity = typeBinderIdentityFromNode exterior,
+                lgcOwner =
+                  LocalGammaOwner
+                    { lgoConstructor = LocalApplicationGamma,
+                      lgoBoundaryEdge = EdgeId 991775,
+                      lgoTermNode = NodeId 991777,
+                      lgoScope = genRef owner
+                    },
+                lgcOwnerPendingScheme = Nothing
+              }
+          localClosures closure =
+            IntMap.singleton (getEdgeId (EdgeId 991775)) closure
 
       it "constructs placement at the nearest contained frozen gen" $ do
         let ga = gaWith (exteriorParents (genRef currentGen))
@@ -2048,6 +2067,65 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               map rgbPlacement (grRequiredGammaBinders placed)
                 `shouldBe`
                   [RequiredGammaAtNestedScope (genRef nestedGen)]
+
+      it "retains an exact local constructor above a deeper result scope" $ do
+        let parents =
+              IntMap.fromList
+                [ ( nodeRefKey (typeRef exterior),
+                    (typeRef exteriorAlias, BindFlex)
+                  ),
+                  ( nodeRefKey (typeRef exteriorAlias),
+                    (genRef siblingRoot, BindFlex)
+                  ),
+                  ( nodeRefKey (genRef siblingRoot),
+                    (genRef currentGen, BindFlex)
+                  ),
+                  ( nodeRefKey (genRef nestedGen),
+                    (genRef currentGen, BindFlex)
+                  )
+                ]
+        case
+            placeRootGammaRequirementsForTest
+              (gaWith parents)
+              (genRef nestedGen)
+              (localClosures (localClosure currentGen))
+              requirements
+          of
+            Left err ->
+              expectationFailure
+                ("ancestor local Gamma placement failed: " ++ show err)
+            Right placed ->
+              map rgbPlacement (grRequiredGammaBinders placed)
+                `shouldBe`
+                  [RequiredGammaAtConstructionScope (genRef currentGen)]
+
+      it "rejects an exact local constructor in an unrelated scope" $ do
+        let parents =
+              IntMap.fromList
+                [ ( nodeRefKey (typeRef exterior),
+                    (genRef siblingRoot, BindFlex)
+                  ),
+                  ( nodeRefKey (genRef nestedGen),
+                    (genRef currentGen, BindFlex)
+                  )
+                ]
+        case
+            placeRootGammaRequirementsForTest
+              (gaWith parents)
+              (genRef nestedGen)
+              (localClosures (localClosure siblingRoot))
+              requirements
+          of
+            Left (ValidationFailed messages) ->
+              messages
+                `shouldSatisfy` any
+                  (isInfixOf "unrelated to the current construction scope")
+            Left err ->
+              expectationFailure
+                ("expected unrelated-scope failure, got " ++ show err)
+            Right placed ->
+              expectationFailure
+                ("expected unrelated-scope rejection, got " ++ show placed)
 
       it "constructs a parentless result exterior at the exact current scope" $ do
         let rootRequirement =
@@ -2562,6 +2640,35 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldBe` DirectAmbientProvisionalNestedResult
         classify []
           `shouldBe` DirectAmbientEstablished
+
+      it "does not count a certified construction alias as a second pending exterior" $ do
+        let sourceProjectedClosure =
+              pendingClosure
+                { lgcOwnerPendingScheme =
+                    Just
+                      ( Elab.schemeInfoFromRefSubst
+                          ( Elab.mkElabSchemeWithRefs
+                              [ (sourcePendingRef, Nothing)
+                              , (pendingRef, Nothing)
+                              ]
+                              TBottom
+                          )
+                          ( IntMap.fromList
+                              [ (getNodeId pendingExterior, sourcePendingRef)
+                              , (getNodeId pendingResult, separateResultRef)
+                              ]
+                          )
+                      )
+                }
+        bodyConsumerProjectionProvenanceForTest
+          [(sourcePendingRef, pendingRef)]
+          pendingOwner
+          (pendingClosures sourceProjectedClosure)
+          pendingRequirement
+          pendingResult
+          pendingRef
+          (TArrow TBottom TBottom)
+          `shouldBe` DirectAmbientProvisionalNestedResult
 
       it "keeps a same-shaped ordinary ambient bottom declaration established and conflicting" $ do
         let ordinaryClosure =
@@ -7078,15 +7185,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               expectationFailure
                 ("expected the unused source let to remain in the checked term, got " ++ show other)
 
-    it "chi-first ResultType|checked-authoritative keeps representative corpus parity" $ do
-      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
-
-    it "checked-authoritative keeps representative corpus parity" $ do
-      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
-
-    it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
-      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
-
     it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
       forM_ representativeMigrationCorpus $ \expr -> do
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
@@ -7101,10 +7199,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         validateStrict legacy
         assertViewParity view legacy
 
-    describe "Dual-path verification" $ do
-      it "production entrypoint remains checked-authoritative on representative corpus" $ do
-        forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
-
+    describe "Result-type diagnostics" $ do
       it "opt-in result-type diagnostics still clear the representative corpus" $ do
         forM_ representativeMigrationCorpus assertDiagnosticPipelineTypeChecks
 
@@ -9376,14 +9471,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           Right (term, canonicalTy) -> typeCheck term `shouldBe` Right canonicalTy
 
     describe "Phase 7 reduction of auto-inferred recursive terms (item-1)" $ do
-      it "isValue recognizes ERoll wrapping a value as a value" $ do
-        let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
-        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-          Left err -> expectationFailure (renderPipelineError err)
-          Right (term, _ty) -> do
-            let nf = normalize term
-            isValue nf `shouldBe` True
-
       it "step reduces EUnroll (ERoll ty v) to v for auto-inferred recursive terms" $ do
         let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
         case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
@@ -9467,7 +9554,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               isValue nf `shouldBe` True
               case typeCheck nf of
                 Right nfTy -> nfTy `shouldBe` ty
-                Left _ -> pure () -- some normal forms lose let-scheme context
+                Left tcErr ->
+                  expectationFailure
+                    (label ++ ": normalized term failed type checking: " ++ show tcErr)
       it "runPipelineElab succeeds for self-recursive definition" $ do
         let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
         case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of

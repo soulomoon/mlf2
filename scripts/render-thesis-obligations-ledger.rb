@@ -65,11 +65,17 @@ def validate_schema!(doc)
     unless ta['matcher'] == o['id']
       fail_validation("obligation #{o['id']} test_anchor matcher must equal the obligation id")
     end
-    unless ta['kind'] == 'quickcheck'
-      fail_validation("obligation #{o['id']} test_anchor kind must be quickcheck")
+    unless %w[fixed quickcheck].include?(ta['kind'])
+      fail_validation("obligation #{o['id']} test_anchor kind must be fixed or quickcheck")
     end
     unless ta['min_success'].is_a?(Integer) && ta['min_success'].positive?
       fail_validation("obligation #{o['id']} test_anchor min_success must be a positive integer")
+    end
+    if ta['kind'] == 'fixed' && ta['min_success'] != 1
+      fail_validation("obligation #{o['id']} fixed evidence must have min_success=1")
+    end
+    if ta['kind'] == 'quickcheck' && ta['min_success'] < 100
+      fail_validation("obligation #{o['id']} quickcheck evidence must have min_success>=100")
     end
   end
 end
@@ -125,15 +131,17 @@ def render_markdown(obligations)
   lines << '## Validation Notes'
   lines << ''
   lines << '- This file is generated; edit the YAML source instead.'
-  lines << '- Gate enforcement additionally verifies id set, mapping completeness, code-anchor files, executable test anchors keyed by obligation ID, QuickCheck evidence kind, and minimum property success counts.'
-  lines << '- Code-anchor fragments are navigational labels; QuickCheck property anchors carry the semantic obligation evidence.'
+  lines << '- Gate enforcement additionally verifies id set, mapping completeness, code-anchor files, executable test anchors keyed by obligation ID, evidence kind, and minimum success counts.'
+  lines << '- `fixed` evidence runs a deterministic obligation example once; `quickcheck` evidence must exercise at least 100 generated sizes.'
+  lines << '- Code-anchor fragments are navigational labels; executable anchors carry the semantic obligation evidence.'
   lines << ''
   lines.join("\n")
 end
 
 options = {
   write: true,
-  check: false
+  check: false,
+  stdout: false
 }
 
 OptionParser.new do |opts|
@@ -143,6 +151,7 @@ OptionParser.new do |opts|
   end
   opts.on('--stdout', 'Print generated markdown to stdout instead of writing file') do
     options[:write] = false
+    options[:stdout] = true
   end
 end.parse!
 
@@ -164,6 +173,8 @@ end
 if options[:write]
   File.write(OUTPUT_PATH, md)
   puts("wrote #{OUTPUT_PATH}")
-else
+elsif options[:stdout]
   puts(md)
+else
+  puts("up to date: #{OUTPUT_PATH}")
 end

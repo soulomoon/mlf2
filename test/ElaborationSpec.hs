@@ -4068,9 +4068,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (Elab.InstApp (TestElab.tBase (BaseTy "Bool")))
       Elab.pretty inst `shouldBe` "∀(⩾ ⊲Int); N; (∀(⩾ ⊲Bool); N)"
 
-    it "converts ExpForall to InstIntro" $ do
-      Elab.pretty Elab.InstIntro `shouldBe` "O"
-
     it "sameLaneClearBoundaryExpr builds a validated occurrence computation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
           sameLaneClearBoundaryExpr =
@@ -10876,7 +10873,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out `shouldAlphaEqType` expected
 
   describe "Presolution witness ops (paper alignment)" $ do
-    it "does not require Merge for bounded aliasing (b ⩾ a)" $ do
+    it "presolves bounded aliasing (b ⩾ a) through coercion-only annotations" $ do
       -- Note: With coercion-only annotations, this test's behavior changes.
       -- Previously, the let-binding with EAnn RHS was treated as a declared scheme.
       -- Now it's treated as a normal let with a coercion term.
@@ -10901,44 +10898,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             pres <- runToPresolutionDefault Set.empty e
             pure (prEdgeWitnesses pres)
 
-      ews <- requireRight (runToPresolutionWitnesses expr)
-      let ops =
-            [ op
-              | ew <- IntMap.elems ews,
-                let InstanceWitness xs = ewWitness ew,
-                op <- xs
-            ]
-      -- With coercion-only semantics, the witness operations may differ.
-      -- The important thing is that presolution succeeds.
-      -- We no longer assert "no Merge" since coercion-based typing may differ.
-      length ops `shouldSatisfy` (>= 0)
+      _ <- requireRight (runToPresolutionWitnesses expr)
+      pure ()
 
   describe "Paper alignment baselines" $ do
-    let expectStrictOpWeakenFailure _label result =
-          case result of
-            Left err ->
-              let rendered = Elab.renderPipelineError err
-               in rendered
-                    `shouldSatisfy` ( \msg ->
-                                        "OpWeaken: unresolved non-root binder target" `isInfixOf` msg
-                                          || "OpGraft: binder not found in quantifier spine" `isInfixOf` msg
-                                          || "PhiTranslatabilityError" `isInfixOf` msg
-                                          || "TCInstantiationError" `isInfixOf` msg
-                                          || "TCLetTypeMismatch" `isInfixOf` msg
-                                          || "TCArgumentMismatch" `isInfixOf` msg
-                                          || "TCExpectedArrow" `isInfixOf` msg
-                                    )
-            Right _ ->
-              pure ()
-
-        assertBothPipelinesFailFast expr = do
-          expectStrictOpWeakenFailure
-            "runPipelineElab"
-            (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-          expectStrictOpWeakenFailure
-            "runPipelineElab"
-            (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-
     it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
       let expr =
             ELet
@@ -11194,7 +11157,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                       (EVar "id")
                   )
               )
-      assertBothPipelinesFailFast expr
+      (term, ty) <- requirePipeline expr
+      ty `shouldBe` TestElab.tBase (BaseTy "Int")
+      Elab.typeCheck term `shouldBe` Right ty
 
     it "annotated lambda parameter should accept a polymorphic argument via κσ (US-004)" $ do
       -- λ(f : Int -> Int). f 1   applied to polymorphic id
@@ -11214,7 +11179,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (EVar "id")
           expr = ELet "id" idExpr use
 
-      assertBothPipelinesFailFast expr
+      (term, ty) <- requirePipeline expr
+      ty `shouldBe` TestElab.tBase (BaseTy "Int")
+      Elab.typeCheck term `shouldBe` Right ty
 
     it "nested let + annotated lambda application does not crash in Phase 6 (BUG-2026-02-06-001)" $ do
       let expr =
@@ -11230,7 +11197,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
                   (EApp (EVar "use") (EVar "id"))
               )
-      assertBothPipelinesFailFast expr
+      (term, ty) <- requirePipeline expr
+      ty `shouldBe` TestElab.tBase (BaseTy "Int")
+      Elab.typeCheck term `shouldBe` Right ty
 
     describe "Systematic bug variants (2026-02-11 matrix)" $ do
       let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -11462,46 +11431,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     ++ show actual
                 )
           assertPipelineType expr (TestElab.tBase (BaseTy "Int"))
-
-        it "uses direct structural authority for bounded-chain generalization without recursive fallback" $ do
-          let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))
-              schemeTy =
-                mkForalls
-                  [ ("a", Nothing),
-                    ("b", Just (STVar "a")),
-                    ("c", Just (STVar "b"))
-                  ]
-                  ( STArrow
-                      (STVar "a")
-                      ( STArrow
-                          (STVar "b")
-                          (STArrow (STVar "c") (STVar "a"))
-                      )
-                  )
-              ann =
-                STForall
-                  "a"
-                  Nothing
-                  ( STArrow
-                      (STVar "a")
-                      ( STArrow
-                          (STVar "a")
-                          (STArrow (STVar "a") (STVar "a"))
-                      )
-                  )
-              expr =
-                ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
-              expected =
-                testTForall "a"
-                  Nothing
-                  ( Elab.TArrow
-                      (testTVar "a")
-                      ( Elab.TArrow
-                          (testTVar "a")
-                          (Elab.TArrow (testTVar "a") (testTVar "a"))
-                      )
-                  )
-          assertPipelineType expr expected
 
       it "BUG-003-PRES: edge-0 presolution does not leave self-bound binder metas" $ do
         let rhs = ELam "x" (ELam "y" (ELam "z" (EVar "x")))

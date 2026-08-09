@@ -174,6 +174,7 @@ import MLF.Elab.Run.Generalize.Prepare
     preparedCompilerExactSourceResultBinderRoutes,
     preparedReadContextReady,
     preparedResultTypeViewReady,
+    selectPreparedRootScopeAuthority,
     stripPreparedWitnesslessAuthoritativeAnn,
   )
 import qualified MLF.Elab.SourceType as SourceType
@@ -2651,13 +2652,20 @@ finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMod
     go _ _ acc [] =
       pure acc
     go identityGenerator index acc ((key, rootExtPrepared, root) : rest) = do
+      let rootLabel = rootTimingLabel label index
+      rootPrepared <-
+        evaluatePipelineEitherSuffix timing rootLabel ".select_scope_authority" $
+          fromElabError
+            ( selectPreparedRootScopeAuthority
+                prepared
+                (mcrAnnotated root)
+            )
       let elabEnv =
             preparedElaborationEnvWithSourceBinderAliases
               (mcrSourceTypeBinderAliases root)
               annSourceTypes
               rootExtPrepared
-              prepared
-          rootLabel = rootTimingLabel label index
+              rootPrepared
       out <-
         ExceptT $
           finishPreparedPipelineRootWithTiming
@@ -2668,7 +2676,7 @@ finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMod
             traceCfg
             identityGenerator
             rootExtPrepared
-            prepared
+            rootPrepared
             elabConfig
             elabEnv
             (mcrAnnotated root)

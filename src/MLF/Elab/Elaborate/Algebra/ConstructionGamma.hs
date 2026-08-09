@@ -15800,9 +15800,12 @@ bodyConsumerRouteProjectionProvenance refRenames owner closures requirement decl
 -- pending consumer is @b@.
 --
 -- The complete frozen closure still fixes the owner, edge set, exterior, and
--- consumer identity.  The pending scheme must contain exactly one unbounded
--- declaration for its direct exterior route; a missing route, a peer route,
--- or an already materialized bound cannot authorize replacement.
+-- consumer identity.  The pending scheme's direct exterior substitution must
+-- name exactly one unbounded declaration before that declaration is projected
+-- through the certified construction quotient.  A construction alias may
+-- coexist in the scheme after projection, but a missing direct route, a peer
+-- route, or an already materialized direct declaration cannot authorize
+-- replacement.
 exactPendingLocalConsumerCompletion
   :: [(TypeBinderRef, TypeBinderRef)]
   -> LocalGammaOwner
@@ -15836,8 +15839,8 @@ exactPendingLocalConsumerCompletion refRenames owner closures requirement node a
                   | (ref, mbBound) <-
                       schemeBinderRefs (siScheme pendingSchemeInfo)
                   , typeBinderRefsSameIdentity
-                      (applyRefRenames ref)
-                      (applyRefRenames exteriorRef)
+                      ref
+                      exteriorRef
                   ]
               of
                 [Nothing] -> True

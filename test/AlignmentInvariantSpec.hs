@@ -59,82 +59,8 @@ spec = describe "Thesis alignment invariants" $ do
                         let missingTraces = IntSet.difference witnessKeys traceKeys
                         missingTraces `shouldBe` IntSet.empty
 
-    describe "A3: pipeline output stability" $ do
-        let corpus =
-                [ ("id", ELam "x" (EVar "x"))
-                , ("const", ELam "x" (ELam "y" (EVar "x")))
-                , ("app-id", EApp (ELam "x" (EVar "x")) (ELam "y" (EVar "y")))
-                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
-                ]
-        forM_ corpus $ \(label, expr) ->
-            it ("checked and unchecked paths agree for: " ++ label) $ do
-                let unchecked = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
-                    checked = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
-                case (unchecked, checked) of
-                    (Right (t1, ty1), Right (t2, ty2)) -> do
-                        show t1 `shouldBe` show t2
-                        show ty1 `shouldBe` show ty2
-                    (Left e1, Left e2) ->
-                        show e1 `shouldBe` show e2
-                    _ -> expectationFailure $
-                        "Path disagreement for " ++ label ++
-                        ": unchecked=" ++ show unchecked ++
-                        ", checked=" ++ show checked
-
-    describe "D1: fallback result type works without patchNode" $ do
-        let corpus =
-                [ ("id", ELam "x" (EVar "x"))
-                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
-                , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
-                ]
-        forM_ corpus $ \(label, expr) ->
-            it ("pipeline output unchanged after patchNode elimination for: " ++ label) $ do
-                let norm = unsafeNormalizeExpr expr
-                    r1 = runPipelineElab Set.empty norm
-                    r2 = runPipelineElab Set.empty norm
-                case (r1, r2) of
-                    (Right (t1, ty1), Right (t2, ty2)) -> do
-                        show t1 `shouldBe` show t2
-                        show ty1 `shouldBe` show ty2
-                    (Left e1, Left e2) -> e1 `shouldBe` e2
-                    _ -> expectationFailure $
-                        "Path disagreement for " ++ label
-
-    describe "B1: reification output stable after original-domain migration" $ do
-        let corpus =
-                [ ("id", ELam "x" (EVar "x"))
-                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
-                , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
-                ]
-        forM_ corpus $ \(label, expr) ->
-            it ("term and type unchanged for: " ++ label) $ do
-                let norm = unsafeNormalizeExpr expr
-                    r1 = runPipelineElab Set.empty norm
-                    r2 = runPipelineElab Set.empty norm
-                case (r1, r2) of
-                    (Right (t1, ty1), Right (t2, ty2)) -> do
-                        show t1 `shouldBe` show t2
-                        show ty1 `shouldBe` show ty2
-                    (Left e1, Left e2) -> e1 `shouldBe` e2
-                    _ -> expectationFailure $
-                        "Path disagreement for " ++ label
-
-    describe "D2: elaboration path is read-only on Solved" $ do
-        let corpus =
-                [ ("id", ELam "x" (EVar "x"))
-                , ("let-poly", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id")))
-                , ("ann-id", EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))))
-                ]
-        forM_ corpus $ \(label, expr) ->
-            it ("full pipeline succeeds post-boundary-enforcement for: " ++ label) $ do
-                let result = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
-                case result of
-                    Left err -> expectationFailure (show err)
-                    Right (term, ty) -> do
-                        show term `shouldNotBe` ""
-                        show ty `shouldNotBe` ""
-
-        it "full pipeline succeeds post-boundary-enforcement for identity-backed nested-let" $ do
+    describe "D2: post-boundary elaboration integration" $ do
+        it "full pipeline typechecks an identity-backed nested let" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
                         (ELet "g" (EVar "f")

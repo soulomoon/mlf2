@@ -3,7 +3,7 @@
 
 module ProgramParserParitySpec (spec) where
 
-import Data.List (intercalate, isInfixOf)
+import Data.List (intercalate, isInfixOf, sort)
 import qualified Data.List.NonEmpty as NE
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
@@ -24,259 +24,17 @@ import MLF.Program.CLI (runProgramArgs)
 import System.Directory
     ( createDirectoryIfMissing
     , doesFileExist
+    , listDirectory
     , removePathForcibly
     )
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeExtension)
 import Test.Hspec
 
 spec :: Spec
 spec =
-    xdescribe "MLF.Program parser parity" $ do
+    describe "MLF.Program parser parity" $ do
         it "matches canonical parser projections for every batched positive fixture" $
             traverse_ assertCanonicalParserParityProjection parserParityPositiveCases
-
-        it "shared parser-owned .mlfp parser parses Char and String literals" $ do
-            source <- readFile textLiteralCharStringCanonicalSourcePath
-            expected <- readFile textLiteralCharStringExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection textLiteralCharStringCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch textLiteralCharStringParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses first-class polymorphic source types" $ do
-            source <- readFile firstClassPolymorphismSourceTypesCanonicalSourcePath
-            expected <- readFile firstClassPolymorphismSourceTypesExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection firstClassPolymorphismSourceTypesCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch firstClassPolymorphismSourceTypesParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses higher-order partial applications" $ do
-            source <- readFile higherOrderPartialApplicationCanonicalSourcePath
-            expected <- readFile higherOrderPartialApplicationExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection higherOrderPartialApplicationCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch higherOrderPartialApplicationParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses higher-order local function flow" $ do
-            source <- readFile higherOrderLocalFunctionFlowCanonicalSourcePath
-            expected <- readFile higherOrderLocalFunctionFlowExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection higherOrderLocalFunctionFlowCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch higherOrderLocalFunctionFlowParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses higher-order returned functions" $ do
-            source <- readFile higherOrderReturnedFunctionCanonicalSourcePath
-            expected <- readFile higherOrderReturnedFunctionExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection higherOrderReturnedFunctionCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch higherOrderReturnedFunctionParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses higher-order function fields" $ do
-            source <- readFile higherOrderFunctionFieldCanonicalSourcePath
-            expected <- readFile higherOrderFunctionFieldExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection higherOrderFunctionFieldCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch higherOrderFunctionFieldParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses authoritative recursive let flows" $ do
-            source <- readFile authoritativeRecursiveLetCanonicalSourcePath
-            expected <- readFile authoritativeRecursiveLetExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection authoritativeRecursiveLetCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch authoritativeRecursiveLetParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses authoritative cross-module let polymorphism" $ do
-            source <- readFile authoritativeCrossModuleLetPolymorphismCanonicalSourcePath
-            expected <- readFile authoritativeCrossModuleLetPolymorphismExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection authoritativeCrossModuleLetPolymorphismCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch authoritativeCrossModuleLetPolymorphismParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses authoritative unified case analysis" $
-            assertSharedParserParityProjection
-                authoritativeCaseAnalysisCanonicalSourcePath
-                authoritativeCaseAnalysisExpectedProjectionPath
-                authoritativeCaseAnalysisParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses importless authoritative unified let polymorphism" $
-            assertSharedParserParityProjection
-                authoritativeLetPolymorphismCanonicalSourcePath
-                authoritativeLetPolymorphismExpectedProjectionPath
-                authoritativeLetPolymorphismParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses authoritative unified nullary overloaded methods" $
-            assertSharedParserParityProjection
-                authoritativeNullaryOverloadedMethodCanonicalSourcePath
-                authoritativeNullaryOverloadedMethodExpectedProjectionPath
-                authoritativeNullaryOverloadedMethodParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses authoritative unified overloaded methods" $
-            assertSharedParserParityProjection
-                authoritativeOverloadedMethodCanonicalSourcePath
-                authoritativeOverloadedMethodExpectedProjectionPath
-                authoritativeOverloadedMethodParserProgramRoot
-
-        it "shared parser-owned .mlfp parser recursively sequences class and instance method rows" $ do
-            canonicalProjection <-
-                renderCanonicalProjection
-                    recursiveMethodRowsSourcePath
-                    recursiveMethodRowsSourceText
-            parserRoot <- writeRecursiveMethodRowsParserPackage
-            sharedParserProjection <- runSharedParserBatch parserRoot
-
-            sharedParserProjection `shouldBe` Right canonicalProjection
-
-        it "shared parser-owned .mlfp parser parses recursive ADT plain Nat" $ do
-            source <- readFile recursiveAdtPlainNatCanonicalSourcePath
-            expected <- readFile recursiveAdtPlainNatExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveAdtPlainNatCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveAdtPlainNatParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses recursive list tail" $ do
-            source <- readFile recursiveListTailCanonicalSourcePath
-            expected <- readFile recursiveListTailExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveListTailCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveListTailParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses recursive tree first-order programs" $ do
-            source <- readFile recursiveTreeFirstOrderCanonicalSourcePath
-            expected <- readFile recursiveTreeFirstOrderExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveTreeFirstOrderCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveTreeFirstOrderParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses recursive tree deriving programs" $ do
-            source <- readFile recursiveTreeDerivingCanonicalSourcePath
-            expected <- readFile recursiveTreeDerivingExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveTreeDerivingCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveTreeDerivingParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses recursive ADT typeclass integration" $ do
-            source <- readFile typeclassIntegrationCanonicalSourcePath
-            expected <- readFile typeclassIntegrationExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection typeclassIntegrationCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch typeclassIntegrationParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses abstract recursive ADT module use" $ do
-            source <- readFile abstractRecursiveAdtModuleUseCanonicalSourcePath
-            expected <- readFile abstractRecursiveAdtModuleUseExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection abstractRecursiveAdtModuleUseCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch abstractRecursiveAdtModuleUseParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses module-integrated recursive existential programs" $ do
-            source <- readFile moduleIntegratedRecursiveExistentialCanonicalSourcePath
-            expected <- readFile moduleIntegratedRecursiveExistentialExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection moduleIntegratedRecursiveExistentialCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch moduleIntegratedRecursiveExistentialParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses complex recursive programs" $ do
-            source <- readFile complexRecursiveProgramCanonicalSourcePath
-            expected <- readFile complexRecursiveProgramExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection complexRecursiveProgramCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch complexRecursiveProgramParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses named deriving Eq recursive ADTs" $ do
-            source <- readFile derivingEqCanonicalSourcePath
-            expected <- readFile derivingEqExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection derivingEqCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch derivingEqParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses named recursive GADT source modules" $ do
-            source <- readFile recursiveGadtCanonicalSourcePath
-            expected <- readFile recursiveGadtExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveGadtCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveGadtParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses named recursive existential source modules" $ do
-            source <- readFile recursiveExistentialCanonicalSourcePath
-            expected <- readFile recursiveExistentialExpectedProjectionPath
-            canonicalProjection <- renderCanonicalProjection recursiveExistentialCanonicalSourcePath source
-            sharedParserProjection <- runSharedParserBatch recursiveExistentialParserProgramRoot
-
-            canonicalProjection `shouldBe` expected
-            sharedParserProjection `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser parses same-root package source layout" $
-            assertSharedPackageParserParityProjection
-                packageCrossModuleLetSourcePaths
-                packageCrossModuleLetExpectedProjectionPath
-                packageCrossModuleLetParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses ordered search-path package source layout" $
-            assertSharedPackageParserParityProjection
-                packageSearchPathImportSourcePaths
-                packageSearchPathImportExpectedProjectionPath
-                packageSearchPathImportParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses compiler-seed data-model package sources" $
-            assertSharedPackageParserParityProjection
-                compilerSeedDataModelSourcePaths
-                compilerSeedDataModelExpectedProjectionPath
-                compilerSeedDataModelParserProgramRoot
-
-        it "shared parser-owned .mlfp parser parses compiler-seed lexer source" $
-            assertSharedParserParityProjection
-                compilerSeedLexerSourcePath
-                compilerSeedLexerExpectedProjectionPath
-                compilerSeedLexerParserProgramRoot
-
-        beforeAll loadRecursiveModuleBodyBatchFixture $ do
-            it "shared parser-owned .mlfp parser uses recursive module-body declaration sequencing" $ \fixture ->
-                case recursiveModuleBodyRunResult fixture of
-                    Left err -> expectationFailure err
-                    Right output ->
-                        take (length (recursiveModuleBodyExpectedPositiveOutput fixture)) output
-                            `shouldBe` recursiveModuleBodyExpectedPositiveOutput fixture
-
-            it "parser-owned .mlfp parser rejects malformed recursive module-body declaration sequencing" $ \fixture ->
-                case recursiveModuleBodyRunResult fixture of
-                    Left err -> expectationFailure err
-                    Right output ->
-                        traverse_ (assertRecursiveModuleBodyNegativeEvidence output) recursiveModuleBodyNegativeCases
 
         it "compiler-seed data-model parser-parity sources copy selected seed modules" $
             traverse_ assertSourceCopy compilerSeedDataModelSourceCopyPairs
@@ -284,275 +42,44 @@ spec =
         it "compiler-seed lexer parser-parity source copies the selected seed module" $
             assertSourceCopy (compilerSeedLexerOriginalPath, compilerSeedLexerSourcePath)
 
-        beforeAll loadParserParityBatchFixture $ do
-            it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+        describe "dynamic .mlfp parser parity driver" $
+            beforeAll loadParserParityBatchFixture $ do
+                it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
+                    case batchRunResult fixture of
+                        Left err -> expectationFailure err
+                        Right output ->
+                            take (length (batchExpectedOutput fixture)) output
+                                `shouldBe` batchExpectedOutput fixture
 
-            it "shared parser-owned .mlfp parser parses multi-module source text and export/import surfaces" $ \fixture -> do
-                abstractSource <- readFile multiModuleAbstractExportImportCanonicalSourcePath
-                abstractExpected <- readFile multiModuleAbstractExportImportExpectedProjectionPath
-                recursiveSource <- readFile multiModuleRecursiveAdtExportImportCanonicalSourcePath
-                recursiveExpected <- readFile multiModuleRecursiveAdtExportImportExpectedProjectionPath
+                it "shared parser-owned .mlfp parser uses recursive module-body declaration sequencing" $ \fixture ->
+                    case batchRunResult fixture of
+                        Left err -> expectationFailure err
+                        Right output ->
+                            let recursiveOutput = drop (length (batchExpectedOutput fixture)) output
+                             in take (length (batchRecursiveModuleBodyExpectedPositiveOutput fixture)) recursiveOutput
+                                    `shouldBe` batchRecursiveModuleBodyExpectedPositiveOutput fixture
 
-                abstractCanonicalProjection <-
-                    renderCanonicalProjection multiModuleAbstractExportImportCanonicalSourcePath abstractSource
-                recursiveCanonicalProjection <-
-                    renderCanonicalProjection multiModuleRecursiveAdtExportImportCanonicalSourcePath recursiveSource
-                sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
+                it "parser-owned .mlfp parser rejects malformed recursive module-body declaration sequencing" $ \fixture ->
+                    case batchRunResult fixture of
+                        Left err -> expectationFailure err
+                        Right output ->
+                            traverse_ (assertRecursiveModuleBodyNegativeEvidence output) recursiveModuleBodyNegativeCases
 
-                abstractCanonicalProjection `shouldBe` abstractExpected
-                recursiveCanonicalProjection `shouldBe` recursiveExpected
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:multi-module-abstract-export-import" abstractExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:multi-module-recursive-adt-export-import" recursiveExpected)
-                filter (`isInfixOf` sharedParserSource) sharedParserRound318ShortcutPhrases
-                    `shouldBe` []
+        it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ do
+            sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedParserExists `shouldBe` True
+            batchRoot <- writeParserParityBatchPackage
+            batchFiles <-
+                sort . filter ((== ".mlfp") . takeExtension)
+                    <$> listDirectory batchRoot
+            batchSource <- concat <$> traverse (readFile . (batchRoot </>)) batchFiles
 
-            it "parser-owned .mlfp parser rejects malformed multi-module import exposing separators through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:multi-module-import-exposing-separator" importExposingSeparatorNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed text literal diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:text-literal-malformed" textLiteralMalformedNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed first-class polymorphic source-type diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:first-class-polymorphism-source-type" firstClassPolymorphismSourceTypeNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed higher-order partial-application diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:higher-order-partial-application" higherOrderPartialApplicationNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed higher-order local function diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:higher-order-local-function-flow" higherOrderLocalFunctionFlowNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed higher-order returned-function diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:higher-order-returned-function" higherOrderReturnedFunctionNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed higher-order function-field diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:higher-order-function-field" higherOrderFunctionFieldNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed authoritative recursive-let diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:authoritative-recursive-let" authoritativeRecursiveLetNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed authoritative cross-module let-polymorphism diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:authoritative-cross-module-let-polymorphism" authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes authoritative unified exact source fixtures through the generated public CLI driver" $ \fixture -> do
-                caseAnalysisExpected <- readFile authoritativeCaseAnalysisExpectedProjectionPath
-                letPolymorphismExpected <- readFile authoritativeLetPolymorphismExpectedProjectionPath
-                nullaryOverloadedExpected <- readFile authoritativeNullaryOverloadedMethodExpectedProjectionPath
-                overloadedExpected <- readFile authoritativeOverloadedMethodExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:authoritative-case-analysis" caseAnalysisExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:authoritative-let-polymorphism" letPolymorphismExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:authoritative-nullary-overloaded-method" nullaryOverloadedExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:authoritative-overloaded-method" overloadedExpected)
-
-            it "parser-owned .mlfp parser reports malformed authoritative unified diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:authoritative-unified-let-polymorphism" authoritativeUnifiedLetPolymorphismNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed recursive ADT plain Nat diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:recursive-adt-plain-nat" recursiveAdtPlainNatNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed recursive list tail diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:recursive-list-tail" recursiveListTailNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes recursive tree fixtures through the generated public CLI driver" $ \fixture -> do
-                firstOrderExpected <- readFile recursiveTreeFirstOrderExpectedProjectionPath
-                derivingExpected <- readFile recursiveTreeDerivingExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:recursive-tree-first-order" firstOrderExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:recursive-tree-deriving" derivingExpected)
-
-            it "parser-owned .mlfp parser reports malformed recursive tree diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:recursive-tree-branch-arrow" recursiveTreeNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes recursive ADT typeclass integration through the generated public CLI driver" $ \fixture -> do
-                expected <- readFile typeclassIntegrationExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:typeclass-integration" expected)
-
-            it "parser-owned .mlfp parser reports malformed recursive ADT typeclass integration diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:typeclass-integration-nested-case" typeclassIntegrationNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes abstract recursive ADT module use through the generated public CLI driver" $ \fixture -> do
-                expected <- readFile abstractRecursiveAdtModuleUseExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:abstract-recursive-adt-module-use" expected)
-
-            it "parser-owned .mlfp parser reports malformed abstract recursive ADT module use diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:abstract-recursive-adt-module-use" abstractRecursiveAdtModuleUseNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes module-integrated recursive existential source through the generated public CLI driver" $ \fixture -> do
-                expected <- readFile moduleIntegratedRecursiveExistentialExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:module-integrated-recursive-existential" expected)
-
-            it "parser-owned .mlfp parser reports malformed module-integrated recursive existential diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:module-integrated-recursive-existential" moduleIntegratedRecursiveExistentialNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes complex recursive programs through the generated public CLI driver" $ \fixture -> do
-                expected <- readFile complexRecursiveProgramExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:complex-recursive-program" expected)
-
-            it "parser-owned .mlfp parser reports malformed complex recursive program diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:complex-recursive-program" complexRecursiveProgramNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes named recursive ADT source modules through the generated public CLI driver" $ \fixture -> do
-                derivingExpected <- readFile derivingEqExpectedProjectionPath
-                gadtExpected <- readFile recursiveGadtExpectedProjectionPath
-                existentialExpected <- readFile recursiveExistentialExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:deriving-eq" derivingExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:recursive-gadt" gadtExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:recursive-existential" existentialExpected)
-
-            it "parser-owned .mlfp parser reports malformed named recursive ADT diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:named-recursive-adt-case-branch" namedRecursiveAdtNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes package source-layout fixtures through the generated public CLI driver" $ \fixture -> do
-                crossModuleLetExpected <- readFile packageCrossModuleLetExpectedProjectionPath
-                searchPathImportExpected <- readFile packageSearchPathImportExpectedProjectionPath
-                compilerSeedDataModelExpected <- readFile compilerSeedDataModelExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:package-cross-module-let" crossModuleLetExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:package-search-path-import" searchPathImportExpected)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:compiler-seed-data-model" compilerSeedDataModelExpected)
-
-            it "parser-owned .mlfp parser reports malformed package-layout import diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:package-cross-module-let-import-semicolon" packageLayoutImportSemicolonNegativeEvidenceProjection)
-
-            it "parser-owned .mlfp parser reports malformed compiler-seed data-model diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:compiler-seed-data-model-case-branch" compilerSeedDataModelCaseBranchNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser routes compiler-seed lexer through the generated public CLI driver" $ \fixture -> do
-                compilerSeedLexerExpected <- readFile compilerSeedLexerExpectedProjectionPath
-
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "positive:compiler-seed-lexer" compilerSeedLexerExpected)
-
-            it "parser-owned .mlfp parser reports malformed compiler-seed lexer diagnostics through public run-program" $ \fixture -> do
-                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
-                batchExpectedOutput fixture
-                    `shouldSatisfy` isInfixOf
-                        (batchSection "negative:compiler-seed-lexer-case-branch" compilerSeedLexerCaseBranchNegativeEvidenceProjection)
-
-            it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
-                sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-                sharedParserExists `shouldBe` True
-
-                let batchSource = batchMainSource fixture
-                batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
-                batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
-                batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromSourceTexts"
-                batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromFourSourceTexts"
-                batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
-                batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
+            batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromSourceTexts"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromFourSourceTexts"
+            batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
 
         it "shared parser-owned .mlfp parser composes grammar without fixture-level token streams" $ do
             sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
@@ -1038,26 +565,6 @@ compilerSeedLexerSourcePath :: FilePath
 compilerSeedLexerSourcePath =
     "test/conformance/mlfp/parser-parity/compiler-seed-lexer/src/SeedLexer.mlfp"
 
-packageCrossModuleLetSourcePaths :: [FilePath]
-packageCrossModuleLetSourcePaths =
-    [ packageCrossModuleLetCoreSourcePath
-    , packageCrossModuleLetMainSourcePath
-    ]
-
-packageSearchPathImportSourcePaths :: [FilePath]
-packageSearchPathImportSourcePaths =
-    [ packageSearchPathImportLibSourcePath
-    , packageSearchPathImportMainSourcePath
-    ]
-
-compilerSeedDataModelSourcePaths :: [FilePath]
-compilerSeedDataModelSourcePaths =
-    [ compilerSeedDataModelSeedSourceSourcePath
-    , compilerSeedDataModelSeedTokenSourcePath
-    , compilerSeedDataModelSeedDiagnosticSourcePath
-    , compilerSeedDataModelSeedAstSourcePath
-    ]
-
 compilerSeedDataModelSourceCopyPairs :: [(FilePath, FilePath)]
 compilerSeedDataModelSourceCopyPairs =
     [ (compilerSeedDataModelSeedSourceOriginalPath, compilerSeedDataModelSeedSourceSourcePath)
@@ -1257,151 +764,6 @@ compilerSeedLexerExpectedProjectionPath =
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
-
-textLiteralCharStringParserProgramRoot :: FilePath
-textLiteralCharStringParserProgramRoot =
-    "test/programs/compiler-parser-parity/text-literal-char-string"
-
-firstClassPolymorphismSourceTypesParserProgramRoot :: FilePath
-firstClassPolymorphismSourceTypesParserProgramRoot =
-    "test/programs/compiler-parser-parity/first-class-polymorphism-source-types"
-
-higherOrderPartialApplicationParserProgramRoot :: FilePath
-higherOrderPartialApplicationParserProgramRoot =
-    "test/programs/compiler-parser-parity/higher-order-partial-application"
-
-higherOrderLocalFunctionFlowParserProgramRoot :: FilePath
-higherOrderLocalFunctionFlowParserProgramRoot =
-    "test/programs/compiler-parser-parity/higher-order-local-function-flow"
-
-higherOrderReturnedFunctionParserProgramRoot :: FilePath
-higherOrderReturnedFunctionParserProgramRoot =
-    "test/programs/compiler-parser-parity/higher-order-returned-function"
-
-higherOrderFunctionFieldParserProgramRoot :: FilePath
-higherOrderFunctionFieldParserProgramRoot =
-    "test/programs/compiler-parser-parity/higher-order-function-field"
-
-authoritativeRecursiveLetParserProgramRoot :: FilePath
-authoritativeRecursiveLetParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-recursive-let"
-
-authoritativeCrossModuleLetPolymorphismParserProgramRoot :: FilePath
-authoritativeCrossModuleLetPolymorphismParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-cross-module-let-polymorphism"
-
-authoritativeCaseAnalysisParserProgramRoot :: FilePath
-authoritativeCaseAnalysisParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-case-analysis"
-
-authoritativeLetPolymorphismParserProgramRoot :: FilePath
-authoritativeLetPolymorphismParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-let-polymorphism"
-
-authoritativeNullaryOverloadedMethodParserProgramRoot :: FilePath
-authoritativeNullaryOverloadedMethodParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-nullary-overloaded-method"
-
-authoritativeOverloadedMethodParserProgramRoot :: FilePath
-authoritativeOverloadedMethodParserProgramRoot =
-    "test/programs/compiler-parser-parity/authoritative-overloaded-method"
-
-recursiveMethodRowsParserProgramRoot :: FilePath
-recursiveMethodRowsParserProgramRoot =
-    "dist-newstyle/parser-parity-recursive-method-rows"
-
-recursiveMethodRowsSourcePath :: FilePath
-recursiveMethodRowsSourcePath =
-    "test/conformance/mlfp/parser-parity/recursive-method-rows/src/Main.mlfp"
-
-recursiveMethodRowsSourceText :: String
-recursiveMethodRowsSourceText =
-    unlines
-        [ "module Main export (Eq, Nat(..), eq, neq, zero, main) {"
-        , "  class Eq a {"
-        , "    eq : a -> a -> Bool;"
-        , "    neq : a -> a -> Bool;"
-        , "    same : a -> a -> Bool;"
-        , "    different : a -> a -> Bool;"
-        , "    again : a -> a -> Bool;"
-        , "  }"
-        , ""
-        , "  data Nat ="
-        , "      Zero : Nat"
-        , "    | Succ : Nat -> Nat;"
-        , ""
-        , "  instance Eq Nat {"
-        , "    eq = λleft λright true;"
-        , "    neq = λleft λright false;"
-        , "    same = λleft λright true;"
-        , "    different = λleft λright false;"
-        , "    again = λleft λright true;"
-        , "  }"
-        , ""
-        , "  def zero : Nat = Zero;"
-        , "  def main : Bool = eq zero Zero;"
-        , "}"
-        ]
-
-recursiveAdtPlainNatParserProgramRoot :: FilePath
-recursiveAdtPlainNatParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-adt-plain-nat"
-
-recursiveListTailParserProgramRoot :: FilePath
-recursiveListTailParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-list-tail"
-
-recursiveTreeFirstOrderParserProgramRoot :: FilePath
-recursiveTreeFirstOrderParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-tree-first-order"
-
-recursiveTreeDerivingParserProgramRoot :: FilePath
-recursiveTreeDerivingParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-tree-deriving"
-
-typeclassIntegrationParserProgramRoot :: FilePath
-typeclassIntegrationParserProgramRoot =
-    "test/programs/compiler-parser-parity/typeclass-integration"
-
-abstractRecursiveAdtModuleUseParserProgramRoot :: FilePath
-abstractRecursiveAdtModuleUseParserProgramRoot =
-    "test/programs/compiler-parser-parity/abstract-recursive-adt-module-use"
-
-moduleIntegratedRecursiveExistentialParserProgramRoot :: FilePath
-moduleIntegratedRecursiveExistentialParserProgramRoot =
-    "test/programs/compiler-parser-parity/module-integrated-recursive-existential"
-
-complexRecursiveProgramParserProgramRoot :: FilePath
-complexRecursiveProgramParserProgramRoot =
-    "test/programs/compiler-parser-parity/complex-recursive-program"
-
-derivingEqParserProgramRoot :: FilePath
-derivingEqParserProgramRoot =
-    "test/programs/compiler-parser-parity/deriving-eq"
-
-recursiveGadtParserProgramRoot :: FilePath
-recursiveGadtParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-gadt"
-
-recursiveExistentialParserProgramRoot :: FilePath
-recursiveExistentialParserProgramRoot =
-    "test/programs/compiler-parser-parity/recursive-existential"
-
-packageCrossModuleLetParserProgramRoot :: FilePath
-packageCrossModuleLetParserProgramRoot =
-    "test/programs/compiler-parser-parity/package-cross-module-let"
-
-packageSearchPathImportParserProgramRoot :: FilePath
-packageSearchPathImportParserProgramRoot =
-    "test/programs/compiler-parser-parity/package-search-path-import"
-
-compilerSeedDataModelParserProgramRoot :: FilePath
-compilerSeedDataModelParserProgramRoot =
-    "test/programs/compiler-parser-parity/compiler-seed-data-model"
-
-compilerSeedLexerParserProgramRoot :: FilePath
-compilerSeedLexerParserProgramRoot =
-    "test/programs/compiler-parser-parity/compiler-seed-lexer"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -2172,13 +1534,10 @@ sharedParserRecursiveMethodRowUsePhrases =
 
 sharedParserRecursiveMethodRowGuardPhrases :: [String]
 sharedParserRecursiveMethodRowGuardPhrases =
-    [ "shared parser-owned .mlfp parser recursively sequences class and instance method rows"
-    , "shared parser-owned .mlfp parser guards recursive class and instance method row substrate"
+    [ "shared parser-owned .mlfp parser guards recursive class and instance method row substrate"
     , "sharedParserRecursiveMethodRowSubstratePhrases"
     , "sharedParserRecursiveMethodRowUsePhrases"
     , "sharedParserRemovedMethodRowContinuationAliases"
-    , "recursiveMethodRowsSourceText"
-    , "writeRecursiveMethodRowsParserPackage"
     ]
 
 sharedParserRemovedMethodRowContinuationAliases :: [String]
@@ -2947,86 +2306,11 @@ runSharedParserBatch :: FilePath -> IO (Either String String)
 runSharedParserBatch batchRoot =
     runProgramArgs [batchRoot, "--search-path", sharedParserLibraryRoot]
 
-writeRecursiveMethodRowsParserPackage :: IO FilePath
-writeRecursiveMethodRowsParserPackage = do
-    removePathForcibly recursiveMethodRowsParserProgramRoot
-    createDirectoryIfMissing True recursiveMethodRowsParserProgramRoot
-    writeFile
-        (recursiveMethodRowsParserProgramRoot </> "Main.mlfp")
-        $ unlines
-            [ "module Main export (main) {"
-            , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-            , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText);"
-            , ""
-            , "  def main : IO Unit ="
-            , "    putStrLn (renderParserParityProjectionFromSourceText"
-            , "      " <> show recursiveMethodRowsSourcePath
-            , "      " <> show recursiveMethodRowsSourceText <> ");"
-            , "}"
-            ]
-    pure recursiveMethodRowsParserProgramRoot
-
 data ParserParityBatchFixture = ParserParityBatchFixture
     { batchExpectedOutput :: String
-    , batchMainSource :: String
+    , batchRecursiveModuleBodyExpectedPositiveOutput :: String
     , batchRunResult :: Either String String
     }
-
-data RecursiveModuleBodyBatchFixture = RecursiveModuleBodyBatchFixture
-    { recursiveModuleBodyExpectedPositiveOutput :: String
-    , recursiveModuleBodyRunResult :: Either String String
-    }
-
-loadRecursiveModuleBodyBatchFixture :: IO RecursiveModuleBodyBatchFixture
-loadRecursiveModuleBodyBatchFixture = do
-    expectedPositiveOutput <- expectedRecursiveModuleBodyPositiveOutput
-    packageRoot <- writeRecursiveModuleBodyBatchPackage
-    runResult <- runSharedParserBatch packageRoot
-    pure
-        RecursiveModuleBodyBatchFixture
-            { recursiveModuleBodyExpectedPositiveOutput = expectedPositiveOutput
-            , recursiveModuleBodyRunResult = runResult
-            }
-
-writeRecursiveModuleBodyBatchPackage :: IO FilePath
-writeRecursiveModuleBodyBatchPackage = do
-    removePathForcibly recursiveModuleBodyBatchPackageRoot
-    createDirectoryIfMissing True recursiveModuleBodyBatchPackageRoot
-    writeFile
-        (recursiveModuleBodyBatchPackageRoot </> "Main.mlfp")
-        recursiveModuleBodyBatchMainSource
-    pure recursiveModuleBodyBatchPackageRoot
-
-recursiveModuleBodyBatchPackageRoot :: FilePath
-recursiveModuleBodyBatchPackageRoot =
-    "dist-newstyle/parser-parity-recursive-module-body"
-
-recursiveModuleBodyBatchMainSource :: String
-recursiveModuleBodyBatchMainSource =
-    unlines $
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
-        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserNegativeEvidenceFromSourceText);"
-        , ""
-        , "  def section : String -> String -> String ="
-        , "    λ(label : String) λ(output : String)"
-        , "      stringAppend \"== \" (stringAppend label (stringAppend \" ==\\n\" (stringAppend output \"\\n\")));"
-        , ""
-        ]
-            ++ concatMap renderInlinePositiveBatchDefinitions recursiveModuleBodyPositiveCases
-            ++ concatMap renderInlineNegativeBatchDefinitions recursiveModuleBodyNegativeCases
-            ++ [ "  def parserParityBatchOutput : String ="
-               , "    " <> appendStringExpressions recursiveModuleBodyBatchSectionNames <> ";"
-               , ""
-               , "  def main : IO Unit ="
-               , "    putStr parserParityBatchOutput;"
-               , "}"
-               ]
-
-recursiveModuleBodyBatchSectionNames :: [String]
-recursiveModuleBodyBatchSectionNames =
-    map ((<> "Section") . inlinePositiveIdentifier) recursiveModuleBodyPositiveCases
-        ++ map ((<> "Section") . inlineNegativeIdentifier) recursiveModuleBodyNegativeCases
 
 renderInlinePositiveBatchDefinitions :: ParserParityInlinePositiveCase -> [String]
 renderInlinePositiveBatchDefinitions testCase =
@@ -3097,13 +2381,13 @@ assertRecursiveModuleBodyNegativeEvidence output testCase = do
 loadParserParityBatchFixture :: IO ParserParityBatchFixture
 loadParserParityBatchFixture = do
     expected <- expectedParserParityBatchOutput
+    recursiveExpectedPositiveOutput <- expectedRecursiveModuleBodyPositiveOutput
     batchRoot <- writeParserParityBatchPackage
-    source <- readFile (batchRoot </> "Main.mlfp")
     result <- runSharedParserBatch batchRoot
     pure
         ParserParityBatchFixture
             { batchExpectedOutput = expected
-            , batchMainSource = source
+            , batchRecursiveModuleBodyExpectedPositiveOutput = recursiveExpectedPositiveOutput
             , batchRunResult = result
             }
 
@@ -3342,25 +2626,6 @@ assertCanonicalParserParityProjection testCase = do
     canonicalProjection <- renderCanonicalProjection (positiveCaseSourcePath testCase) source
     canonicalProjection `shouldBe` expected
 
-assertSharedParserParityProjection :: FilePath -> FilePath -> FilePath -> IO ()
-assertSharedParserParityProjection sourcePath expectedPath parserRoot = do
-    source <- readFile sourcePath
-    expected <- readFile expectedPath
-    canonicalProjection <- renderCanonicalProjection sourcePath source
-    sharedParserProjection <- runSharedParserBatch parserRoot
-
-    canonicalProjection `shouldBe` expected
-    sharedParserProjection `shouldBe` Right expected
-
-assertSharedPackageParserParityProjection :: [FilePath] -> FilePath -> FilePath -> IO ()
-assertSharedPackageParserParityProjection sourcePaths expectedPath parserRoot = do
-    expected <- readFile expectedPath
-    canonicalProjection <- renderCanonicalPackageProjection sourcePaths
-    sharedParserProjection <- runSharedParserBatch parserRoot
-
-    canonicalProjection `shouldBe` expected
-    sharedParserProjection `shouldBe` Right expected
-
 assertSourceCopy :: (FilePath, FilePath) -> IO ()
 assertSourceCopy (sourcePath, copiedPath) = do
     source <- readFile sourcePath
@@ -3372,11 +2637,13 @@ writeParserParityBatchPackage = do
     loadedPositiveCases <- traverse loadPositiveParserParityCase parserParityPositiveCases
     loadedPackagePositiveCases <-
         traverse loadPositivePackageParserParityCase parserParityPackagePositiveCases
+    let shards = parserParityBatchShards loadedPositiveCases loadedPackagePositiveCases
     removePathForcibly parserParityBatchPackageRoot
     createDirectoryIfMissing True parserParityBatchPackageRoot
+    traverse_ (writeParserParityBatchShard parserParityBatchPackageRoot) shards
     writeFile
         (parserParityBatchPackageRoot </> "Main.mlfp")
-        (parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases)
+        (parserParityBatchMainSource shards)
     pure parserParityBatchPackageRoot
 
 loadPositiveParserParityCase :: ParserParityPositiveCase -> IO (ParserParityPositiveCase, String)
@@ -3395,14 +2662,92 @@ loadPositivePackageParserParityCase testCase = do
         sourceText <- readFile (packageSourcePath sourceCase)
         pure (sourceCase, sourceText)
 
-parserParityBatchMainSource ::
+data ParserParityBatchEntry = ParserParityBatchEntry
+    { parserParityBatchEntryDefinitions :: [String]
+    , parserParityBatchEntrySectionName :: String
+    }
+
+data ParserParityBatchShard = ParserParityBatchShard
+    { parserParityBatchShardModuleName :: String
+    , parserParityBatchShardOutputName :: String
+    , parserParityBatchShardEntries :: [ParserParityBatchEntry]
+    }
+
+parserParityBatchShards ::
     [(ParserParityPositiveCase, String)] ->
     [(ParserParityPackagePositiveCase, [(ParserParityPackageSource, String)])] ->
-    String
-parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases =
+    [ParserParityBatchShard]
+parserParityBatchShards loadedPositiveCases loadedPackagePositiveCases =
+    zipWith makeShard [1 :: Int ..] (chunksOf parserParityBatchShardSize entries)
+  where
+    entries =
+        map
+            (\loadedCase ->
+                ParserParityBatchEntry
+                    (renderPositiveBatchDefinitions loadedCase)
+                    ((<> "Section") . positiveCaseIdentifier . fst $ loadedCase)
+            )
+            loadedPositiveCases
+            ++ map
+                (\loadedCase ->
+                    ParserParityBatchEntry
+                        (renderPackagePositiveBatchDefinitions loadedCase)
+                        ((<> "Section") . packagePositiveCaseIdentifier . fst $ loadedCase)
+                )
+                loadedPackagePositiveCases
+            ++ map
+                (\testCase ->
+                    ParserParityBatchEntry
+                        (renderNegativeBatchDefinitions testCase)
+                        ((<> "Section") . negativeCaseIdentifier $ testCase)
+                )
+                parserParityNegativeCases
+            ++ [ ParserParityBatchEntry
+                    renderRetryBatchDefinitions
+                    (retryEvidenceIdentifier <> "Section")
+               ]
+            ++ map
+                (\testCase ->
+                    ParserParityBatchEntry
+                        (renderInlinePositiveBatchDefinitions testCase)
+                        ((<> "Section") . inlinePositiveIdentifier $ testCase)
+                )
+                recursiveModuleBodyPositiveCases
+            ++ map
+                (\testCase ->
+                    ParserParityBatchEntry
+                        (renderInlineNegativeBatchDefinitions testCase)
+                        ((<> "Section") . inlineNegativeIdentifier $ testCase)
+                )
+                recursiveModuleBodyNegativeCases
+
+    makeShard index shardEntries =
+        ParserParityBatchShard
+            { parserParityBatchShardModuleName = "ParserParityBatchShard" <> show index
+            , parserParityBatchShardOutputName = "parserParityBatchShard" <> show index <> "Output"
+            , parserParityBatchShardEntries = shardEntries
+            }
+
+parserParityBatchShardSize :: Int
+parserParityBatchShardSize = 8
+
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _ [] = []
+chunksOf size values =
+    let (chunk, rest) = splitAt size values
+     in chunk : chunksOf size rest
+
+writeParserParityBatchShard :: FilePath -> ParserParityBatchShard -> IO ()
+writeParserParityBatchShard root shard =
+    writeFile
+        (root </> (parserParityBatchShardModuleName shard <> ".mlfp"))
+        (parserParityBatchShardSource shard)
+
+parserParityBatchShardSource :: ParserParityBatchShard -> String
+parserParityBatchShardSource shard =
     unlines $
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
+        [ "module " <> parserParityBatchShardModuleName shard <> " export (" <> parserParityBatchShardOutputName shard <> ") {"
+        , "  import Prelude exposing (stringAppend);"
         , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityPackageProjectionFromFourSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
         , ""
         , "  def section : String -> String -> String ="
@@ -3410,23 +2755,37 @@ parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases =
         , "      stringAppend \"== \" (stringAppend label (stringAppend \" ==\\n\" (stringAppend output \"\\n\")));"
         , ""
         ]
-            ++ concatMap renderPositiveBatchDefinitions loadedPositiveCases
-            ++ concatMap renderPackagePositiveBatchDefinitions loadedPackagePositiveCases
-            ++ concatMap renderNegativeBatchDefinitions parserParityNegativeCases
-            ++ renderRetryBatchDefinitions
-            ++ [ "  def parserParityBatchOutput : String ="
-               , "    " <> appendStringExpressions batchSectionNames <> ";"
+            ++ concatMap parserParityBatchEntryDefinitions (parserParityBatchShardEntries shard)
+            ++ [ "  def " <> parserParityBatchShardOutputName shard <> " : String ="
+               , "    "
+                    <> appendStringExpressions
+                        (map parserParityBatchEntrySectionName (parserParityBatchShardEntries shard))
+                    <> ";"
+               , "}"
+               ]
+
+parserParityBatchMainSource :: [ParserParityBatchShard] -> String
+parserParityBatchMainSource shards =
+    unlines $
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
+        ]
+            ++ map renderShardImport shards
+            ++ [ ""
+               , "  def parserParityBatchOutput : String ="
+               , "    " <> appendStringExpressions (map parserParityBatchShardOutputName shards) <> ";"
                , ""
                , "  def main : IO Unit ="
                , "    putStr parserParityBatchOutput;"
                , "}"
                ]
   where
-    batchSectionNames =
-        map ((<> "Section") . positiveCaseIdentifier . fst) loadedPositiveCases
-            ++ map ((<> "Section") . packagePositiveCaseIdentifier . fst) loadedPackagePositiveCases
-            ++ map ((<> "Section") . negativeCaseIdentifier) parserParityNegativeCases
-            ++ [retryEvidenceIdentifier <> "Section"]
+    renderShardImport shard =
+        "  import "
+            <> parserParityBatchShardModuleName shard
+            <> " exposing ("
+            <> parserParityBatchShardOutputName shard
+            <> ");"
 
 renderPositiveBatchDefinitions :: (ParserParityPositiveCase, String) -> [String]
 renderPositiveBatchDefinitions (testCase, sourceText) =
@@ -4512,14 +3871,6 @@ renderCanonicalProjection path source =
             expectationFailure (renderProgramParseError err) >> fail "parse failed"
         Right located ->
             renderLocatedProjection located
-
-renderCanonicalPackageProjection :: [FilePath] -> IO String
-renderCanonicalPackageProjection sourcePaths =
-    concat <$> traverse renderSourcePathProjection sourcePaths
-  where
-    renderSourcePathProjection sourcePath = do
-        source <- readFile sourcePath
-        renderCanonicalProjection sourcePath source
 
 renderLocatedProjection :: P.LocatedProgram -> IO String
 renderLocatedProjection located =

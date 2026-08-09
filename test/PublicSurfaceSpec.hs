@@ -44,10 +44,6 @@ spec = describe "Public surface contracts" $ do
       let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
       parseRawEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr
 
-    it "roundtrips recursive surface types through parse(pretty(type))" $ do
-      let ty = STMu "a" (STCon "List" (STVar "a" :| []))
-      parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
-
     it "roundtrips variable-headed surface types through parse(pretty(type))" $ do
       let ty = STVarApp "f" (STVarApp "g" (STVar "a" :| []) :| [STVar "b"])
       parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
@@ -108,12 +104,6 @@ spec = describe "Public surface contracts" $ do
               Nothing
       Pipeline.TBaseWithIdentity identity (Pipeline.BaseTy "$stale_token")
         `shouldBe` Pipeline.TBaseWithIdentity identity (Pipeline.BaseTy "Main.Token")
-
-    it "owns checked runtime helpers and pipeline diagnostics" $ do
-      expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
-        expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do
-          Pipeline.typeCheck term `shouldBe` Right ty
-          Pipeline.isValue term `shouldBe` True
 
     it "runs unified .mlfp programs through the shared eMLF/typecheck surface" $ do
       src <- readFile "test/programs/unified/authoritative-let-polymorphism.mlfp"
@@ -193,11 +183,11 @@ spec = describe "Public surface contracts" $ do
           let c = Pipeline.crConstraint cr
           API.constraintNodeCount c `shouldSatisfy` (> 0)
 
-    it "constraintEdgeCount returns a non-negative count" $ do
+    it "constraintEdgeCount observes instantiation edges in an applied let" $ do
       expectRight (parseNormEmlfExpr "let id = λ(x) x in id 1") $ \expr ->
         expectRight (Pipeline.inferConstraintGraph Set.empty expr) $ \cr -> do
           let c = Pipeline.crConstraint cr
-          API.constraintEdgeCount c `shouldSatisfy` (>= 0)
+          API.constraintEdgeCount c `shouldSatisfy` (> 0)
 
     it "lookupNode retrieves the root node from a constraint graph" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->

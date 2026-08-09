@@ -8,6 +8,7 @@ module MLF.Elab.SourceBinder.TestSupport
     resolveConstructionSourceBindersInTypeAtExpectedForTest,
     resolveConstructionSourceBindersInPacketAtExpectedForTest,
     sourceBinderConstructionRenamesForTest,
+    sourceBinderConstructionRenamesRetainingAmbiguousSourcesForTest,
   )
 where
 
@@ -24,6 +25,7 @@ import MLF.Elab.SourceBinder
     resolveConstructionSourceBindersInTypeAtExpected,
     resolveConstructionSourceBindersInPacketAtExpected,
     sourceBinderConstructionRenames,
+    sourceBinderConstructionRenamesRetainingAmbiguousSources,
   )
 import MLF.Elab.Types
   ( ElabScheme,
@@ -106,3 +108,11 @@ sourceBinderConstructionRenamesForTest
   -> Either String [(TypeBinderRef, TypeBinderRef)]
 sourceBinderConstructionRenamesForTest =
   sourceBinderConstructionRenames
+
+sourceBinderConstructionRenamesRetainingAmbiguousSourcesForTest
+  :: (NodeId -> NodeId)
+  -> IntMap.IntMap TypeBinderRef
+  -> IntMap.IntMap TypeBinderRef
+  -> Either String [(TypeBinderRef, TypeBinderRef)]
+sourceBinderConstructionRenamesRetainingAmbiguousSourcesForTest =
+  sourceBinderConstructionRenamesRetainingAmbiguousSources

@@ -38,6 +38,7 @@ module MLF.Elab.Run.Generalize.Prepare.TestSupport (
     rootRequirementOwnershipAllowsLocalGammaClosureForTest,
     validateLocalApplicationCertificatesForTest,
     unclaimedEdgesOutsideLocalGammaClosuresForTest,
+    placeRootGammaRequirementsForTest,
     placeFrozenRootGammaRequirementsForTest,
     resolvedSourceApplicationArgumentEndpointForTest,
 ) where
@@ -263,6 +264,15 @@ placeFrozenRootGammaRequirementsForTest
     -> Either ElabError GeneralizationRequirements
 placeFrozenRootGammaRequirementsForTest ga currentScope =
     placeNestedRootRequirements ga currentScope IntMap.empty
+
+placeRootGammaRequirementsForTest
+    :: GaBindParents 'Presolved
+    -> NodeRef
+    -> IntMap.IntMap LocalGammaClosure
+    -> GeneralizationRequirements
+    -> Either ElabError GeneralizationRequirements
+placeRootGammaRequirementsForTest =
+    placeNestedRootRequirements
 
 resolvedSourceApplicationArgumentEndpointForTest
     :: SchemeInfo

@@ -3,6 +3,53 @@
 ## Unreleased
 
 ### Changed
+- Re-enabled the complete `ProgramParserParitySpec` harness and replaced its
+  fixture-by-fixture dynamic duplication with one generated, sharded public-CLI
+  driver.  The restored gate exposed and fixed production-path defects:
+  term-local application Gamma ownership was being replayed at an unrelated
+  batch root, the deferred-definition fallback queue discarded the suffix
+  after its first ineligible item, and representative lookup ignored exact
+  ambient aliases when repeated recursive parser branches shared one
+  structural binder.  An exact local Gamma can now remain at its certified
+  ancestor construction scope, and a finalized body-consumer certificate is
+  projected through a frozen operated endpoint before ambient comparison, so
+  deep monomorphic partial applications retain their declared codomain without
+  a global type-shape preference.  Parent result authority is propagated down
+  a partial-application spine only when one checked source application reaches
+  that result; Church-encoding implementation binders no longer make a
+  monomorphic source function look explicitly polymorphic while its checked
+  child is still publishing the immediate codomain.  Shared monomorphic root
+  `RaiseMerge` requirements keep distinct live flexible routes, but coalesce
+  edge provenance when solving has erased every such route and their exact
+  endpoint evidence agrees.  Pending local-consumer completion now counts the
+  exact direct exterior before applying construction renames, so one certified
+  declaration and its construction alias are not mistaken for two competing
+  exteriors.  When a returned higher-rank parameter crosses ignored
+  applications and let publication, the active packet's validated
+  source-owner completion replaces only its exact stale provisional Gamma
+  slot; the actual child term must recheck under that completed declaration,
+  so a source forall stays beneath the function parameter instead of moving to
+  the outer binder spine.  Repeated occurrences of one source binder may also
+  share a solved representative while retaining distinct outward construction
+  identities.  Relaxed source projection now preserves the source authority
+  in that case, SchemeInfo alignment consults only occurrence keys owned by
+  the current scheme, and owner-final let publication carries the selected
+  occurrence rename through the scheme, checked RHS, and publication Gamma as
+  one quotient.  A third generated counterexample exposed a completed returned
+  function declaration beneath nested value lambdas: its open child result
+  could not be published directly at the now-closed declaration.  Exact lambda
+  construction now takes the completed declaration bound, certifies a unique
+  codomain instantiation, applies it beneath the value-lambda spine, rechecks
+  the complete term, and only then publishes the exact result identity; no
+  ordinary instantiation is allowed to cross a value arrow without that owner
+  certificate.  Thesis-obligation evidence now distinguishes deterministic
+  fixed examples from genuinely
+  size-varying QuickCheck properties, assigns each obligation a distinct
+  property function and normalized equation, and is checked in one test
+  process.  Repository guards reject disabled/focused Hspec combinators and
+  future duplicate obligation properties; vacuous and same-path duplicate
+  tests were removed or strengthened.  The complete serialized suite passes
+  4042 examples, and the thesis-conformance gate remains green.
 - Completed the construction-directed source-declaration path needed by the
   paper's annotated `g g` family. Frozen source declarations are selected by
   semantic binder identity together with their frozen declaration base; a

@@ -1913,10 +1913,64 @@ prepareRootRaiseMergeSchemeWithPlacement resultPlacement artifacts edgeId requir
               schemeInfo
               (schemeFromType (schemeToType (siScheme schemeInfo)))
               (siSubstRefs schemeInfo)
-      validated <- validateExteriorBinder authority normalizedSchemeInfo
       requirement <- requiredGammaBinderForRootRaiseMerge edgeId authority requirements
+      edgeLocalSchemeInfo <-
+        localizeSharedResultRoute authority requirement normalizedSchemeInfo
+      validated <- validateExteriorBinder authority edgeLocalSchemeInfo
       constructExteriorResult authority requirement validated
   where
+    -- Several root RaiseMerge edges can solve to one outward monomorphic
+    -- result while retaining distinct exterior declarations.  The enclosing
+    -- scheme publishes one stable result alias, but the packet for each edge
+    -- must construct that edge's result at its own exterior.  Rebase only
+    -- when the existing result route is itself backed by an explicit sibling
+    -- requirement for the same result; an arbitrary mismatched substitution
+    -- still reaches 'validateExteriorBinder' and fails closed.
+    localizeSharedResultRoute authority requirement info = do
+      exteriorRef <- lookupPreparedRef "exterior" exterior info
+      resultRef <- lookupPreparedRef "result root" resultRoot info
+      if typeBinderRefsSameIdentity resultRef exteriorRef
+        then pure info
+        else
+          if
+              any
+                (siblingOwnsPublishedResult resultRef)
+                siblingRequirements
+            then
+              pure
+                ( rebuildSchemeInfoFromRefSubst
+                    info
+                    (siScheme info)
+                    ( foldr
+                        (\root -> IntMap.insert (getNodeId root) exteriorRef)
+                        (siSubstRefs info)
+                        ( resultRoot
+                            : NonEmpty.toList
+                              (rgbResultRoots requirement)
+                        )
+                    )
+                )
+            else pure info
+      where
+        exterior = rrmaExterior authority
+        resultRoot = rrmaResultRoot authority
+        siblingRequirements =
+          [ sibling
+          | sibling <- grRequiredGammaBinders requirements
+          , sibling /= requirement
+          , rgbPlacement sibling == rgbPlacement requirement
+          , resultRoot `elem` rgbResultRoots sibling
+          ]
+        siblingOwnsPublishedResult publishedResultRef sibling =
+          case
+              IntMap.lookup
+                (getNodeId (rgbExteriorNode sibling))
+                (siSubstRefs info)
+            of
+              Just siblingRef ->
+                typeBinderRefsSameIdentity siblingRef publishedResultRef
+              Nothing -> False
+
     -- Attaching the exterior substitution quotients graph binders by design.
     -- Reject contradictory input before that construction step can erase the
     -- evidence: an explicit exterior binder cannot coexist with a route that

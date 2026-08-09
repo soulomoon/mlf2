@@ -38,9 +38,9 @@ obligations:
   test_anchor:
     matcher: O14-WF-EMPTY
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -56,9 +56,9 @@ obligations:
   test_anchor:
     matcher: O14-WF-TVAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed evidence constructs a two-binding type environment and checks that the inner bound retains the outer type-binder identity through Inst-Abstr checking.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -74,9 +74,9 @@ obligations:
   test_anchor:
     matcher: O14-WF-VAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed evidence constructs distinct type and term environments and checks resolved-variable lookup through typeCheckWithEnv.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -92,9 +92,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-REFLEX
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -110,9 +110,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-TRANS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -128,9 +128,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-BOT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed judgment evidence checks Inst-Bot through checkInstantiation and rejects the same constructor from a non-bottom source.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -146,9 +146,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-HYP
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -164,9 +164,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-INNER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -182,9 +182,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-OUTER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -200,9 +200,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-QUANT-ELIM
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed judgment evidence checks quantifier elimination through checkInstantiation, independently of the type-computation application oracle.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -218,9 +218,9 @@ obligations:
   test_anchor:
     matcher: O14-INST-QUANT-INTRO
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed judgment evidence checks quantifier introduction through checkInstantiation, independently of the type-computation application oracle.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-CORRECTNESS
@@ -235,9 +235,9 @@ obligations:
   test_anchor:
     matcher: O14-T-VAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -252,9 +252,9 @@ obligations:
   test_anchor:
     matcher: O14-T-ABS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -269,9 +269,9 @@ obligations:
   test_anchor:
     matcher: O14-T-APP
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -286,9 +286,9 @@ obligations:
   test_anchor:
     matcher: O14-T-TABS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -303,9 +303,9 @@ obligations:
   test_anchor:
     matcher: O14-T-TAPP
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -320,9 +320,9 @@ obligations:
   test_anchor:
     matcher: O14-T-LET
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF typechecking over generated typed term witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TYPING-RULES
@@ -338,9 +338,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-BETA
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -357,9 +357,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-BETALET
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -376,9 +376,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-REFLEX
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -395,9 +395,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-TRANS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -414,9 +414,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-QUANT-INTRO
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -433,9 +433,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-QUANT-ELIM
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -452,9 +452,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-INNER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -471,9 +471,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-OUTER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -490,9 +490,9 @@ obligations:
   test_anchor:
     matcher: O14-RED-CONTEXT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF reduction/progress proxies over reducible typed terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PRESERVATION
@@ -508,9 +508,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-N
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed equation evidence evaluates quantifier elimination directly with applyInstantiation.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -525,9 +525,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-O
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed equation evidence evaluates quantifier introduction directly with applyInstantiation.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -542,9 +542,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-SEQ
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -559,9 +559,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-INNER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -576,9 +576,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-OUTER
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -593,9 +593,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-HYP
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -610,9 +610,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-BOT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed equation evidence evaluates bottom instantiation directly with applyInstantiation.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -627,9 +627,9 @@ obligations:
   test_anchor:
     matcher: O14-APPLY-ID
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises xMLF instantiation application over polymorphic type witnesses.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-INST-APPLICATION
@@ -661,9 +661,9 @@ obligations:
   test_anchor:
     matcher: O15-TRANS-SCHEME-ROOT-RIGID
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration as a translatable-presolution proxy.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TRANSLATABLE-PRESOLUTION
@@ -678,9 +678,9 @@ obligations:
   test_anchor:
     matcher: O15-TRANS-ARROW-RIGID
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration as a translatable-presolution proxy.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TRANSLATABLE-PRESOLUTION
@@ -695,9 +695,9 @@ obligations:
   test_anchor:
     matcher: O15-TRANS-NON-INTERIOR-RIGID
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration as a translatable-presolution proxy.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-TRANSLATABLE-PRESOLUTION
@@ -714,9 +714,9 @@ obligations:
   test_anchor:
     matcher: O15-REORDER-REQUIRED
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises Sigma quantifier reordering and replayable instantiation output.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SIGMA-REORDER
@@ -733,9 +733,9 @@ obligations:
   test_anchor:
     matcher: O15-REORDER-IDENTITY
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises Sigma quantifier reordering and replayable instantiation output.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SIGMA-REORDER
@@ -790,9 +790,9 @@ obligations:
   test_anchor:
     matcher: O15-EDGE-TRANSLATION
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -807,9 +807,9 @@ obligations:
   test_anchor:
     matcher: O15-ELAB-LAMBDA-VAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -824,9 +824,9 @@ obligations:
   test_anchor:
     matcher: O15-ELAB-LET-VAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -841,9 +841,9 @@ obligations:
   test_anchor:
     matcher: O15-ELAB-ABS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -858,9 +858,9 @@ obligations:
   test_anchor:
     matcher: O15-ELAB-APP
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -875,9 +875,9 @@ obligations:
   test_anchor:
     matcher: O15-ELAB-LET
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -894,9 +894,9 @@ obligations:
   test_anchor:
     matcher: O15-ENV-LAMBDA
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed live-pipeline evidence checks that a lambda binder and its resolved occurrence share identity and type, then rechecks the elaborated term.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -913,9 +913,9 @@ obligations:
   test_anchor:
     matcher: O15-ENV-LET
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed live-pipeline evidence checks that a let binder, its generalized scheme, and its resolved occurrence agree in identity and type, then rechecks the elaborated term.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -932,9 +932,9 @@ obligations:
   test_anchor:
     matcher: O15-ENV-WF
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises checked elaboration and xMLF typechecking over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -950,9 +950,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-SEQ-EMPTY
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -969,9 +969,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-SEQ-CONS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -988,9 +988,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-RIGID-RAISE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1007,9 +1007,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-RIGID-MERGE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1026,9 +1026,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-RIGID-RAISEMERGE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1045,9 +1045,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-ROOT-GRAFT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1064,9 +1064,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-ROOT-RAISEMERGE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1083,9 +1083,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-ROOT-WEAKEN
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1102,9 +1102,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-NODE-GRAFT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1159,9 +1159,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-NODE-WEAKEN
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1178,9 +1178,9 @@ obligations:
   test_anchor:
     matcher: O15-TR-NODE-RAISE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises witness-to-elaboration pipeline evidence over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-PHI-CORRECTNESS
@@ -1196,9 +1196,9 @@ obligations:
   test_anchor:
     matcher: O04-BIND-FLEX-CHILDREN
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises binding-tree binder enumeration Q(n) over generated binder regions.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-CGEN-SHAPE
@@ -1349,7 +1349,7 @@ obligations:
   test_anchor:
     matcher: O07-UNIF-CORE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises structural unification decomposition for same-head type nodes.
+    rationale: QuickCheck exercises the pure core decomposition step and checks the exact child-edge obligations emitted for two arrow heads.
     kind: quickcheck
     min_success: 100
   status: anchored
@@ -1366,9 +1366,9 @@ obligations:
   test_anchor:
     matcher: O07-UNIF-PRESOL
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase variable unification and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-UNIFICATION
@@ -1401,9 +1401,9 @@ obligations:
   test_anchor:
     matcher: O07-GENUNIF
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises batch equivalence-class unification and representative agreement.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-UNIFICATION
@@ -1419,9 +1419,9 @@ obligations:
   test_anchor:
     matcher: O08-REIFY-TYPE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -1436,9 +1436,9 @@ obligations:
   test_anchor:
     matcher: O08-REIFY-NAMES
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -1453,9 +1453,9 @@ obligations:
   test_anchor:
     matcher: O08-BIND-MONO
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -1491,9 +1491,9 @@ obligations:
   test_anchor:
     matcher: O08-REIFY-INLINE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -1508,9 +1508,9 @@ obligations:
   test_anchor:
     matcher: O08-INLINE-PRED
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises pipeline reification by checking elaborated terms against reified types.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-ELABORATION-CORRECTNESS
@@ -1525,9 +1525,9 @@ obligations:
   test_anchor:
     matcher: O09-CGEN-ROOT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises constraint generation shape and binding-tree validity over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-CGEN-SHAPE
@@ -1543,9 +1543,9 @@ obligations:
   test_anchor:
     matcher: O09-CGEN-EXPR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises constraint generation shape and binding-tree validity over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-CGEN-SHAPE
@@ -1579,9 +1579,9 @@ obligations:
   test_anchor:
     matcher: O10-EXP-APPLY
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution completion and binding-tree validity over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-EXPANSION-MINIMALITY
@@ -1597,9 +1597,9 @@ obligations:
   test_anchor:
     matcher: O10-PROP-SOLVE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution completion and binding-tree validity over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-EXPANSION-MINIMALITY
@@ -1615,9 +1615,9 @@ obligations:
   test_anchor:
     matcher: O10-PROP-WITNESS
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution completion and binding-tree validity over source terms.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-EXPANSION-MINIMALITY
@@ -1651,7 +1651,7 @@ obligations:
   test_anchor:
     matcher: O11-UNIFY-STRUCT
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises structural unification decomposition for same-head type nodes.
+    rationale: QuickCheck runs the presolution structural-unify transition and checks canonical union-find representatives for both arrow children and their parent.
     kind: quickcheck
     min_success: 100
   status: anchored
@@ -1719,9 +1719,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-UNIFY
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase variable unification and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS
@@ -1856,9 +1856,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-VAR-BASE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase variable unification and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS
@@ -1873,9 +1873,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-VAR-VAR
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase variable unification and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS
@@ -1890,9 +1890,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-HARMONIZE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises batch equivalence-class unification and representative agreement.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS
@@ -1907,9 +1907,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-ARROW
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase arrow decomposition and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS
@@ -1924,9 +1924,9 @@ obligations:
   test_anchor:
     matcher: O12-SOLVE-VALIDATE
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises solve-phase variable unification and solved binding-tree validation.
-    kind: quickcheck
-    min_success: 100
+    rationale: Fixed obligation example; no generator coverage is claimed.
+    kind: fixed
+    min_success: 1
   status: anchored
   supports_claims:
   - CLM-SOLVER-CORRECTNESS

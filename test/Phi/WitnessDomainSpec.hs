@@ -344,7 +344,7 @@ spec = describe "WitnessDomain" $ do
                             , not (null (copiedNodes (etCopyMap tr)))
                             ]
                     -- At least one trace should have copies in let-poly
-                    length tracesWithCopies `shouldSatisfy` (>= 0)
+                    length tracesWithCopies `shouldSatisfy` (> 0)
                     -- The ranking invariant is structurally enforced by
                     -- sourceKeysForNode's witness-domain construction order:
                     -- raw, forward/reverse copy, then trace-ranked keys.

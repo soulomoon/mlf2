@@ -7,6 +7,7 @@ module MLF.Elab.TermClosure
     constructTermWithSchemeSubstRefsAtPublication,
     constructTermWithSchemeSubstRefsAtPublicationWithRoutes,
     constructTermWithCertifiedResultSchemeAtPublicationWithRoutes,
+    constructTermWithCertifiedInstantiationAtLambdaResult,
     constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
     etaExpandTermToSchemeSubstRefs,
@@ -830,6 +831,59 @@ constructTermWithCertifiedResultSchemeAtPublicationWithRoutes env subst scheme t
     subst
     scheme
     term
+
+-- | Apply one already certified xMLF computation at the first exact result
+-- beneath transparent lets and value lambdas.  Instantiations cannot descend
+-- through value arrows themselves; a Figure 15.3.5 owner certificate is the
+-- positive authority for moving the computation to that codomain.  The
+-- caller supplies the exact source and target, and this helper accepts the
+-- rebuilt term only after checking both the computation at its leaf and the
+-- complete term at the requested endpoint.
+constructTermWithCertifiedInstantiationAtLambdaResult
+  :: Env
+  -> ElabType
+  -> ElabType
+  -> Instantiation
+  -> XmlfTerm
+  -> Maybe XmlfTerm
+constructTermWithCertifiedInstantiationAtLambdaResult env sourceTy targetTy inst term = do
+  actualTy <- either (const Nothing) Just (typeCheckWithEnv env term)
+  if typesAgree actualTy sourceTy
+    then pure ()
+    else Nothing
+  constructed <- descend sourceTy targetTy term
+  constructedTy <-
+    either (const Nothing) Just (typeCheckWithEnv env constructed)
+  if typesAgree constructedTy targetTy
+    then Just constructed
+    else Nothing
+  where
+    descend actualTy expectedTy currentTerm =
+      case TypeCheck.checkInstantiation env actualTy inst of
+        Right completedTy
+          | typesAgree completedTy expectedTy ->
+              Just (ETyInst currentTerm inst)
+        _ ->
+          case currentTerm of
+            ELet resolved scheme rhs body ->
+              ELet resolved scheme rhs
+                <$> descend actualTy expectedTy body
+            ELam resolved body ->
+              case (actualTy, expectedTy) of
+                ( TArrow actualDomain actualCodomain
+                  , TArrow expectedDomain expectedCodomain
+                  )
+                    | typesAgree actualDomain expectedDomain ->
+                        ELam resolved
+                          <$> descend
+                            actualCodomain
+                            expectedCodomain
+                            body
+                _ -> Nothing
+            _ -> Nothing
+
+    typesAgree left right =
+      alphaEqType left right || churchAwareEqType left right
 
 constructTermWithResultModeAtPublicationWithRoutes
   :: LambdaResultConstruction

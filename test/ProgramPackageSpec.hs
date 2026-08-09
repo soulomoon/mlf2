@@ -749,11 +749,56 @@ spec =
 
         it "checks independent annotated defs equivalently across batch boundaries" $
             withBatchEquivalenceFile $ \path -> do
-                oneRoot <- checkProgramArgsWithBatchSize Nothing [path]
+                productionBatch <- checkProgramArgsWithBatchSize Nothing [path]
+                batch1 <- checkProgramArgsWithBatchSize (Just "1") [path]
                 batch2 <- checkProgramArgsWithBatchSize (Just "2") [path]
 
-                batch2 `shouldBe` oneRoot
-                batch2 `shouldBe` Right "OK\n"
+                batch1 `shouldBe` productionBatch
+                batch2 `shouldBe` productionBatch
+                productionBatch `shouldBe` Right "OK\n"
+
+        it "preserves recursive and unsupported work after a deferred prefix batch" $ do
+            PreludeCacheTestSupport.splitContiguousEligibleBatchForTest
+                8
+                [True, True, False, True]
+                `shouldBe` ([True, True], [False, True])
+            PreludeCacheTestSupport.splitContiguousEligibleBatchForTest
+                2
+                [True, True, True, False]
+                `shouldBe` ([True, True], [True, False])
+
+        it "keeps construction scopes root-local for String-heavy definitions in one batch" $
+            withProgramSourceFile "root-local-string" rootLocalStringBatchSource $ \path -> do
+                isolatedRoots <- checkProgramArgsWithBatchSize (Just "1") [path]
+                sharedBatch <- checkProgramArgsWithBatchSize Nothing [path]
+
+                sharedBatch `shouldBe` isolatedRoots
+                sharedBatch `shouldBe` Right "OK\n"
+
+        it "keeps nested monomorphic application results in their exact lexical scopes" $
+            withProgramSourceFile "nested-string-results" nestedStringResultsSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturn` Right "OK\n"
+
+        it "retains a declared recursive endpoint through a deep partial-application spine with a reused argument" $
+            withProgramSourceFile "deep-partial-application" deepPartialApplicationSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturn` Right "OK\n"
+
+        it "constructs a local application Gamma above its deeper result scope" $
+            withProgramSourceFile "local-application-gamma" localApplicationGammaSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturn` Right "OK\n"
+
+        it "uses exact ambient aliases for repeated recursive branch results" $
+            withProgramSourceFile "repeated-recursive-choice" repeatedRecursiveChoiceSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturn` Right "OK\n"
+
+        it "coalesces cross-module root RaiseMerge edges only after their flexible routes solve away" $
+            withProgramSourceFile "shared-root-raise-merge" sharedRootRaiseMergeSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturn` Right "OK\n"
 
         it "keeps external scheme instantiations root-local in module constraint batches" $ do
             ModuleConstraintResult {mcrRootOwnership = rootOwnership} <-
@@ -843,6 +888,178 @@ batchEquivalenceSource =
             ++ [ "  def main : Int = value1;"
                , "}"
                ]
+
+rootLocalStringBatchSource :: String
+rootLocalStringBatchSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  data StringMatch ="
+        , "      StringMatched : StringMatch"
+        , "    | StringMismatch : StringMatch;"
+        , "  def cursorEnd : String -> String -> String -> String ="
+        , "    λ(_lineNumber : String) λ(_linePrefix : String) λ(sourceLexeme : String) sourceLexeme;"
+        , "  def stringExactMatch : String -> String -> StringMatch ="
+        , "    λ(_expected : String) λ(_actual : String) StringMatched;"
+        , "  def main : StringMatch = stringExactMatch (cursorEnd \"1\" \"\" \"x\") \"x\";"
+        , "}"
+        ]
+
+nestedStringResultsSource :: String
+nestedStringResultsSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (stringAppend, stringFromInt, stringLength);"
+        , "  def cursorEnd : String -> String -> String -> String ="
+        , "    λ(lineNumber : String) λ(linePrefix : String) λ(sourceLexeme : String)"
+        , "      stringAppend lineNumber"
+        , "        (stringAppend \":\""
+        , "          (stringFromInt (stringLength (stringAppend (stringAppend \" \" linePrefix) sourceLexeme))));"
+        , "  def main : String = cursorEnd \"1\" \"\" \"x\";"
+        , "}"
+        ]
+
+deepPartialApplicationSource :: String
+deepPartialApplicationSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  data Value ="
+        , "      ValueUnit : Value"
+        , "    | ValueText : String -> Value;"
+        , "  def tokenStart : Value -> String ="
+        , "    λ(_token : Value) \"1:1\";"
+        , "  def spanToToken : String -> Value -> String ="
+        , "    λ(start : String) λ(_token : Value) start;"
+        , "  def useString : String -> String ="
+        , "    λ(value : String) value;"
+        , "  def bind : String -> (Value -> String) -> String ="
+        , "    λ(first : String) λ(_next : Value -> String) first;"
+        , "  def finish : Value -> Value -> Value -> Value -> String ="
+        , "    λ(_name : Value) λ(_parameter : Value) λ(_semicolon : Value) λ(_rows : Value) \"done\";"
+        , "  def target : Value -> Value -> Value -> Value -> String ="
+        , "    λ(constructor : Value) λ(name : Value) λ(parameter : Value) λ(semicolon : Value)"
+        , "      bind (useString (spanToToken (tokenStart constructor) semicolon))"
+        , "        (finish name parameter semicolon);"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+localApplicationGammaSource :: String
+localApplicationGammaSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  data ParserState ="
+        , "      ParserState : ParserState;"
+        , "  data ParserValue ="
+        , "      ParserValue : ParserValue;"
+        , "  data ParserStep ="
+        , "      ParserStepOk : ParserState -> ParserValue -> ParserStep;"
+        , "  data ParserExpectation ="
+        , "      ParserExpectImportSemicolon : ParserExpectation;"
+        , "  data Parser a ="
+        , "      Parser : (ParserState -> ParserStep) -> Parser a;"
+        , "  def parserChoice : Parser ParserValue -> Parser ParserValue -> Parser ParserValue ="
+        , "    λ(first : Parser ParserValue) λ(_second : Parser ParserValue) first;"
+        , "  def expectText : String -> Parser ParserValue ="
+        , "    λ(_text : String)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def parserFailExpectedAtCurrent : ParserExpectation -> Parser ParserValue ="
+        , "    λ(_expectation : ParserExpectation)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def target : Parser ParserValue ="
+        , "    parserChoice (expectText \";\") (parserFailExpectedAtCurrent ParserExpectImportSemicolon);"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+repeatedRecursiveChoiceSource :: String
+repeatedRecursiveChoiceSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  data ParserState = ParserState : ParserState;"
+        , "  data ParserValue = ParserValue : ParserValue;"
+        , "  data ParserStep = ParserStepOk : ParserState -> ParserValue -> ParserStep;"
+        , "  data Parser a = Parser : (ParserState -> ParserStep) -> Parser a;"
+        , "  def parserChoice : Parser ParserValue -> Parser ParserValue -> Parser ParserValue ="
+        , "    λ(first : Parser ParserValue) λ(_second : Parser ParserValue) first;"
+        , "  def branchOne : String -> ParserValue -> Parser ParserValue ="
+        , "    λ(_sourceFile : String) λ(_start : ParserValue)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def branchTwo : String -> ParserValue -> Parser ParserValue ="
+        , "    λ(_sourceFile : String) λ(_start : ParserValue)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def branchThree : String -> ParserValue -> Parser ParserValue ="
+        , "    λ(_sourceFile : String) λ(_start : ParserValue)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def branchFour : String -> ParserValue -> Parser ParserValue ="
+        , "    λ(_sourceFile : String) λ(_start : ParserValue)"
+        , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
+        , "  def choiceRows : String -> ParserValue -> Parser ParserValue ="
+        , "    λ(sourceFile : String) λ(_start : ParserValue)"
+        , "      parserChoice (branchOne sourceFile ParserValue)"
+        , "        (parserChoice (branchTwo sourceFile ParserValue)"
+        , "          (parserChoice (branchThree sourceFile ParserValue)"
+        , "            (branchFour sourceFile ParserValue)));"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+sharedRootRaiseMergeSource :: String
+sharedRootRaiseMergeSource =
+    unlines
+        [ "module ParserReplyDiagnostic export (ParserDiagnostic(..)) {"
+        , "  data ParserDiagnostic ="
+        , "      UnexpectedSourceText : String -> ParserDiagnostic"
+        , "    | ExpectedCompleteModule : String -> ParserDiagnostic"
+        , "    | ExpectedEquals : String -> ParserDiagnostic;"
+        , "}"
+        , "module ParserReplySource export (basicUnexpectedSpan) {"
+        , "  def basicUnexpectedSpan : String = \"unexpected\";"
+        , "}"
+        , "module ParserReplyTypes export (ParserState(..), ParserEnd(..), ParserValue(..), ParserStep(..), parserStateAtEnd) {"
+        , "  import ParserReplyDiagnostic exposing (ParserDiagnostic);"
+        , "  data ParserState ="
+        , "      ParserState : String -> ParserState;"
+        , "  data ParserEnd ="
+        , "      ParserAtEnd : ParserEnd"
+        , "    | ParserNotAtEnd : ParserEnd"
+        , "    | ParserEndUnknown : ParserEnd;"
+        , "  data ParserValue ="
+        , "      ValueModuleKey : String -> ParserValue"
+        , "    | ValueProjectionRows : String -> ParserValue"
+        , "    | ValueConstructorRows : String -> ParserValue"
+        , "    | ValueUnit : ParserValue"
+        , "    | ValueToken : String -> ParserValue;"
+        , "  data ParserStep ="
+        , "      ParserStepOk : ParserState -> ParserValue -> ParserStep"
+        , "    | ParserStepError : ParserDiagnostic -> ParserStep;"
+        , "  def parserStateAtEnd : ParserState -> ParserEnd ="
+        , "    λ(_state : ParserState) ParserAtEnd;"
+        , "}"
+        , "module Main export (main) {"
+        , "  import ParserReplyDiagnostic exposing (ParserDiagnostic(..));"
+        , "  import ParserReplySource exposing (basicUnexpectedSpan);"
+        , "  import ParserReplyTypes exposing (ParserEnd(..), ParserState, ParserStep(..), ParserValue(..), parserStateAtEnd);"
+        , "  data ParserResult ="
+        , "      ParserOk : String -> ParserResult"
+        , "    | ParserError : ParserDiagnostic -> ParserResult;"
+        , "  def parserReplyToResult : ParserStep -> ParserResult ="
+        , "    λ(reply : ParserStep) case reply of {"
+        , "      ParserStepOk state value -> case parserStateAtEnd state of {"
+        , "        ParserAtEnd -> case value of {"
+        , "          ValueModuleKey key -> ParserOk key;"
+        , "          ValueProjectionRows rows -> ParserOk rows;"
+        , "          ValueConstructorRows _ -> ParserError (ExpectedCompleteModule basicUnexpectedSpan);"
+        , "          ValueUnit -> ParserError (ExpectedCompleteModule basicUnexpectedSpan);"
+        , "          ValueToken _ -> ParserError (ExpectedCompleteModule basicUnexpectedSpan)"
+        , "        };"
+        , "        ParserNotAtEnd -> ParserError (ExpectedCompleteModule basicUnexpectedSpan);"
+        , "        ParserEndUnknown -> ParserError (ExpectedCompleteModule basicUnexpectedSpan)"
+        , "      };"
+        , "      ParserStepError diagnostic -> ParserError diagnostic"
+        , "    };"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
 
 smallPreludeClientSource :: String
 smallPreludeClientSource =
@@ -1073,12 +1290,16 @@ nodesOwnedByRoot rootKey =
 
 withBatchEquivalenceFile :: (FilePath -> IO a) -> IO a
 withBatchEquivalenceFile =
+    withProgramSourceFile "batch-equivalence" batchEquivalenceSource
+
+withProgramSourceFile :: String -> String -> (FilePath -> IO a) -> IO a
+withProgramSourceFile stem source =
     bracket setup removePathForcibly
   where
     setup = do
         tmpDir <- getTemporaryDirectory
-        (path, handle) <- openTempFile tmpDir "batch-equivalence.mlfp"
-        hPutStr handle batchEquivalenceSource
+        (path, handle) <- openTempFile tmpDir (stem ++ ".mlfp")
+        hPutStr handle source
         hClose handle
         pure path
 

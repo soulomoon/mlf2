@@ -298,8 +298,9 @@ sourceBinderConstructionRenames representative sourceBinderRefs constructionAlia
 -- identity. A compiler-exact packet can contain several graph occurrences of
 -- the same lexical source binder before those occurrences are joined. In
 -- that case the source identity itself remains the construction authority;
--- choosing either graph peer would erase occurrence provenance. Ambiguity
--- inside one graph representative remains an error.
+-- choosing either graph peer would erase occurrence provenance. This relaxed
+-- projection therefore drops a route when one occurrence's representative
+-- contains several outward binders; the strict variant still rejects it.
 sourceBinderConstructionRenamesRetainingAmbiguousSources
   :: (NodeId -> NodeId)
   -> IntMap.IntMap TypeBinderRef
@@ -389,19 +390,27 @@ sourceBinderConstructionRenamesWith rejectAmbiguousSource representative sourceB
     constructionRoute sourceRef node =
       case IntMap.lookup (getNodeId node) constructionAliases of
         Just direct -> pure (Just direct)
-        Nothing -> uniqueRepresentativeRoute sourceRef (representative node)
+        Nothing ->
+          uniqueRepresentativeRoute
+            sourceRef
+            node
+            (representative node)
 
-    uniqueRepresentativeRoute sourceRef target =
+    uniqueRepresentativeRoute sourceRef node target =
       case findSameIdentity sourceRef outwardRefs of
         Just sourceOutwardRef -> pure (Just sourceOutwardRef)
         Nothing ->
           case outwardRefs of
             [] -> pure Nothing
             [outwardRef] -> pure (Just outwardRef)
-            _ ->
+            _
+              | not rejectAmbiguousSource -> pure Nothing
+              | otherwise ->
                 Left
                 ( "construction Gamma representative has multiple outward binders: source="
                     ++ show sourceRef
+                    ++ ", occurrence="
+                    ++ show node
                     ++ ", representative="
                     ++ show target
                     ++ ", binders="

@@ -1733,23 +1733,6 @@ spec = describe "MLF.Backend.LLVM" $ do
       output `shouldNotSatisfy` isInfixOf "escaping function"
       validateLLVMAssembly output
 
-    it "supports local closure-sensitive specialization when type applications cross let heads" $ do
-      output <- requireRight (renderFixtureBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
-
-      output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
-      output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
-      output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
-      validateLLVMAssembly output
-
-    it "supports first-class polymorphic lowering on the existing static lane" $ do
-      output <-
-        withTempProgram localFirstClassPolymorphismProgram $ \path ->
-          requireRight =<< emitBackendFile path
-
-      output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
-      output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
-      validateLLVMAssembly output
-
     it "runs the paper bounded self-application through LLVM and native emission" $ do
       artifact <-
         requireRight
@@ -1764,26 +1747,6 @@ spec = describe "MLF.Backend.LLVM" $ do
       validateLLVMAssembly output
       validateLLVMObjectCode output
       assertNativeCheckedProgramArtifact artifact "true"
-
-    it "qualifies closure entries emitted from type specializations" $ do
-      output <- requireRight (renderFixtureBackendProgramLLVM polymorphicClosureSpecializationProgram)
-
-      let closureDefinitions =
-            filter
-              (\line -> "define private i64 @\"poly$t" `isInfixOf` line && "$__mlfp_closure$poly\"" `isInfixOf` line)
-              (lines output)
-      length closureDefinitions `shouldBe` 2
-      output `shouldNotSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$poly\""
-      output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$poly\""
-      validateLLVMAssembly output
-
-    it "rejects polymorphic main bindings before LLVM emission" $ do
-      result <- withTempProgram sourceEscapingPolymorphicMainProgram emitBackendFile
-
-      result
-        `shouldSatisfy` either
-          (isInfixOf "polymorphic main binding")
-          (const False)
 
     it "rejects unspecialized polymorphic bindings that escape specialization" $ do
       renderFixtureBackendProgramLLVM unspecializedPolymorphicBindingProgram

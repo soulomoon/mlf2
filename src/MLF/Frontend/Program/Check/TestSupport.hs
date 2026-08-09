@@ -11,6 +11,7 @@ module MLF.Frontend.Program.Check.TestSupport
     , checkLocatedProgramPackageWithCache
     , checkLocatedProgramPackageWithDefaultTiming
     , checkLocatedProgramPackageWithDefaultTimingAndCache
+    , splitContiguousEligibleBatchForTest
     )
 where
 
@@ -20,6 +21,7 @@ import MLF.Frontend.Program.Check.Internal
     , checkLocatedProgramPackageWithTimingAndBuiltinPreludeCheckCacheForTest
     , newBuiltinPreludeCheckCacheForTest
     , nextClientIdentityAfterCachedBuiltinPreludeForTest
+    , splitContiguousEligibleBatch
     )
 import MLF.Frontend.Program.Check.Cache
     ( BuiltinPreludeCheckCacheHandle
@@ -107,3 +109,7 @@ checkLocatedProgramPackageWithDefaultTimingAndCache ::
     IO (Either ProgramDiagnostic CheckedProgram)
 checkLocatedProgramPackageWithDefaultTimingAndCache =
     checkLocatedProgramPackageWithTimingAndBuiltinPreludeCheckCacheForTest defaultTimingConfig
+
+splitContiguousEligibleBatchForTest :: Int -> [Bool] -> ([Bool], [Bool])
+splitContiguousEligibleBatchForTest batchSize =
+    splitContiguousEligibleBatch batchSize id

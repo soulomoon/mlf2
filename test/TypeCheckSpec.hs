@@ -53,6 +53,7 @@ import MLF.Elab.TermClosure
     , alignTermTypeVarsToScheme
     , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
+    , constructTermWithCertifiedInstantiationAtLambdaResult
     , constructTermWithCertifiedResultSchemeAtPublicationWithRoutes
     , constructTermWithSchemeSubstRefsAtPublicationWithRoutes
     , constructTermWithSchemeSubstRefsByBinderRoutes
@@ -1924,6 +1925,65 @@ spec = describe "Phase 7 typecheck" $ do
                                     && ElabTypes.typeBinderRefsSameIdentity targetRef outerRef
                             )
             _ -> expectationFailure ("unexpected publication term: " ++ show published)
+
+    it "applies a certified instantiation beneath a returned value lambda" $ do
+        let outerRef = typeRef 992000 "outer"
+            sourceRef = typeRef 992001 "source"
+            outerTy = tVarWithRef outerRef
+            sourceScheme =
+                mkElabSchemeWithRefs
+                    [(sourceRef, Nothing)]
+                    (TArrow (tVarWithRef sourceRef) (tVarWithRef sourceRef))
+            returnedTy = schemeToType sourceScheme
+            outerParam =
+                generatedResolvedLocal
+                    992002
+                    "$outer#certified-result"
+                    "outer"
+                    outerTy
+            identityParam =
+                generatedResolvedLocal
+                    992003
+                    "$identity#certified-result"
+                    "identity"
+                    (tVarWithRef sourceRef)
+            returned =
+                generatedResolvedLocal
+                    992004
+                    "$returned#certified-result"
+                    "returned"
+                    returnedTy
+            identityTerm =
+                eTyAbsWithRef
+                    sourceRef
+                    Nothing
+                    (ELam identityParam (EVarNode identityParam))
+            sourceTerm =
+                ELam
+                    outerParam
+                    (ELet returned sourceScheme identityTerm (EVarNode returned))
+            expectedTerm =
+                ELam
+                    outerParam
+                    ( ETyInst
+                        (ELet returned sourceScheme identityTerm (EVarNode returned))
+                        (InstApp builtinIntTy)
+                    )
+            sourceTy = TArrow outerTy returnedTy
+            targetTy = TArrow outerTy (TArrow builtinIntTy builtinIntTy)
+            env =
+                insertTypeBindingRef
+                    outerRef
+                    TBottom
+                    (mkTypeCheckEnvWithResolvedTerms [] Map.empty)
+        constructTermWithCertifiedInstantiationAtLambdaResult
+            env
+            sourceTy
+            targetTy
+            (InstApp builtinIntTy)
+            sourceTerm
+            `shouldBe` Just expectedTerm
+        typeCheckWithEnv env expectedTerm `shouldBe` Right targetTy
 
     it "publishes a certified identity result through a retained nested forall" $ do
         let outerRef = typeRef 674 "outer"

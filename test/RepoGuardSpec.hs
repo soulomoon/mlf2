@@ -2,6 +2,7 @@ module RepoGuardSpec (spec) where
 
 import Control.Monad (forM, forM_)
 import Data.List (intercalate, isSuffixOf, sort)
+import Data.Map.Strict qualified as Map
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (dropExtension, makeRelative, splitDirectories, takeExtension, (</>))
 import Test.Hspec
@@ -18,6 +19,14 @@ spec = describe "Repository guardrails" $ do
     assertSet "Cabal other-modules" specModules cabalModules
     assertSet "test/Main imports" mainEntryModules mainImports
     assertSet "test/Main registrations" mainEntryModules mainCalls
+
+  it "test modules do not silently disable or focus specs" $ do
+    offenders <- findSpecSelectionOffenders
+    offenders `shouldBe` []
+
+  it "thesis obligations use distinct property functions and equations" $ do
+    source <- readFileStrict "test/Thesis/ObligationPropertySpec.hs"
+    thesisObligationPropertyIssues source `shouldBe` []
 
   it "legacy MyLib surface is removed" $ do
     doesFileExist "src-public/MyLib.hs" >>= (`shouldBe` False)
@@ -253,7 +262,7 @@ discoverMainCalls = do
   pure
     [ moduleName
     | line <- src,
-      let trimmed = trim line,
+      let trimmed = trim (stripLineComment line),
       Just moduleName <- [parseMainCall trimmed]
     ]
   where
@@ -263,6 +272,130 @@ discoverMainCalls = do
             moduleName : _ -> Just moduleName
             [] -> Nothing
       | otherwise = Nothing
+
+findSpecSelectionOffenders :: IO [String]
+findSpecSelectionOffenders = do
+  hsFiles <- collectHsFiles "test"
+  fmap concat . forM hsFiles $ \path -> do
+    src <- lines <$> readFileStrict path
+    pure
+      [ path ++ ":" ++ show lineNumber ++ ": " ++ trimmed
+      | (lineNumber, line) <- zip [(1 :: Int) ..] src,
+        let trimmed = trim (stripLineComment line),
+        combinator <- disabledOrFocusedSpecCombinators,
+        isSpecCombinatorCall combinator trimmed
+      ]
+
+disabledOrFocusedSpecCombinators :: [String]
+disabledOrFocusedSpecCombinators =
+  [ "xdescribe"
+  , "xcontext"
+  , "xit"
+  , "xspecify"
+  , "fdescribe"
+  , "fcontext"
+  , "fit"
+  , "fspecify"
+  ]
+
+isSpecCombinatorCall :: String -> String -> Bool
+isSpecCombinatorCall combinator line =
+  case stripPrefix combinator line of
+    Just (next : _) -> next == ' ' || next == '\t'
+    _ -> False
+
+thesisObligationPropertyIssues :: String -> [String]
+thesisObligationPropertyIssues source =
+  sharedFunctionIssues ++ missingEquationIssues ++ duplicateEquationIssues
+  where
+    bindings = thesisObligationPropertyBindings source
+    usedProperties = map snd bindings
+    equations =
+      [ (propertyName, equation)
+      | (propertyName, equation) <- topLevelPropertyEquations source,
+        propertyName `elem` usedProperties
+      ]
+    sharedFunctionIssues =
+      [ "shared property function " ++ propertyName ++ ": " ++ intercalate ", " (sort obligationIds)
+      | (propertyName, obligationIds) <- duplicateValues [(obligationId, propertyName) | (obligationId, propertyName) <- bindings]
+      ]
+    missingEquationIssues =
+      [ "missing property equation: " ++ propertyName
+      | propertyName <- usedProperties,
+        propertyName `notElem` map fst equations
+      ]
+    duplicateEquationIssues =
+      [ "duplicate property equation: " ++ intercalate ", " (sort propertyNames)
+      | (_equation, propertyNames) <- duplicateValues equations
+      ]
+
+thesisObligationPropertyBindings :: String -> [(String, String)]
+thesisObligationPropertyBindings source =
+  [ (stripToken obligationId, stripToken propertyName)
+  | line <- lines source,
+    let tokens = filter (/= "[") (words (trim (stripLineComment line))),
+    (kind : obligationId : propertyName : _) <- [tokens],
+    kind `elem` ["FixedObligation", "SizedObligation"],
+    "\"O" `isPrefixOf` obligationId
+  ]
+  where
+    stripToken =
+      reverse
+        . dropWhile (`elem` ['\"', ',', ']'])
+        . reverse
+        . dropWhile (== '\"')
+
+topLevelPropertyEquations :: String -> [(String, String)]
+topLevelPropertyEquations = go . lines
+  where
+    go [] = []
+    go (signature : rest) =
+      case propertySignatureName signature of
+        Nothing -> go rest
+        Just propertyName ->
+          case rest of
+            [] -> []
+            definition : remaining ->
+              let (continuation, afterEquation) = span isEquationContinuation remaining
+                  equation = normalizePropertyEquation definition continuation
+               in (propertyName, equation) : go afterEquation
+
+    isEquationContinuation line =
+      null line
+        || startsWithWhitespace line
+        || "--" `isPrefixOf` line
+
+    startsWithWhitespace line =
+      case line of
+        ' ' : _ -> True
+        '\t' : _ -> True
+        _ -> False
+
+propertySignatureName :: String -> Maybe String
+propertySignatureName signature =
+  case words signature of
+    [propertyName, "::", "Int", "->", "Property"]
+      | "prop" `isPrefixOf` propertyName -> Just propertyName
+    _ -> Nothing
+
+normalizePropertyEquation :: String -> [String] -> String
+normalizePropertyEquation definition continuation =
+  unwords . words . unlines $
+    dropEquationLhs definition
+      : filter (not . isCommentLine) continuation
+  where
+    dropEquationLhs line =
+      case dropWhile (/= '=') line of
+        '=' : rhs -> rhs
+        _ -> line
+    isCommentLine = ("--" `isPrefixOf`) . trim
+
+duplicateValues :: (Ord value) => [(key, value)] -> [(value, [key])]
+duplicateValues pairs =
+  [ (value, keys)
+  | (value, keys) <- Map.toList (Map.fromListWith (++) [(value, [key]) | (key, value) <- pairs]),
+    length keys > 1
+  ]
 
 findImportOffenders :: [String] -> [FilePath] -> IO [FilePath]
 findImportOffenders moduleNames roots = do

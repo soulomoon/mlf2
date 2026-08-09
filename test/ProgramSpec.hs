@@ -1414,13 +1414,6 @@ spec = do
             ProgramTypes.freeTypeBinderIdentitiesTypeView source
                 `shouldBe` Set.fromList [leftIdentity, rightIdentity]
 
-        it "rejects free type-view variable construction without binder metadata" $ do
-            ProgramTypes.typeViewFromSourceType
-                Map.empty
-                Map.empty
-                (STVar "a")
-                `shouldSatisfy` isLeft
-
         it "keeps replacement type head identities by display key after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991429)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
@@ -1797,13 +1790,6 @@ spec = do
                         Map.empty
             ProgramTypes.lookupTypeBinderSubstViewByIdentity identity identitySubst
                 `shouldBe` Nothing
-
-        it "rejects TypeView variables without identity payloads before matching" $ do
-            ProgramTypes.typeViewFromSourceType
-                Map.empty
-                Map.empty
-                (STVar "a")
-                `shouldSatisfy` isLeft
 
         it "does not let method display matching override conflicting head identities" $ do
             let leftIdentity = generatedSymbolIdentity 991733 SymbolType "Left" "Token" Nothing

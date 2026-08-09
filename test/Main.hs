@@ -90,9 +90,6 @@ import Util.GraphSpec qualified
 import Util.UnionFindSpec qualified
 import XMLFPrettySpec qualified
 
-_programParserParitySpecDisabled :: Spec
-_programParserParitySpecDisabled = ProgramParserParitySpec.spec >> pure ()
-
 main :: IO ()
 main =
   hspec $ do
@@ -127,7 +124,7 @@ main =
     timedSpec "ProgramFixturePackageSpec" ProgramFixturePackageSpec.spec
     timedSpec "ProgramPackageSpec" ProgramPackageSpec.spec
     timedSpec "ProgramPackageDiscoverySpec" ProgramPackageDiscoverySpec.spec
-    -- timedSpec "ProgramParserParitySpec" ProgramParserParitySpec.spec
+    timedSpec "ProgramParserParitySpec" ProgramParserParitySpec.spec
     timedSpec "ProgramSpec" ProgramSpec.spec
     timedSpec "ResolvedSymbolSpec" ResolvedSymbolSpec.spec
     timedSpec "PipelineSpec" PipelineSpec.spec

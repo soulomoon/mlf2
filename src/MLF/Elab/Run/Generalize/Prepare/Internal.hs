@@ -35,6 +35,7 @@ module MLF.Elab.Run.Generalize.Prepare.Internal (
     placeNestedRootRequirements,
     preparedAnnotated,
     authorizePreparedAnn,
+    selectPreparedRootScopeAuthority,
     preparedReadContextReady,
     preparedResultTypeViewReady,
     preparedIdentityGenerator,
@@ -462,6 +463,7 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaExactProducerTypes :: Either ElabError (IntMap.IntMap ElabType)
     , pgaAnnotationSourceNodeKeys :: IntSet.IntSet
     , pgaScopeOverrides :: ConstructionScopes
+    , pgaRootScopeOverrides :: [(AnnExpr, ConstructionScopes)]
     , pgaSubtermGeneralizations :: Either ElabError SubtermGeneralizations
     , pgaIdentityGenerator :: Either ElabError IdentityGenerator
     , pgaAnnotated :: AnnExpr
@@ -1891,6 +1893,17 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             [ (edgeId, RootEdgeExactProducer <$> mbEndpoint)
             | (edgeId, mbEndpoint) <- explicitEdges
             ]
+        -- An exact endpoint refines S'(operated); it does not override the
+        -- syntax-owned constructor selected for that edge.  The root-owned
+        -- baseline must therefore exclude every edge already claimed by a
+        -- local closure.
+        rootExplicitProducerEdges =
+            [ edge
+            | edge@(edgeId, _) <- explicitProducerEdges
+            , IntMap.notMember
+                (getEdgeId edgeId)
+                (rbeLocallyClosedGammas boundaryEdges)
+            ]
     rootRequirements <-
         generalizationRequirementsForScopeEdges
             []
@@ -1904,7 +1917,7 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             exactProducerTypes
             sourceBinderRefs
             subtermPackets
-            explicitProducerEdges
+            rootExplicitProducerEdges
             expectedType
             ann
     let resultLocalEdges =
@@ -1912,6 +1925,22 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             | (edgeKey, closure) <-
                 IntMap.toList (rbeLocallyClosedGammas boundaryEdges)
             , localGammaOwnerOnResultPath (lgcOwner closure) ann
+            ]
+        resultLocalEdgeKeys =
+            IntSet.fromList (map getEdgeId resultLocalEdges)
+        -- A locally claimed exact edge contributes to the root result only
+        -- when its constructor is on that result path.  Other exact
+        -- application arguments are closed inside the checked term and must
+        -- not be replayed as root Gamma requirements.
+        resultExplicitProducerEdges =
+            [ edge
+            | edge@(edgeId, _) <- explicitProducerEdges
+            , IntMap.notMember
+                (getEdgeId edgeId)
+                (rbeLocallyClosedGammas boundaryEdges)
+                || IntSet.member
+                    (getEdgeId edgeId)
+                    resultLocalEdgeKeys
             ]
     requirements0 <-
         generalizationRequirementsForScopeEdges
@@ -1932,7 +1961,7 @@ generalizationRequirementsForRootBoundary scopeForBoundary identityRepresentativ
             exactProducerTypes
             sourceBinderRefs
             subtermPackets
-            explicitProducerEdges
+            resultExplicitProducerEdges
             expectedType
             ann
     let closureMatchesRequirement closure requirement =
@@ -2732,9 +2761,13 @@ validateLocalApplicationCertificatesWithRepresentative identityRepresentative sc
                     , lgoTermNode owner == applicationNode -> True
                 _ -> False
 
--- | Attach the exact nested Figure 15.3.5 owner while construction evidence is
--- still available.  A term-local closure is the strongest authority.  If no
--- term constructor owns the edge, the frozen binding tree supplies the
+-- | Attach the exact Figure 15.3.5 owner while construction evidence is still
+-- available.  A term-local closure is the strongest authority.  Its source
+-- constructor can be at the current scope, below it, or above a deeper result
+-- scope: the last case is an exact construction-scope placement, not a nested
+-- placement.  Unrelated scopes remain invalid.
+--
+-- If no term constructor owns the edge, the frozen binding tree supplies the
 -- structural owner: the first gen reached through the exterior's flexible
 -- path.  That gen must be the current construction scope or a proven
 -- descendant of it.  A parentless exterior has no such path; it belongs to
@@ -2786,12 +2819,7 @@ placeNestedRootRequirements ga currentScope locallyClosed requirements = do
                         requirement
                         closures
                 | otherwise ->
-                    pure
-                        requirement
-                            { rgbPlacement =
-                                RequiredGammaAtNestedScope
-                                    (localGammaOwnerScope (lgcOwner closure))
-                            }
+                    placeFromLocalClosure requirement closure
       where
         requirementEdges = NonEmpty.toList (rgbEdgeIds requirement)
         presentClosures =
@@ -2802,6 +2830,40 @@ placeNestedRootRequirements ga currentScope locallyClosed requirements = do
 
     closureForEdge edgeId =
         IntMap.lookup (getEdgeId edgeId) locallyClosed
+
+    placeFromLocalClosure requirement closure = do
+        currentOwner <- currentScopeGenOwner requirement
+        let closureOwner = localGammaOwnerScope (lgcOwner closure)
+        placement <-
+            if closureOwner == currentOwner
+                then pure (RequiredGammaAtNestedScope closureOwner)
+                else do
+                    closureOwnerPath <-
+                        bindingPathToRootLocal bindParents closureOwner
+                    currentOwnerPath <-
+                        bindingPathToRootLocal bindParents currentOwner
+                    let closureIsNested =
+                            currentOwner `elem` drop 1 closureOwnerPath
+                        closureContainsCurrent =
+                            closureOwner `elem` drop 1 currentOwnerPath
+                    case () of
+                        _
+                            | closureIsNested ->
+                                pure (RequiredGammaAtNestedScope closureOwner)
+                            | closureContainsCurrent ->
+                                pure
+                                    ( RequiredGammaAtConstructionScope
+                                        closureOwner
+                                    )
+                            | otherwise ->
+                                localClosurePlacementFailure
+                                    "local Gamma owner is unrelated to the current construction scope"
+                                    requirement
+                                    closureOwner
+                                    currentOwner
+                                    closureOwnerPath
+                                    currentOwnerPath
+        pure requirement {rgbPlacement = placement}
 
     placeFromFrozenExterior requirement = do
         currentOwner <- currentScopeGenOwner requirement
@@ -2922,6 +2984,18 @@ placeNestedRootRequirements ga currentScope locallyClosed requirements = do
                 , "  frozen exterior owner: " ++ show exteriorOwner
                 , "  current construction owner: " ++ show currentOwner
                 , "  owner path: " ++ show ownerPath
+                ]
+            )
+
+    localClosurePlacementFailure reason requirement closureOwner currentOwner closureOwnerPath currentOwnerPath =
+        Left
+            ( ValidationFailed
+                [ reason
+                , "  requirement: " ++ show requirement
+                , "  local Gamma owner: " ++ show closureOwner
+                , "  current construction owner: " ++ show currentOwner
+                , "  local Gamma owner path: " ++ show closureOwnerPath
+                , "  current construction owner path: " ++ show currentOwnerPath
                 ]
             )
 
@@ -4644,7 +4718,8 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
         of
             Left err -> Left (Solve.BindingTreeError err)
             Right parts -> Right parts
-    let scopeOverrides = mconcat scopeOverrideParts
+    let rootScopeOverrides = zip anns scopeOverrideParts
+        scopeOverrides = mconcat scopeOverrideParts
     let
         subtermPreparation =
             do
@@ -4666,9 +4741,12 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
                         sourceBinderRefs
                         (IntMap.map ceepConstructionRefs exactEdgePlans)
                         resultTypeView
-                        scopeOverrides
-                        anns
-                        annCanons
+                        ( zipWith3
+                            (\scopes source canon -> (scopes, source, canon))
+                            scopeOverrideParts
+                            anns
+                            annCanons
+                        )
                     )
                   of
                     Right preparedPackets -> pure preparedPackets
@@ -4696,6 +4774,7 @@ prepareGeneralizationArtifactForRoots traceCfg identityGenerator exactProducerSo
             , pgaExactProducerTypes = exactProducerTypes
             , pgaAnnotationSourceNodeKeys = annotationSourceNodeKeys
             , pgaScopeOverrides = scopeOverrides
+            , pgaRootScopeOverrides = rootScopeOverrides
             , pgaSubtermGeneralizations = subtermGeneralizations
             , pgaIdentityGenerator = preparedGenerator
             , pgaAnnotated = annCanon
@@ -4908,49 +4987,24 @@ prepareSubtermGeneralizations
     -> IntMap.IntMap TypeBinderRef
     -> IntMap.IntMap (IntMap.IntMap TypeBinderRef)
     -> Either ElabError (ResultTypeView 'Presolved)
-    -> ConstructionScopes
-    -> [AnnExpr]
-    -> [AnnExpr]
+    -> [(ConstructionScopes, AnnExpr, AnnExpr)]
     -> Either ElabError (SubtermGeneralizations, IdentityGenerator)
-prepareSubtermGeneralizations identityGenerator identityRepresentative constructionCanonical baseConstraint presolutionView rawEdgeArtifacts edgeArtifacts exactProducerTypes annExpectedTypes redirects bindParentsGa sourceBinderRefs compilerExactConstructionRefs resultTypeView scopeOverrides sources canons = do
-    localGammaClosures <- preparedLocalGammaClosures
-    rootPairs <- pairSubtermGeneralizationRoots sources canons
-    foldM (collectRoot localGammaClosures) (Map.empty, identityGenerator) rootPairs
+prepareSubtermGeneralizations identityGenerator identityRepresentative constructionCanonical baseConstraint presolutionView rawEdgeArtifacts edgeArtifacts exactProducerTypes annExpectedTypes redirects bindParentsGa sourceBinderRefs compilerExactConstructionRefs resultTypeView scopedRoots =
+    foldM collectRoot (Map.empty, identityGenerator) scopedRoots
   where
-    preparedLocalGammaClosures = do
-        boundaries <-
-            traverse
-                ( rootBoundaryInstantiationEdges
-                    packetScopeRootForBoundary
-                    bindParentsGa
-                    edgeArtifacts
-                    []
-                )
-                canons
-        foldM
-            mergePreparedClosureMap
-            IntMap.empty
-            (map rbeLocallyClosedGammas boundaries)
+    sources = [source | (_, source, _) <- scopedRoots]
+    canons = [canon | (_, _, canon) <- scopedRoots]
 
-    mergePreparedClosureMap closures incoming =
-        foldM insertPreparedClosure closures (IntMap.toList incoming)
+    preparedLocalGammaClosures scopeOverrides canon =
+        rbeLocallyClosedGammas
+            <$> rootBoundaryInstantiationEdges
+                (packetScopeRootForBoundary scopeOverrides)
+                bindParentsGa
+                edgeArtifacts
+                []
+                canon
 
-    insertPreparedClosure closures (edgeKey, closure) =
-        case IntMap.lookup edgeKey closures of
-            Nothing -> pure (IntMap.insert edgeKey closure closures)
-            Just existing
-                | existing == closure -> pure closures
-                | otherwise ->
-                    Left
-                        ( ValidationFailed
-                            [ "one prepared edge has conflicting local Gamma owners"
-                            , "  edge: " ++ show (EdgeId edgeKey)
-                            , "  first: " ++ show existing
-                            , "  second: " ++ show closure
-                            ]
-                        )
-
-    packetScopeRootForBoundary edgeId fallbackNode =
+    packetScopeRootForBoundary scopeOverrides edgeId fallbackNode =
         resolveConstructionScopeForBoundary
             constructionCanonical
             bindParentsGa
@@ -4964,7 +5018,9 @@ prepareSubtermGeneralizations identityGenerator identityRepresentative construct
          in alphaEqType leftType rightType
                 || churchAwareEqType leftType rightType
 
-    collectRoot localGammaClosures (packets, generator) (source, canon) = do
+    collectRoot (packets, generator) (scopeOverrides, source, canon) = do
+        localGammaClosures <-
+            preparedLocalGammaClosures scopeOverrides canon
         (rootPackets, generator') <-
             collect
                 localGammaClosures
@@ -9600,6 +9656,40 @@ authorizePreparedAnn artifact sourceAnn =
                 ( ValidationFailed
                     [ "annotated root does not belong to the prepared edge authority"
                     , "  root: " ++ show sourceAnn
+                    ]
+                )
+
+-- | Restrict occurrence-sensitive construction scopes to one prepared root.
+-- Multi-root module checking shares solved type representatives across roots,
+-- but lexical Gamma ownership does not cross a root boundary.  Selecting the
+-- root's scope authority before construction prevents a canonical base node
+-- (for example the built-in String node) from combining unrelated let scopes.
+selectPreparedRootScopeAuthority
+    :: PreparedGeneralizationArtifact
+    -> AnnExpr
+    -> Either ElabError PreparedGeneralizationArtifact
+selectPreparedRootScopeAuthority artifact sourceAnn =
+    case
+        [ scopes
+        | (preparedAnn, scopes) <- pgaRootScopeOverrides artifact
+        , preparedAnn == sourceAnn
+        ]
+    of
+        [scopes] ->
+            pure artifact {pgaScopeOverrides = scopes}
+        [] ->
+            Left
+                ( ValidationFailed
+                    [ "annotated root has no prepared construction-scope authority"
+                    , "  root: " ++ show sourceAnn
+                    ]
+                )
+        scopes ->
+            Left
+                ( ValidationFailed
+                    [ "annotated root has multiple prepared construction-scope authorities"
+                    , "  root: " ++ show sourceAnn
+                    , "  authorities: " ++ show scopes
                     ]
                 )
 
@@ -15303,11 +15393,11 @@ prepareRootConstructionScopeWithRequirementEvidence
             | otherwise = ref : refs
 
 -- | Prove that one complete root requirement is emitted by the exact local
--- constructor retained at its nested placement.  The edge set, semantic
--- exterior, consumer identity, lexical owner, and either direct-application
--- occurrence provenance or flexible binding-tree path are all part of the
--- proof; a matching name or quotient representative is deliberately
--- insufficient.
+-- constructor retained at its nested or enclosing construction placement.
+-- The edge set, semantic exterior, consumer identity, lexical owner, and
+-- either direct-application occurrence provenance or flexible binding-tree
+-- path are all part of the proof; a matching name or quotient representative
+-- is deliberately insufficient.
 requiredGammaBinderClosedLocally
     :: GaBindParents p
     -> IntMap.IntMap LocalGammaClosure
@@ -15369,10 +15459,13 @@ requiredGammaBinderClosedLocally ga locallyClosedGammas requirement =
                         invalidLocalClosure
                             "current-scope root requirement is also claimed by a local constructor"
                             closures
-                    RequiredGammaAtConstructionScope _ ->
-                        invalidLocalClosure
-                            "exact-scope root requirement is also claimed by a local constructor"
-                            closures
+                    RequiredGammaAtConstructionScope owner
+                        | owner == localGammaOwnerScope (lgcOwner closure) ->
+                            pure True
+                        | otherwise ->
+                            invalidLocalClosure
+                                "construction-scope root requirement placement disagrees with its local constructor owner"
+                                closures
                     RequiredGammaAtNestedScope owner
                         | owner == localGammaOwnerScope (lgcOwner closure) ->
                             pure True

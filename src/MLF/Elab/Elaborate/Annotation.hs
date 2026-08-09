@@ -648,6 +648,19 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
         Nothing ->
           case annExpr of
             AResolvedVar details _ _ -> pure (resolvedLookup details)
+            -- A literal's syntax is exact source authority for its closed
+            -- builtin type.  Recovering that scheme from its prepared graph
+            -- node is both unnecessary and unsound when normalization has
+            -- merged sibling monomorphic results onto the same canonical
+            -- node with distinct lexical construction scopes.
+            ALit literal _ ->
+              pure
+                ( Just
+                    ( schemeInfoFromRefSubst
+                        (schemeFromType (TypeCheck.literalType literal))
+                        IntMap.empty
+                    )
+                )
             AExactAnn inner _ _ edgeId ->
               recurseUnderAnnotation ambientBinderRefs edgeId inner
             AAnn inner _ edgeId ->
@@ -854,6 +867,8 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                           Left
                             ( ValidationFailed
                                 [ "annotation source has no exact construction scope"
+                                , "  source boundary: "
+                                    ++ sourceGeneralizationBoundary sourceAnn
                                 , "  source node: " ++ show sourceNode
                                 , "  target node: " ++ show target
                                 , "  cause: " ++ show cause
@@ -1067,6 +1082,40 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
                   boundaryEdge
                   resultNode
               _ -> scopeRootForNode scopeContext sourceNode
+
+        sourceGeneralizationBoundary sourceExpr =
+          case sourceExpr of
+            AResolvedVar _ name node ->
+              "resolved variable " ++ show name ++ " at " ++ show node
+            ALit literal node ->
+              "literal " ++ show literal ++ " at " ++ show node
+            ALam _ _ _ owner _ bodyEdge node ->
+              "lambda body edge "
+                ++ show bodyEdge
+                ++ " owner "
+                ++ show owner
+                ++ " at "
+                ++ show node
+            AApp _ _ functionSite _ node ->
+              "application function edge "
+                ++ show (instantiationSiteEdgeId functionSite)
+                ++ " at "
+                ++ show node
+            ALet _ _ _ schemeRootNode _ _ _ body node ->
+              "let scheme root "
+                ++ show schemeRootNode
+                ++ " body boundary "
+                ++ show (directLetBoundaryEdge body)
+                ++ " at "
+                ++ show node
+            AAnn _ node edge ->
+              "annotation edge " ++ show edge ++ " at " ++ show node
+            AExactAnn _ _ node edge ->
+              "exact annotation edge " ++ show edge ++ " at " ++ show node
+            ALetScope _ node edge ->
+              "let-scope edge " ++ show edge ++ " at " ++ show node
+            AUnfold _ node edge ->
+              "unfold edge " ++ show edge ++ " at " ++ show node
 
         rootGammaOwner ann edgeId ownedPackets =
           case

@@ -1411,13 +1411,34 @@ buildBinderPlan BinderPlanInput {..} = do
                 not (typeBinderRefsSameIdentity firstRef routeRef)
             )
             remainingRoutes
+        , not (sharedResultHasDistinctDeclarationRoutes resultKey routes)
         ]
+      sharedResultHasDistinctDeclarationRoutes resultKey routes =
+        any ((== primaryResultKey) . fst) routes
+          && all hasExactDeclarationRoute routes
+        where
+          primaryResultKey =
+            getNodeId (canonical (NodeId resultKey))
+          hasExactDeclarationRoute (requiredKey, _) =
+            requiredKey == primaryResultKey
+              || case lookupNodeInMap nodes (NodeId requiredKey) of
+                Just TyVar {} -> True
+                _ -> False
       requiredGammaResultRoutes =
-        IntMap.mapMaybe
-          ( \routes ->
-              case routes of
-                route : _ -> Just route
-                [] -> Nothing
+        IntMap.mapMaybeWithKey
+          ( \resultKey routes ->
+              case
+                  [ route
+                  | route@(requiredKey, _) <- routes
+                  , requiredKey
+                      == getNodeId (canonical (NodeId resultKey))
+                  ]
+                of
+                  route : _ -> Just route
+                  [] ->
+                    case routes of
+                      route : _ -> Just route
+                      [] -> Nothing
           )
           requiredGammaResultRouteGroups
       requiredGammaResultSubst =
@@ -1842,7 +1863,7 @@ buildBinderPlan BinderPlanInput {..} = do
     conflicts ->
       Left
         ( ValidationFailed
-            [ "one required Gamma result has conflicting exterior identities"
+            [ "one required Gamma result has conflicting exterior identities without distinct declaration routes"
             , "  conflicts: " ++ show conflicts
             ]
         )

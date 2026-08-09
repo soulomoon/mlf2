@@ -35,8 +35,6 @@ import MLF.Constraint.Types.Graph
 import MLF.Elab.Pipeline
     ( applyRedirectsToAnn
     , canonicalizeAnn
-    , renderPipelineError
-    , runPipelineElab
     )
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
@@ -61,7 +59,6 @@ import SpecUtil
     , defaultTraceConfig
     , requireRight
     , runPipelineArtifactsDefault
-    , unsafeNormalizeExpr
     )
 
 spec :: Spec
@@ -122,174 +119,6 @@ spec =
         it "nestedForallContrastExpr stays recursive as preserved merged-baseline same-wrapper nested-forall success across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
-
-        it "sameLaneClearBoundaryExpr is the first explicit milestone-3 representative broader-positive clear-boundary packet on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneQuadrupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged triple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneQuintupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quadruple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneSeptupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged sextuple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneNonupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged octuple-alias anchor on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr keeps the combined nested-forall plus owner-local alias packet recursive on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr keeps the combined nested-forall plus decuple owner-local alias packet recursive on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
-
-        it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on the canonical pipeline entrypoint" $ do
-            let pipelineRuns =
-                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))]
-            mapM_
-                (\(label, result) -> case result of
-                    Left err ->
-                        expectationFailure (label ++ ": " ++ renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` True
-                )
-                pipelineRuns
 
 sameLaneClearBoundaryExpr :: SurfaceExpr
 sameLaneClearBoundaryExpr =

@@ -178,6 +178,7 @@ import MLF.Elab.SourceBinder.TestSupport
     , resolveConstructionSourceBindersInTypeExceptForTest
     , resolveConstructionSourceBindersInTypeForTest
     , sourceBinderConstructionRenamesForTest
+    , sourceBinderConstructionRenamesRetainingAmbiguousSourcesForTest
     )
 import MLF.Frontend.ConstraintGen
     ( AnnExpr(..)
@@ -1043,6 +1044,26 @@ spec = do
                 Right routes ->
                     expectationFailure
                         ("expected ambiguous construction routes, got " ++ show routes)
+
+        it "retains source authority when one occurrence has several construction peers" $ do
+            let sourceRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 720))
+                        "source"
+                firstPeer = typeRef 722 "first-peer"
+                secondPeer = typeRef 723 "second-peer"
+                representative _ = NodeId 720
+                sourceRefs = IntMap.singleton 721 sourceRef
+                constructionAliases =
+                    IntMap.fromList
+                        [ (722, firstPeer)
+                        , (723, secondPeer)
+                        ]
+            sourceBinderConstructionRenamesRetainingAmbiguousSourcesForTest
+                representative
+                sourceRefs
+                constructionAliases
+                `shouldBe` Right []
 
     describe "local Gamma source frames" $ do
         it "uses the application function edge as owner while retaining both direct edge sources" $ do

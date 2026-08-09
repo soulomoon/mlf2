@@ -1557,13 +1557,15 @@ finalizeLayerIndividually timing label moduleContext lowereds =
     go _ [] = pure []
     go index (lowered : rest) = do
       checked <-
-        ExceptT $
-          finalizeBindingAllowOpaqueWithModuleContextWithTiming
-            timing
-            (label ++ ".def_" ++ show index)
-            moduleContext
-            False
-            lowered
+        ExceptT $ do
+          result <-
+            finalizeBindingAllowOpaqueWithModuleContextWithTiming
+              timing
+              (label ++ ".def_" ++ show index)
+              moduleContext
+              False
+              lowered
+          pure (either (Left . annotateLoweredBindingPipelineError lowered) Right result)
       restResult <- go (index + 1) rest
       pure (checked : restResult)
 
@@ -1580,15 +1582,29 @@ finalizeLayerIndividuallyWithTimingFromSupply timing label generator0 moduleCont
     go generator _ acc [] = pure (reverse acc, generator)
     go generator index acc (lowered : rest) = do
       (checked, generator') <-
-        ExceptT $
-          finalizeBindingAllowOpaqueWithModuleContextWithTimingFromSupply
-            timing
-            (label ++ ".def_" ++ show index)
-            generator
-            moduleContext
-            False
-            lowered
+        ExceptT $ do
+          result <-
+            finalizeBindingAllowOpaqueWithModuleContextWithTimingFromSupply
+              timing
+              (label ++ ".def_" ++ show index)
+              generator
+              moduleContext
+              False
+              lowered
+          pure (either (Left . annotateLoweredBindingPipelineError lowered) Right result)
       go generator' (index + 1) (checked : acc) rest
+
+annotateLoweredBindingPipelineError :: LoweredBinding -> ProgramError -> ProgramError
+annotateLoweredBindingPipelineError lowered err =
+  case err of
+    ProgramPipelineError message ->
+      ProgramPipelineError
+        ( "binding `"
+            ++ loweredBindingName lowered
+            ++ "`: "
+            ++ message
+        )
+    _ -> err
 
 finalizeLayerPipelineResults ::
   TimingConfig ->

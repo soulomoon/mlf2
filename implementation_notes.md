@@ -1,3 +1,85 @@
+## 2026-08-09 - Systematic-test cleanup and parser-parity restoration
+
+- Re-enabled `ProgramParserParitySpec` in the active Hspec harness.  Its
+  dynamic `.mlfp` cases now run through one generated public-CLI package,
+  sharded into bounded definition batches, instead of compiling a separate
+  parser package for every fixture.  The full dynamic group passes all three
+  checks, including recursive module-body sequencing and malformed-input
+  rejection.
+- Fixed the production defects revealed by that restored path.  Prepared
+  multi-root artifacts retain per-root scope overrides and select that lexical
+  authority before each root elaborates.  A local constructor above a deeper
+  result owner is placed at its certified construction scope, while unrelated
+  owners still fail closed.  Deferred fallback batching now preserves both the
+  unconsumed eligible prefix and the untouched suffix.  Representative ambient
+  lookup uses an exact node-key authority, when one is frozen, to recover the
+  structural recursive declaration shared by repeated branches.  A finalized
+  body-consumer certificate is projected through the frozen operated endpoint
+  before ambient comparison, so deep monomorphic partial applications retain
+  their declared codomain without a global type-shape preference.  An
+  enclosing result is exact authority for a child application only when one
+  application of the checked source scheme reaches it.  If a monomorphic
+  nested application exposes only Church-encoding structural binders, the
+  child is checked first and its owner-final construction supplies the
+  immediate codomain; genuine non-structural source foralls still use the
+  parent endpoint to choose their specialization.  Root `RaiseMerge`
+  requirements that share a solved monomorphic result retain separate Gamma
+  declarations whenever a distinct flexible route survives.  If no such
+  route remains, equal-bound requirements with compatible exact occurrence
+  evidence merge their edge IDs onto the primary declaration rather than
+  manufacturing a binder identity from a rigid/base node.
+- Fixed two construction-identity failures found by the restored gates.  A
+  pending local consumer first proves that exactly one raw direct exterior is
+  unbounded and only then applies the construction quotient, so a certified
+  declaration alias cannot be counted as a second pending exterior.  A frozen
+  generated O15 counterexample also showed a source forall moving from a
+  returned higher-rank parameter into an enclosing outer binder spine.  The
+  reconciler now consumes only the active packet's validated
+  `SourceOwnerConsumerCompletion`, matches its exact consumer identity and
+  completed bound, and rechecks the actual child term before replacing that
+  source owner's stale provisional Gamma entry.  Ordinary conflicting ambient
+  declarations still fail closed.
+- Froze the subsequent generated seed `937635187` counterexample, where one
+  source forall had several graph occurrences in a shared solved class and the
+  class exposed more than one outward construction binder.  The relaxed route
+  collector now retains the source identity instead of choosing a peer or
+  failing before occurrence selection; the strict collector still rejects the
+  same ambiguous class.  Scheme alignment restricts representative lookup to
+  source occurrence keys owned by that SchemeInfo, and owner-final let
+  publication propagates its exact alignment rename to the checked RHS and
+  publication environment instead of changing only the scheme.  The frozen
+  regression and seeds `937635187`, `195565654`, and `20260809` (100 generated
+  programs each) pass.
+- Froze generated seed `449181304` case 66, where an ignored let returned a
+  source-polymorphic function beneath two value lambdas after exact Gamma
+  completion had closed the result declaration's bound.  Publishing the open
+  child directly with `InstAbstrRef` was invalid because an xMLF instantiation
+  cannot cross the enclosing value arrow.  Exact returned-body construction
+  now prefers the completed declaration bound, separates certified open
+  value-lambda parameters from residual result binders, constructs a unique
+  checked instantiation from the source codomain to that residual bound, and
+  applies it at the first exact result beneath the value-lambda spine.  The
+  rebuilt term and its result publication are both typechecked before the
+  endpoint plan is accepted; ambiguous or inexact constructions fail closed.
+  The new helper has a direct placement/typecheck regression, and seed
+  `449181304` also passes 100 generated programs.
+- Removed same-path integration repetitions and assertions that were true for
+  every possible value, and strengthened surviving tests to observe a real
+  edge, copy trace, or typecheck result.  The thesis ledger now classifies
+  deterministic evidence as `fixed` with one execution and generated evidence
+  as `quickcheck` with at least 100 successes.  O07 core decomposition and O11
+  presolution structural unification have independent oracles; variable
+  well-formedness, instantiation, and lambda/let environment obligations also
+  exercise their own judgment boundaries.
+- Added repository guards that reject disabled or focused Hspec combinators,
+  reused thesis property functions, and duplicate normalized top-level
+  property equations.  The ledger renderer and executable checker enforce the
+  fixed/generated distinction and execute all 107 obligation anchors in one
+  process.  Final validation passes all 302 fixed annotation cases, 126 Root
+  RaiseMerge cases, 15 repository guards, 107 thesis-obligation anchors,
+  `cabal build all -j1`, the complete serialized suite (4042 examples, zero
+  failures), and `./scripts/thesis-conformance-gate.sh`.
+
 ## 2026-08-07 - Source-declaration construction and paper `g g` completion
 
 - Fixed the mixed-source declaration cycle at binder-plan construction time.
