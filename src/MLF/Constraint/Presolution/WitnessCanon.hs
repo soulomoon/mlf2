@@ -20,15 +20,15 @@ module MLF.Constraint.Presolution.WitnessCanon (
     assertNoStandaloneGraftsWithProvenance
 ) where
 
-import Data.Functor.Foldable (ListF(..), ana, cata)
+import Data.Functor.Foldable (ListF(..), cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (nubBy, partition, sortBy)
+import Data.List (nubBy, partition)
 
 import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
 import MLF.Constraint.Types.Witness (InstanceOp(..), ValidatedInstanceOps)
 import qualified MLF.Binding.Tree as Binding
-import MLF.Util.Order (compareNodesByOrderKey)
+import qualified MLF.Util.Order as Order
 import MLF.Constraint.Presolution.WitnessValidation
     ( OmegaNormalizeEnv(..)
     , OmegaNormalizeError(..)
@@ -258,7 +258,8 @@ reorderWeakenWithProvenance env ops =
                         [ (wiAnchor info, [info])
                         | info <- infos
                         ]
-                orderedGroups = IntMap.map orderWeakenGroup groups
+            orderedGroups <- traverse orderWeakenGroup groups
+            let
                 nonWeakenByIndex =
                     IntMap.fromList
                         [ (idx, op)
@@ -272,7 +273,7 @@ reorderWeakenWithProvenance env ops =
                             ++ IntMap.findWithDefault [] idx orderedGroups
                         | idx <- [0 .. maxIndex]
                         ]
-            Right output
+            pure output
   where
     opsIndexed = zip [0 ..] ops
 
@@ -366,13 +367,25 @@ reorderWeakenWithProvenance env ops =
                 , wiDesc = descSet
                 }
 
-    orderWeakenGroup infos0 = map wiOp (ana orderAlg ([], infos0))
+    -- Weakens with the same delayed anchor still need the paper's binder
+    -- order to choose among incomparable ready nodes.  The old pure sorter
+    -- swallowed a missing or contradictory order key and used source
+    -- operation order instead.  That manufactured a normalized witness
+    -- without the corresponding <P authority.  Keep sorting in the error
+    -- channel so normalization either consumes a complete order model or
+    -- fails before publishing the witness.
+    orderWeakenGroup infos0 = map wiOp <$> orderReadyLayers infos0
       where
-        compareReady a b =
-            case compareNodesByOrderKey (orderKeys env) (wiBinder a) (wiBinder b) of
-                Right EQ -> compare (wiIndex a) (wiIndex b)
-                Right ord -> ord
-                Left _ -> compare (wiIndex a) (wiIndex b)  -- fallback if missing key
+        compareReady a b = do
+            order <-
+                compareNodesByOrderKeyM
+                    env
+                    (wiBinder a)
+                    (wiBinder b)
+            pure $
+                case order of
+                    EQ -> compare (wiIndex a) (wiIndex b)
+                    _ -> order
 
         hasDescendant remaining info =
             any
@@ -383,20 +396,18 @@ reorderWeakenWithProvenance env ops =
                 )
                 remaining
 
-        orderAlg (queue, remaining) =
-            case queue of
-                (q:qs) -> Cons q (qs, remaining)
-                [] ->
-                    case remaining of
-                        [] -> Nil
-                        _ ->
-                            let (ready, blocked) = partition (not . hasDescendant remaining) remaining
-                            in if null ready
-                                then emitQueue (sortBy compareReady remaining) []
-                                else emitQueue (sortBy compareReady ready) blocked
-
-        emitQueue [] _ = Nil
-        emitQueue (q:qs) remaining = Cons q (qs, remaining)
+        orderReadyLayers [] = pure []
+        orderReadyLayers remaining = do
+            let (ready, blocked) =
+                    partition
+                        (not . hasDescendant remaining)
+                        remaining
+            if null ready
+                then Order.sortByM compareReady remaining
+                else do
+                    readyOrdered <- Order.sortByM compareReady ready
+                    blockedOrdered <- orderReadyLayers blocked
+                    pure (readyOrdered ++ blockedOrdered)
 
 coalesceDelayedGraftWeakenWithProvenance
     :: Eq provenance

@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Made delayed-`Weaken` normalization fail closed when two incomparable
+  operations need a binder-order decision but the `<P` order authority is
+  missing or contradictory.  The previous pure comparator silently replaced
+  that missing paper evidence with source operation order and could therefore
+  publish a normalized witness that was not justified by its construction
+  environment.  Ready-layer ordering now remains in the normalization error
+  channel and consumes `compareNodesByOrderKeyM` directly.  The effectful
+  stable sort used here is shared with edge-unification merge emission, which
+  removes two local insertion-sort implementations without weakening either
+  caller's ordering semantics.
 - Re-enabled the complete `ProgramParserParitySpec` harness and replaced its
   fixture-by-fixture dynamic duplication with one generated, sharded public-CLI
   driver.  The restored gate exposed and fixed production-path defects:

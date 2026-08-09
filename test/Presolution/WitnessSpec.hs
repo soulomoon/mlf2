@@ -1650,6 +1650,58 @@ spec = do
                 reorderWeakenWithEnv env ops0
                     `shouldBe` Right [OpWeaken child, OpWeaken parent]
 
+            it "rejects tied incomparable Weakens when their binder order authority is incomplete" $ do
+                let leftParent = NodeId 10
+                    leftChild = NodeId 11
+                    rightParent = NodeId 12
+                    rightChild = NodeId 13
+                    tiedNodes =
+                        nodeMapFromList
+                            [ (getNodeId root, TyArrow root leftParent rightParent)
+                            , (getNodeId leftParent, TyForall leftParent leftChild)
+                            , (getNodeId leftChild, TyVar { tnId = leftChild, tnBound = Nothing })
+                            , (getNodeId rightParent, TyForall rightParent rightChild)
+                            , (getNodeId rightChild, TyVar { tnId = rightChild, tnBound = Nothing })
+                            ]
+                    tiedParents =
+                        bindParentsFromPairs
+                            [ (leftParent, root, BindFlex)
+                            , (leftChild, leftParent, BindFlex)
+                            , (rightParent, root, BindFlex)
+                            , (rightChild, rightParent, BindFlex)
+                            ]
+                    tiedConstraint =
+                        rootedConstraint $
+                            emptyConstraint
+                                { cNodes = tiedNodes
+                                , cBindParents = tiedParents
+                                }
+                    tiedEnv0 =
+                        mkNormalizeEnv
+                            tiedConstraint
+                            root
+                            ( IntSet.fromList
+                                [ getNodeId leftParent
+                                , getNodeId leftChild
+                                , getNodeId rightParent
+                                , getNodeId rightChild
+                                ]
+                            )
+                    tiedEnv =
+                        tiedEnv0
+                            { orderKeys =
+                                IntMap.delete
+                                    (getNodeId rightParent)
+                                    (orderKeys tiedEnv0)
+                            }
+                    ops0 =
+                        [ OpWeaken leftParent
+                        , OpWeaken rightParent
+                        , OpMerge leftChild rightChild
+                        ]
+                reorderWeakenWithEnv tiedEnv ops0
+                    `shouldBe` Left (MissingOrderKey rightParent)
+
             it "preserves unrelated op order while moving Weaken" $ do
                 let ops0 = [OpWeaken parent, OpGraft sibling sibling, OpGraft child child]
                 reorderWeakenWithEnv env ops0

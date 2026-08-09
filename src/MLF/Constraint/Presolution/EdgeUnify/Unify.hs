@@ -375,7 +375,7 @@ recordMergesIntoRep bs
         repId <- pickRepBinderId (if IntSet.null live then bs else live)
         let rep = NodeId repId
             others = filter (/= repId) (IntSet.toList bs)
-        othersSorted <- sortByM (\a b -> compareBinderIdsByPrec b a) others
+        othersSorted <- Order.sortByM (\a b -> compareBinderIdsByPrec b a) others
         forM_ othersSorted $ \bid -> do
             let b = NodeId bid
             already <- isEliminated b
@@ -385,16 +385,6 @@ recordMergesIntoRep bs
                 recordOp (OpMerge b rep)
                 setVarBoundM bMeta (Just repMeta)
                 recordEliminate b
-  where
-    sortByM :: (a -> a -> EdgeUnifyM p Ordering) -> [a] -> EdgeUnifyM p [a]
-    sortByM _ [] = pure []
-    sortByM cmp xs = do
-        let insertOne x [] = pure [x]
-            insertOne x (y:ys) = do
-                o <- cmp x y
-                if o == LT then pure (x : y : ys) else (y :) <$> insertOne x ys
-        foldM (\acc x -> insertOne x acc) [] xs
-
 {- Note [Edge-local Raise/Merge emission]
 Edge-local unification mirrors the paper's chi_e operations. Binding-edge
 harmonization produces a raise trace, and we emit `OpRaise` for the interior

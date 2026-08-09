@@ -1,3 +1,25 @@
+## 2026-08-10 - Construction-authoritative delayed-Weaken ordering
+
+- Found a remaining fallback in witness normalization: when incomparable
+  delayed `Weaken` operations landed at the same anchor, the pure sorter
+  swallowed `MissingOrderKey` and `EqualOrderKeysDistinctNodes` and used their
+  original operation indices.  That ordering was deterministic, but it was
+  not evidence for the paper's `<P` relation.
+- Replaced the fallback with effectful ready-layer ordering.  Every comparison
+  now goes through `compareNodesByOrderKeyM`, so an incomplete or contradictory
+  construction order rejects the witness before `ValidatedInstanceOps` can be
+  produced.  Operation indices are used only to stabilize two occurrences of
+  the same canonical binder after authoritative comparison succeeds.
+- Moved the stable effectful insertion sort into `MLF.Util.Order` and reused it
+  for edge-unification merge emission, deleting the second local copy.  A
+  regression constructs two incomparable delayed weakens with one missing
+  order key and proves that the production normalizer returns
+  `MissingOrderKey`; the complete witness-normalization group plus the O11
+  reorder and O15 node-Weaken obligations remain green.
+- Validation: `cabal build all -j1`, the complete serialized test suite
+  (`4043 examples, 0 failures`), and `scripts/thesis-conformance-gate.sh` all
+  pass.
+
 ## 2026-08-09 - Systematic-test cleanup and parser-parity restoration
 
 - Re-enabled `ProgramParserParitySpec` in the active Hspec harness.  Its

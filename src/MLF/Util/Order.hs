@@ -19,9 +19,11 @@ module MLF.Util.Order (
     orderKeysFromRoot,
     orderKeysFromRootRestricted,
     compareNodesByOrderKey,
-    sortByOrderKey
+    sortByOrderKey,
+    sortByM
 ) where
 
+import Control.Monad (foldM)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 
@@ -44,6 +46,21 @@ orderKeysFromRoot solved root0 =
 orderKeysFromRootRestricted :: Solved -> NodeId -> IntSet.IntSet -> IntMap OrderKey
 orderKeysFromRootRestricted solved root0 allowed =
     orderKeysFromConstraintWith (Solved.canonical solved) (Solved.originalConstraint solved) root0 (Just allowed)
+
+-- | Stable insertion sort whose comparison can reject an incomplete order
+-- model in the caller's effect.  Keep this shared rather than converting an
+-- authoritative comparison to a pure fallback at individual call sites.
+sortByM :: Monad m => (a -> a -> m Ordering) -> [a] -> m [a]
+sortByM compareM = foldM insert []
+  where
+    insert ordered item = insertInto item ordered
+
+    insertInto item [] = pure [item]
+    insertInto item ordered@(existing : rest) = do
+        order <- compareM item existing
+        case order of
+            LT -> pure (item : ordered)
+            _ -> (existing :) <$> insertInto item rest
 
 -- | Compute order keys from a raw constraint using term-DAG structure plus
 -- instance-bound dependencies.
