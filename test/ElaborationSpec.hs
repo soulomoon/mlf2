@@ -3549,6 +3549,141 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         producerTerm
         `shouldBe` Right producerTerm
 
+    it "rejects an alpha-equivalent recursive producer whose owner was not fixed during construction" $ do
+      let producerRef = graphTypeBinderRef 992057 "producer-rec"
+          exactRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992057))
+              "exact-rec"
+          intTy = TestElab.tBase (BaseTy "Int")
+          producerRecursiveTy =
+            ElabTypes.tMuWithRef
+              producerRef
+              (Elab.TArrow (ElabTypes.tVarWithRef producerRef) intTy)
+          exactRecursiveTy =
+            ElabTypes.tMuWithRef
+              exactRef
+              (Elab.TArrow (ElabTypes.tVarWithRef exactRef) intTy)
+          producerTy = Elab.TArrow producerRecursiveTy producerRecursiveTy
+          exactTy = Elab.TArrow exactRecursiveTy exactRecursiveTy
+          parameter =
+            ResolvedVar
+              { resolvedVarType = producerRecursiveTy
+              , resolvedVarDetails = LocalId (localRefFromNodeId "x" (NodeId 992058))
+              }
+          producerTerm = Elab.ELam parameter (Elab.EVarNode parameter)
+          env = Elab.mkTypeCheckEnvWithResolvedTerms [] Map.empty
+      TypeOps.alphaEqType producerTy exactTy `shouldBe` True
+      Annotation.elaborateClosedExactAnnotationTermAtType
+        env
+        exactTy
+        (EdgeId 992057)
+        producerTerm
+        `shouldSatisfy` isLeft
+
+    it "constructs an exact recursive owner from sidecar authority without renaming a same-key forall" $ do
+      let sharedGraphRef = graphTypeBinderRef 992059 "shared-graph"
+          exactRecursiveRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992159))
+              "exact-recursive"
+          intTy = TestElab.tBase (BaseTy "Int")
+          producerRecursiveTy =
+            ElabTypes.tMuWithRef
+              sharedGraphRef
+              (Elab.TArrow (ElabTypes.tVarWithRef sharedGraphRef) intTy)
+          exactRecursiveTy =
+            ElabTypes.tMuWithRef
+              exactRecursiveRef
+              (Elab.TArrow (ElabTypes.tVarWithRef exactRecursiveRef) intTy)
+          producerTy =
+            ElabTypes.tForallWithRef
+              sharedGraphRef
+              Nothing
+              (Elab.TArrow producerRecursiveTy producerRecursiveTy)
+          exactTy =
+            ElabTypes.tForallWithRef
+              sharedGraphRef
+              Nothing
+              (Elab.TArrow exactRecursiveTy exactRecursiveTy)
+          parameter =
+            ResolvedVar
+              { resolvedVarType = producerRecursiveTy
+              , resolvedVarDetails = LocalId (localRefFromNodeId "x" (NodeId 992160))
+              }
+          producerTerm =
+            Elab.ETyAbsRef
+              sharedGraphRef
+              Nothing
+              (Elab.ELam parameter (Elab.EVarNode parameter))
+          authority =
+            IntMap.singleton
+              (getNodeId (NodeId 992059))
+              exactRecursiveRef
+          env = Elab.mkTypeCheckEnvWithResolvedTerms [] Map.empty
+      Elab.typeCheckWithEnv env producerTerm `shouldBe` Right producerTy
+      case
+          Annotation.elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority
+            authority
+            env
+            exactTy
+            (EdgeId 992159)
+            producerTerm
+        of
+          Left err -> expectationFailure ("exact recursive owner construction failed: " ++ show err)
+          Right constructed -> do
+            Elab.typeCheckWithEnv env constructed `shouldBe` Right exactTy
+            case constructed of
+              Elab.ETyAbsRef outerRef _ _ ->
+                ElabTypes.typeBinderRefsSameIdentity outerRef sharedGraphRef
+                  `shouldBe` True
+              _ -> expectationFailure "exact recursive construction lost the outer forall"
+
+    it "publishes an env-owned recursive producer through an exact lexical binding" $ do
+      let producerRef = graphTypeBinderRef 992161 "producer-rec"
+          exactRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992261))
+              "exact-rec"
+          intTy = TestElab.tBase (BaseTy "Int")
+          producerTy =
+            ElabTypes.tMuWithRef
+              producerRef
+              (Elab.TArrow (ElabTypes.tVarWithRef producerRef) intTy)
+          exactTy =
+            ElabTypes.tMuWithRef
+              exactRef
+              (Elab.TArrow (ElabTypes.tVarWithRef exactRef) intTy)
+          producer =
+            ResolvedVar
+              { resolvedVarType = producerTy
+              , resolvedVarDetails = LocalId (localRefFromNodeId "producer" (NodeId 992162))
+              }
+          authority =
+            IntMap.singleton
+              (getNodeId (NodeId 992161))
+              exactRef
+          env = Elab.mkTypeCheckEnvWithResolvedTerms [(producer, producerTy)] Map.empty
+      TypeOps.alphaEqType producerTy exactTy `shouldBe` True
+      case
+          Annotation.elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority
+            authority
+            env
+            exactTy
+            (EdgeId 992161)
+            (Elab.EVarNode producer)
+        of
+          Left err -> expectationFailure ("env-owned recursive owner publication failed: " ++ show err)
+          Right constructed -> do
+            Elab.typeCheckWithEnv env constructed `shouldBe` Right exactTy
+            case constructed of
+              Elab.ELet published publishedScheme (Elab.EVarNode source) (Elab.EVarNode body) -> do
+                publishedScheme `shouldBe` Elab.schemeFromType exactTy
+                resolvedVarDetails source `shouldBe` resolvedVarDetails producer
+                resolvedVarDetails body `shouldBe` resolvedVarDetails published
+                resolvedVarType published `shouldBe` exactTy
+              _ -> expectationFailure "env-owned recursive owner was not published by a lexical let"
+
     it "eliminates a bounded result under a retained binder before introducing a vacuous target forall" $ do
       let retainedRef = graphTypeBinderRef 992060 "b"
           resultRef = graphTypeBinderRef 992061 "result"

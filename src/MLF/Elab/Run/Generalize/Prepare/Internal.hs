@@ -44,6 +44,7 @@ module MLF.Elab.Run.Generalize.Prepare.Internal (
     insertPreparedTermSourceBinderAlias,
     completePreparedCompilerExactSubtermResults,
     preparedCompilerExactExpectedType,
+    preparedCompilerExactDeclarationRefs,
     preparedElaborationConfig,
     preparedElaborationEnv,
     preparedElaborationEnvWithInitialEnv,
@@ -510,6 +511,10 @@ withPreparedResolvedTermSchemes schemes artifact =
 data CompilerExactEdgePlan = CompilerExactEdgePlan
     { ceepExpectedType :: !ElabType
     , ceepConstructionRefs :: !(IntMap.IntMap TypeBinderRef)
+    -- Exact declaration identities paired with graph occurrences by source
+    -- provenance. These are occurrence-selection evidence, not ambient Gamma
+    -- aliases: one solved graph key can serve another lexical role elsewhere.
+    , ceepDeclarationRefs :: !(IntMap.IntMap TypeBinderRef)
     }
     deriving (Eq, Show)
 
@@ -4296,7 +4301,50 @@ prepareCompilerExactEdgePlans rawExactTypes edgeTraces sourceBinderRefs =
             CompilerExactEdgePlan
                 { ceepExpectedType = expectedType
                 , ceepConstructionRefs = constructionRefs
+                , ceepDeclarationRefs =
+                    exactDeclarationRefs constructionRefs expectedType
                 }
+
+    -- Recursive declarations are not edge arguments, so retain their exact
+    -- identity provenance in a separate lane. The boundary later selects only
+    -- the graph owner occurring at the corresponding recursive position. Use
+    -- the post-quotient type because imported structural owners can become
+    -- exact only through this edge's frozen binder route.
+    exactDeclarationRefs constructionRefs expectedType =
+        IntMap.unions
+            [ IntMap.map
+                (const exactRef)
+                ( IntMap.union
+                    ( Map.findWithDefault
+                        IntMap.empty
+                        (typeBinderRefIdentity exactRef)
+                        sourceBinderRefsByIdentity
+                    )
+                    ( IntMap.filter
+                        (typeBinderRefsSameIdentity exactRef)
+                        constructionRefs
+                    )
+                )
+            | exactRef <- declarationRefs
+            ]
+      where
+        declarationRefs =
+            distinctTypeBinderRefs
+                (typeBinderDeclarationRefs expectedType)
+
+    -- This index is shared by every exact edge. Building it once avoids an
+    -- edge-by-edge scan of the whole source-provenance table in large modules.
+    sourceBinderRefsByIdentity =
+        IntMap.foldlWithKey'
+            (\refsByIdentity graphKey sourceRef ->
+                Map.insertWith
+                    IntMap.union
+                    (typeBinderRefIdentity sourceRef)
+                    (IntMap.singleton graphKey sourceRef)
+                    refsByIdentity
+            )
+            Map.empty
+            sourceBinderRefs
 
     prepareBinderRoute traceInfo rawExactType edgeId (constructionRefs, exactBinderRefs) (producerBinder, argumentNode) =
         case selectArgumentRef rawExactType argumentNode of
@@ -9900,6 +9948,26 @@ preparedCompilerExactExpectedType artifact exactEdge = do
                     ]
                 )
 
+-- | Return the exact edge's occurrence-sensitive declaration provenance.
+-- Unlike construction refs, this map must not be installed as a Gamma alias;
+-- its graph key is consumed only after the boundary has identified the
+-- corresponding recursive declaration in the checked producer type.
+preparedCompilerExactDeclarationRefs
+    :: PreparedGeneralizationArtifact
+    -> EdgeId
+    -> Either ElabError (IntMap.IntMap TypeBinderRef)
+preparedCompilerExactDeclarationRefs artifact exactEdge = do
+    plansByEdge <- pgaCompilerExactEdgePlans artifact
+    case IntMap.lookup (getEdgeId exactEdge) plansByEdge of
+        Just plan -> pure (ceepDeclarationRefs plan)
+        Nothing ->
+            Left
+                ( ValidationFailed
+                    [ "prepared compiler-exact edge has no declaration plan"
+                    , "  edge: " ++ show exactEdge
+                    ]
+                )
+
 -- | Apply only the exact-contract side of a compiler-exact identity proof.
 -- Unlike a free-reference substitution, this quotient renames lexical forall
 -- and mu declarations together with their bounds and occurrences.  The route
@@ -10091,6 +10159,9 @@ preparedElaborationEnvWithInitialEnv annSourceTypes initialTermEnv artifact =
         , eeExactProducerTypes = pgaExactProducerTypes artifact
         , eeCompilerExactConstructionRefs =
             IntMap.map ceepConstructionRefs
+                <$> pgaCompilerExactEdgePlans artifact
+        , eeCompilerExactDeclarationRefs =
+            IntMap.map ceepDeclarationRefs
                 <$> pgaCompilerExactEdgePlans artifact
         , eeScopeOverrides = pgaScopeOverrides artifact
         , eeExactLambdaParamSourceTypes =

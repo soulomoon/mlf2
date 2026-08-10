@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Changed
+- Removed the exact-annotation fallback that recursively retyped a completed
+  `XmlfTerm` when its inferred recursive type was only alpha-equivalent to the
+  exact source type. Compiler-exact preparation now carries occurrence-sensitive
+  declaration provenance separately from ambient Gamma aliases. At the exact
+  boundary that authority constructs only the corresponding lexical `mu`
+  binder and its occurrences in the checked producer; another binder kind that
+  shares the graph key is not renamed. When the producer occurrence is owned by
+  the type-checking environment, the boundary publishes the approved exact
+  presentation through a fresh lexical `let`, because changing a resolved
+  variable payload cannot override its environment entry. Missing or
+  conflicting authority fails closed, and the final exact check only validates
+  the constructed owner. This deletes the whole-term
+  `mapTermTypes`/`mapInstantiationTypes` repair pass and makes an unauthorized
+  recursive owner mismatch unrepresentable as a successful exact construction.
 - Froze the paper's source-binder `<P` order when constructing edge-local
   unification state.  Merge representative selection now consumes that
   construction authority directly instead of recomputing order from copied

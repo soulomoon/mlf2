@@ -20,6 +20,7 @@ module MLF.Elab.TermClosure
     freshenTypeAbsIdentitiesAgainstEnvWithRenames,
     renameTypeVarInTermAgainstEnv,
     alphaRenameTermTypeBinderScopes,
+    alphaRenameTermRecursiveTypeBinderScopes,
     alphaRenameTypeBinderScopes,
     renameTermTypeBinderRefPayloads,
     renameBoundTypeBinderRefPayloads,
@@ -449,7 +450,32 @@ alphaRenameTermTypeBinderScopes
   :: [TypeVarRename]
   -> XmlfTerm
   -> XmlfTerm
-alphaRenameTermTypeBinderScopes selectedRenames = renameTerm []
+alphaRenameTermTypeBinderScopes =
+  alphaRenameTermTypeBinderScopesSelecting (const True)
+
+-- | Construct only selected recursive type declarations in a new identity
+-- domain. Forall/ETyAbs/InstUnder declarations still shadow an active rename,
+-- but they are never selected merely because graph solving reused the same
+-- node identity for a different lexical role.
+alphaRenameTermRecursiveTypeBinderScopes
+  :: [TypeVarRename]
+  -> XmlfTerm
+  -> XmlfTerm
+alphaRenameTermRecursiveTypeBinderScopes =
+  alphaRenameTermTypeBinderScopesSelecting (== RecursiveTypeBinder)
+
+data TypeBinderDeclarationKind
+  = ExplicitTypeBinder
+  | ForallTypeBinder
+  | RecursiveTypeBinder
+  deriving (Eq)
+
+alphaRenameTermTypeBinderScopesSelecting
+  :: (TypeBinderDeclarationKind -> Bool)
+  -> [TypeVarRename]
+  -> XmlfTerm
+  -> XmlfTerm
+alphaRenameTermTypeBinderScopesSelecting selectBinder selectedRenames = renameTerm []
   where
     renameTerm activeRenames term =
       case term of
@@ -471,7 +497,8 @@ alphaRenameTermTypeBinderScopes selectedRenames = renameTerm []
             (renameTerm activeRenames rhs)
             (renameTerm activeRenames body)
         ETyAbsRef ref mbBound body ->
-          let (ref', bodyRenames) = enterBinder activeRenames ref
+          let (ref', bodyRenames) =
+                enterBinder ExplicitTypeBinder activeRenames ref
            in ETyAbsRef
                 ref'
                 (fmap (renameScopedBound activeRenames) mbBound)
@@ -498,7 +525,8 @@ alphaRenameTermTypeBinderScopes selectedRenames = renameTerm []
         InstElim -> InstElim
         InstAbstrRef ref -> InstAbstrRef (renameActiveRef activeRenames ref)
         InstUnderRef ref inner ->
-          let (ref', innerRenames) = enterBinder activeRenames ref
+          let (ref', innerRenames) =
+                enterBinder ExplicitTypeBinder activeRenames ref
            in InstUnderRef
                 ref'
                 (renameInstantiation innerRenames inner)
@@ -509,7 +537,10 @@ alphaRenameTermTypeBinderScopes selectedRenames = renameTerm []
             (renameInstantiation activeRenames left)
             (renameInstantiation activeRenames right)
 
-    renameType = alphaRenameTypeBinderScopesWith selectedRenames
+    renameType =
+      alphaRenameTypeBinderScopesSelecting
+        selectBinder
+        selectedRenames
 
     renameScopedBound activeRenames bound =
       case elabToBound (renameType activeRenames (tyToElab bound)) of
@@ -519,19 +550,21 @@ alphaRenameTermTypeBinderScopes selectedRenames = renameTerm []
     renameActiveRef activeRenames ref =
       fromMaybe ref (lookupRename activeRenames ref)
 
-    enterBinder activeRenames ref =
+    enterBinder binderKind activeRenames ref =
       case lookupRename activeRenames ref of
         -- A declaration with the same identity nested under an already active
         -- copy shadows that copy.  Keeping the nested declaration at the old
         -- identity makes the two scopes distinct after the outer copy.
         Just _ -> (ref, removeRename ref activeRenames)
-        Nothing ->
-          case lookupRename selectedRenames ref of
-            Just freshRef ->
-              ( freshRef
-              , (ref, freshRef) : removeRename ref activeRenames
-              )
-            Nothing -> (ref, removeRename ref activeRenames)
+        Nothing
+          | selectBinder binderKind ->
+              case lookupRename selectedRenames ref of
+                Just freshRef ->
+                  ( freshRef
+                  , (ref, freshRef) : removeRename ref activeRenames
+                  )
+                Nothing -> (ref, removeRename ref activeRenames)
+          | otherwise -> (ref, removeRename ref activeRenames)
 
     lookupRename renames ref =
       snd
@@ -551,14 +584,18 @@ alphaRenameTypeBinderScopes
   -> ElabType
   -> ElabType
 alphaRenameTypeBinderScopes selectedRenames =
-  alphaRenameTypeBinderScopesWith selectedRenames []
+  alphaRenameTypeBinderScopesSelecting
+    (const True)
+    selectedRenames
+    []
 
-alphaRenameTypeBinderScopesWith
-  :: [TypeVarRename]
+alphaRenameTypeBinderScopesSelecting
+  :: (TypeBinderDeclarationKind -> Bool)
+  -> [TypeVarRename]
   -> [TypeVarRename]
   -> ElabType
   -> ElabType
-alphaRenameTypeBinderScopesWith selectedRenames = renameType
+alphaRenameTypeBinderScopesSelecting selectBinder selectedRenames = renameType
   where
     renameType activeRenames ty =
       case ty of
@@ -578,13 +615,15 @@ alphaRenameTypeBinderScopesWith selectedRenames = renameType
             (fmap (renameType activeRenames) arguments)
         TBaseWithIdentity identity base -> TBaseWithIdentity identity base
         TForallRef ref mbBound body ->
-          let (ref', bodyRenames) = enterBinder activeRenames ref
+          let (ref', bodyRenames) =
+                enterBinder ForallTypeBinder activeRenames ref
            in TForallRef
                 ref'
                 (fmap (renameScopedBound activeRenames) mbBound)
                 (renameType bodyRenames body)
         TMuRef ref body ->
-          let (ref', bodyRenames) = enterBinder activeRenames ref
+          let (ref', bodyRenames) =
+                enterBinder RecursiveTypeBinder activeRenames ref
            in TMuRef ref' (renameType bodyRenames body)
         TBottom -> TBottom
 
@@ -596,16 +635,18 @@ alphaRenameTypeBinderScopesWith selectedRenames = renameType
     renameActiveRef activeRenames ref =
       fromMaybe ref (lookupRename activeRenames ref)
 
-    enterBinder activeRenames ref =
+    enterBinder binderKind activeRenames ref =
       case lookupRename activeRenames ref of
         Just _ -> (ref, removeRename ref activeRenames)
-        Nothing ->
-          case lookupRename selectedRenames ref of
-            Just freshRef ->
-              ( freshRef
-              , (ref, freshRef) : removeRename ref activeRenames
-              )
-            Nothing -> (ref, removeRename ref activeRenames)
+        Nothing
+          | selectBinder binderKind ->
+              case lookupRename selectedRenames ref of
+                Just freshRef ->
+                  ( freshRef
+                  , (ref, freshRef) : removeRename ref activeRenames
+                  )
+                Nothing -> (ref, removeRename ref activeRenames)
+          | otherwise -> (ref, removeRename ref activeRenames)
 
     lookupRename renames ref =
       snd

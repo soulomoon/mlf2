@@ -5408,7 +5408,8 @@ data AlgebraContext (p :: Phase) = AlgebraContext
     algSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
     algSubtermGeneralizations :: SubtermGeneralizations,
     algExactProducerTypes :: IntMap.IntMap ElabType,
-    algCompilerExactConstructionRefs :: IntMap.IntMap (IntMap.IntMap TypeBinderRef)
+    algCompilerExactConstructionRefs :: IntMap.IntMap (IntMap.IntMap TypeBinderRef),
+    algCompilerExactDeclarationRefs :: IntMap.IntMap (IntMap.IntMap TypeBinderRef)
   }
 
 -- | Free Hyp references carried by a Phi computation. References introduced
@@ -39956,6 +39957,16 @@ elabAlg algebraContext layer =
                         , "  edge: " ++ show eid
                         ]
                     )
+            edgeDeclarationRefs <-
+              case IntMap.lookup (getEdgeId eid) (algCompilerExactDeclarationRefs algebraContext) of
+                Just refs -> pure refs
+                Nothing ->
+                  Left
+                    ( ValidationFailed
+                        [ "compiler exact annotation has no prepared declaration plan"
+                        , "  edge: " ++ show eid
+                        ]
+                    )
             envInExactIdentityDomain <-
               alignEnvToCompilerExactBinderRenames
                 ( compilerExactBinderRenamesForEdge
@@ -40039,6 +40050,7 @@ elabAlg algebraContext layer =
                     expectedTy
                     exactOccurrenceConstructionRenames
                     edgeConstructionRefs
+                    edgeDeclarationRefs
                     annNodeId
                     eid
                     sourceCompletedTermAtBoundary

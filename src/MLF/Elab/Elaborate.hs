@@ -64,6 +64,7 @@ data ElabEnv (p :: Phase) = ElabEnv
     eeGaParents :: GaBindParents p,
     eeExactProducerTypes :: Either ElabError (IntMap.IntMap ElabType),
     eeCompilerExactConstructionRefs :: Either ElabError (IntMap.IntMap (IntMap.IntMap TypeBinderRef)),
+    eeCompilerExactDeclarationRefs :: Either ElabError (IntMap.IntMap (IntMap.IntMap TypeBinderRef)),
     eeScopeOverrides :: ConstructionScopes,
     -- Exact lambdas have no annotation edge.  Their parameter source type is
     -- therefore the only remaining node-keyed annotation authority.
@@ -116,6 +117,7 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel root = do
   subtermGeneralizations <- eeSubtermGeneralizations elabEnv
   exactProducerTypes <- eeExactProducerTypes elabEnv
   compilerExactConstructionRefs <- eeCompilerExactConstructionRefs elabEnv
+  compilerExactDeclarationRefs <- eeCompilerExactDeclarationRefs elabEnv
   let namedSet = ermNamedNodes readModel
       inlineBoundVarsContext =
         mkInlineBoundVarsContextWithReadModelCanonical canonical readModel
@@ -158,7 +160,8 @@ elaborateWithEnvReadModelDetailed config elabEnv readModel root = do
             algSourceTypeBinderIdentities = eeSourceTypeBinderIdentities elabEnv,
             algSubtermGeneralizations = subtermGeneralizations,
             algExactProducerTypes = exactProducerTypes,
-            algCompilerExactConstructionRefs = compilerExactConstructionRefs
+            algCompilerExactConstructionRefs = compilerExactConstructionRefs,
+            algCompilerExactDeclarationRefs = compilerExactDeclarationRefs
           }
       ElabOut {elabDetailed = runElab} =
         para

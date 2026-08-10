@@ -1,3 +1,43 @@
+## 2026-08-10 - Construction-time recursive exact-owner authority
+
+- Removed `alignExactRecursivePresentations`, which used to collect
+  alpha-equivalent `mu` subtree replacements after producer typechecking and
+  recursively rewrite every type stored in the completed `XmlfTerm`, including
+  lambda parameters, let schemes, instantiation arguments, and roll payloads.
+  That pass could turn a producer carrying the wrong recursive owner into a
+  successful exact construction and therefore concealed the construction
+  boundary where identity authority had been lost.
+- Removing that repair exposed the real construction gap for imported Prelude
+  declarations: the checked producer for `Unit` could still carry a graph
+  owner while the exact source type carried `$Prelude.Unit_self`. Installing
+  every exact declaration as a Gamma alias was also invalid because a single
+  solved graph key can have another lexical role in a different occurrence.
+- `CompilerExactEdgePlan` therefore carries declaration provenance in a
+  separate occurrence-sensitive lane. The exact boundary first identifies a
+  corresponding recursive declaration in the independently checked producer,
+  then accepts a graph-to-source owner change only when that edge-local sidecar
+  authorizes the exact identity. The scoped constructor renames the selected
+  `mu` declaration and its occurrences while `forall`, `ETyAbs`, and
+  `InstUnder` declarations with the same graph key only shadow the rename. The
+  final exact check validates matching recursive owners and performs no repair;
+  the owner-local entrypoint without a prepared sidecar fails closed.
+- Imported and other environment-owned variables require one additional
+  construction case. `TypeCheck` intentionally reloads their type from the
+  identity-keyed environment, so changing the `ResolvedVar` payload cannot
+  publish the exact owner. The exact boundary now introduces a fresh lexical
+  `let`: its RHS remains checked at the original alpha-equivalent type and its
+  scheme/body expose only the provenance-approved exact presentation. The
+  `Core.Token` cross-module resolved-AST regression fixes this boundary, and a
+  direct elaboration regression proves that the result is a constructed let,
+  not an after-the-fact type rewrite.
+- RED-before-GREEN regressions cover the fail-closed owner-local path, the
+  prepared declaration route, and a same-key `forall`/`mu` term proving that
+  only the recursive declaration moves. Focused Prelude IO validation is green
+  at 1.91 seconds in the warm Hspec process (about 3.9 seconds including
+  Cabal), so this construction change retains the repaired Prelude/package
+  cache boundary. The merged higher-kinded interpreter/LLVM/native row remains
+  at 0.66 seconds in the warm Hspec process (2.66 seconds including Cabal).
+
 ## 2026-08-10 - Frozen source-binder order for edge Merge construction
 
 - Found a second ordering recovery after delayed-`Weaken` normalization was

@@ -22,6 +22,7 @@ module MLF.Elab.Run.Generalize.Prepare (
     preparedCompilerExactSourceResultBinderRoutes,
     completePreparedCompilerExactSubtermResults,
     preparedCompilerExactExpectedType,
+    preparedCompilerExactDeclarationRefs,
     preparedElaborationConfig,
     preparedElaborationEnv,
     preparedElaborationEnvWithInitialEnv,
@@ -75,5 +76,6 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , preparedIdentityGenerator
     , completePreparedCompilerExactSubtermResults
     , preparedCompilerExactExpectedType
+    , preparedCompilerExactDeclarationRefs
     , stripPreparedWitnesslessAuthoritativeAnn
     )

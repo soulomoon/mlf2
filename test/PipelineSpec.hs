@@ -134,6 +134,7 @@ import MLF.Elab.Run.Annotation (alignAnnInstantiationSites)
 import MLF.Elab.Run.Generalize.Prepare.TestSupport
   ( PreparedGeneralizationArtifactTestView (..),
     alignSourceExpectedOperatedTypeForTest,
+    prepareCompilerExactDeclarationRefsForTest,
     prepareCompilerExactEdgePlansForTest,
     applyPreparedRootBinderSubstForTest,
     prepareCompilerExactRootBinderSubstForTest,
@@ -6750,6 +6751,78 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         (IntMap.singleton (getEdgeId edge) trace)
         (IntMap.singleton (getNodeId graphNode) unrelatedRef)
         `shouldBe` Right (IntMap.singleton (getEdgeId edge) (rawType, IntMap.empty))
+
+    it "publishes a source-sidecar route for an exact recursive declaration" $ do
+      let edge = EdgeId 992115
+          graphOwner = NodeId 164
+          exactOwner =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromUnique (UniqueIdentity 992116))
+              "exact-recursive-owner"
+          rawType =
+            TMuRef
+              exactOwner
+              (TArrow (TVarRef exactOwner) TBottom)
+          trace = compilerExactTrace graphOwner []
+      prepareCompilerExactDeclarationRefsForTest
+        (IntMap.singleton (getEdgeId edge) rawType)
+        (IntMap.singleton (getEdgeId edge) trace)
+        (IntMap.singleton (getNodeId graphOwner) exactOwner)
+        `shouldBe`
+          Right
+            ( IntMap.singleton
+                (getEdgeId edge)
+                (IntMap.singleton (getNodeId graphOwner) exactOwner)
+            )
+
+    it "publishes a post-quotient recursive declaration at its producer occurrence" $ do
+      let edge = EdgeId 992117
+          producerOwner = NodeId 164
+          argumentOwner = NodeId 165
+          graphOwner =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode producerOwner)
+              "graph-recursive-owner"
+          exactOwner =
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromUnique (UniqueIdentity 992118))
+              "exact-recursive-owner"
+          rawType =
+            TMuRef
+              graphOwner
+              (TArrow (TVarRef graphOwner) TBottom)
+          exactType =
+            TMuRef
+              exactOwner
+              (TArrow (TVarRef exactOwner) TBottom)
+          trace =
+            compilerExactTrace
+              producerOwner
+              [(producerOwner, argumentOwner)]
+          exactTypes = IntMap.singleton (getEdgeId edge) rawType
+          traces = IntMap.singleton (getEdgeId edge) trace
+          sourceRefs =
+            IntMap.singleton (getNodeId argumentOwner) exactOwner
+      prepareCompilerExactEdgePlansForTest exactTypes traces sourceRefs
+        `shouldBe`
+          Right
+            ( IntMap.singleton
+                (getEdgeId edge)
+                ( exactType
+                , IntMap.singleton (getNodeId producerOwner) exactOwner
+                )
+            )
+      prepareCompilerExactDeclarationRefsForTest exactTypes traces sourceRefs
+        `shouldBe`
+          Right
+            ( IntMap.singleton
+                (getEdgeId edge)
+                ( IntMap.fromList
+                    [ (getNodeId producerOwner, exactOwner)
+                    , (getNodeId argumentOwner, exactOwner)
+                    ]
+                )
+            )
 
     it "keeps compiler-exact binder routes isolated between sibling edges" $ do
       let firstEdge = EdgeId 992107

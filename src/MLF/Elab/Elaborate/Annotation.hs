@@ -32,6 +32,7 @@ module MLF.Elab.Elaborate.Annotation
     elaborateExactAnnotationTerm,
     elaborateClosedExactAnnotationTerm,
     elaborateClosedExactAnnotationTermAtType,
+    elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority,
     constructExactTermAtType,
     freshenTermTypeAbsAgainstEnv,
     reifyInst,
@@ -166,6 +167,7 @@ import MLF.Elab.SourceBinder
 import MLF.Elab.TermClosure
   ( alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
+    alphaRenameTermRecursiveTypeBinderScopes,
     alignTopTyAbsToScheme,
     closeTermWithSchemeSubstRefsIfNeeded,
     refreshLocalResolvedVarType,
@@ -186,12 +188,16 @@ import MLF.Elab.Types
     Ty (..),
     elabToBound,
     eTyAbsWithRef,
+    generatedIdentitiesInTerm,
+    generatedIdentitiesInType,
     instAbstrWithRef,
     instUnderWithRef,
+    localResolvedVarFromRef,
     mapResolvedVarType,
     mapBoundType,
     mkElabSchemeWithRefs,
     renameTypeBinderRef,
+    resolvedVarDetails,
     resolvedVarType,
     schemeBinderRefs,
     schemeBody,
@@ -238,7 +244,11 @@ import MLF.Types.Identity
   ( IdDetails,
     IdentityGenerator,
     TypeBinderIdentity,
+    freshLocalRef,
+    idDetailsGeneratedIdentities,
     idDetailsIdentityKey,
+    identityGeneratorAfter,
+    typeBinderGeneratedIdentities,
   )
 import MLF.Util.Trace (TraceConfig, traceElab)
 
@@ -1538,11 +1548,12 @@ elaborateExactAnnotationTerm ::
   ElabType ->
   [(TypeBinderRef, TypeBinderRef)] ->
   IntMap.IntMap TypeBinderRef ->
+  IntMap.IntMap TypeBinderRef ->
   NodeId ->
   EdgeId ->
   XmlfTerm ->
   Either ElabError XmlfTerm
-elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType constructionBinderRenames edgeRefs _annNodeId eid expr' = do
+elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType constructionBinderRenames edgeRefs declarationRefs _annNodeId eid expr' = do
   case annotationExpectedTypeForEdge annotationContext eid of
     Just _ -> pure ()
     Nothing ->
@@ -1578,6 +1589,7 @@ elaborateExactAnnotationTerm boundaryRole annotationContext tcEnv expectedType c
           )
   elaborateClosedExactAnnotationTermAtTypeFor
     boundaryRole
+    declarationRefs
     tcEnv
     expectedTy
     eid
@@ -1649,16 +1661,29 @@ elaborateClosedExactAnnotationTermAtType ::
   XmlfTerm ->
   Either ElabError XmlfTerm
 elaborateClosedExactAnnotationTermAtType =
-  elaborateClosedExactAnnotationTermAtTypeFor AnnotationProducerBoundary
+  elaborateClosedExactAnnotationTermAtTypeFor
+    AnnotationProducerBoundary
+    IntMap.empty
 
-elaborateClosedExactAnnotationTermAtTypeFor ::
-  AnnotationBoundaryRole ->
+elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority ::
+  IntMap.IntMap TypeBinderRef ->
   TypeCheck.Env ->
   ElabType ->
   EdgeId ->
   XmlfTerm ->
   Either ElabError XmlfTerm
-elaborateClosedExactAnnotationTermAtTypeFor boundaryRole tcEnv expectedTy eid sourceTerm = do
+elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority =
+  elaborateClosedExactAnnotationTermAtTypeFor AnnotationProducerBoundary
+
+elaborateClosedExactAnnotationTermAtTypeFor ::
+  AnnotationBoundaryRole ->
+  IntMap.IntMap TypeBinderRef ->
+  TypeCheck.Env ->
+  ElabType ->
+  EdgeId ->
+  XmlfTerm ->
+  Either ElabError XmlfTerm
+elaborateClosedExactAnnotationTermAtTypeFor boundaryRole recursiveOwnerAuthority tcEnv expectedTy eid sourceTerm = do
   sourceActual <-
     case TypeCheck.typeCheckWithEnv tcEnv sourceTerm of
       Left err ->
@@ -1680,8 +1705,10 @@ elaborateClosedExactAnnotationTermAtTypeFor boundaryRole tcEnv expectedTy eid so
       Right ty -> pure ty
   constructed <-
     if alphaEqType sourceActual expectedTy
-      then
-        alignExactRecursivePresentations
+      then do
+        constructExactRecursivePresentations
+          recursiveOwnerAuthority
+          tcEnv
           eid
           sourceActual
           expectedTy
@@ -1701,7 +1728,10 @@ elaborateClosedExactAnnotationTermAtTypeFor boundaryRole tcEnv expectedTy eid so
     Right actualTy
       | alphaEqType actualTy expectedTy
           || churchAwareEqType actualTy expectedTy
-          || implicitForallClosureMatches expectedTy actualTy ->
+          || implicitForallClosureMatches expectedTy actualTy -> do
+          if alphaEqType actualTy expectedTy
+            then requireExactRecursivePresentations eid actualTy expectedTy
+            else pure ()
           pure constructed
       | otherwise ->
           exactFailure
@@ -1807,98 +1837,172 @@ elaborateClosedExactAnnotationTermAtTypeFor boundaryRole tcEnv expectedTy eid so
         EUnroll body ->
           "Unroll(" ++ exactTermConstructionSummary body ++ ")"
 
--- | An exact boundary owns the source-facing presentation of its result.  The
--- graph pipeline can construct an alpha-equivalent recursive type whose local
--- @mu@ binder still carries a graph identity.  Leaving that presentation in
--- the completed term loses the data owner needed by later structural lowering.
---
--- This is not shape-based owner recovery: the exact source type and the
--- independently checked producer type first have to be alpha-equivalent.  We
--- then replace only the precise recursive subtrees found at corresponding
--- positions, and reject one producer presentation being routed to two source
--- presentations.  Explicit roll/unroll structure is retained because both
--- sides remain recursive types.
-alignExactRecursivePresentations
-  :: EdgeId
+-- | Construct recursive owner identities from the exact edge's source-sidecar
+-- authority before validating the exact term.  This is a lexical binder
+-- construction, not a whole-type repair: only a corresponding @mu@
+-- declaration whose graph node was already labelled with the exact identity
+-- can move, and forall/type-abstraction declarations sharing that graph key
+-- remain untouched.
+constructExactRecursivePresentations
+  :: IntMap.IntMap TypeBinderRef
+  -> TypeCheck.Env
+  -> EdgeId
   -> ElabType
   -> ElabType
   -> XmlfTerm
   -> Either ElabError XmlfTerm
-alignExactRecursivePresentations eid sourceTy targetTy term = do
-  rewrites <-
-    either
-      ( \detail ->
-          Left
-            ( PhiInvariantError
-                ( "compiler exact annotation has ambiguous recursive presentation for edge "
-                    ++ show eid
-                    ++ "; "
-                    ++ detail
-                )
+constructExactRecursivePresentations authority tcEnv eid sourceTy targetTy term = do
+  renames <-
+    either recursiveOwnerFailure Right
+      (collectRecursivePresentationRenames (Just authority) sourceTy targetTy)
+  let renamed = alphaRenameTermRecursiveTypeBinderScopes renames term
+  pure
+    ( case TypeCheck.typeCheckWithEnv tcEnv renamed of
+        Right renamedTy
+          | alphaEqType renamedTy targetTy
+          , Left _ <-
+              collectRecursivePresentationRenames
+                Nothing
+                renamedTy
+                targetTy ->
+              publishExactRecursivePresentation tcEnv targetTy renamed
+        _ -> renamed
+    )
+  where
+    recursiveOwnerFailure detail =
+      Left
+        ( PhiInvariantError
+            ( "compiler exact annotation cannot construct recursive owner for edge "
+                ++ show eid
+                ++ "; "
+                ++ detail
             )
-      )
-      Right
-      (collectRecursivePresentationRewrites sourceTy targetTy)
-  pure (mapTermTypes (rewriteType rewrites) term)
-  where
-    rewriteType rewrites ty =
-      case lookupExactType ty rewrites of
-        Just replacement -> replacement
-        Nothing ->
-          case ty of
-            TVarRef ref -> TVarRef ref
-            TArrow domain codomain ->
-              TArrow
-                (rewriteType rewrites domain)
-                (rewriteType rewrites codomain)
-            TConWithIdentity identity con args ->
-              TConWithIdentity identity con (fmap (rewriteType rewrites) args)
-            TVarAppRef ref args ->
-              TVarAppRef ref (fmap (rewriteType rewrites) args)
-            TBaseWithIdentity identity base ->
-              TBaseWithIdentity identity base
-            TForallRef ref mbBound body ->
-              TForallRef
-                ref
-                (fmap (mapBoundType (rewriteType rewrites)) mbBound)
-                (rewriteType rewrites body)
-            TMuRef ref body ->
-              TMuRef ref (rewriteType rewrites body)
-            TBottom -> TBottom
+        )
 
-    lookupExactType _ [] = Nothing
-    lookupExactType ty ((source, target) : rest)
-      | ty == source = Just target
-      | otherwise = lookupExactType ty rest
-
-collectRecursivePresentationRewrites
-  :: ElabType
+-- | An occurrence whose type is supplied by the term environment cannot
+-- change that type by editing its resolved payload: the checker deliberately
+-- reloads the authoritative environment entry. Publish the provenance-approved
+-- presentation through a fresh lexical let instead. The RHS is still checked
+-- at its original alpha-equivalent type, while the body can only observe the
+-- exact recursive owner carried by the new scheme.
+publishExactRecursivePresentation
+  :: TypeCheck.Env
   -> ElabType
-  -> Either String [(ElabType, ElabType)]
-collectRecursivePresentationRewrites = go []
+  -> XmlfTerm
+  -> XmlfTerm
+publishExactRecursivePresentation tcEnv exactTy term =
+  ELet exactResolved exactScheme term (EVarNode exactResolved)
   where
-    go rewrites source target =
+    exactScheme = schemeFromType exactTy
+    exactResolved = localResolvedVarFromRef exactLocalRef exactTy
+    (exactLocalRef, _) =
+      freshLocalRef
+        "$exact-recursive-owner"
+        (identityGeneratorAfter reservedIdentities)
+    reservedIdentities =
+      generatedIdentitiesInTerm term
+        ++ generatedIdentitiesInType exactTy
+        ++ concat
+          [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+              ++ generatedIdentitiesInType ty
+          | (resolved, ty) <-
+              TypeCheck.resolvedTermEnvEntries
+                (TypeCheck.resolvedTermEnv tcEnv)
+          ]
+        ++ concatMap
+          generatedIdentitiesInType
+          (Map.elems (TypeCheck.typeEnv tcEnv))
+        ++ concatMap
+          (typeBinderGeneratedIdentities . typeBinderRefIdentity)
+          (Map.keys (TypeCheck.typeEnv tcEnv))
+
+-- | The final exact check never repairs a producer. Every corresponding
+-- recursive declaration must already carry the exact owner identity selected
+-- by construction.
+requireExactRecursivePresentations
+  :: EdgeId
+  -> ElabType
+  -> ElabType
+  -> Either ElabError ()
+requireExactRecursivePresentations eid sourceTy targetTy =
+  either
+    ( \detail ->
+        Left
+          ( PhiInvariantError
+              ( "compiler exact annotation has mismatched recursive owner for edge "
+                  ++ show eid
+                  ++ "; "
+                  ++ detail
+              )
+          )
+    )
+    Right
+    (() <$ collectRecursivePresentationRenames Nothing sourceTy targetTy)
+
+collectRecursivePresentationRenames
+  :: Maybe (IntMap.IntMap TypeBinderRef)
+  -> ElabType
+  -> ElabType
+  -> Either String [(TypeBinderRef, TypeBinderRef)]
+collectRecursivePresentationRenames mbAuthority = go []
+  where
+    go renames source target =
       case (source, target) of
-        (TMuRef {}, TMuRef {})
-          | source /= target
-          , alphaEqType source target ->
-              addRewrite source target rewrites
+        (TMuRef sourceRef sourceBody, TMuRef targetRef targetBody)
+          | typeBinderRefsSameIdentity sourceRef targetRef ->
+              go renames
+                sourceBody
+                (substTypeCaptureRef targetRef (TVarRef sourceRef) targetBody)
+          | otherwise -> do
+              authority <-
+                case mbAuthority of
+                  Just refs -> pure refs
+                  Nothing -> recursiveOwnerMismatch sourceRef targetRef
+              graphNode <-
+                case typeBinderRefNode sourceRef of
+                  Just node -> pure node
+                  Nothing -> recursiveOwnerMismatch sourceRef targetRef
+              authorizedRef <-
+                case IntMap.lookup (getNodeId graphNode) authority of
+                  Just ref
+                    | typeBinderRefsSameIdentity ref targetRef -> pure ref
+                    | otherwise ->
+                        Left
+                          ( "producer recursive graph owner is labelled with a different exact identity: graph="
+                              ++ show sourceRef
+                              ++ ", sidecar="
+                              ++ show ref
+                              ++ ", expected="
+                              ++ show targetRef
+                          )
+                  Nothing ->
+                    Left
+                      ( "producer recursive graph owner has no exact declaration authority: graph="
+                          ++ show sourceRef
+                          ++ ", expected="
+                          ++ show targetRef
+                      )
+              renames' <- addRename sourceRef authorizedRef renames
+              go
+                renames'
+                (substTypeCaptureRef sourceRef (TVarRef targetRef) sourceBody)
+                targetBody
         (TArrow sourceDomain sourceCodomain, TArrow targetDomain targetCodomain) -> do
-          rewrites' <- go rewrites sourceDomain targetDomain
-          go rewrites' sourceCodomain targetCodomain
+          renames' <- go renames sourceDomain targetDomain
+          go renames' sourceCodomain targetCodomain
         (TConWithIdentity sourceIdentity _ sourceArgs, TConWithIdentity targetIdentity _ targetArgs)
           | sourceIdentity == targetIdentity
           , length sourceArgs == length targetArgs ->
               foldM
                 (\current (sourceArg, targetArg) -> go current sourceArg targetArg)
-                rewrites
+                renames
                 (zip (toList sourceArgs) (toList targetArgs))
         (TVarAppRef sourceRef sourceArgs, TVarAppRef targetRef targetArgs)
           | typeBinderRefsSameIdentity sourceRef targetRef
           , length sourceArgs == length targetArgs ->
               foldM
                 (\current (sourceArg, targetArg) -> go current sourceArg targetArg)
-                rewrites
+                renames
                 (zip (toList sourceArgs) (toList targetArgs))
         (TForallRef sourceRef sourceBound sourceBody, TForallRef targetRef targetBound targetBody) -> do
           let targetBody' =
@@ -1907,79 +2011,43 @@ collectRecursivePresentationRewrites = go []
                 fmap
                   (mapBoundType (substTypeCaptureRef targetRef (TVarRef sourceRef)))
                   targetBound
-          rewrites' <- goBounds rewrites sourceBound targetBound'
-          go rewrites' sourceBody targetBody'
-        _ -> pure rewrites
+          renames' <- goBounds renames sourceBound targetBound'
+          go renames' sourceBody targetBody'
+        _ -> pure renames
 
-    goBounds rewrites Nothing Nothing = pure rewrites
-    goBounds rewrites (Just sourceBound) (Just targetBound) =
-      go rewrites (tyToElab sourceBound) (tyToElab targetBound)
-    goBounds rewrites _ _ = pure rewrites
+    goBounds renames Nothing Nothing = pure renames
+    goBounds renames (Just sourceBound) (Just targetBound) =
+      go renames (tyToElab sourceBound) (tyToElab targetBound)
+    goBounds renames _ _ = pure renames
 
-    addRewrite source target rewrites =
-      case lookup source rewrites of
-        Nothing -> pure ((source, target) : rewrites)
-        Just existing
-          | existing == target -> pure rewrites
-          | otherwise ->
-              Left
-                ( "producer recursive type maps to both "
-                    ++ show existing
-                    ++ " and "
-                    ++ show target
-                )
+    recursiveOwnerMismatch sourceRef targetRef =
+      Left
+        ( "producer owner "
+            ++ show sourceRef
+            ++ " differs from exact owner "
+            ++ show targetRef
+        )
+
+    addRename sourceRef targetRef renames =
+      case
+          find
+            (typeBinderRefsSameIdentity sourceRef . fst)
+            renames
+        of
+          Nothing -> pure ((sourceRef, targetRef) : renames)
+          Just (_, existingTarget)
+            | typeBinderRefsSameIdentity existingTarget targetRef -> pure renames
+            | otherwise ->
+                Left
+                  ( "one producer recursive owner maps to multiple exact identities: producer="
+                      ++ show sourceRef
+                      ++ ", first="
+                      ++ show existingTarget
+                      ++ ", second="
+                      ++ show targetRef
+                  )
 
     toList (first :| rest) = first : rest
-
-mapTermTypes :: (ElabType -> ElabType) -> XmlfTerm -> XmlfTerm
-mapTermTypes rewrite = go
-  where
-    go term =
-      case term of
-        EVarNode resolved ->
-          EVarNode (mapResolvedVarType rewrite resolved)
-        ELit literal -> ELit literal
-        ELam resolved body ->
-          ELam
-            (mapResolvedVarType rewrite resolved)
-            (go body)
-        EApp fun arg -> EApp (go fun) (go arg)
-        ELet resolved scheme rhs body ->
-          let scheme' = schemeFromType (rewrite (schemeToType scheme))
-           in ELet
-                (mapResolvedVarType rewrite resolved)
-                scheme'
-                (go rhs)
-                (go body)
-        ETyAbsRef ref mbBound body ->
-          ETyAbsRef
-            ref
-            (fmap (mapBoundType rewrite) mbBound)
-            (go body)
-        ETyInst inner inst ->
-          ETyInst (go inner) (mapInstantiationTypes rewrite inst)
-        ERoll ty body -> ERoll (rewrite ty) (go body)
-        EUnroll body -> EUnroll (go body)
-
-mapInstantiationTypes
-  :: (ElabType -> ElabType)
-  -> Instantiation
-  -> Instantiation
-mapInstantiationTypes rewrite inst =
-  case inst of
-    InstId -> InstId
-    InstApp ty -> InstApp (rewrite ty)
-    InstBot ty -> InstBot (rewrite ty)
-    InstIntro -> InstIntro
-    InstElim -> InstElim
-    InstAbstrRef ref -> InstAbstrRef ref
-    InstUnderRef ref inner ->
-      InstUnderRef ref (mapInstantiationTypes rewrite inner)
-    InstInside inner -> InstInside (mapInstantiationTypes rewrite inner)
-    InstSeq left right ->
-      InstSeq
-        (mapInstantiationTypes rewrite left)
-        (mapInstantiationTypes rewrite right)
 
 -- | Construct an exact boundary in the producer's lexical order.  A
 -- lambda-body generalization stays under that lambda; for example,

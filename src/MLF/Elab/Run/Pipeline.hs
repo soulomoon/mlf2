@@ -124,7 +124,7 @@ import MLF.Elab.Elaborate.Algebra
 import MLF.Elab.Elaborate.Annotation
   ( AuthorizedElaborationRoot,
     authorizedElaborationResultAnn,
-    elaborateClosedExactAnnotationTermAtType,
+    elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority,
   )
 import MLF.Elab.Generalize
   ( CompilerExactResultStage (..),
@@ -169,6 +169,7 @@ import MLF.Elab.Run.Generalize.Prepare
     preparedElaborationConfig,
     preparedElaborationEnvWithInitialEnv,
     preparedIdentityGenerator,
+    preparedCompilerExactDeclarationRefs,
     preparedCompilerExactExpectedType,
     applyPreparedTermSourceBinderAliases,
     preparedCompilerExactSourceResultBinderRoutes,
@@ -1513,13 +1514,20 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
                 prepared
                 (dreaEdgeId deferred)
             )
+        recursiveOwnerAuthority <-
+          fromElabError
+            ( preparedCompilerExactDeclarationRefs
+                prepared
+                (dreaEdgeId deferred)
+            )
         let closedExpectedExactType =
               closePreparedExactExpectedType
                 (prgClosure rootGeneralizationFinal)
                 expectedExactType
         exactTerm <-
           case
-              elaborateClosedExactAnnotationTermAtType
+              elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority
+                recursiveOwnerAuthority
                 initialTcEnv
                 closedExpectedExactType
                 (dreaEdgeId deferred)
@@ -2968,13 +2976,20 @@ closeAndFreshenPipelineRootStage timing label identityGenerator preparedRoot = d
                   prepared
                   (dreaEdgeId deferred)
               )
+          recursiveOwnerAuthority <-
+            fromElabError
+              ( preparedCompilerExactDeclarationRefs
+                  prepared
+                  (dreaEdgeId deferred)
+              )
           let closedExpectedExactType =
                 closePreparedExactExpectedType
                   rootClosure
                   expectedExactType
           exactTerm <-
             case
-                elaborateClosedExactAnnotationTermAtType
+                elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority
+                  recursiveOwnerAuthority
                   initialTcEnv
                   closedExpectedExactType
                   (dreaEdgeId deferred)

@@ -18,6 +18,7 @@ module MLF.Elab.Run.Generalize.Prepare.TestSupport (
     projectPreparedSourceBinderSubstExceptForTest,
     insertPreparedTermSourceBinderAliasForTest,
     prepareCompilerExactEdgePlansForTest,
+    prepareCompilerExactDeclarationRefsForTest,
     prepareCompilerExactRootBinderSubstForTest,
     prepareAnnotationExpectedTypesByEdgeForTest,
     alignSourceExpectedOperatedTypeForTest,
@@ -623,6 +624,16 @@ prepareCompilerExactEdgePlansForTest exactTypes traces sourceBinderRefs =
         ( IntMap.map
             (\plan -> (ceepExpectedType plan, ceepConstructionRefs plan))
         )
+        (prepareCompilerExactEdgePlans exactTypes traces sourceBinderRefs)
+
+prepareCompilerExactDeclarationRefsForTest
+    :: IntMap.IntMap ElabType
+    -> IntMap.IntMap EdgeTrace
+    -> IntMap.IntMap TypeBinderRef
+    -> Either ElabError (IntMap.IntMap (IntMap.IntMap TypeBinderRef))
+prepareCompilerExactDeclarationRefsForTest exactTypes traces sourceBinderRefs =
+    fmap
+        (IntMap.map ceepDeclarationRefs)
         (prepareCompilerExactEdgePlans exactTypes traces sourceBinderRefs)
 
 prepareCompilerExactRootBinderSubstForTest

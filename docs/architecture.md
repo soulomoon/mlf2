@@ -358,6 +358,17 @@ runtime invariants as compile-time types:
   consumes the exact refs returned by the same owner. Lexical binder scope is
   carried through every recursive subtree, including constructor and
   variable-application arguments in structural lower bounds.
+- Compiler-exact preparation carries source declaration provenance in a
+  separate occurrence-sensitive lane. It is not installed as an ambient Gamma
+  alias because one solved graph key can represent a different lexical binder
+  role elsewhere. `MLF.Elab.Elaborate.Annotation` consumes that authority at
+  the exact boundary to construct only a corresponding recursive `mu` binder
+  and its scoped occurrences. If an occurrence is environment-owned, its
+  authoritative type cannot be changed through its resolved payload, so the
+  boundary publishes the approved presentation with a fresh exact-typed
+  lexical `let`. The final exact check validates the resulting owner and never
+  recursively retypes a completed `XmlfTerm`; missing, different, or ambiguous
+  declaration authority fails closed.
 - `MLF.Elab.Run.Generalize.Prepare` owns the elaboration-side Generalization
   Preparation step. Its normal API exposes the abstract
   `PreparedGeneralizationArtifact` plus owner operations for prepared
