@@ -267,8 +267,17 @@ publishSourceBinderOrderFromProvenance sourceBinderRefs schemeInfo =
           (schemeInfoBinderRefSubst schemeInfo)
     }
   where
+    -- A prepared local-root closure deliberately keeps binders already
+    -- constructed by a descendant in the leading forall spine of the scheme
+    -- body.  They are still part of the occurrence's ordered publication
+    -- spine.  Looking only at the explicit outer Scheme binders drops the
+    -- source-order certificate while retaining the graph occurrence route,
+    -- so Phi later asks a stale graph for an order key that need not exist.
     schemeBinderRefs0 =
-      map fst (schemeBinderRefs (siScheme schemeInfo))
+      map fst (schemeBinderRefs scheme)
+        ++ map fst leadingBodyBinders
+    scheme = siScheme schemeInfo
+    (leadingBodyBinders, _) = splitForallsRefs (schemeBody scheme)
     sourceRefs = IntMap.elems sourceBinderRefs
 
     sourceOwnsBinderOrder ref =

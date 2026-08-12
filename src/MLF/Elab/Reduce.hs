@@ -223,9 +223,49 @@ normalizeCheckedTypeRedexesWithEnv = go
           )
         of
           (Right originalTy, Right reducedTy) ->
-            alphaEqType originalTy reducedTy
-              || churchAwareEqType originalTy reducedTy
+            ( alphaEqType originalTy reducedTy
+                || churchAwareEqType originalTy reducedTy
+            )
+              && declarationIdentityPattern originalTy
+                == declarationIdentityPattern reducedTy
           _ -> False
+
+    -- Alpha-equivalence deliberately ignores the concrete identities chosen
+    -- for lexical binders.  It must not, however, identify two declarations
+    -- that were distinct before reduction.  Bounded elimination can copy a
+    -- polymorphic lower bound into several positions; the type checker gives
+    -- those copies fresh identities, while a naive term substitution can
+    -- collapse them back to one declaration.  Compare the equality pattern
+    -- of declarations (rather than their particular identities) so ordinary
+    -- alpha-renaming remains reducible but aliasing distinct scopes does not.
+    declarationIdentityPattern ty =
+      [ firstIdentityIndex ref declarations
+      | ref <- declarations
+      ]
+      where
+        declarations = declarationRefs ty
+
+    firstIdentityIndex sought = findIndexByIdentity (0 :: Int)
+      where
+        findIndexByIdentity index (ref : rest)
+          | typeBinderRefsSameIdentity sought ref = index
+          | otherwise = findIndexByIdentity (index + 1) rest
+        findIndexByIdentity index [] = index
+
+    declarationRefs ty =
+      case ty of
+        TVarRef {} -> []
+        TVarAppRef _ arguments -> foldMap declarationRefs arguments
+        TArrow domain codomain ->
+          declarationRefs domain ++ declarationRefs codomain
+        TConWithIdentity _ _ arguments -> foldMap declarationRefs arguments
+        TBaseWithIdentity {} -> []
+        TForallRef ref mbBound body ->
+          ref
+            : maybe [] (declarationRefs . tyToElab) mbBound
+              ++ declarationRefs body
+        TMuRef ref body -> ref : declarationRefs body
+        TBottom -> []
 
     typeRedexCarriesExplicitHyp term =
       case term of
@@ -585,8 +625,10 @@ substTypeVarTermRef target s = goSub
     x = typeBinderRefName target
     freeSRefs = freeTypeVarRefsType s
     freeSNames = Set.unions (map typeBinderRefAliasNames freeSRefs)
-    freshCaptureRef name mb body =
-      fst (freshTypeBinderRef name (identityGeneratorAfterTerm seed))
+    freshCaptureRef ref name mb body =
+      let (freshRef, _) =
+            freshenTypeBinderRef ref (identityGeneratorAfterTerm seed)
+       in renameTypeBinderRef name freshRef
       where
         seed =
           ERoll
@@ -619,7 +661,7 @@ substTypeVarTermRef target s = goSub
             | typeRefMember ref freeSRefs ->
                 let used = Set.unions [freeSNames, freeTypeVarAliasNamesTerm (fst body), Set.singleton x]
                     v' = freshTermNameFrom v used
-                    ref' = freshCaptureRef v' mb (fst body)
+                    ref' = freshCaptureRef ref v' mb (fst body)
                     body' = substTypeVarTermRef ref (tVarWithRef ref') (fst body)
                  in eTyAbsWithRef ref' (substBoundVar mb) (goSub body')
             | otherwise -> eTyAbsWithRef ref (substBoundVar mb) (snd body)

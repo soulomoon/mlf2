@@ -123,6 +123,7 @@ import MLF.Elab.Generalize
     , subtermGeneralizationConstructionResultAbstractionRef
     , subtermGeneralizationGammaBoundScheme
     , withConstructionBinderRenames
+    , withPlacedCopiedBinderRoutes
     , subtermGeneralizationGammaBoundSchemeForConsumer
     , subtermGeneralizationSchemeInfo
     , subtermConsumerAuthorityEnclosingOwner
@@ -199,6 +200,7 @@ import MLF.Types.Elab
     , Ty(..)
     , TypeBinderRef
     , elabToBound
+    , freshenTypeBinderRef
     , mkElabSchemeWithRefs
     , schemeBinderRefs
     , schemeBody
@@ -3281,6 +3283,53 @@ spec = do
                 projectedType
                 `shouldBe` Right ()
 
+        it "projects a fresh graph copy only through its recorded graph origin" $ do
+            let operatedRef =
+                    typeRef (getNodeId operated) "source-operated"
+                (freshOperatedRef, _) =
+                    freshenTypeBinderRef
+                        operatedRef
+                        initialIdentityGenerator
+                checkedSource =
+                    TArrow
+                        (tVarWithRef freshOperatedRef)
+                        TBottom
+                projectedType =
+                    TArrow
+                        (tVarWithRef otherConstructionRef)
+                        TBottom
+                operatedRequirements =
+                    requirementsWith
+                        [ (requirementAt RequiredGammaAtCurrentScope)
+                            { rgbOperatedType =
+                                TArrow
+                                    (tVarWithRef operatedRef)
+                                    TBottom
+                            }
+                        ]
+                constructionAliases =
+                    IntMap.insert
+                        (getNodeId operated)
+                        otherConstructionRef
+                        aliases
+            route <-
+                requireRoute
+                    ( AlgebraTestSupport.selectBodyConsumerRouteForTest
+                        owner
+                        edgeId
+                        operatedRequirements
+                        constructionAliases
+                    )
+            typeBinderRefNode freshOperatedRef `shouldBe` Nothing
+            AlgebraTestSupport.validateBodyConsumerCheckedSourceProjectionForTest
+                IntMap.empty
+                constructionAliases
+                []
+                route
+                checkedSource
+                projectedType
+                `shouldBe` Right ()
+
         it "specializes an already projected body consumer without reapplying its construction route" $ do
             route <-
                 requireRoute
@@ -4118,7 +4167,7 @@ spec = do
             gaConstructionRouteNodes canonical routeProvenance sourceRoot
                 `shouldBe` [restoredRoot, constructionResult, constructionAlias]
 
-        it "publishes a topology consumer from its canonical route and rejects conflicts" $ do
+        it "ignores undeclared topology aliases and rejects declared route conflicts" $ do
             let outwardConsumerRef = typeRef 54 "result"
                 conflictingConsumerRef = typeRef 55 "other-result"
                 packetRef = typeRef 39 "a"
@@ -4133,7 +4182,7 @@ spec = do
                             (tVarWithRef outwardConsumerRef)
                         )
                         (IntMap.singleton 56 outwardConsumerRef)
-                conflictingConstructionInfo =
+                staleUndeclaredConstructionInfo =
                     topologyConstructionInfo
                         { siSubstRefs =
                             IntMap.fromList
@@ -4141,6 +4190,19 @@ spec = do
                                 , (56, outwardConsumerRef)
                                 ]
                         }
+                genuineConflictInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [ (conflictingConsumerRef, Nothing)
+                            , (outwardConsumerRef, Nothing)
+                            ]
+                            (tVarWithRef outwardConsumerRef)
+                        )
+                        ( IntMap.fromList
+                            [ (44, conflictingConsumerRef)
+                            , (56, outwardConsumerRef)
+                            ]
+                        )
                 routeProvenance =
                     GaBindParents
                         { gaBindParentsBase = IntMap.empty
@@ -4184,11 +4246,24 @@ spec = do
                     Right schemeInfo -> pure schemeInfo
             IntMap.lookup 44 (schemeInfoBinderRefSubst published)
                 `shouldBe` Just outwardConsumerRef
+            stalePublished <-
+                case
+                    publishTopologyConsumerRoutesForTest
+                        constructionRoute
+                        (Map.singleton (ownerKey 39 "owner") packet)
+                        staleUndeclaredConstructionInfo
+                  of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "stale undeclared topology alias was treated as authority"
+                    Right schemeInfo -> pure schemeInfo
+            IntMap.lookup 44 (schemeInfoBinderRefSubst stalePublished)
+                `shouldBe` Just outwardConsumerRef
             case
                 publishTopologyConsumerRoutesForTest
                     constructionRoute
                     (Map.singleton (ownerKey 39 "owner") packet)
-                    conflictingConstructionInfo
+                    genuineConflictInfo
               of
                 Left (ValidationFailed messages) ->
                     messages
@@ -5633,6 +5708,107 @@ spec = do
                     Left err ->
                         expectationFailure (show err)
                             >> fail "exact local-result discharge failed"
+                    Right prepared -> pure prepared
+            subtermGeneralizationLocalResultAuthority resolved
+                `shouldBe` Nothing
+            subtermGeneralizationResultAbstractionRef resolved
+                `shouldBe` Nothing
+
+        it "requires the exact consumer-owned binder-copy route for an ambient local-result discharge" $ do
+            let localEdge = EdgeId 134
+                sourceBody = NodeId 135
+                lambdaParamRef = typeRef 136 "parameter"
+                sourceAlphaRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 137))
+                        "alpha"
+                copiedAlphaRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 138))
+                        "alpha"
+                ambientBetaRef =
+                    typeBinderRefFromIdentity
+                        (typeBinderIdentityFromUnique (UniqueIdentity 139))
+                        "beta"
+                sourceResultType =
+                    TForallRef sourceAlphaRef Nothing
+                        ( TArrow
+                            (tVarWithRef ambientBetaRef)
+                            ( TArrow
+                                (tVarWithRef sourceAlphaRef)
+                                (tVarWithRef sourceAlphaRef)
+                            )
+                        )
+                copiedResultBound :: BoundType
+                copiedResultBound =
+                    TForallRef copiedAlphaRef Nothing
+                        ( TArrow
+                            (tVarWithRef ambientBetaRef)
+                            ( TArrow
+                                (tVarWithRef copiedAlphaRef)
+                                (tVarWithRef copiedAlphaRef)
+                            )
+                        )
+                completeType =
+                    TArrow
+                        (tVarWithRef lambdaParamRef)
+                        sourceResultType
+                packetInfo =
+                    schemeInfoFromRefSubst
+                        ( mkElabSchemeWithRefs
+                            [ (lambdaParamRef, Nothing)
+                            , (resultRef, Just copiedResultBound)
+                            ]
+                            completeType
+                        )
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+                constructionInfoWithoutResult =
+                    schemeInfoFromRefSubst
+                        (mkElabSchemeWithRefs [] completeType)
+                        (IntMap.singleton (getNodeId resultRefNode) resultRef)
+                exactCopyRoutes =
+                    Map.singleton
+                        (typeBinderRefIdentity resultRef)
+                        [ ( typeBinderRefIdentity sourceAlphaRef
+                          , copiedAlphaRef
+                          )
+                        ]
+            topologyAuthority <-
+                requireTestTopologyConsumerAuthority
+                    localEdge
+                    sourceBody
+                    resultRefNode
+            packet <-
+                case
+                    prepareSubtermGeneralizationPacket
+                        initialIdentityGenerator
+                        (WithLocalTopologyResult DirectPacket topologyAuthority)
+                        packetInfo
+                        packetInfo
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "ambient copied-result packet preparation failed"
+                    Right (prepared, _) -> pure prepared
+            resolveSubtermLocalResultAtConstruction
+                constructionInfoWithoutResult
+                packet
+                `shouldSatisfy` isLeft
+            packetWithCopyRoute <-
+                case withPlacedCopiedBinderRoutes exactCopyRoutes packet of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "exact copied-result route construction failed"
+                    Right prepared -> pure prepared
+            resolved <-
+                case
+                    resolveSubtermLocalResultAtConstruction
+                        constructionInfoWithoutResult
+                        packetWithCopyRoute
+                of
+                    Left err ->
+                        expectationFailure (show err)
+                            >> fail "exact ambient copied-result discharge failed"
                     Right prepared -> pure prepared
             subtermGeneralizationLocalResultAuthority resolved
                 `shouldBe` Nothing

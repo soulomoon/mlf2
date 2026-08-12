@@ -3,6 +3,36 @@
 ## Unreleased
 
 ### Changed
+- Replaced the last polymorphic-bound shape heuristic in root closure with two
+  explicit construction authorities.  A scoped-publication certificate names
+  exact checked declarations in the planned root binder spine and permits
+  construction only under that publication scope; a topology-packet
+  certificate separately authorizes descent through a value-lambda result.
+  Successive packets in one frozen local-Gamma closure now share a validated
+  final source-owner completion only when owner, consumer identity, and member
+  edge agree, with conflicting endpoints rejected before merging.  Paired
+  negative/positive tests prove that a bare forall-shaped root is not repaired
+  after elaboration while the certified Section 15.3.8 `g g` case constructs
+  its exact abstraction, specialization, and principal scheme.  Let
+  publication now protects private lexical declaration identities, returned
+  exact-owner authorization follows the complete returned-result chain,
+  source-order publication includes already-constructed leading body foralls,
+  and post-Gamma result specialization emits its checked endpoint certificate
+  at construction time.  Returned-polymorphism publication now advances the
+  exact child endpoint, its owner scheme, and the pending body-consumer state
+  together before `Gen(Gamma,tau)` emits the enclosing declaration.  The
+  repaired runtime harness reuses one semantically keyed checked Prelude
+  artifact across interpreter/LLVM/native consumers; the combined focused
+  higher-kinded row falls from 42.66 seconds to about 0.79 seconds.  Bounded
+  result-directed application construction now accepts `<sigma1>; <sigma2>;
+  N` only when every inferred type argument is closed with respect to the
+  source forall spine; an endpoint that still names a source declaration
+  retains the packet-copy construction instead of emitting an ill-scoped
+  self-bound abstraction.  Packet placement also projects independently
+  ordered source prefixes only when every declaration is unbounded, uniquely
+  identity-owned by the enclosing Gamma, and bound-preserving.  The fixed
+  annotation group passes 355 examples, 15 historical generated seeds pass
+  1,500 programs, and the complete serialized suite passes 4,114 examples.
 - Removed the exact-annotation fallback that recursively retyped a completed
   `XmlfTerm` when its inferred recursive type was only alpha-equivalent to the
   exact source type. Compiler-exact preparation now carries occurrence-sensitive

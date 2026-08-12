@@ -4,6 +4,7 @@ module MLF.Elab.Run.Generalize.Prepare (
     preparedRootCertifiedTermBinderRenames,
     PreparedRootClosure(..),
     preparedRootClosureScheme,
+    preparedRootClosureQuantifierReordering,
     PreparedRootConstructionScope,
     preparedRootConstructionScopeBinders,
     preparedRootConstructionScopeAliases,
@@ -45,6 +46,7 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , preparedRootCertifiedTermBinderRenames
     , PreparedRootClosure(..)
     , preparedRootClosureScheme
+    , preparedRootClosureQuantifierReordering
     , PreparedRootConstructionScope
     , applyPreparedRootSourceTypeBinderIdentities
     , applyPreparedRootBinderIdentities

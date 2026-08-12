@@ -283,6 +283,10 @@ hasRecursiveArrow ty = case ty of
             ) ->
               Pipeline.typeBinderRefsSameIdentity boundMuRef boundMuUseRef
                 && Pipeline.typeBinderRefsSameIdentity parameterMuRef parameterMuUseRef
-                && Pipeline.typeBinderRefsSameIdentity boundMuRef parameterMuRef
+                && not
+                  ( Pipeline.typeBinderRefsSameIdentity
+                      boundMuRef
+                      parameterMuRef
+                  )
           _ -> False
   _ -> False

@@ -80,7 +80,8 @@ import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilderRequired)
 import MLF.Elab.Types (ResolvedVar (..), resolvedVarName)
 import MLF.Elab.Elaborate.Algebra
-  ( LocalGammaConstruction (..),
+  ( ExactResultConstruction (..),
+    LocalGammaConstruction (..),
     LocalGammaConstructionCertificate (..),
     OwnerFinalConstruction (..),
   )
@@ -285,6 +286,12 @@ matchesRecursiveArrow :: ElabType -> ElabType -> Bool
 matchesRecursiveArrow actual expected = case (actual, expected) of
   (TArrow domA codA, TArrow domE codE) ->
     matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
+  ( TForallRef resultRef (Just resultBound) (TArrow domA (TVarRef resultUseRef)),
+    TArrow domE codE
+    ) ->
+      typeBinderRefsSameIdentity resultRef resultUseRef
+        && matchesRecursiveMu domA domE
+        && matchesRecursiveMu (tyToElab resultBound) codE
   _ -> False
 
 matchesRecursiveArrowCodomain :: ElabType -> ElabType -> Bool
@@ -4657,7 +4664,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ofcLambdaParamBoundaryCertificates = [],
                 ofcOwnLambdaParamBoundaryCertificate = Nothing,
                 ofcOpenValueLambdaParameterRefs = [],
-                ofcBodyConsumerBoundRefinements = []
+                ofcBodyConsumerBoundRefinements = [],
+                ofcBodyConsumerScopeDependencyRenames = []
               }
           expectCertificateFailure label result =
             case result of
@@ -5384,6 +5392,104 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         schemeBinderRefs closed `shouldBe` []
         schemeBody closed `shouldBe` constructedType
 
+      it "retains a carried binder only when the exact returned-result chain certifies it" $ do
+        let returnedGraphNode = NodeId 991998
+            returnedRef =
+              typeBinderRefFromIdentity
+                (typeBinderIdentityFromUnique (UniqueIdentity 991999))
+                "returned"
+            returnedType =
+              TForallRef
+                returnedRef
+                Nothing
+                ( TArrow
+                    (tVarWithRef emittedLocalRef)
+                    (tVarWithRef returnedRef)
+                )
+            returnedConstruction =
+              ExactResultConstruction
+                { ercOwner = owner,
+                  ercConstructedType = returnedType,
+                  ercExactEndpointCompletion = Nothing,
+                  ercConstructedBinders = [(returnedRef, Nothing)],
+                  ercBinderRoutes =
+                    IntMap.singleton
+                      (getNodeId returnedGraphNode)
+                      returnedRef,
+                  ercTypeAbstractionRefs = [returnedRef],
+                  ercOpenValueLambdaParameterRefs = [],
+                  ercReturnedResultConstruction = Nothing
+                }
+            constructedWithReturned =
+              TForallRef emittedLocalRef Nothing returnedType
+            certificateWithReturned =
+              certificate
+                { ofcConstructedType = constructedWithReturned,
+                  ofcCarriedResultBinders = [(returnedRef, Nothing)],
+                  ofcCarriedResultBinderRoutes =
+                    IntMap.singleton
+                      (getNodeId returnedGraphNode)
+                      returnedRef,
+                  ofcCarriedResultTypeAbstractionRefs = [returnedRef],
+                  ofcReturnedResultConstruction = Just returnedConstruction
+                }
+        closed <-
+          requireRight
+            ( prepareRootClosureSchemeWithOwnerFinalForTest
+                [closure]
+                rootSubst
+                plannedScheme
+                certificateWithReturned
+            )
+        schemeBinderRefs closed `shouldBe` []
+        schemeBody closed `shouldBe` constructedWithReturned
+        prepareRootClosureSchemeWithOwnerFinalForTest
+          [closure]
+          rootSubst
+          plannedScheme
+          certificateWithReturned
+            { ofcReturnedResultConstruction = Nothing
+            }
+          `shouldSatisfy` isLeft
+        prepareRootClosureSchemeWithOwnerFinalForTest
+          [closure]
+          rootSubst
+          plannedScheme
+          certificateWithReturned
+            { ofcReturnedResultConstruction =
+                Just
+                  returnedConstruction
+                    { ercBinderRoutes =
+                        IntMap.singleton 991997 returnedRef
+                    }
+            }
+          `shouldSatisfy` isLeft
+        prepareRootClosureSchemeWithOwnerFinalForTest
+          [closure]
+          rootSubst
+          plannedScheme
+          certificateWithReturned
+            { ofcReturnedResultConstruction =
+                Just
+                  returnedConstruction
+                    { ercTypeAbstractionRefs = []
+                    }
+            }
+          `shouldSatisfy` isLeft
+        prepareRootClosureSchemeWithOwnerFinalForTest
+          [closure]
+          rootSubst
+          plannedScheme
+          certificateWithReturned
+            { ofcReturnedResultConstruction =
+                Just
+                  returnedConstruction
+                    { ercConstructedBinders =
+                        [(returnedRef, Just (TArrow TBottom TBottom))]
+                    }
+            }
+          `shouldSatisfy` isLeft
+
       it "carries the exact body-consumer bound into the final root binder spine" $ do
         let dependencyRef = graphRef (NodeId 991881) "a"
             provisionalRef = graphRef (NodeId 991882) "b"
@@ -5510,7 +5616,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   ofcLambdaParamBoundaryCertificates = [],
                   ofcOwnLambdaParamBoundaryCertificate = Nothing,
                   ofcOpenValueLambdaParameterRefs = [],
-                  ofcBodyConsumerBoundRefinements = []
+                  ofcBodyConsumerBoundRefinements = [],
+                  ofcBodyConsumerScopeDependencyRenames = []
                 }
             refinementSubst =
               IntMap.singleton 991883 semanticRef

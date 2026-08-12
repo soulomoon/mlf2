@@ -1,3 +1,82 @@
+## 2026-08-12 - Construction-certified paper `g g` publication
+
+- Removed the final type-shape test that treated a polymorphic root bound as
+  permission to rewrite a value-lambda result.  Root preparation now emits a
+  `PreparedScopedPublicationRootClosure` only when the checked producer's
+  exact ambient declaration occurs in the planned root binder spine.  That
+  non-empty identity proof permits checking and substitution under the root
+  publication spine, while `PreparedTopologyPacketRootClosure` remains the
+  distinct, stronger authority required to descend through value-lambda
+  results.  Projection retains either certificate only through exact binder
+  identity, and validation rejects scoped declarations outside the root spine.
+- Successive `RaiseMerge` packets for one `LocalGammaClosure` can observe
+  historical states of the same source owner.  Preparation now selects the
+  validated final source-owner completion while the frozen closure grouping is
+  still available and installs it only in packets with the same owner,
+  consumer identity, and member edge.  Conflicting owners or operational
+  endpoints fail before requirement merging; no edge number, type shape, or
+  post-elaboration term repair participates in the choice.
+- Paired regressions prove both sides of the construction boundary: a bare
+  polymorphic-looking root receives no bounded-result construction, while the
+  certified paper case constructs the exact
+  `Lambda(alpha > sigma-id) lambda(g:sigma-id) (g[sigma-id] g)[alpha]`
+  term and principal scheme.  The fixed annotation group, the frozen
+  outer-let Gamma counterexample, and the generated O15 seed are green.  This
+  is executable evidence for the covered Section 15.3.8 construction paths,
+  not a mechanized proof of every eMLF metatheorem.
+- Generated annotation counterexamples exposed four additional places where a
+  checked construction could be lost at an enclosing boundary.  Let scheme
+  alignment now protects every private lexical declaration in its returned
+  owner tree; root authorization follows exact returned-result owners rather
+  than inspecting only the outer certificate; source-order publication records
+  leading foralls already present in a checked scheme body; and post-Gamma
+  semantic-meta specialization returns the endpoint certificate together with
+  the `ETyInst` it constructs.  Sequential endpoint certificates are validated
+  as a source-to-target chain, so an enclosing owner cannot accept a final type
+  merely because it is equal to the desired endpoint.
+- Two later generated counterexamples exposed the remaining enclosing-lambda
+  boundary.  Parameter-boundary construction now completes a child-owned
+  requirement before `Gen(Gamma,tau)`, and a returned-polymorphism let
+  publication carries the same directional endpoint through the owner scheme
+  and pending body-consumer certificate.  The requirement, emitted declaration,
+  and eventual `Hyp` therefore share one construction input; no failed
+  instantiation or final type is used to repair the bound afterward.
+- The seven minimized counterexamples are frozen in the fixed annotation group:
+  ambient specialization of a returned polymorphic value, root publication of
+  a carried result binder, source ordering for a projected higher-rank
+  parameter, direct-lambda mixed-result specialization, exact child
+  abstractions beneath enclosing lambda generalization, and returned
+  polymorphism before let scheme publication, plus identity-directed
+  projection of two independently ordered unbounded source declarations
+  before placing a descendant packet tail.  The fixed group passes 355
+  examples, and 15 historical generated seeds pass 1,500 generated programs
+  before the full repository gate.
+- Result-directed application construction now derives the paper's bounded
+  `<sigma1>; <sigma2>; N` spine before classifying the earlier binders as
+  result-undetermined, but only when the exact endpoint and every inferred
+  argument are closed with respect to the eliminated source forall spine.
+  This construction-time condition rejects the reachable nested-owner form
+  that otherwise emitted `forall b >= b -> c`: a forall lower bound is outside
+  its own declaration scope, so the source-spine identity cannot be used as
+  its own instantiation evidence.  That case retains the existing certified
+  packet-copy path and allocates a distinct lexical declaration before Phase 7.
+- Packet placement preserves declaration order whenever any source binder has
+  a lower bound.  Independent unbounded declarations may commute, as allowed
+  by reification, only after a one-to-one `TypeBinderIdentity` check proves
+  that every generated declaration is already owned by the enclosing Gamma.
+  Published forall bounds are also checked for self-reference before their
+  consumer certificate is accepted.  There is no spelling, alpha-shape, or
+  post-typecheck recovery path.
+- The Prelude/package boundary repair remains effective: the focused
+  higher-kinded interpreter/LLVM/native row completes in about 0.79 seconds in
+  the warm test process instead of 42.66 seconds, a no-Prelude artifact takes
+  about 0.2 seconds, and two Prelude clients share one semantic checked-Prelude
+  build instead of recompiling the whole package for each runtime lane.
+- Final validation passes `cabal build all -j1`, `cabal test -j1` with all
+  4,114 examples, the 355-example fixed annotation group, 1,500 generated O15
+  programs across the 15 historical seeds, the 24-case P2 harness, and all 29
+  publication regressions.
+
 ## 2026-08-10 - Construction-time recursive exact-owner authority
 
 - Removed `alignExactRecursivePresentations`, which used to collect

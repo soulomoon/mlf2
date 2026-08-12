@@ -22,7 +22,10 @@ import MLF.Elab.Pipeline
     , typeCheck
     )
 import MLF.Elab.TermClosure (preserveRetainedChildAuthoritativeResult)
-import MLF.Elab.Reduce.TestSupport (collectApplicationSpineThroughHeadTypeRedexes)
+import MLF.Elab.Reduce.TestSupport
+    ( collectApplicationSpineThroughHeadTypeRedexes
+    , normalizeCheckedTypeRedexesForTest
+    )
 import MLF.Types.Elab
     ( ResolvedVar(..)
     , TypeBinderRef
@@ -41,6 +44,7 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import qualified MLF.Reify.TypeOps as TypeOps
 import MLF.Types.Identity (IdDetails(..), idDetailsStableName, primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator, typeBinderIdentityStableName)
 import ElabTermTestSupport
     ( generatedLocalRef
@@ -493,16 +497,64 @@ spec = do
                 expectedInst = InstSeq (InstInside (InstBot intTy)) InstElim
             step term `shouldBe` Just (ETyInst (mkTestTyAbs "a" Nothing body) expectedInst)
 
-        it "reduces an at-bound flexible forall use constructed with N" $ do
+        it "reduces an at-bound N under raw normalization" $ do
             let identityTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
                 body = mkTestLocalLam "x" (testTVar "result") (mkTestDeferredVar "x")
                 term = mkTestTyAbs "result" (Just (boundFromType identityTy)) body
                 reduced = mkTestLocalLam "x" identityTy (mkTestDeferredVar "x")
                 instantiated = ETyInst term InstElim
-                reducedTy = TArrow identityTy identityTy
-            typeCheck instantiated `shouldBe` Right reducedTy
+            case typeCheck instantiated of
+                Right
+                    (TArrow left@(TForallRef leftRef Nothing _) right@(TForallRef rightRef Nothing _)) -> do
+                        left `shouldSatisfy` TypeOps.alphaEqType identityTy
+                        right `shouldSatisfy` TypeOps.alphaEqType identityTy
+                        typeBinderRefIdentity leftRef
+                            `shouldNotBe` typeBinderRefIdentity rightRef
+                other ->
+                    expectationFailure
+                        ( "expected two fresh lexical copies of the N bound, got: "
+                            ++ show other
+                        )
             normalize instantiated `shouldBe` reduced
-            typeCheck (normalize instantiated) `shouldBe` Right reducedTy
+            case typeCheck reduced of
+                Right
+                    (TArrow left@(TForallRef leftRef Nothing _) right@(TForallRef rightRef Nothing _)) -> do
+                        left `shouldSatisfy` TypeOps.alphaEqType identityTy
+                        right `shouldSatisfy` TypeOps.alphaEqType identityTy
+                        -- Raw N reduction substitutes the same annotated
+                        -- bound at both term positions.  The checked
+                        -- normalizer regression below is what prevents this
+                        -- declaration alias from entering production IR.
+                        typeBinderRefIdentity leftRef
+                            `shouldBe` typeBinderRefIdentity rightRef
+                other ->
+                    expectationFailure
+                        ( "expected the raw N reduct to retain the bound shape, got: "
+                            ++ show other
+                        )
+
+        it "keeps bounded elimination when reducing it would alias lexical forall copies" $ do
+            let boundRef = typeRef 964 "bound"
+                boundTy =
+                    TForallRef
+                        boundRef
+                        Nothing
+                        (TArrow (TVarRef boundRef) (TVarRef boundRef))
+                flexibleRef = typeRef 965 "flexible"
+                parameter =
+                    resolvedLocal
+                        "$bounded#965"
+                        "bounded-runtime"
+                        (TVarRef flexibleRef)
+                term =
+                    ETyInst
+                        ( eTyAbsWithRef
+                            flexibleRef
+                            (Just (boundFromType boundTy))
+                            (ELam parameter (EVarNode parameter))
+                        )
+                        InstElim
+            normalizeCheckedTypeRedexesForTest term `shouldBe` term
 
         it "consumes a vacuous leading forall before applying a later forall" $ do
             let method =

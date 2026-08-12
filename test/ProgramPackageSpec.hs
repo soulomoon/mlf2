@@ -13,6 +13,7 @@ import Control.Concurrent
     )
 import Control.Exception (SomeException, bracket, finally, throwIO)
 import Data.Either (isRight)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.IORef
     ( IORef
     , atomicModifyIORef'
@@ -790,10 +791,17 @@ spec =
                 checkProgramArgsWithBatchSize (Just "1") [path]
                     `shouldReturn` Right "OK\n"
 
+        it "constructs imported recursive owners in a higher-kinded parser runner" $
+            withProgramSourceFile "recursive-parser-runner" recursiveParserRunnerSource $ \path ->
+                checkProgramArgsWithBatchSize (Just "1") [path]
+                    `shouldReturnCliOk`
+                        "higher-kinded parser runner"
+
         it "uses exact ambient aliases for repeated recursive branch results" $
             withProgramSourceFile "repeated-recursive-choice" repeatedRecursiveChoiceSource $ \path ->
                 checkProgramArgsWithBatchSize (Just "1") [path]
-                    `shouldReturn` Right "OK\n"
+                    `shouldReturnCliOk`
+                        "repeated recursive branch results"
 
         it "coalesces cross-module root RaiseMerge edges only after their flexible routes solve away" $
             withProgramSourceFile "shared-root-raise-merge" sharedRootRaiseMergeSource $ \path ->
@@ -967,6 +975,34 @@ localApplicationGammaSource =
         , "      (Parser (λ(state : ParserState) ParserStepOk state ParserValue) : Parser ParserValue);"
         , "  def target : Parser ParserValue ="
         , "    parserChoice (expectText \";\") (parserFailExpectedAtCurrent ParserExpectImportSemicolon);"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+recursiveParserRunnerSource :: String
+recursiveParserRunnerSource =
+    unlines
+        [ "module ParserSource export (SourceInput(..), SourceSymbol(..)) {"
+        , "  data SourceSymbol ="
+        , "      SourceSymbol : String -> SourceSymbol;"
+        , "  data SourceInput ="
+        , "      SourceInputNil : SourceInput"
+        , "    | SourceInputCons : SourceSymbol -> SourceInput -> SourceInput;"
+        , "}"
+        , "module ParserCore export (Parser(..), ParserState(..), ParserStep(..), runParser) {"
+        , "  import ParserSource exposing (SourceInput);"
+        , "  data ParserState ="
+        , "      ParserState : SourceInput -> ParserState;"
+        , "  data ParserStep ="
+        , "      ParserStepOk : ParserState -> ParserStep;"
+        , "  data Parser a ="
+        , "      Parser : (ParserState -> ParserStep) -> Parser a;"
+        , "  def runParser : ∀ a. Parser a -> ParserState -> ParserStep ="
+        , "    λ(parser : Parser a) λ(state : ParserState) case parser of {"
+        , "      Parser run -> run state"
+        , "    };"
+        , "}"
+        , "module Main export (main) {"
         , "  def main : Bool = true;"
         , "}"
         ]
@@ -1310,6 +1346,69 @@ checkProgramArgsWithBatchSize ::
 checkProgramArgsWithBatchSize mbBatchSize args =
     withEnv "MLF_MODULE_DEF_BATCH_SIZE" mbBatchSize $
         checkProgramArgs args
+
+shouldReturnCliOk :: IO (Either String String) -> String -> Expectation
+shouldReturnCliOk action role = do
+    result <- action
+    case result of
+        Right "OK\n" -> pure ()
+        Right output ->
+            expectationFailure
+                (role ++ " returned unexpected output: " ++ show output)
+        Left failure ->
+            expectationFailure
+                ( role
+                    ++ " failed: "
+                    ++ unlines
+                        ( case
+                            [ marker
+                            | marker <- pipelineFailureMarkers
+                            , marker `isInfixOf` failure
+                            ]
+                          of
+                            [] -> [take 4000 failure]
+                            markers -> [show markers]
+                        )
+                    ++ concatMap
+                        (\marker -> maybe "" (("\n" ++) . take 2400) (failureContext marker failure))
+                        pipelineFailureContextMarkers
+                )
+
+pipelineFailureMarkers :: [String]
+pipelineFailureMarkers =
+    [ "ordinary lambda result cannot enter a fresh sibling scope"
+    , "candidate-bound lexical construction retained duplicate declarations"
+    , "compiler exact annotation cannot construct recursive owner"
+    , "compiler exact annotation has mismatched recursive owner"
+    , "compiler exact annotation construction failed"
+    , "compiler exact lambda parameter source type disagrees"
+    , "application argument failed under its constructed Gamma"
+    , "lambda-body computation is not admissible in its constructed Gamma"
+    ]
+
+pipelineFailureContextMarkers :: [String]
+pipelineFailureContextMarkers =
+    [ "outgoing Gamma result="
+    , "compiler exact annotation has mismatched recursive owner"
+    , "producer recursive"
+    , "typecheck="
+    , "InstAbstr expects bound"
+    , "publication type="
+    , "body binder copies="
+    , "body instantiation="
+    , "; expected="
+    , "; reason="
+    , "; leading bound elimination="
+    , "; term outer shape="
+    ]
+
+failureContext :: String -> String -> Maybe String
+failureContext marker = go
+  where
+    go [] = Nothing
+    go remaining@(_ : rest)
+        | marker `isPrefixOf` remaining = Just remaining
+        | otherwise = go rest
 
 withEnv :: String -> Maybe String -> IO a -> IO a
 withEnv name value action =

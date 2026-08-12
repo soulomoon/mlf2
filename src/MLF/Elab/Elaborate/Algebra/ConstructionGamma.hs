@@ -14,17 +14,26 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     lambdaParamBoundarySourceBinderRefs,
     completeSchemeInfoRouteType,
     completeLambdaParamBoundarySchemeInfo,
+    completeLambdaParamBoundarySchemeInfoInScope,
     completeLambdaParamBoundaryBound,
     completeLambdaParamBoundarySourceRootBound,
     constructLambdaParamBoundaryRequirement,
     completeLambdaParamBoundaryDeclarationBound,
     completeLambdaParamBoundaryDeclarationBoundInScope,
+    completeLambdaParamBoundaryTypeInScope,
     completeLambdaParamBoundaryType,
     renameLambdaParamBoundaryCertificate,
     OrdinaryGammaPacketConstruction (..),
     ValidatedBodyConsumerProjection,
     BodyConsumerDeclarationAuthority,
     BodyConsumerBoundRefinementCertificate,
+    CertifiedPacketConsumerBodyProjection,
+    certifyPacketConsumerBodyProjection,
+    attachCertifiedPacketConsumerBodyProjection,
+    certifiedPacketConsumerBodyProjectionSourceRef,
+    certifiedPacketConsumerBodyProjectionSourceType,
+    certifiedPacketConsumerBodyProjectionTargetRef,
+    certifiedPacketConsumerBodyProjectionTargetType,
     bodyConsumerBoundRefinementCertifiesTransition,
     bodyConsumerBoundRefinementsJointlyCertifyTransition,
     bodyConsumerBoundRefinementsAuthorizeDeclarationCompletion,
@@ -47,6 +56,7 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     bodyConsumerBoundRefinementConsumedDependencies,
     bodyConsumerBoundRefinementConsumedReplayRoutes,
     bodyConsumerBoundRefinementTargetsAny,
+    bodyConsumerBoundRefinementHasSemanticRouteWithin,
     bodyConsumerBoundRefinementCompletesPreparedPacket,
     completeLambdaEndpointFromBodyConsumerRefinement,
     completeSelectedFreeLambdaEndpointFromBodyConsumerRefinement,
@@ -64,6 +74,7 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     renameCertifiedGammaBoundTransition,
     advanceBodyConsumerBoundRefinementThroughCertifiedGammaBound,
     advanceBodyConsumerBoundRefinementsThroughCertifiedGammaBound,
+    advanceBodyConsumerBoundRefinementThroughOwnerEndpointCompletion,
     advanceBodyConsumerBoundRefinementsThroughValidatedLocalGamma,
     installBodyConsumerBoundRefinements,
     installBodyConsumerConstructionRoutes,
@@ -76,6 +87,7 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     authorizeBodyConsumerDeclarationWithValidatedLocalRequirements,
     authorizedBodyConsumerDeclarationBound,
     authorizedBodyConsumerRoute,
+    bodyConsumerBoundRefinementRoute,
     buildAmbientGammaAuthorities,
     constructOrdinaryGammaPacket,
     certifiedSourcePacketOperatedOccurrenceRenames,
@@ -113,7 +125,13 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     forallClosurePresentsSameIdentityBody,
     exactIdentityForallClosureOf,
     CertifiedLambdaBodyConstruction,
+    CertifiedPacketConsumerBinder,
+    certifiedPacketConsumerBinderRef,
     certifyLambdaBodyConstruction,
+    certifyPacketConsumerBinderFromBodyConstruction,
+    CertifiedPacketSourceConsumerBinder,
+    certifiedPacketSourceConsumerBinderRef,
+    certifyPacketSourceConsumerBinder,
     CertifiedOpenValueLambdaParameterClosure,
     certifyOpenValueLambdaParameterClosure,
     certifyOpenValueLambdaParameterClosureAtBinders,
@@ -122,17 +140,21 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     exactLambdaConstructionPublishedBinders,
     exactLambdaConstructionPublishedType,
     exactLambdaConstructionBinderRenames,
+    exactLambdaConstructionParameterBinderCopies,
     exactLambdaConstructionBodyBinderRenames,
+    exactLambdaConstructionResultBinderCopies,
     exactLambdaConstructionBodyAbstractions,
     exactLambdaConstructionBodyInstantiation,
     exactLambdaConstructionBodyType,
     exactLambdaConstructionPreservedBodyRefinements,
     exactLambdaConstructionAmbientBodyRefinement,
+    exactLambdaConstructionIntroducedAmbientBodyDeclaration,
     exactLambdaConstructionAmbientBodyRefinementCertificate,
     exactLambdaConstructionCompletionInstantiation,
     exactLambdaConstructionCompletionPreservesBinderIdentities,
     certifyExactLambdaConstruction,
     certifyExactLambdaEndpointConstruction,
+    certifyExactLambdaEndpointConstructionWithCopies,
     exactLambdaEndpointTypesAgree,
     operationalEndpointTypesAgree,
     mkValidatedBodyConsumerProjection,
@@ -153,6 +175,8 @@ module MLF.Elab.Elaborate.Algebra.ConstructionGamma
     completePreparedBodyConsumerConstructionBounds,
     projectCertifiedBodyConsumerBoundsIfPresent,
     alphaRenameBodyConsumerBoundRefinementCertificate,
+    alignBodyConsumerBoundRefinementScopeDependencies,
+    renameBodyConsumerBoundRefinementScopeDependencies,
     renameBodyConsumerBoundRefinementCertificate,
     publishFrozenEndpointCertificate,
     bodyConsumerProjectionProvenance,
@@ -174,7 +198,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (find, nub)
 import qualified Data.List.NonEmpty as NonEmpty
-import Data.Maybe (fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
@@ -239,6 +263,7 @@ import MLF.Elab.Inst
 import MLF.Elab.Run.Instantiation
   ( constructExactInstantiation,
     constructExactInstantiationAtSourceArguments,
+    constructLexicalForallCopyInstantiation,
     exactBinderSpineInstantiation,
     exactBinderSpineRenames,
     inferInstAppArgsFromSchemeRefsExact,
@@ -284,6 +309,7 @@ import MLF.Reify.TypeOps
   ( alphaEqType,
     churchAwareEqType,
     churchRepresentationEqType,
+    composeTypeHeadRef,
     freeTypeVarRefsType,
     matchTypeRefs,
     splitForallsRefs,
@@ -295,15 +321,17 @@ import MLF.Types.Elab
     typeBinderIdentityFromNode,
     typeBinderIdentityNode,
     typeBinderRefFromIdentity,
+    typeBinderRefGraphOrigin,
     typeBinderRefIdentity,
     typeBinderRefName,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
-    freshTypeBinderRef,
+    freshenTypeBinderRef,
   )
 import MLF.Types.Identity
   ( StructuralTypeBinderRole (StructuralSelfBinder),
     typeBinderIdentityGeneratedUnique,
+    typeBinderIdentityIsCanonicalStructural,
     typeBinderIdentityStableName,
     typeBinderIdentityStructural,
   )
@@ -777,6 +805,10 @@ data CertifiedLambdaBodyConstruction =
         ![(TypeBinderRef, Maybe BoundType)]
     , certifiedLambdaBodySourceRefs :: ![TypeBinderRef]
     , certifiedLambdaBodyParameterRefs :: ![TypeBinderRef]
+    , certifiedLambdaBodyAmbientDeclarations ::
+        ![AmbientGammaAuthority]
+    , certifiedLambdaBodyScopeDependencyRenames ::
+        ![(TypeBinderRef, TypeBinderRef)]
     , certifiedLambdaBodyReturnedResults ::
         ![(LocalGammaOwner, ElabType)]
     }
@@ -802,9 +834,11 @@ certifyLambdaBodyConstruction
   -> [(TypeBinderRef, Maybe BoundType)]
   -> [TypeBinderRef]
   -> [TypeBinderRef]
+  -> [AmbientGammaAuthority]
+  -> [(TypeBinderRef, TypeBinderRef)]
   -> [(LocalGammaOwner, ElabType)]
   -> Maybe CertifiedLambdaBodyConstruction
-certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedBinders sourceRefs parameterRefs returnedResults = do
+certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedBinders sourceRefs parameterRefs ambientDeclarations scopeDependencyRenames returnedResults = do
   guard (length certifiedBinders == length constructedBinders)
   guard (and (zipWith bindersAgree certifiedBinders constructedBinders))
   guard (distinctBinderIdentities certifiedBinders)
@@ -818,6 +852,23 @@ certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedB
     ( allDistinctBy
         typeBinderRefsSameIdentity
         parameterRefs
+    )
+  guard
+    ( allDistinctBy
+        (\left right ->
+            typeBinderRefsSameIdentity
+              (agaExactRef left)
+              (agaExactRef right)
+        )
+        ambientDeclarations
+    )
+  guard
+    ( allDistinctBy
+        (\(leftSource, leftTarget) (rightSource, rightTarget) ->
+            typeBinderRefsSameIdentity leftSource rightSource
+              && typeBinderRefsSameIdentity leftTarget rightTarget
+        )
+        scopeDependencyRenames
     )
   guard
     ( all
@@ -854,10 +905,8 @@ certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedB
         returnedResults
     )
   guard
-    ( all
-        ( returnedResultBelongsToConstructedType
-            . snd
-        )
+    ( returnedResultChainBelongsToConstructedType
+        constructedTy
         returnedResults
     )
   pure
@@ -868,8 +917,12 @@ certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedB
       , certifiedLambdaBodyConsumedBinders = consumedBinders
       , certifiedLambdaBodySourceRefs = sourceRefs
       , certifiedLambdaBodyParameterRefs = parameterRefs
+      , certifiedLambdaBodyAmbientDeclarations = ambientDeclarations
+      , certifiedLambdaBodyScopeDependencyRenames =
+          scopeDependencyRenames
       , certifiedLambdaBodyReturnedResults = returnedResults
       }
+
   where
     constructedBinders = schemeBinderRefs (schemeFromType constructedTy)
     constructedRefs =
@@ -902,20 +955,328 @@ certifyLambdaBodyConstruction bodyOwner constructedTy certifiedBinders consumedB
         go [] = True
         go (item : rest) = not (any (same item) rest) && go rest
 
-    -- The returned-result certificate is projected from the checked owner,
-    -- but keep the projection sealed only when its endpoint is actually on
-    -- that owner's result path.  This validates provenance already carried by
-    -- the owner certificate; it does not infer a result owner from type shape.
-    returnedResultBelongsToConstructedType returnedTy =
-      resultPathContains constructedTy
+    -- The returned-result certificate is an ordered owner chain.  Validate
+    -- each child against the endpoint constructed by its immediate parent,
+    -- rather than requiring every descendant to remain visible in the outer
+    -- owner's final type.  A parent may publish the child through a flexible
+    -- result declaration, in which case the child is the exact certified
+    -- bound and the parent's visible result is that declaration.  The owner
+    -- chain supplies positive provenance; this shape check only confirms the
+    -- construction recorded by that provenance.
+    returnedResultChainBelongsToConstructedType _ [] = True
+    returnedResultChainBelongsToConstructedType parentTy ((_, returnedTy) : rest) =
+      resultPathContains parentTy returnedTy
+        && returnedResultChainBelongsToConstructedType returnedTy rest
+
+    resultPathContains parentTy returnedTy = go parentTy
       where
-        resultPathContains currentTy
+        go currentTy
           | operationalEndpointTypesAgree currentTy returnedTy = True
-        resultPathContains (TForallRef _ _ bodyTy) =
-          resultPathContains bodyTy
-        resultPathContains (TArrow _ resultTy) =
-          resultPathContains resultTy
-        resultPathContains _ = False
+        go (TForallRef ref mbBound bodyTy) =
+          publishesReturnedBound ref mbBound bodyTy || go bodyTy
+        go (TArrow _ resultTy) = go resultTy
+        go _ = False
+
+        publishesReturnedBound ref (Just bound) bodyTy =
+          terminalFlexibleResultRef bodyTy == Just ref
+            && operationalEndpointTypesAgree
+              (tyToElab bound)
+              returnedTy
+        publishesReturnedBound _ Nothing _ = False
+
+        terminalFlexibleResultRef currentTy =
+          case currentTy of
+            TVarRef ref -> Just ref
+            TForallRef _ _ bodyTy -> terminalFlexibleResultRef bodyTy
+            TArrow _ resultTy -> terminalFlexibleResultRef resultTy
+            _ -> Nothing
+
+-- | Proof that a packet's operated consumer is one declaration constructed
+-- by the recursively checked child.  The constructor is private: callers can
+-- inspect the selected ref for local-vs-ambient classification, but only the
+-- certificate owner can recover its checked bound or turn the ref into a
+-- cross-identity body-consumer projection.
+data CertifiedPacketConsumerBinder =
+  CertifiedPacketConsumerBinder
+    !TypeBinderIdentity
+    !TypeBinderRef
+    !BoundType
+  deriving (Eq, Show)
+
+certifiedPacketConsumerBinderRef
+  :: CertifiedPacketConsumerBinder
+  -> TypeBinderRef
+certifiedPacketConsumerBinderRef
+  (CertifiedPacketConsumerBinder _ ref _) = ref
+
+-- | Proof that a packet's exact exterior route selects one source declaration
+-- emitted by the recursively checked child.  A lambda boundary deliberately
+-- hides child-local aliases from its ambient environment, so the current
+-- pending Gamma scheme can retain the declaration while losing the graph
+-- route by which the packet selected it.  The private constructor records the
+-- join of four positive authorities: the packet's unanimous route, its
+-- consumer declaration and operated/completed occurrences, the current
+-- declaration, and the checked child's exact binder spine and endpoint.  The
+-- packet's staged SchemeInfos may legitimately retain both the provisional
+-- graph route and its copied construction route.  They are alternatives, not
+-- aliases to quotient eagerly: exactly one must survive the complete join.
+newtype CertifiedPacketSourceConsumerBinder =
+  CertifiedPacketSourceConsumerBinder TypeBinderRef
+  deriving (Eq, Show)
+
+certifiedPacketSourceConsumerBinderRef
+  :: CertifiedPacketSourceConsumerBinder
+  -> TypeBinderRef
+certifiedPacketSourceConsumerBinderRef
+  (CertifiedPacketSourceConsumerBinder ref) = ref
+
+certifyPacketSourceConsumerBinder
+  :: PreparedSubtermGeneralization
+  -> SchemeInfo
+  -> CertifiedLambdaBodyConstruction
+  -> ElabType
+  -> Either ElabError (Maybe CertifiedPacketSourceConsumerBinder)
+certifyPacketSourceConsumerBinder packet currentSchemeInfo bodyConstruction sourceTy =
+  case subtermGeneralizationGammaAuthority packet of
+    Nothing -> pure Nothing
+    Just gammaAuthority ->
+      case typeBinderIdentityNode (gpaConsumerIdentity gammaAuthority) of
+        Nothing -> pure Nothing
+        Just exterior ->
+          certifyUniqueRoute (distinctRefs (packetRoutes exterior))
+  where
+    certifyUniqueRoute routedRefs = do
+      certifiedRoutes <-
+        catMaybes <$> traverse certifyRoutedDeclaration routedRefs
+      case distinctCertifiedRoutes certifiedRoutes of
+        [] -> pure Nothing
+        [certificate] -> pure (Just certificate)
+        certificates ->
+          Left
+            ( ValidationFailed
+                [ "packet source consumer has conflicting checked construction routes"
+                , "  routes: " ++ show routedRefs
+                , "  certificates: " ++ show certificates
+                ]
+            )
+
+    distinctCertifiedRoutes = foldl' insertCertificate []
+      where
+        insertCertificate certificates certificate
+          | certificate `elem` certificates = certificates
+          | otherwise = certificates ++ [certificate]
+
+    packetRoutes exterior =
+      [ routedRef
+      | packetInfo <- packetSchemeInfos
+      , routedRef <-
+          maybeToList
+            ( IntMap.lookup
+                (getNodeId exterior)
+                (schemeInfoBinderRefSubst packetInfo)
+            )
+      ]
+
+    packetSchemeInfos =
+      [ subtermGeneralizationConsumerConstructionSchemeInfo packet
+      , subtermGeneralizationOperatedSchemeInfo packet
+      , subtermGeneralizationSchemeInfo packet
+      ]
+
+    certifyRoutedDeclaration routedRef =
+      case
+          ( currentCandidates routedRef
+          , bodyCandidates routedRef
+          , consumerConstructionCandidates routedRef
+          )
+        of
+          ( [(currentRef, currentBound)]
+            , [(_, bodyBound)]
+            , [_]
+            )
+              | currentBoundCanBeCompleted currentBound bodyBound
+              , packetEndpointMentions routedRef
+              , operationalEndpointTypesAgree
+                  (certifiedLambdaBodyConstructedType bodyConstruction)
+                  sourceTy ->
+                  pure
+                    ( Just
+                        (CertifiedPacketSourceConsumerBinder currentRef)
+                    )
+          ([], _, _) -> pure Nothing
+          (_, [], _) -> pure Nothing
+          (_, _, []) -> pure Nothing
+          (currentBinders, bodyBinders, consumerBinders) ->
+              Left
+                ( ValidationFailed
+                    [ "packet source consumer route is ambiguous in the checked child construction"
+                    , "  route: " ++ show routedRef
+                    , "  current binders: " ++ show currentBinders
+                    , "  child binders: " ++ show bodyBinders
+                    , "  packet consumer binders: " ++ show consumerBinders
+                    ]
+                )
+
+    currentCandidates routedRef =
+      [ binder
+      | binder@(ref, _) <-
+          schemeBinderRefs (siScheme currentSchemeInfo)
+      , typeBinderRefsSameIdentity ref routedRef
+      ]
+
+    bodyCandidates routedRef =
+      [ binder
+      | binder@(ref, _) <-
+          certifiedLambdaBodyConstructedBinders bodyConstruction
+      , typeBinderRefsSameIdentity ref routedRef
+      ]
+
+    consumerConstructionCandidates routedRef =
+      [ binder
+      | binder@(ref, _) <-
+          schemeBinderRefs
+            ( siScheme
+                (subtermGeneralizationConsumerConstructionSchemeInfo packet)
+            )
+      , typeBinderRefsSameIdentity ref routedRef
+      ]
+
+    packetEndpointMentions routedRef =
+      all
+        ( any (typeBinderRefsSameIdentity routedRef)
+            . packetOccurrenceRefs
+        )
+        [ subtermGeneralizationOperatedSchemeInfo packet
+        , subtermGeneralizationSchemeInfo packet
+        ]
+
+    packetOccurrenceRefs info =
+      let packetTy = schemeToType (siScheme info)
+       in typeBinderDeclarationRefs packetTy
+            ++ freeTypeVarRefsType packetTy
+
+    currentBoundCanBeCompleted Nothing _ = True
+    currentBoundCanBeCompleted (Just currentBound) (Just bodyBound) =
+      operationalEndpointTypesAgree
+        (tyToElab currentBound)
+        (tyToElab bodyBound)
+    currentBoundCanBeCompleted (Just _) Nothing = False
+
+    distinctRefs = foldl' insertRef []
+      where
+        insertRef refs ref
+          | any (typeBinderRefsSameIdentity ref) refs = refs
+          | otherwise = refs ++ [ref]
+
+-- | Join a packet's exact operated consumer route with a recursively checked
+-- child construction.  Child-local declarations are deliberately removed
+-- from the enclosing ambient alias map, but a packet owned by the enclosing
+-- lambda may still consume one of those declarations locally.  This
+-- certificate recovers that classification without reintroducing an ambient
+-- alias: the packet supplies the graph-exterior route, while the child
+-- supplies the complete checked binder spine and endpoint.
+certifyPacketConsumerBinderFromBodyConstruction
+  :: PreparedSubtermGeneralization
+  -> SchemeInfo
+  -> CertifiedLambdaBodyConstruction
+  -> Either ElabError (Maybe CertifiedPacketConsumerBinder)
+certifyPacketConsumerBinderFromBodyConstruction packet currentSchemeInfo bodyConstruction =
+  case subtermGeneralizationGammaAuthority packet of
+    Nothing -> pure Nothing
+    Just gammaAuthority ->
+      case typeBinderIdentityNode (gpaConsumerIdentity gammaAuthority) of
+        Nothing -> pure Nothing
+        Just exterior ->
+          case
+              IntMap.lookup
+                (getNodeId exterior)
+                ( schemeInfoBinderRefSubst
+                    (subtermGeneralizationOperatedSchemeInfo packet)
+                )
+            of
+              Nothing -> pure Nothing
+              Just operatedRef ->
+                case
+                    ( currentCandidates operatedRef
+                    , bodyCandidates operatedRef
+                    , operatedCandidates operatedRef
+                    )
+                  of
+                  ( [currentRef]
+                    , [(_, bodyBound)]
+                    , [(_, Just operatedBound)]
+                    )
+                    | currentDeclarationAgrees currentRef bodyBound ->
+                        pure
+                          ( Just
+                              ( CertifiedPacketConsumerBinder
+                                  (gpaConsumerIdentity gammaAuthority)
+                                  currentRef
+                                  operatedBound
+                              )
+                          )
+                  ([], _, _) -> pure Nothing
+                  (_, [], _) -> pure Nothing
+                  (currentRefs, bodyBinders, operatedBinders) ->
+                    Left
+                      ( ValidationFailed
+                          [ "packet operated consumer route is ambiguous in the checked child construction"
+                          , "  consumer: "
+                              ++ show (gpaConsumerIdentity gammaAuthority)
+                          , "  operated route: " ++ show operatedRef
+                          , "  current refs: " ++ show currentRefs
+                          , "  child binders: " ++ show bodyBinders
+                          , "  operated binders: " ++ show operatedBinders
+                          ]
+                      )
+  where
+    currentCandidates operatedRef =
+      distinctRefs
+        [ ref
+        | ref <-
+            typeBinderDeclarationRefs currentType
+              ++ freeTypeVarRefsType currentType
+        , typeBinderRefsSameIdentity ref operatedRef
+        ]
+    bodyCandidates operatedRef =
+      [ binder
+      | binder@(ref, _) <-
+          certifiedLambdaBodyConstructedBinders bodyConstruction
+      , typeBinderRefsSameIdentity ref operatedRef
+      ]
+    operatedCandidates operatedRef =
+      [ binder
+      | binder@(ref, _) <-
+          schemeBinderRefs
+            ( siScheme
+                (subtermGeneralizationOperatedSchemeInfo packet)
+            )
+      , typeBinderRefsSameIdentity ref operatedRef
+      ]
+    currentType = schemeToType (siScheme currentSchemeInfo)
+
+    currentDeclarationAgrees currentRef bodyBound =
+      case
+          [ currentBound
+          | (declaredRef, currentBound) <-
+              schemeBinderRefs (siScheme currentSchemeInfo)
+          , typeBinderRefsSameIdentity declaredRef currentRef
+          ]
+        of
+          [] -> True
+          [currentBound] -> declaredBoundsAgree currentBound bodyBound
+          _ -> False
+
+    distinctRefs = foldl' insertRef []
+      where
+        insertRef refs ref
+          | any (typeBinderRefsSameIdentity ref) refs = refs
+          | otherwise = refs ++ [ref]
+
+    declaredBoundsAgree Nothing Nothing = True
+    declaredBoundsAgree (Just left) (Just right) =
+      operationalEndpointTypesAgree (tyToElab left) (tyToElab right)
+    declaredBoundsAgree _ _ = False
 
 certifyOpenValueLambdaParameterClosure
   :: ElabType
@@ -1285,11 +1646,26 @@ certifySourceOwnerConsumerBodyCompletion
           let (pairedExpectedBinders, remainingExpectedBinders) =
                 splitAt (length childBinders) expectedBodyBinders
               pairedBinders = zip pairedExpectedBinders childBinders
+              binderRenames =
+                [ (expectedRef, childRef)
+                | ((expectedRef, _), (childRef, _)) <- pairedBinders
+                ]
           guard
             ( all
                 ( \((expectedRef, expectedBound), (childRef, childBound)) ->
-                    typeBinderRefsSameIdentity expectedRef childRef
-                      && case (expectedBound, childBound) of
+                    certifiedScopeRefsCorrespond
+                      (certifiedLambdaBodyScopeDependencyRenames bodyConstruction)
+                      expectedRef
+                      childRef
+                      && case
+                          ( fmap
+                              ( renameBoundTypeBinderRefPayloads
+                                  binderRenames
+                              )
+                              expectedBound
+                          , childBound
+                          )
+                        of
                         (Nothing, Nothing) -> True
                         (Just expected, Just child) ->
                           operationalEndpointTypesAgree
@@ -1299,11 +1675,7 @@ certifySourceOwnerConsumerBodyCompletion
                 )
                 pairedBinders
             )
-          let binderRenames =
-                [ (expectedRef, childRef)
-                | ((expectedRef, _), (childRef, _)) <- pairedBinders
-                ]
-              childTypeEnv =
+          let childTypeEnv =
                 foldr
                   ( \(ref, mbBound) env ->
                       TypeCheck.insertTypeBindingRef
@@ -1359,6 +1731,9 @@ certifySourceOwnerConsumerBodyCompletion
           , "  raw source-owner endpoint: " ++ show expectedEndpoint
           , "  completed source-owner endpoint: "
               ++ show completedExpectedEndpoint
+          , "  certified child scope dependency renames: "
+              ++ show
+                (certifiedLambdaBodyScopeDependencyRenames bodyConstruction)
           , "  checked body type: " ++ show checkedBodyType
           , "  completed Gamma bound: " ++ show completedGammaBound
           , "  returned child constructions: "
@@ -1372,6 +1747,15 @@ certifySourceOwnerConsumerBodyCompletion
       | otherwise = Left [message]
 
     requireValue message = maybe (Left [message]) Right
+
+    certifiedScopeRefsCorrespond scopeDependencyRenames sourceRef targetRef =
+      typeBinderRefsSameIdentity sourceRef targetRef
+        || any
+          ( \(certifiedSourceRef, certifiedTargetRef) ->
+              typeBinderRefsSameIdentity sourceRef certifiedSourceRef
+                && typeBinderRefsSameIdentity targetRef certifiedTargetRef
+          )
+          scopeDependencyRenames
 
 -- | Construction plan for the exact enclosing endpoint of Figure 15.3.5's
 -- lambda rule.  The expected packet scheme owns both the complete
@@ -1387,7 +1771,20 @@ data ExactLambdaConstructionPlan = ExactLambdaConstructionPlan
   , exactLambdaConstructionPublishedType :: !ElabType
   , exactLambdaConstructionBinderRenames ::
       ![(TypeBinderRef, TypeBinderRef)]
+  , -- | Fresh lexical presentations allocated for forall declarations inside
+    -- the value-lambda parameter when a Lambda(Gamma) declaration carries the
+    -- same source identity.  These copies apply to the parameter and its body
+    -- occurrences, but not to the enclosing Gamma binder.
+    exactLambdaConstructionParameterBinderCopies ::
+      ![(TypeBinderRef, TypeBinderRef)]
   , exactLambdaConstructionBodyBinderRenames ::
+      ![(TypeBinderRef, TypeBinderRef)]
+  , -- | Exact source-to-copy routes allocated by the body's explicit xMLF
+    -- lexical-forall computation.  These are construction provenance: an
+    -- enclosing result owner may use them to present the already checked
+    -- returned value in the copied identity domain, but may not infer another
+    -- route from alpha-equivalent endpoint types.
+    exactLambdaConstructionResultBinderCopies ::
       ![(TypeBinderRef, TypeBinderRef)]
   , exactLambdaConstructionBodyAbstractions ::
       ![(TypeBinderRef, Maybe BoundType)]
@@ -1397,8 +1794,12 @@ data ExactLambdaConstructionPlan = ExactLambdaConstructionPlan
       ![BodyConsumerBoundRefinementCertificate]
   , exactLambdaConstructionAmbientBodyRefinement ::
       !(Maybe (TypeBinderRef, ElabType, ElabType))
+  , exactLambdaConstructionIntroducedAmbientBodyDeclaration ::
+      !(Maybe (TypeBinderRef, ElabType))
   , exactLambdaConstructionAmbientBodyRefinementCertificate ::
       !(Maybe BodyConsumerBoundRefinementCertificate)
+  , exactLambdaConstructionPacketBodyProjection ::
+      !(Maybe CertifiedPacketConsumerBodyProjection)
   , exactLambdaConstructionCompletionInstantiation :: !Instantiation
   }
   deriving (Eq, Show)
@@ -1693,6 +2094,13 @@ freshenExactLambdaBodyScopeCollisions
         plan
           { exactLambdaConstructionBodyBinderRenames =
               composedBodyBinderRenames
+          , exactLambdaConstructionResultBinderCopies =
+              [ ( renameCollisionRef sourceRef
+                , renameCollisionRef targetRef
+                )
+              | (sourceRef, targetRef) <-
+                  exactLambdaConstructionResultBinderCopies plan
+              ]
           , exactLambdaConstructionBodyInstantiation =
               bodyInstantiation
           }
@@ -1720,6 +2128,10 @@ freshenExactLambdaBodyScopeCollisions
     collidingBodyBinderRefs =
       [ bodyRef
       | bodyRef <- bodySourceBinderRefs
+      , not
+          ( typeBinderIdentityIsCanonicalStructural
+              (typeBinderRefIdentity bodyRef)
+          )
       , any
           (typeBinderRefsSameIdentity bodyRef)
           lexicallyBoundBodyRefs
@@ -1762,9 +2174,7 @@ freshenExactLambdaBodyScopeCollisions
         collidingBodyBinderRefs
     freshenCollision (renames, generator) sourceRef =
       let (freshRef, nextGenerator) =
-            freshTypeBinderRef
-              (typeBinderRefName sourceRef)
-              generator
+            freshenTypeBinderRef sourceRef generator
        in (renames ++ [(sourceRef, freshRef)], nextGenerator)
     renameCollisionRef ref =
       fromMaybe
@@ -1833,6 +2243,37 @@ certifyExactLambdaEndpointConstruction
   paramTy
   bodySourceTy
   expectedTy =
+    certifyExactLambdaEndpointConstructionWithCopies
+      ambientBindings
+      reservedBodyBinderRefs
+      []
+      rawCandidates
+      paramTy
+      bodySourceTy
+      expectedTy
+
+-- | Variant for an enclosing constructor that allocated a second lexical
+-- presentation of nested declarations before entering this lambda.  The
+-- source-to-copy routes are construction authority; this function validates
+-- and consumes them instead of inferring a correspondence from the final
+-- alpha-equivalent types.
+certifyExactLambdaEndpointConstructionWithCopies
+  :: Map.Map TypeBinderRef ElabType
+  -> [TypeBinderRef]
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> ElabType
+  -> ElabType
+  -> ElabType
+  -> Either ElabError ExactLambdaConstructionPlan
+certifyExactLambdaEndpointConstructionWithCopies
+  ambientBindings
+  reservedBodyBinderRefs
+  inheritedBodyBinderCopies
+  rawCandidates
+  paramTy
+  bodySourceTy
+  expectedTy =
     certifyLambdaAtExpectedEndpoint
       ambientBindings
       rawCandidates
@@ -1842,6 +2283,7 @@ certifyExactLambdaEndpointConstruction
         certifyExactLambdaEndpointConstructionAtLambdaType
           ambientBindings
           reservedBodyBinderRefs
+          inheritedBodyBinderCopies
           constructionCandidates
           paramTy
           bodySourceTy
@@ -1856,6 +2298,7 @@ certifyExactLambdaEndpointConstruction
 certifyExactLambdaEndpointConstructionAtLambdaType
   :: Map.Map TypeBinderRef ElabType
   -> [TypeBinderRef]
+  -> [(TypeBinderRef, TypeBinderRef)]
   -> [(TypeBinderRef, Maybe BoundType)]
   -> ElabType
   -> ElabType
@@ -1864,23 +2307,90 @@ certifyExactLambdaEndpointConstructionAtLambdaType
 certifyExactLambdaEndpointConstructionAtLambdaType
   ambientBindings
   reservedBodyBinderRefs
+  inheritedBodyBinderCopies0
   rawCandidates
   paramTy
   bodySourceTy
   expectedTy = do
     ensureDistinct "construction" (map fst constructionCandidates)
     ensureDistinct "endpoint" (map fst expectedBinders)
-    expectedBodyTy <-
+    (rawExpectedParamTy, expectedBodyTy) <-
       case schemeBody expectedScheme of
         TArrow expectedParamTy bodyTy
           | exactLambdaEndpointTypesAgree expectedParamTy paramTy ->
-              pure bodyTy
+              pure (expectedParamTy, bodyTy)
         body ->
           constructionFailure
             "the inherited exact endpoint is not this lambda"
             ["  endpoint body: " ++ show body]
-    let sourceBinderRefs =
-          map fst (schemeBinderRefs (schemeFromType bodySourceTy))
+    let expectedBoundDeclarationRefs =
+          [ boundRef
+          | (_, Just expectedBound) <- expectedBinders
+          , boundRef <- typeBinderDeclarationRefs (tyToElab expectedBound)
+          ]
+        -- A forall in the parameter and an alpha-equivalent forall nested in
+        -- an enclosing result bound are different lexical declarations.  The
+        -- paper's @forall (alpha >= sigma-id). sigma-id -> alpha@ endpoint is
+        -- the minimal example: retaining the source @sigma-id@ identity in
+        -- both positions makes the endpoint ill-scoped once it is embedded in
+        -- a larger construction.  Keep the bound occurrence as the endpoint
+        -- authority and construct a fresh sibling copy for the parameter.
+        parameterCollisionRefs =
+          distinctRefs
+            [ parameterRef
+            | parameterRef <- typeBinderDeclarationRefs paramTy
+            , any
+                (typeBinderRefsSameIdentity parameterRef . fst)
+                expectedBinders
+                || any
+                  (typeBinderRefsSameIdentity parameterRef)
+                  expectedBoundDeclarationRefs
+            ]
+        (parameterBinderCopies, _) =
+          foldl
+            freshenSourceBinder
+            ([], identityGeneratorAfterType (TArrow paramTy expectedTy))
+            parameterCollisionRefs
+        paramTyAtLexicalCopies =
+          alphaRenameTypeBinderScopes parameterBinderCopies paramTy
+        expectedParamTy =
+          alphaRenameTypeBinderScopes
+            parameterBinderCopies
+            rawExpectedParamTy
+        expectedTyAtLexicalCopies =
+          schemeToType
+            ( mkElabSchemeWithRefs
+                expectedBinders
+                (TArrow expectedParamTy expectedBodyTy)
+            )
+        outerLexicalRefs =
+          map fst expectedBinders
+            ++ concatMap
+              ( maybe
+                  []
+                  ( \bound ->
+                      typeBinderDeclarationRefs (tyToElab bound)
+                        ++ freeTypeVarRefsType (tyToElab bound)
+                  )
+                  . snd
+              )
+              expectedBinders
+            ++ typeBinderDeclarationRefs expectedParamTy
+            ++ freeTypeVarRefsType expectedParamTy
+        sharedNestedDeclarationRefs =
+          [ bodyRef
+          | bodyRef <- typeBinderDeclarationRefs expectedBodyTy
+          , any
+              (typeBinderRefsSameIdentity bodyRef)
+              outerLexicalRefs
+          ]
+        bodySourceTyAtParameterCopies =
+          alphaRenameTypeBinderScopes
+            parameterBinderCopies
+            bodySourceTy
+        sourceBinderRefs =
+          distinctRefs
+            (typeBinderDeclarationRefs bodySourceTyAtParameterCopies)
         targetFreeRefs = freeTypeVarRefsType expectedBodyTy
         collidingSourceBinderRefs =
           [ sourceRef
@@ -1896,13 +2406,27 @@ certifyExactLambdaEndpointConstructionAtLambdaType
               identityGeneratorAfterType
                 ( foldr
                     TArrow
-                    (TArrow bodySourceTy expectedTy)
+                    (TArrow bodySourceTyAtParameterCopies expectedTyAtLexicalCopies)
                     (map TVarRef endpointReservedRefs)
                 )
             )
             collidingSourceBinderRefs
         freshBodySourceTy =
-          renameTypeBinderRefPayloads bodyBinderRenames bodySourceTy
+          alphaRenameTypeBinderScopes
+            bodyBinderRenames
+            bodySourceTyAtParameterCopies
+        renameBodySourceRef sourceRef =
+          fromMaybe
+            sourceRef
+            ( snd
+                <$> find
+                  (typeBinderRefsSameIdentity sourceRef . fst)
+                  bodyBinderRenames
+            )
+        inheritedBodyBinderCopies =
+          [ (renameBodySourceRef sourceRef, targetRef)
+          | (sourceRef, targetRef) <- inheritedBodyBinderCopies0
+          ]
         constructionTypeEnv =
           foldr
             ( \(ref, mbBound) env ->
@@ -1913,15 +2437,48 @@ certifyExactLambdaEndpointConstructionAtLambdaType
             )
             (TypeCheck.mkTypeCheckEnvWithResolvedTerms [] ambientBindings)
             constructionCandidates
-    bodyInstantiation0 <-
-      requireMaybe
-        "the checked body cannot construct the inherited exact codomain"
-        ( constructExactInstantiation
-            constructionTypeEnv
-            exactLambdaEndpointTypesAgree
+    pendingInheritedBodyBinderCopies <-
+      validateInheritedBodyBinderCopies
+        inheritedBodyBinderCopies
+        freshBodySourceTy
+        expectedBodyTy
+    let bodySourceTyAtInheritedCopies =
+          alphaRenameTypeBinderScopes
+            pendingInheritedBodyBinderCopies
             freshBodySourceTy
-            expectedBodyTy
-        )
+    (lexicalBodyBinderCopies, bodyInstantiation0) <-
+      case
+          if null sharedNestedDeclarationRefs
+            then Nothing
+            else
+              constructLexicalForallCopyInstantiation
+                constructionTypeEnv
+                exactLambdaEndpointTypesAgree
+                bodySourceTyAtInheritedCopies
+                expectedBodyTy
+        of
+          Just copiedConstruction -> pure copiedConstruction
+          Nothing -> do
+            -- The dedicated copy constructor changes one complete leading
+            -- forall spine.  A body that must first introduce or specialize
+            -- other endpoint structure is constructed normally here; the
+            -- owner-final collision pass below then alpha-copies its lexical
+            -- body declarations against the completed outer Gamma and records
+            -- those routes on the plan.
+            instantiation <-
+              requireMaybe
+                "the checked body cannot construct the inherited exact codomain"
+                ( constructExactInstantiation
+                    constructionTypeEnv
+                    exactLambdaEndpointTypesAgree
+                    bodySourceTyAtInheritedCopies
+                    expectedBodyTy
+                )
+            pure ([], instantiation)
+    let bodySourceTyAtLexicalCopies =
+          alphaRenameTypeBinderScopes
+            lexicalBodyBinderCopies
+            bodySourceTyAtInheritedCopies
     certifiedBodyTy <-
       either
         ( \cause ->
@@ -1932,7 +2489,7 @@ certifyExactLambdaEndpointConstructionAtLambdaType
         pure
         ( TypeCheck.checkInstantiation
             constructionTypeEnv
-            freshBodySourceTy
+            bodySourceTyAtLexicalCopies
             bodyInstantiation0
         )
     unless
@@ -1941,11 +2498,53 @@ certifyExactLambdaEndpointConstructionAtLambdaType
           "the inherited exact body computation reaches a different codomain"
           ["  constructed codomain: " ++ show certifiedBodyTy]
       )
-    let constructionTy0 =
+    lexicalResultBinderCopies <-
+      if null lexicalBodyBinderCopies
+        then pure []
+        else do
+          let sourceBinders =
+                schemeBinderRefs
+                  (schemeFromType bodySourceTyAtLexicalCopies)
+              copiedBinders =
+                schemeBinderRefs (schemeFromType certifiedBodyTy)
+              copyPairs = zip sourceBinders copiedBinders
+          unless
+            ( length sourceBinders == length copiedBinders
+                && all
+                  ( \((sourceRef, _), (copiedRef, _)) ->
+                      not
+                        ( typeBinderRefsSameIdentity
+                            sourceRef
+                            copiedRef
+                        )
+                  )
+                  copyPairs
+            )
+            ( constructionFailure
+                "the lexical forall computation did not allocate one fresh copy per source declaration"
+                [ "  source binders: " ++ show sourceBinders
+                , "  copied binders: " ++ show copiedBinders
+                , "  computation: " ++ show bodyInstantiation0
+                ]
+            )
+          pure
+            [ (sourceRef, copiedRef)
+            | ((sourceRef, _), (copiedRef, _)) <- copyPairs
+            ]
+    let expectedBodyTyForConstruction
+          | null lexicalBodyBinderCopies = expectedBodyTy
+          | otherwise = certifiedBodyTy
+        expectedTyForConstruction =
+          schemeToType
+            ( mkElabSchemeWithRefs
+                expectedBinders
+                (TArrow expectedParamTy expectedBodyTyForConstruction)
+            )
+        constructionTy0 =
           schemeToType
             ( mkElabSchemeWithRefs
                 constructionCandidates
-                (TArrow paramTy expectedBodyTy)
+                (TArrow paramTyAtLexicalCopies expectedBodyTyForConstruction)
             )
     spinePlan <-
       requireMaybe
@@ -1953,7 +2552,7 @@ certifyExactLambdaEndpointConstructionAtLambdaType
         ( planExactBinderSpine
             exactLambdaEndpointTypesAgree
             constructionTy0
-            expectedTy
+            expectedTyForConstruction
         )
     let binderRenames = exactBinderSpineRenames spinePlan
         alignType = renameTypeBinderRefPayloads binderRenames
@@ -1973,9 +2572,9 @@ certifyExactLambdaEndpointConstructionAtLambdaType
             )
           | (ref, mbBound) <- constructionCandidates
           ]
-        alignedParamTy = alignType paramTy
-        alignedBodyTy = alignType expectedBodyTy
-        alignedPublishedTy = alignType expectedTy
+        alignedParamTy = alignType paramTyAtLexicalCopies
+        alignedBodyTy = alignType expectedBodyTyForConstruction
+        alignedPublishedTy = alignType expectedTyForConstruction
         alignedConstructionTy =
           schemeToType
             ( mkElabSchemeWithRefs
@@ -2032,13 +2631,29 @@ certifyExactLambdaEndpointConstructionAtLambdaType
         , exactLambdaConstructionPublishedBinders = publishedBinders
         , exactLambdaConstructionPublishedType = alignedPublishedTy
         , exactLambdaConstructionBinderRenames = binderRenames
-        , exactLambdaConstructionBodyBinderRenames = bodyBinderRenames
+        , exactLambdaConstructionParameterBinderCopies =
+            parameterBinderCopies
+        , exactLambdaConstructionBodyBinderRenames =
+            parameterBinderCopies
+              ++ bodyBinderRenames
+              ++ inheritedBodyBinderCopies
+              ++ lexicalBodyBinderCopies
+        , exactLambdaConstructionResultBinderCopies =
+            [ (alignRef sourceRef, alignRef copiedRef)
+            | (sourceRef, copiedRef) <-
+                parameterBinderCopies
+                  ++ inheritedBodyBinderCopies
+                  ++ lexicalResultBinderCopies
+                  ++ lexicalBodyBinderCopies
+            ]
         , exactLambdaConstructionBodyAbstractions = []
         , exactLambdaConstructionBodyInstantiation = bodyInstantiation
         , exactLambdaConstructionBodyType = alignedBodyTy
         , exactLambdaConstructionPreservedBodyRefinements = []
         , exactLambdaConstructionAmbientBodyRefinement = Nothing
+        , exactLambdaConstructionIntroducedAmbientBodyDeclaration = Nothing
         , exactLambdaConstructionAmbientBodyRefinementCertificate = Nothing
+        , exactLambdaConstructionPacketBodyProjection = Nothing
         , exactLambdaConstructionCompletionInstantiation =
             if constructsPublishedEndpointDirectly
               then InstId
@@ -2075,11 +2690,65 @@ certifyExactLambdaEndpointConstructionAtLambdaType
            ]
 
     freshenSourceBinder (renames, generator) sourceRef =
-      let (freshRef, nextGenerator) =
-            freshTypeBinderRef
-              (typeBinderRefName sourceRef)
-              generator
-       in (renames ++ [(sourceRef, freshRef)], nextGenerator)
+      if typeBinderIdentityIsCanonicalStructural
+          (typeBinderRefIdentity sourceRef)
+        then (renames, generator)
+        else
+          let (freshRef, nextGenerator) =
+                freshenTypeBinderRef sourceRef generator
+           in (renames ++ [(sourceRef, freshRef)], nextGenerator)
+
+    validateInheritedBodyBinderCopies copies sourceTy targetTy = do
+      let sourceDeclarationRefs = typeBinderDeclarationRefs sourceTy
+          targetDeclarationRefs = typeBinderDeclarationRefs targetTy
+          duplicateSources = duplicateRefs (map fst copies)
+          duplicateTargets = duplicateRefs (map snd copies)
+          invalidCopies =
+            [ copy
+            | copy@(sourceRef, targetRef) <- copies
+            , typeBinderRefsSameIdentity sourceRef targetRef
+                || not
+                  ( any
+                      (typeBinderRefsSameIdentity targetRef)
+                      targetDeclarationRefs
+                  )
+                || not
+                  ( any
+                      (typeBinderRefsSameIdentity sourceRef)
+                      sourceDeclarationRefs
+                      || any
+                        (typeBinderRefsSameIdentity targetRef)
+                        sourceDeclarationRefs
+                  )
+            ]
+          pendingCopies =
+            [ copy
+            | copy@(sourceRef, targetRef) <- copies
+            , any
+                (typeBinderRefsSameIdentity sourceRef)
+                sourceDeclarationRefs
+            , not
+                ( any
+                    (typeBinderRefsSameIdentity targetRef)
+                    sourceDeclarationRefs
+                )
+            ]
+      unless
+        ( null duplicateSources
+            && null duplicateTargets
+            && null invalidCopies
+        )
+        ( constructionFailure
+            "the inherited lexical-copy certificate is not valid at this body boundary"
+            [ "  inherited copies: " ++ show copies
+            , "  duplicate sources: " ++ show duplicateSources
+            , "  duplicate targets: " ++ show duplicateTargets
+            , "  invalid copies: " ++ show invalidCopies
+            , "  body source declarations: " ++ show sourceDeclarationRefs
+            , "  expected body declarations: " ++ show targetDeclarationRefs
+            ]
+        )
+      pure pendingCopies
 
     ensureDistinct
       :: String
@@ -2099,6 +2768,12 @@ certifyExactLambdaEndpointConstructionAtLambdaType
       | (index, ref) <- zip [0 :: Int ..] refs
       , any (typeBinderRefsSameIdentity ref) (drop (index + 1) refs)
       ]
+
+    distinctRefs = foldl insertRef []
+      where
+        insertRef refs ref
+          | any (typeBinderRefsSameIdentity ref) refs = refs
+          | otherwise = refs ++ [ref]
 
     requireMaybe :: String -> Maybe a -> Either ElabError a
     requireMaybe detail =
@@ -2245,6 +2920,13 @@ certifyExactLambdaConstructionAtLambdaType
         , "  unordered candidates: "
             ++ show completedConstructionCandidates
         ]
+  case introducedAmbientBodyDeclarations of
+    [] -> pure ()
+    [_] -> pure ()
+    declarations ->
+      constructionFailure
+        "the exact packet introduces more than one ambient body declaration"
+        ["  declarations: " ++ show declarations]
   ensureDistinct "construction" (map fst candidates)
   ensureDistinct "enclosing" (map fst expectedBinders)
   ensureDistinct
@@ -2311,6 +2993,8 @@ certifyExactLambdaConstructionAtLambdaType
         ++ map completionCandidate
           (mapMaybe certifyCompletedBodyOption bodyOptions)
         ++ map completionCandidate
+          (maybeToList certifySourceOpenedPacketBodySpine)
+        ++ map completionCandidate
           (maybeToList certifyCompletedPacketBodySpine)
         ++ map completionCandidate
           (maybeToList certifyPendingPacketBodyBinder)
@@ -2329,6 +3013,60 @@ certifyExactLambdaConstructionAtLambdaType
             ++ show certifiedBodyConstruction
         , "  packet construction binders: "
             ++ show packetConstructionBinders
+        , "  direct checked-body plan: "
+            ++ show
+              ( certifyBodyOption
+                  bodySourceTy
+                  checkedBodyInstantiation
+                  candidates
+                  expectedTy
+                  (InstId, bodyResultTy, ambientPublishedBodyRefinement, [])
+              )
+        , "  expected binders: " ++ show expectedBinders
+        , "  prepared packet binders: "
+            ++ show
+              ( schemeBinderRefs
+                  ( siScheme
+                      (subtermGeneralizationSchemeInfo packet)
+                  )
+              )
+        , "  direct body refinement/environment: "
+            ++ show
+              ( ambientPublishedBodyRefinement
+              , refinedAmbientBindingsForBody
+                  ambientPublishedBodyRefinement
+              )
+        , "  direct body instantiation: "
+            ++ show
+              ( do
+                  bodyAmbientBindings <-
+                    refinedAmbientBindingsForBody
+                      ambientPublishedBodyRefinement
+                  pure
+                    ( TypeCheck.checkInstantiation
+                        ( constructionTypeEnvForAmbient
+                            bodyAmbientBindings
+                            candidates
+                        )
+                        bodySourceTy
+                        checkedBodyInstantiation
+                    )
+              )
+        , "  direct binder-spine plan: "
+            ++ show
+              ( planExactBinderSpine
+                  exactLambdaEndpointTypesAgree
+                  (constructionType candidates paramTy bodyResultTy)
+                  expectedTy
+              )
+        , "  direct construction type: "
+            ++ show (constructionType candidates paramTy bodyResultTy)
+        , "  direct construction agrees: "
+            ++ show
+              ( exactLambdaEndpointTypesAgree
+                  (constructionType candidates paramTy bodyResultTy)
+                  expectedTy
+              )
         ]
   where
     selectExactExpectedPlan rejected [] =
@@ -2336,6 +3074,12 @@ certifyExactLambdaConstructionAtLambdaType
         "no certified lambda construction publishes the selected exact endpoint"
         [ "  selected endpoint: " ++ show expectedTy
         , "  rejected publication transitions: " ++ show (reverse rejected)
+        , "  construction candidates: " ++ show candidates
+        , "  packet construction binders: "
+            ++ show packetConstructionBinders
+        , "  expected binders: " ++ show expectedBinders
+        , "  checked body source/result: "
+            ++ show (bodySourceTy, bodyResultTy)
         , "  open body-abstraction candidate: "
             ++ show
               ( ( \plan ->
@@ -2364,13 +3108,16 @@ certifyExactLambdaConstructionAtLambdaType
       -- checked descendant completion, or a certified bound refinement), so
       -- the tag records a proof-producing constructor rather than a
       -- same-shaped type comparison.
-      if exactLambdaEndpointTypesAgree
-          (exactLambdaConstructionPublishedType plan)
-          expectedTy
-          || exactLambdaEndpointTypesAgree
-            (exactLambdaConstructionPublishedType plan0)
-            expectedTy
-          || completesSelectedEndpoint
+      if null (duplicateTypeDeclarations plan0)
+          && null (duplicateTypeDeclarations plan)
+          && ( exactLambdaEndpointTypesAgree
+                (exactLambdaConstructionPublishedType plan)
+                expectedTy
+                || exactLambdaEndpointTypesAgree
+                  (exactLambdaConstructionPublishedType plan0)
+                  expectedTy
+                || completesSelectedEndpoint
+             )
         then
           freshenExactLambdaBodyScopeCollisions
             ambientBindings
@@ -2384,18 +3131,102 @@ certifyExactLambdaConstructionAtLambdaType
             ( ( completesSelectedEndpoint
               , exactLambdaConstructionPublishedType plan0
               , exactLambdaConstructionPublishedType plan
+              , duplicateTypeDeclarations plan0
+              , duplicateTypeDeclarations plan
+              , certifiedBodyScopeDependencyRenames
               )
                 : rejected
             )
             remainingPlans
 
-    exactCandidate plan = (False, plan)
-    completionCandidate plan = (True, plan)
+    duplicateTypeDeclarations plan =
+      [ (leftRef, rightRef)
+      | (index, leftRef) <- zip [0 :: Int ..] declarationRefs
+      , rightRef <- drop (index + 1) declarationRefs
+      , typeBinderRefsSameIdentity leftRef rightRef
+      ]
+      where
+        declarationRefs =
+          typeBinderDeclarationRefs
+            (exactLambdaConstructionPublishedType plan)
+
+    exactCandidate plan =
+      (False, recordCandidateBoundScopeCopies plan)
+    completionCandidate plan =
+      (True, recordCandidateBoundScopeCopies plan)
+
+    -- Candidate bounds and the recursively checked body share one lexical
+    -- source domain.  Record any alpha-copies allocated while those bounds
+    -- were constructed, so the bound, checked term, and body certificate
+    -- cannot choose different fresh identities later.
+    recordCandidateBoundScopeCopies plan =
+      plan
+        { exactLambdaConstructionBodyBinderRenames =
+            existingCopies
+              ++ [ copy
+                 | copy@(sourceRef, _) <- bodyCandidateBoundScopeRenames
+                 , not
+                     ( any
+                         (typeBinderRefsSameIdentity sourceRef . fst)
+                         existingCopies
+                     )
+                 ]
+        , exactLambdaConstructionResultBinderCopies =
+            existingResultCopies
+              ++ [ copy
+                 | copy <- allCandidateBoundScopeRenames
+                 , not
+                     ( any
+                         (sameCandidateScopeCopy copy)
+                         existingResultCopies
+                     )
+                 ]
+        , exactLambdaConstructionIntroducedAmbientBodyDeclaration =
+            introducedAmbientBodyDeclaration
+        }
+      where
+        existingCopies = exactLambdaConstructionBodyBinderRenames plan
+        existingResultCopies =
+          exactLambdaConstructionResultBinderCopies plan
+
+        sameCandidateScopeCopy
+          (sourceRef, copiedRef)
+          (existingSourceRef, existingCopiedRef) =
+            typeBinderRefsSameIdentity sourceRef existingSourceRef
+              && typeBinderRefsSameIdentity copiedRef existingCopiedRef
 
     completeConsumedBodyConsumerPlan plan = do
-      completedConstructionScheme <-
-        consumeCertifiedBodyConsumerConstructionScheme
+      let planBindings =
+            Map.fromList
+              [ (ref, maybe TBottom tyToElab mbBound)
+              | (ref, mbBound) <- exactLambdaConstructionBinders plan
+              ]
+          constructionRefinement certificate =
+            let renamedCertificate =
+                  renameBodyConsumerBoundRefinementCertificate
+                    (exactLambdaConstructionBinderRenames plan)
+                    certificate
+             in if
+                  certificate
+                    `elem` exactLambdaConstructionPreservedBodyRefinements plan
+                  then renamedCertificate
+                  else
+                    alphaRenameBodyConsumerBoundRefinementCertificate
+                      (exactLambdaConstructionBodyBinderRenames plan)
+                      renamedCertificate
+      planBodyRefinements <-
+        traverse
+          ( consumeBodyConsumerBoundRefinementScopeDependencies
+              planBindings
+              certifiedBodyScopeDependencyRenames
+              . constructionRefinement
+          )
           bodyRefinements
+      completedConstructionScheme <-
+        consumePlanRefinements
+          "construction"
+          plan
+          planBodyRefinements
           ( mkElabSchemeWithRefs
               (exactLambdaConstructionBinders plan)
               ( TArrow
@@ -2404,8 +3235,10 @@ certifyExactLambdaConstructionAtLambdaType
               )
           )
       completedPublishedScheme <-
-        consumeCertifiedBodyConsumerConstructionScheme
-          bodyRefinements
+        consumePlanRefinements
+          "publication"
+          plan
+          planBodyRefinements
           ( schemeFromType
               (exactLambdaConstructionPublishedType plan)
           )
@@ -2496,6 +3329,28 @@ certifyExactLambdaConstructionAtLambdaType
               completedCompletionInstantiation
           }
 
+    consumePlanRefinements role plan refinements scheme =
+      case
+          consumeCertifiedBodyConsumerConstructionScheme
+            refinements
+            scheme
+        of
+          Right completed -> pure completed
+          Left cause ->
+            constructionFailure
+              ("cannot consume the exact plan's " ++ role ++ " refinements")
+              [ "  plan construction renames: "
+                  ++ show (exactLambdaConstructionBinderRenames plan)
+              , "  plan body renames: "
+                  ++ show (exactLambdaConstructionBodyBinderRenames plan)
+              , "  plan preserved refinements: "
+                  ++ show
+                    (exactLambdaConstructionPreservedBodyRefinements plan)
+              , "  aligned refinements: " ++ show refinements
+              , "  candidate scheme: " ++ show scheme
+              , "  cause: " ++ show cause
+              ]
+
     matchCompletedBodyAbstractions [] ty = pure ([], ty)
     matchCompletedBodyAbstractions
       ((expectedRef, expectedBound) : remaining)
@@ -2544,7 +3399,20 @@ certifyExactLambdaConstructionAtLambdaType
 
     expectedScheme = schemeFromType expectedTy
     expectedBinders = schemeBinderRefs expectedScheme
+    certifiedBodyScopeDependencyRenames =
+      maybe
+        []
+        certifiedLambdaBodyScopeDependencyRenames
+        certifiedBodyConstruction
     expectedFreeRefs = freeTypeVarRefsType expectedTy
+    installedAmbientBoundEndpointFreeRefs =
+      [ freeRef
+      | (_, ambientBound) <- Map.toList ambientBindings0
+      , exactLambdaEndpointTypesAgree
+          expectedTy
+          ambientBound
+      , freeRef <- expectedFreeRefs
+      ]
     -- Exact construction allocates alpha-copies after several independently
     -- prepared source and graph packets have met.  Reserve every identity
     -- already owned by those inputs, including declarations that occur only as
@@ -2574,10 +3442,16 @@ certifyExactLambdaConstructionAtLambdaType
     -- occurrence that selects it.  A pending candidate is already sufficient
     -- authority for the Bottom declaration.  A completed candidate needs the
     -- independent owner-final body-consumer certificate below to prove the
-    -- same identity and bound before it can be opened ambiently.
+    -- same identity and bound before it can be opened ambiently.  A checked
+    -- source-body completion is the other constructive case: the packet owns
+    -- the pending declaration, the child certificate owns Typ(body), and the
+    -- checked InstAbstr computation installs the completed bound at the exact
+    -- free endpoint.
     endpointAmbientCandidates =
+      rawEndpointAmbientCandidates ++ packetEndpointAmbientCandidates
+    rawEndpointAmbientCandidates =
       [ (expectedRef, candidateRef, ambientBound)
-      | (candidateRef, candidateBound) <- rawCandidates
+      | (candidateRef, candidateBound) <- rawCandidatesAtCopiedBounds
       , expectedRef <- expectedFreeRefs
       , typeBinderRefsSameIdentity candidateRef expectedRef
       , ambientBound <-
@@ -2587,10 +3461,48 @@ certifyExactLambdaConstructionAtLambdaType
                 candidateBound
             )
       ]
+    -- A completed packet declaration can occur free in the installed bound
+    -- of a different ambient declaration.  Its prepared construction-order
+    -- entry is already a checked Gamma declaration; move that exact entry to
+    -- the ambient body scope instead of quantifying it inside the value
+    -- lambda, which would capture the selected bound's free occurrence.
+    packetEndpointAmbientCandidates =
+      [ (expectedRef, packetRef, tyToElab packetBound)
+      | expectedRef <- installedAmbientBoundEndpointFreeRefs
+      , (packetRef, Just packetBound) <- preparedPacketConstructionBinders
+      , typeBinderRefsSameIdentity expectedRef packetRef
+      , constructionOwnsPacketBinder packetRef
+      , not (sourceOwnsPacketBinder packetRef)
+      , not
+          ( any
+              (typeBinderRefsSameIdentity packetRef)
+              (typeBinderDeclarationRefs expectedTy)
+          )
+      , not
+          ( any
+              (typeBinderRefsSameIdentity packetRef)
+              ( typeBinderDeclarationRefs (tyToElab packetBound)
+                  ++ freeTypeVarRefsType (tyToElab packetBound)
+              )
+          )
+      , not
+          ( any
+              ( \(_, rawCandidateRef, _) ->
+                  typeBinderRefsSameIdentity packetRef rawCandidateRef
+              )
+              rawEndpointAmbientCandidates
+          )
+      ]
     endpointCandidateAmbientBound expectedRef candidateBound =
       case matchingAmbientBounds of
         []
           | isNothing candidateBound -> Just TBottom
+          | Just bound <- candidateBound
+          , Just completedBound <-
+              certifiedSourceBodyAmbientBound
+                expectedRef
+                (tyToElab bound) ->
+              Just completedBound
           | otherwise -> Nothing
         firstBound : remainingBounds
           | all
@@ -2614,6 +3526,92 @@ certifyExactLambdaConstructionAtLambdaType
                 ++ Map.toList ambientBindings0
           , typeBinderRefsSameIdentity expectedRef ambientRef
           ]
+
+    certifiedSourceBodyAmbientBound expectedRef candidateBound = do
+      bodyConstruction <- certifiedBodyConstruction
+      guard (certifiedLambdaBodyOwner bodyConstruction /= owner)
+      guard
+        ( certifiedConstructionReachesCheckedBody
+            bodyConstruction
+            bodySourceTy
+            && any
+              ( \(packetRef, packetBound) ->
+                  typeBinderRefsSameIdentity expectedRef packetRef
+                    && isNothing packetBound
+              )
+              packetConstructionBinders
+            && operationalEndpointTypesAgree
+              candidateBound
+              bodySourceAtRawCandidateCopies
+        )
+      TVarRef bodyResultRef <- pure bodyResultTy
+      guard
+        (typeBinderRefsSameIdentity expectedRef bodyResultRef)
+      constructedBodyTy <-
+        either
+          (const Nothing)
+          Just
+          ( TypeCheck.checkInstantiation
+              ( TypeCheck.mkTypeCheckEnvWithResolvedTerms
+                  []
+                  ( installAmbientBinding
+                      (expectedRef, candidateBound)
+                      ambientBindings0
+                  )
+              )
+              bodySourceAtRawCandidateCopies
+              checkedBodyInstantiation
+          )
+      guard
+        ( exactLambdaEndpointTypesAgree
+            constructedBodyTy
+            (TVarRef expectedRef)
+        )
+      pure candidateBound
+
+    bodySourceAtRawCandidateCopies =
+      alphaRenameTypeBinderScopes
+        rawBodyCandidateBoundScopeRenames
+        bodySourceTy
+
+    introducedAmbientBodyDeclaration =
+      case introducedAmbientBodyDeclarations of
+        [declaration] -> Just declaration
+        _ -> Nothing
+
+    introducedAmbientBodyDeclarations =
+      sourceBodyAmbientDeclarations
+        ++ [ (expectedRef, completedBound)
+           | (expectedRef, _packetRef, completedBound) <-
+               packetEndpointAmbientCandidates
+           , not
+               ( any
+                   (typeBinderRefsSameIdentity expectedRef . fst)
+                   (Map.toList ambientBindings0)
+               )
+           ]
+
+    sourceBodyAmbientDeclarations =
+      [ (expectedRef, completedBound)
+      | (expectedRef, candidateRef, completedBound) <-
+          endpointAmbientCandidates
+      , not
+          ( any
+              (typeBinderRefsSameIdentity expectedRef . fst)
+              (Map.toList ambientBindings0)
+          )
+      , (_, Just candidateBound) <-
+          [ candidate
+          | candidate@(ref, Just _) <- rawCandidatesAtCopiedBounds
+          , typeBinderRefsSameIdentity ref candidateRef
+          ]
+      , Just certifiedBound <-
+          [ certifiedSourceBodyAmbientBound
+              expectedRef
+              (tyToElab candidateBound)
+          ]
+      , operationalEndpointTypesAgree completedBound certifiedBound
+      ]
     ambientBindings =
       foldr
         installAmbientBinding
@@ -2661,7 +3659,7 @@ certifyExactLambdaConstructionAtLambdaType
       ]
     localRawCandidates =
       [ candidate
-      | candidate@(candidateRef, _) <- rawCandidates
+      | candidate@(candidateRef, _) <- rawCandidatesAtCopiedBounds
       , not
           ( any
               ( \(_, ambientCandidateRef, _) ->
@@ -2672,7 +3670,7 @@ certifyExactLambdaConstructionAtLambdaType
               endpointAmbientCandidates
           )
       ]
-    completedConstructionCandidates =
+    completedConstructionCandidates0 =
       map
         alignRetainedPacketBinderWithFrozenEndpoint
         ( map
@@ -2684,6 +3682,254 @@ certifyExactLambdaConstructionAtLambdaType
                 )
             )
         )
+    ( rawCandidatesAtCopiedBounds
+      , rawCandidateBoundScopeCopies
+      , candidateBoundScopeGeneratorAfterRaw
+      , _candidateBoundReservedRefsAfterRaw
+      ) =
+        foldl
+          freshenCandidateBoundScope
+          ( []
+          , []
+          , candidateBoundScopeIdentityGenerator
+          , candidateBoundInitialReservedRefs
+          )
+          rawCandidates
+    ( completedConstructionCandidates
+      , candidateBoundScopeCopies
+      , _candidateBoundScopeGenerator
+      , _candidateBoundReservedRefs
+      ) =
+        foldl
+          freshenCandidateBoundScope
+          ( []
+          , rawCandidateBoundScopeCopies
+          , candidateBoundScopeGeneratorAfterRaw
+          , candidateBoundInitialReservedRefs
+          )
+          completedConstructionCandidates0
+
+    -- Candidate bounds are sibling lexical scopes.  Allocate each nested
+    -- declaration while threading the declarations already placed by the
+    -- parameter, body result, earlier candidates, and the candidate's own
+    -- outer binder.  A flat identity-keyed rename cannot do this: two later
+    -- sibling bounds may each need a different copy of the same source
+    -- declaration.
+    freshenCandidateBoundScope
+      (candidates0, copies0, generator0, reservedRefs0)
+      candidate@(candidateRef, mbBound) =
+        case mbBound of
+          Nothing ->
+            ( candidates0 ++ [candidate]
+            , copies0
+            , generator0
+            , insertExactConstructionRef candidateRef reservedRefs0
+            )
+          Just candidateBound ->
+            let originalBound = tyToElab candidateBound
+                ( copiedBound
+                  , (reservedRefs1, generator1, boundCopies)
+                  ) =
+                    freshenCandidateBoundTypeScopes
+                      []
+                      ( insertExactConstructionRef
+                          candidateRef
+                          reservedRefs0
+                      , generator0
+                      , []
+                      )
+                      candidateBound
+                copyRecords =
+                  [ (candidateRef, originalBound, sourceRef, copiedRef)
+                  | (sourceRef, copiedRef) <- boundCopies
+                  ]
+             in ( candidates0 ++ [(candidateRef, Just copiedBound)]
+                , copies0 ++ copyRecords
+                , generator1
+                , reservedRefs1
+                )
+
+    candidateBoundInitialReservedRefs =
+      foldr
+        insertExactConstructionRef
+        []
+        ( map fst expectedBinders
+            ++ typeBinderDeclarationRefs paramTy
+            ++ typeBinderDeclarationRefs bodyResultTy
+        )
+
+    freshenCandidateBoundTypeScopes active state bound =
+      case bound of
+        TArrow domain codomain ->
+          let (domain', state') =
+                freshenCandidateElabTypeScopes active state domain
+              (codomain', state'') =
+                freshenCandidateElabTypeScopes active state' codomain
+           in (TArrow domain' codomain', state'')
+        TConWithIdentity identity constructor arguments ->
+          let (arguments', state') =
+                freshenCandidateElabTypeNonEmpty active state arguments
+           in (TConWithIdentity identity constructor arguments', state')
+        TVarAppRef ref arguments ->
+          let (arguments', state') =
+                freshenCandidateElabTypeNonEmpty active state arguments
+           in (TVarAppRef (activeCandidateRef active ref) arguments', state')
+        TBaseWithIdentity identity base ->
+          (TBaseWithIdentity identity base, state)
+        TForallRef ref mbNestedBound body ->
+          let (mbNestedBound', state') =
+                freshenCandidateOptionalBound active state mbNestedBound
+              (copiedRef, state'') =
+                allocateCandidateBoundDeclaration ref state'
+              bodyActive = enterCandidateActiveRef ref copiedRef active
+              (body', state''') =
+                freshenCandidateElabTypeScopes bodyActive state'' body
+           in (TForallRef copiedRef mbNestedBound' body', state''')
+        TMuRef ref body ->
+          let (copiedRef, state') =
+                allocateCandidateBoundDeclaration ref state
+              bodyActive = enterCandidateActiveRef ref copiedRef active
+              (body', state'') =
+                freshenCandidateElabTypeScopes bodyActive state' body
+           in (TMuRef copiedRef body', state'')
+        TBottom -> (TBottom, state)
+
+    freshenCandidateElabTypeScopes active state ty =
+      case ty of
+        TVarRef ref -> (TVarRef (activeCandidateRef active ref), state)
+        TArrow domain codomain ->
+          let (domain', state') =
+                freshenCandidateElabTypeScopes active state domain
+              (codomain', state'') =
+                freshenCandidateElabTypeScopes active state' codomain
+           in (TArrow domain' codomain', state'')
+        TConWithIdentity identity constructor arguments ->
+          let (arguments', state') =
+                freshenCandidateElabTypeNonEmpty active state arguments
+           in (TConWithIdentity identity constructor arguments', state')
+        TVarAppRef ref arguments ->
+          let (arguments', state') =
+                freshenCandidateElabTypeNonEmpty active state arguments
+           in (TVarAppRef (activeCandidateRef active ref) arguments', state')
+        TBaseWithIdentity identity base ->
+          (TBaseWithIdentity identity base, state)
+        TForallRef ref mbNestedBound body ->
+          let (mbNestedBound', state') =
+                freshenCandidateOptionalBound active state mbNestedBound
+              (copiedRef, state'') =
+                allocateCandidateBoundDeclaration ref state'
+              bodyActive = enterCandidateActiveRef ref copiedRef active
+              (body', state''') =
+                freshenCandidateElabTypeScopes bodyActive state'' body
+           in (TForallRef copiedRef mbNestedBound' body', state''')
+        TMuRef ref body ->
+          let (copiedRef, state') =
+                allocateCandidateBoundDeclaration ref state
+              bodyActive = enterCandidateActiveRef ref copiedRef active
+              (body', state'') =
+                freshenCandidateElabTypeScopes bodyActive state' body
+           in (TMuRef copiedRef body', state'')
+        TBottom -> (TBottom, state)
+
+    freshenCandidateElabTypeList _ state [] = ([], state)
+    freshenCandidateElabTypeList active state (ty : types) =
+      let (ty', state') =
+            freshenCandidateElabTypeScopes active state ty
+          (types', state'') =
+            freshenCandidateElabTypeList active state' types
+       in (ty' : types', state'')
+
+    freshenCandidateElabTypeNonEmpty
+      active
+      state
+      (firstTy NonEmpty.:| remainingTys) =
+      let (firstTy', state') =
+            freshenCandidateElabTypeScopes active state firstTy
+          (remainingTys', state'') =
+            freshenCandidateElabTypeList active state' remainingTys
+       in (firstTy' NonEmpty.:| remainingTys', state'')
+
+    freshenCandidateOptionalBound _ state Nothing = (Nothing, state)
+    freshenCandidateOptionalBound active state (Just bound) =
+      let (bound', state') =
+            freshenCandidateBoundTypeScopes active state bound
+       in (Just bound', state')
+
+    allocateCandidateBoundDeclaration
+      ref
+      state@(reservedRefs, generator, copies)
+      | typeBinderIdentityIsCanonicalStructural
+          (typeBinderRefIdentity ref) =
+          (ref, state)
+      | any (typeBinderRefsSameIdentity ref) reservedRefs =
+          let (copiedRef, nextGenerator) =
+                freshenTypeBinderRef ref generator
+           in ( copiedRef
+              , ( copiedRef : reservedRefs
+                , nextGenerator
+                , copies ++ [(ref, copiedRef)]
+                )
+              )
+      | otherwise =
+          (ref, (ref : reservedRefs, generator, copies))
+
+    activeCandidateRef active ref =
+      fromMaybe
+        ref
+        ( snd
+            <$> find
+              (typeBinderRefsSameIdentity ref . fst)
+              active
+        )
+
+    enterCandidateActiveRef sourceRef targetRef active =
+      (sourceRef, targetRef)
+        : filter
+          (not . typeBinderRefsSameIdentity sourceRef . fst)
+          active
+
+    candidateBoundCopyAppliesToBody
+      candidateRef
+      originalBound =
+        operationalEndpointTypesAgree originalBound bodySourceTy
+          || case bodyResultTy of
+            TVarRef bodyResultRef ->
+              typeBinderRefsSameIdentity candidateRef bodyResultRef
+            _ -> False
+
+    rawBodyCandidateBoundScopeRenames =
+      [ (sourceRef, copiedRef)
+      | (candidateRef, originalBound, sourceRef, copiedRef) <-
+          rawCandidateBoundScopeCopies
+      , candidateBoundCopyAppliesToBody candidateRef originalBound
+      ]
+
+    bodyCandidateBoundScopeRenames =
+      [ (sourceRef, copiedRef)
+      | (candidateRef, originalBound, sourceRef, copiedRef) <-
+          candidateBoundScopeCopies
+      , candidateBoundCopyAppliesToBody candidateRef originalBound
+      ]
+
+    allCandidateBoundScopeRenames =
+      [ (sourceRef, copiedRef)
+      | (_, _, sourceRef, copiedRef) <- candidateBoundScopeCopies
+      ]
+
+    candidateBoundScopeIdentityGenerator =
+      identityGeneratorAfterType
+        ( foldr
+            TArrow
+            (TArrow bodySourceTy expectedTy)
+            ( [paramTy, bodyResultTy]
+                ++ Map.elems ambientBindings0
+                ++ concatMap candidateSeedTypes rawCandidates
+                ++ concatMap candidateSeedTypes packetConstructionBinders
+            )
+        )
+
+    candidateSeedTypes (ref, mbBound) =
+      TVarRef ref : maybe [] (pure . tyToElab) mbBound
     -- The selected exact endpoint fixes the lexical order of every retained
     -- declaration, including source-owned binders that are intentionally
     -- absent from the packet's local-emission order.  Merge ownership sources
@@ -2721,6 +3967,9 @@ certifyExactLambdaConstructionAtLambdaType
     -- declaration can also be installed in the checking environment; that
     -- visibility is not ambient ownership.
     packetExpectedConstructionCandidates =
+      foldl insertPacketEndpointCandidate []
+        leadingPacketEndpointCandidates
+    leadingPacketEndpointCandidates =
       [ fromMaybe
           expectedBinder
           ( find
@@ -2731,6 +3980,11 @@ certifyExactLambdaConstructionAtLambdaType
       , constructionOwnsPacketBinder expectedRef
       , not (sourceOwnsPacketBinder expectedRef)
       ]
+    insertPacketEndpointCandidate accumulated candidate@(candidateRef, _)
+      | any
+          (typeBinderRefsSameIdentity candidateRef . fst)
+          accumulated = accumulated
+      | otherwise = accumulated ++ [candidate]
     remainingLocalRawCandidates =
       [ candidate
       | candidate@(candidateRef, _) <- localRawCandidates
@@ -2837,6 +4091,11 @@ certifyExactLambdaConstructionAtLambdaType
                 packet
             )
         )
+    preparedPacketConstructionBinders =
+      schemeBinderRefs
+        ( siScheme
+            (subtermGeneralizationSchemeInfo packet)
+        )
 
     -- The enclosing packet fixes the source identity and lexical position of
     -- its result before Typ(body) is available.  A checked body computation
@@ -2858,6 +4117,9 @@ certifyExactLambdaConstructionAtLambdaType
       , Right checkedBodyBound <- elabToBound bodySourceTy =
           (candidateRef, Just checkedBodyBound)
       | Just completedBound <-
+          certifiedBodyRefinementCompletion candidateRef (snd binder) =
+          (candidateRef, Just completedBound)
+      | Just completedBound <-
           certifiedBodyConstructionCompletion candidateRef =
           (candidateRef, Just completedBound)
       | Just completedBound <-
@@ -2867,6 +4129,36 @@ certifyExactLambdaConstructionAtLambdaType
           certifiedDescendantCompletion candidateRef =
           (candidateRef, Just completedBound)
       | otherwise = binder
+
+    -- A finalized body-consumer certificate is the positive construction
+    -- evidence that a provisional declaration has advanced to its completed
+    -- bound.  Prefer that exact transition over an older bound retained in a
+    -- recursively checked owner's binder spine.  Identity alone is not
+    -- enough: the certificate must target the construction declaration and
+    -- accept the candidate's current, authority-recorded state.
+    certifiedBodyRefinementCompletion candidateRef candidateBound = do
+      [certificate] <-
+        pure
+          [ refinement
+          | refinement <- bodyRefinements
+          , bodyConsumerBoundRefinementOwnerFinalized refinement
+          , bodyConsumerBoundRefinementAppliesToDeclarationState
+              candidateRef
+              currentBound
+              refinement
+          , let route =
+                  authorizedBodyConsumerRoute
+                    (bcbrDeclarationAuthority refinement)
+          , typeBinderRefsSameIdentity
+              candidateRef
+              (bcrConstructionRef route)
+          ]
+      either
+        (const Nothing)
+        Just
+        (elabToBound (bcbrCompletedBound certificate))
+      where
+        currentBound = maybe TBottom tyToElab candidateBound
 
     -- A recursively checked child publishes its complete leading declaration
     -- spine through a private owner-final certificate.  Complete the matching
@@ -4600,11 +5892,13 @@ certifyExactLambdaConstructionAtLambdaType
     -- declaration a fresh alpha-copy first; the InstApp payload then denotes
     -- only the enclosing source identity.
     freshenSourceBinder (renames, generator) sourceRef =
-      let (freshRef, nextGenerator) =
-            freshTypeBinderRef
-              (typeBinderRefName sourceRef)
-              generator
-       in (renames ++ [(sourceRef, freshRef)], nextGenerator)
+      if typeBinderIdentityIsCanonicalStructural
+          (typeBinderRefIdentity sourceRef)
+        then (renames, generator)
+        else
+          let (freshRef, nextGenerator) =
+                freshenTypeBinderRef sourceRef generator
+           in (renames ++ [(sourceRef, freshRef)], nextGenerator)
 
     -- A completed packet-body declaration fixes both the exact result
     -- identity and the bound consumed by its terminal Hyp.  If the recursive
@@ -4947,9 +6241,12 @@ certifyExactLambdaConstructionAtLambdaType
           provisionalCandidates
           constructedBodyTy0
           completedCandidates
-          [ expectedWithCompletedDependencies completedCandidates
-          , expectedTy
-          ]
+          ( maybeToList
+              ( expectedWithCompletedDependencies
+                  completedCandidates
+              )
+              ++ [expectedTy]
+          )
       certifyBodyOption
         bodySourceTy
         checkedBodyInstantiation
@@ -4973,14 +6270,32 @@ certifyExactLambdaConstructionAtLambdaType
     -- exact binder-spine checks below remain the authority that this expanded
     -- endpoint is constructible; no display name or type-only correspondence
     -- selects a declaration.
-    expectedWithCompletedDependencies completedCandidates =
+    expectedWithCompletedDependencies completedCandidates = do
       case completedDependencyBinders completedCandidates of
-        [] -> expectedTy
-        dependencyBinders ->
-          schemeToType
-            ( mkElabSchemeWithRefs
-                (dependencyBinders ++ expectedBinders)
-                (schemeBody expectedScheme)
+        [] -> Just expectedTy
+        dependencyBinders -> do
+          let completedEndpointBinders =
+                [ fromMaybe
+                    candidate
+                    ( find
+                        (typeBinderRefsSameIdentity candidateRef . fst)
+                        expectedBinders
+                    )
+                | candidate@(candidateRef, _) <- candidates
+                , any
+                    (typeBinderRefsSameIdentity candidateRef . fst)
+                    (dependencyBinders ++ expectedBinders)
+                ]
+          guard
+            ( length completedEndpointBinders
+                == length dependencyBinders + length expectedBinders
+            )
+          pure
+            ( schemeToType
+                ( mkElabSchemeWithRefs
+                    completedEndpointBinders
+                    (schemeBody expectedScheme)
+                )
             )
 
     completedDependencyBinders completedCandidates =
@@ -5127,6 +6442,184 @@ certifyExactLambdaConstructionAtLambdaType
         completedExpectedTy
         bodyOption
 
+    -- The checked body can already have published itself through the packet
+    -- result's provisional Hyp before the enclosing lambda freezes the final
+    -- result bound.  In that case @bodyResultTy@ is the packet variable and
+    -- no longer exposes the source forall spine which constructs its bound.
+    -- Rebuild that exact computation from @Typ(body)@: retain each
+    -- source-owned dependency in the enclosing Lambda(Gamma), N-open the
+    -- alpha-copied body forall at that declaration, then apply Hyp at the
+    -- completed packet result.  The provisional unbounded packet plan proves
+    -- which result slot is eliminated by the enclosing spine; completing that
+    -- eliminated slot publishes its checked residual as the lambda codomain.
+    certifySourceOpenedPacketBodySpine = do
+      ( freshBodySourceTy
+        , completedCandidates
+        , completedExpectedTy
+        , candidateRef
+        , bodyInstantiation
+        , bodyBinderRenames
+        ) <- prepareSourceOpenedPacketBodySpine
+      plan <-
+        certifyBodyOption
+          freshBodySourceTy
+          InstId
+          completedCandidates
+          completedExpectedTy
+          (bodyInstantiation, TVarRef candidateRef, Nothing, [])
+      pure
+        plan
+          { exactLambdaConstructionBodyBinderRenames =
+              bodyBinderRenames
+          }
+
+    prepareSourceOpenedPacketBodySpine = do
+      checkedResultRef <- outgoingResultRef checkedBodyInstantiation
+      packetResultRef <-
+        subtermGeneralizationResultAbstractionRef packet
+      guard
+        (typeBinderRefsSameIdentity checkedResultRef packetResultRef)
+      (candidateRef, Just candidateBound) <-
+        find
+          (typeBinderRefsSameIdentity checkedResultRef . fst)
+          candidates
+      guard
+        ( not (sourceOwnsPacketBinder candidateRef)
+            && any
+              ( \(packetRef, packetBound) ->
+                  typeBinderRefsSameIdentity candidateRef packetRef
+                    && isNothing packetBound
+              )
+              packetConstructionBinders
+            && operationalEndpointTypesAgree
+              (tyToElab candidateBound)
+              bodySourceTy
+        )
+      bodyResultRef <-
+        case bodyResultTy of
+          TVarRef ref -> Just ref
+          _ -> Nothing
+      guard (typeBinderRefsSameIdentity bodyResultRef candidateRef)
+      checkedPublishedTy <-
+        either
+          (const Nothing)
+          Just
+          ( TypeCheck.checkInstantiation
+              (constructionTypeEnvFor candidates)
+              bodySourceTy
+              checkedBodyInstantiation
+          )
+      guard
+        ( case checkedPublishedTy of
+            TVarRef ref ->
+              typeBinderRefsSameIdentity ref candidateRef
+            _ -> False
+        )
+      let (checkedBodyBinders, _) = splitForallsRefs bodySourceTy
+          candidatePrefix =
+            takeWhile
+              (not . typeBinderRefsSameIdentity candidateRef . fst)
+              candidates
+      guard (not (null checkedBodyBinders))
+      dependencyCandidates <-
+        traverse
+          (checkedBodyDependencyCandidate candidatePrefix)
+          checkedBodyBinders
+      bodyBinderRenames <-
+        traverse checkedBodyBinderCopy checkedBodyBinders
+      let freshBodySourceTy =
+            renameTypeBinderRefPayloads
+              bodyBinderRenames
+              bodySourceTy
+          (freshBodyBinders, freshBodyResidual) =
+            splitForallsRefs freshBodySourceTy
+          freshToCandidateRenames =
+            zipWith
+              (\(freshRef, _) (candidateDependencyRef, _) ->
+                  (freshRef, candidateDependencyRef)
+              )
+              freshBodyBinders
+              dependencyCandidates
+          completedDependencies =
+            zipWith
+              (completeCheckedBodyDependency freshToCandidateRenames)
+              dependencyCandidates
+              freshBodyBinders
+          checkedBodyResidual =
+            renameTypeBinderRefPayloads
+              freshToCandidateRenames
+              freshBodyResidual
+      completedResidualBound <-
+        either
+          (const Nothing)
+          Just
+          (elabToBound checkedBodyResidual)
+      let completedBodyCandidate =
+            (candidateRef, Just completedResidualBound)
+          completedBinders =
+            completedDependencies ++ [completedBodyCandidate]
+          completedCandidates =
+            map
+              (replaceCompletedBinder completedBinders)
+              candidates
+          provisionalCandidates = map provisionalPacketBinder candidates
+      guard
+        ( any
+            (uncurry binderCompletionChanged)
+            (zip candidates completedCandidates)
+        )
+      provisionalPlan <-
+        planExactBinderSpine
+          exactLambdaEndpointTypesAgree
+          ( constructionType
+              provisionalCandidates
+              paramTy
+              (TVarRef candidateRef)
+          )
+          expectedTy
+      completedExpectedTy <-
+        completeEliminatedPacketBodyBinder
+          expectedTy
+          provisionalCandidates
+          (TVarRef candidateRef)
+          [completedBodyCandidate]
+          provisionalPlan
+      let completedTypeEnv =
+            constructionTypeEnvFor completedCandidates
+      checkedBodySpecialization <-
+        constructExactInstantiation
+          completedTypeEnv
+          exactLambdaEndpointTypesAgree
+          freshBodySourceTy
+          checkedBodyResidual
+      let bodyInstantiation =
+            composeInst
+              checkedBodySpecialization
+              (InstAbstrRef candidateRef)
+      constructedBodyTy <-
+        either
+          (const Nothing)
+          Just
+          ( TypeCheck.checkInstantiation
+              completedTypeEnv
+              freshBodySourceTy
+              bodyInstantiation
+          )
+      guard
+        ( case constructedBodyTy of
+            TVarRef constructedRef ->
+              typeBinderRefsSameIdentity constructedRef candidateRef
+            _ -> False
+        )
+      pure
+        ( freshBodySourceTy
+        , completedCandidates
+        , completedExpectedTy
+        , candidateRef
+        , bodyInstantiation
+        , bodyBinderRenames
+        )
+
     -- A descendant can finish a construction-owned packet body after the
     -- enclosing endpoint has already frozen an older bounded presentation.
     -- The checked body supplies an exact leading forall spine and residual;
@@ -5135,10 +6628,12 @@ certifyExactLambdaConstructionAtLambdaType
     -- bound.  The resulting @InstApp ...; Hyp(result)@ is then validated by
     -- the ordinary exact binder-spine planner.
     --
-    -- This completion is unavailable to source-owned binders.  A source
-    -- forall's bound and vacuity are ABI, whereas the packet identities here
-    -- are construction slots whose metadata explicitly records that
-    -- ownership.
+    -- The completed packet body itself must remain construction-owned.  A
+    -- source-owned declaration may occur in the dependency prefix, but only
+    -- at the identical packet source declaration and bound.  In that case it
+    -- is retained unchanged and used as the explicit N argument which opens
+    -- the checked body's source forall; its ABI bound and vacuity are never
+    -- completed or inferred by this branch.
     certifyCompletedPacketBodySpine = do
       packetBodyRef <- packetBodyBinderRef
       (candidateRef, Just _) <-
@@ -5265,69 +6760,82 @@ certifyExactLambdaConstructionAtLambdaType
           { exactLambdaConstructionBodyBinderRenames =
               bodyBinderRenames
           }
-      where
-        checkedBodyDependencyCandidate candidatePrefix (checkedRef, _) = do
-          candidate <-
-            find
-              (typeBinderRefsSameIdentity checkedRef . fst)
-              candidatePrefix
-          guard
-            ( constructionOwnsPacketBinder (fst candidate)
-                && not (sourceOwnsPacketBinder (fst candidate))
-            )
-          pure candidate
 
-        checkedBodyBinderCopy (checkedRef, _) = do
-          copyRef <-
-            case
-                [ candidate
-                | (identity, candidate) <-
-                    subtermGeneralizationCopiedBinderRoutes packet
-                , identity == typeBinderRefIdentity checkedRef
-                ]
-            of
-              [candidate] -> Just candidate
-              _ -> Nothing
-          guard
-            ( not (typeBinderRefsSameIdentity checkedRef copyRef)
-                && not
-                  ( any
-                      (typeBinderRefsSameIdentity copyRef . fst)
-                      candidates
+    checkedBodyDependencyCandidate candidatePrefix (checkedRef, checkedBound) = do
+      candidate@(candidateRef, candidateBound) <-
+        find
+          (typeBinderRefsSameIdentity checkedRef . fst)
+          candidatePrefix
+      guard
+        ( if sourceOwnsPacketBinder candidateRef
+            then
+              sourceOwnsPacketBinder checkedRef
+                && lambdaConstructionBinderBoundsAgree
+                  checkedBound
+                  candidateBound
+                && any
+                  ( \(packetRef, packetBound) ->
+                      typeBinderRefsSameIdentity packetRef candidateRef
+                        && lambdaConstructionBinderBoundsAgree
+                          checkedBound
+                          packetBound
                   )
-            )
-          pure (checkedRef, copyRef)
+                  packetConstructionBinders
+            else constructionOwnsPacketBinder candidateRef
+        )
+      pure candidate
 
-        completeCheckedBodyDependency
-          freshToCandidateRenames
-          (candidateRef, _)
-          (_, freshBound) =
-            ( candidateRef
-            , fmap
-                ( renameBoundTypeBinderRefPayloads
-                    freshToCandidateRenames
+    checkedBodyBinderCopy (checkedRef, _) = do
+      copyRef <-
+        case
+            [ candidate
+            | (identity, candidate) <-
+                subtermGeneralizationCopiedBinderRoutes packet
+            , identity == typeBinderRefIdentity checkedRef
+            ]
+        of
+          [candidate] -> Just candidate
+          _ -> Nothing
+      guard
+        ( not (typeBinderRefsSameIdentity checkedRef copyRef)
+            && not
+              ( any
+                  (typeBinderRefsSameIdentity copyRef . fst)
+                  candidates
+              )
+        )
+      pure (checkedRef, copyRef)
+
+    completeCheckedBodyDependency
+      freshToCandidateRenames
+      (candidateRef, _)
+      (_, freshBound) =
+        ( candidateRef
+        , fmap
+            ( renameBoundTypeBinderRefPayloads
+                freshToCandidateRenames
+            )
+            freshBound
+        )
+
+    replaceCompletedBinder replacements binder@(ref, _) =
+      fromMaybe
+        binder
+        (find (typeBinderRefsSameIdentity ref . fst) replacements)
+
+    binderCompletionChanged
+      (leftRef, leftBound)
+      (rightRef, rightBound) =
+        typeBinderRefsSameIdentity leftRef rightRef
+          && case (leftBound, rightBound) of
+            (Nothing, Nothing) -> False
+            (Just left, Just right) ->
+              not
+                ( operationalEndpointTypesAgree
+                    (tyToElab left)
+                    (tyToElab right)
                 )
-                freshBound
-            )
-
-        replaceCompletedBinder replacements binder@(ref, _) =
-          fromMaybe
-            binder
-            (find (typeBinderRefsSameIdentity ref . fst) replacements)
-
-        binderCompletionChanged
-          (leftRef, leftBound)
-          (rightRef, rightBound) =
-            typeBinderRefsSameIdentity leftRef rightRef
-              && case (leftBound, rightBound) of
-                (Nothing, Nothing) -> False
-                (Just left, Just right) ->
-                  not
-                    ( operationalEndpointTypesAgree
-                        (tyToElab left)
-                        (tyToElab right)
-                    )
-                _ -> True
+            _ -> True
 
     packetConstructionSchemeInfo =
       subtermGeneralizationConsumerConstructionSchemeInfo packet
@@ -5537,10 +7045,84 @@ certifyExactLambdaConstructionAtLambdaType
         , ambientBodyRefinement0
         , bodyPeerRenames
         ) = do
-      let bodyInstantiation0 =
-            composeInst
+      let publishedScheme0 = schemeFromType publishedTy
+          publishedBinders0 = schemeBinderRefs publishedScheme0
+          publishedBody0 = schemeBody publishedScheme0
+          publishedParameterDeclarationRefs =
+            case publishedBody0 of
+              TArrow publishedParamTy _ ->
+                typeBinderDeclarationRefs publishedParamTy
+              _ -> []
+          publishedOuterDeclarationRefs =
+            map fst publishedBinders0
+              ++ concatMap
+                ( maybe
+                    []
+                    (typeBinderDeclarationRefs . tyToElab)
+                    . snd
+                )
+                publishedBinders0
+              ++ publishedParameterDeclarationRefs
+              ++ map fst bodyAbstractions0
+              ++ concatMap
+                ( maybe
+                    []
+                    (typeBinderDeclarationRefs . tyToElab)
+                    . snd
+                )
+                bodyAbstractions0
+          bodyScopeCollisionRefs =
+            foldr insertBodyScopeCollision []
+              [ bodyRef
+              | bodyRef <- typeBinderDeclarationRefs constructedBodyTy0
+              , any
+                  (typeBinderRefsSameIdentity bodyRef)
+                  publishedOuterDeclarationRefs
+              ]
+          (bodyScopeCopies, _) =
+            foldl
+              freshenSourceBinder
+              ( []
+              , exactConstructionIdentityGenerator
+                  [publishedTy, constructedBodyTy0]
+              )
+              bodyScopeCollisionRefs
+          copyBodyScope =
+            alphaRenameTypeBinderScopes bodyScopeCopies
+          checkedBodySourceTyAtBodyScope =
+            copyBodyScope checkedBodySourceTy
+          checkedBodyInstantiationAtBodyScope =
+            foldl
+              ( \inst (sourceRef, copiedRef) ->
+                  renameInstBoundRef sourceRef copiedRef inst
+              )
               checkedBodyInstantiation0
+              bodyScopeCopies
+          bodyCompletionInstantiationAtBodyScope =
+            foldl
+              ( \inst (sourceRef, copiedRef) ->
+                  renameInstBoundRef sourceRef copiedRef inst
+              )
               bodyCompletionInstantiation
+              bodyScopeCopies
+          constructedBodyTy = copyBodyScope constructedBodyTy0
+          publishedTyAtBodyScope =
+            schemeToType
+              ( mkElabSchemeWithRefs
+                  publishedBinders0
+                  ( case publishedBody0 of
+                      TArrow publishedParamTy publishedBodyTy ->
+                        TArrow
+                          publishedParamTy
+                          (copyBodyScope publishedBodyTy)
+                      otherPublishedBody ->
+                        copyBodyScope otherPublishedBody
+                  )
+              )
+          bodyInstantiation0 =
+            composeInst
+              checkedBodyInstantiationAtBodyScope
+              bodyCompletionInstantiationAtBodyScope
       bodyAmbientBindings <-
         refinedAmbientBindingsForBody ambientBodyRefinement0
       let bodyTypeEnv =
@@ -5553,7 +7135,7 @@ certifyExactLambdaConstructionAtLambdaType
           Just
           ( TypeCheck.checkInstantiation
               bodyTypeEnv
-              checkedBodySourceTy
+              checkedBodySourceTyAtBodyScope
               bodyInstantiation0
           )
       let certifiedBodyTy =
@@ -5565,7 +7147,7 @@ certifyExactLambdaConstructionAtLambdaType
       guard
         ( exactLambdaEndpointTypesAgree
             certifiedBodyTy
-            constructedBodyTy0
+            constructedBodyTy
         )
       let alignPeerType =
             renameTypeBinderRefPayloads bodyPeerRenames
@@ -5586,8 +7168,8 @@ certifyExactLambdaConstructionAtLambdaType
             | (ref, mbBound) <- constructionCandidates
             ]
           peerParamTy = alignPeerType paramTy
-          peerBodyTy = alignPeerType constructedBodyTy0
-          peerPublishedTy0 = alignPeerType publishedTy
+          peerBodyTy = alignPeerType constructedBodyTy
+          peerPublishedTy0 = alignPeerType publishedTyAtBodyScope
           peerPublishedTy =
             fromMaybe
               peerPublishedTy0
@@ -5658,7 +7240,7 @@ certifyExactLambdaConstructionAtLambdaType
             | (ref, mbBound) <- bodyAbstractions0
             ]
           alignedParamTy = alignType paramTy
-          alignedBodyTy = alignType constructedBodyTy0
+          alignedBodyTy = alignType constructedBodyTy
           alignedConstructionTy =
             schemeToType
               ( mkElabSchemeWithRefs
@@ -5787,18 +7369,26 @@ certifyExactLambdaConstructionAtLambdaType
           , exactLambdaConstructionPublishedBinders = publishedBinders
           , exactLambdaConstructionPublishedType = alignedPublishedTy
           , exactLambdaConstructionBinderRenames = binderRenames
-          , exactLambdaConstructionBodyBinderRenames = []
+          , exactLambdaConstructionParameterBinderCopies = []
+          , exactLambdaConstructionBodyBinderRenames = bodyScopeCopies
+          , exactLambdaConstructionResultBinderCopies = bodyScopeCopies
           , exactLambdaConstructionBodyAbstractions = bodyAbstractions
           , exactLambdaConstructionBodyInstantiation = bodyInstantiation
           , exactLambdaConstructionBodyType = alignedBodyTy
           , exactLambdaConstructionPreservedBodyRefinements = []
           , exactLambdaConstructionAmbientBodyRefinement =
               ambientBodyRefinement
+          , exactLambdaConstructionIntroducedAmbientBodyDeclaration = Nothing
           , exactLambdaConstructionAmbientBodyRefinementCertificate =
               ambientBodyRefinementCertificate
+          , exactLambdaConstructionPacketBodyProjection = Nothing
           , exactLambdaConstructionCompletionInstantiation =
               emittedCompletionInstantiation
           }
+      where
+        insertBodyScopeCollision ref refs
+          | any (typeBinderRefsSameIdentity ref) refs = refs
+          | otherwise = ref : refs
 
     -- A packet body slot can be copied to the checked body's exact result
     -- identity before Typ(body) completes its bound.  The peer route is
@@ -6086,6 +7676,7 @@ data BodyConsumerDeclarationAuthority
   | BodyConsumerConsumedAtOwner
       !BodyConsumerRoute
       !ElabType
+      !OrdinaryOwnerEmissionProgress
   deriving (Eq, Show)
 
 -- | Directional declaration progress while a descendant completion travels
@@ -6152,6 +7743,17 @@ finalizedLocalBodyConsumerDeclaration certificate
   where
     completedBound = bcbrCompletedBound certificate
 
+-- | How the checked consumer declaration is represented at this boundary.
+-- The ordinary case uses the ambient declaration itself.  A nested source
+-- annotation can instead expose a child-local operated binder while the
+-- enclosing Gamma still owns the graph declaration; its checked bound is
+-- retained here so the enclosing Lambda(Gamma) candidate is completed from
+-- construction evidence, not rediscovered from the final type.
+data BodyConsumerConstructionProjection
+  = DirectBodyConsumerConstructionProjection
+  | PacketOperatedBodyConsumerConstructionProjection !BoundType
+  deriving (Eq, Show)
+
 -- | A construction proof that one provisional declaration was completed by
 -- the exact lambda-body consumer that owns it.  Owner progress is represented
 -- by the constructor, not by a Boolean that can disagree with declaration
@@ -6162,12 +7764,14 @@ data BodyConsumerBoundRefinementCertificate
   = PendingBodyConsumerBoundRefinementCertificate
       { bcbrDeclarationAuthority :: !BodyConsumerDeclarationAuthority,
         bcbrAmbientRef :: !TypeBinderRef,
+        bcbrConstructionProjection :: !BodyConsumerConstructionProjection,
         bcbrPreviousBound :: !ElabType,
         bcbrCompletedBound :: !ElabType
       }
   | FinalizedBodyConsumerBoundRefinementCertificate
       { bcbrDeclarationAuthority :: !BodyConsumerDeclarationAuthority,
         bcbrAmbientRef :: !TypeBinderRef,
+        bcbrConstructionProjection :: !BodyConsumerConstructionProjection,
         bcbrPreviousBound :: !ElabType,
         bcbrCompletedBound :: !ElabType
       }
@@ -6183,9 +7787,32 @@ pendingBodyConsumerBoundRefinementCertificate authority ambientRef previousBound
   PendingBodyConsumerBoundRefinementCertificate
     { bcbrDeclarationAuthority = authority,
       bcbrAmbientRef = ambientRef,
+      bcbrConstructionProjection = DirectBodyConsumerConstructionProjection,
       bcbrPreviousBound = previousBound,
       bcbrCompletedBound = completedBound
     }
+
+pendingPacketOperatedBodyConsumerBoundRefinementCertificate
+  :: BodyConsumerDeclarationAuthority
+  -> TypeBinderRef
+  -> BoundType
+  -> ElabType
+  -> ElabType
+  -> BodyConsumerBoundRefinementCertificate
+pendingPacketOperatedBodyConsumerBoundRefinementCertificate
+  authority
+  ambientRef
+  projectedBound
+  previousBound
+  completedBound =
+    PendingBodyConsumerBoundRefinementCertificate
+      { bcbrDeclarationAuthority = authority
+      , bcbrAmbientRef = ambientRef
+      , bcbrConstructionProjection =
+          PacketOperatedBodyConsumerConstructionProjection projectedBound
+      , bcbrPreviousBound = previousBound
+      , bcbrCompletedBound = completedBound
+      }
 
 -- | A proof that one exact Gamma declaration crossed a checked construction
 -- step.  Its constructor is private, and the declaration identity is kept
@@ -6253,8 +7880,7 @@ renameCertifiedGammaBoundTransition renames (CertifiedGammaBoundTransition ref s
   where
     renameRoute route =
       route
-        { bcrSemanticRef = renameRef (bcrSemanticRef route)
-        , bcrConstructionRef = renameRef (bcrConstructionRef route)
+        { bcrConstructionRef = renameRef (bcrConstructionRef route)
         , bcrOperatedType =
             renameTypeBinderRefPayloads renames (bcrOperatedType route)
         , bcrConstructionOperatedType =
@@ -6410,8 +8036,56 @@ advanceBodyConsumerBoundRefinementsThroughCertifiedGammaBound
 advanceBodyConsumerBoundRefinementsThroughCertifiedGammaBound transition =
   map
     ( advanceBodyConsumerBoundRefinementThroughCertifiedGammaBound
-        transition
+      transition
     )
+
+-- | Advance a future-owner consumer after a checked child has replaced the
+-- exact operated endpoint from which that consumer was constructed.  Both
+-- states must already occur in the private certificate in the expected
+-- direction: the old operated endpoint is its completion and the new checked
+-- endpoint is its previous owner declaration.  This makes the update a
+-- construction-state join, rather than a type-shaped rewrite after a failed
+-- Hyp check.  Certificates for another owner, route, or construction state
+-- are left unchanged.
+advanceBodyConsumerBoundRefinementThroughOwnerEndpointCompletion
+  :: LocalGammaOwner
+  -> NodeId
+  -> ElabType
+  -> ElabType
+  -> BodyConsumerBoundRefinementCertificate
+  -> BodyConsumerBoundRefinementCertificate
+advanceBodyConsumerBoundRefinementThroughOwnerEndpointCompletion
+  owner
+  exteriorNode
+  sourceEndpoint
+  completedEndpoint
+  certificate
+    | not (bodyConsumerBoundRefinementEmittedBy owner certificate) =
+        certificate
+    | bcrExteriorNode route /= exteriorNode = certificate
+    | operationalEndpointTypesAgree sourceEndpoint completedEndpoint =
+        certificate
+    | not
+        ( operationalEndpointTypesAgree
+            (bcbrCompletedBound certificate)
+            sourceEndpoint
+        ) =
+        certificate
+    | not
+        ( operationalEndpointTypesAgree
+            (bcbrPreviousBound certificate)
+            completedEndpoint
+        ) =
+        certificate
+    | otherwise =
+        certificate
+          { bcbrPreviousBound = completedEndpoint
+          , bcbrCompletedBound = completedEndpoint
+          }
+  where
+    route =
+      authorizedBodyConsumerRoute
+        (bcbrDeclarationAuthority certificate)
 
 advanceBodyConsumerBoundRefinementThroughCertifiedGammaBound
   :: CertifiedGammaBoundTransition
@@ -6469,6 +8143,8 @@ finalizedBodyConsumerBoundRefinementCertificate authority certificate =
   FinalizedBodyConsumerBoundRefinementCertificate
     { bcbrDeclarationAuthority = authority,
       bcbrAmbientRef = bcbrAmbientRef certificate,
+      bcbrConstructionProjection =
+        bcbrConstructionProjection certificate,
       bcbrPreviousBound = bcbrPreviousBound certificate,
       bcbrCompletedBound = bcbrCompletedBound certificate
     }
@@ -6554,6 +8230,26 @@ bodyConsumerBoundRefinementTargetsAny refs certificate =
   any
     (typeBinderRefsSameIdentity (bcbrAmbientRef certificate))
     refs
+
+-- | Require the semantic half of a body-consumer route to occur in the
+-- current construction authority.  Several graph occurrences may quotient
+-- to one construction reference; the construction reference alone therefore
+-- cannot decide whether a historical consumed declaration belongs to a
+-- later requirement using that representative.
+bodyConsumerBoundRefinementHasSemanticRouteWithin
+  :: [NodeId]
+  -> [TypeBinderRef]
+  -> BodyConsumerBoundRefinementCertificate
+  -> Bool
+bodyConsumerBoundRefinementHasSemanticRouteWithin nodes refs certificate =
+  bcrExteriorNode route `elem` nodes
+    || any
+      (typeBinderRefsSameIdentity (bcrSemanticRef route))
+      refs
+  where
+    route =
+      authorizedBodyConsumerRoute
+        (bcbrDeclarationAuthority certificate)
 
 -- | Join a private declaration-completion certificate to the exact prepared
 -- packet whose provisional consumer it advances.  This is deliberately
@@ -6792,7 +8488,7 @@ completeConsumedResultOwnerEndpointFromBodyConsumerRefinement
     guard (bodyConsumerBoundRefinementOwnerFinalized certificate)
     (route, declaredBound) <-
       case bcbrDeclarationAuthority certificate of
-        BodyConsumerConsumedAtOwner consumedRoute bound ->
+        BodyConsumerConsumedAtOwner consumedRoute bound _ ->
           Just (consumedRoute, bound)
         _ -> Nothing
     guard (bcrOwner route == owner)
@@ -7008,7 +8704,7 @@ bodyConsumerBoundRefinementConsumedReplayRoutes =
 
     consumedReplayRoute certificate
       | bodyConsumerBoundRefinementOwnerFinalized certificate
-      , BodyConsumerConsumedAtOwner route consumedBound <-
+      , BodyConsumerConsumedAtOwner route consumedBound _ <-
           bcbrDeclarationAuthority certificate
       , typeBinderRefsSameIdentity
           (bcbrAmbientRef certificate)
@@ -7132,15 +8828,15 @@ bodyConsumerBoundRefinementsAuthorizeDeclarationCompletion
       , operationalEndpointTypesAgree
           (bcbrPreviousBound certificate)
           TBottom
-      , operationalEndpointTypesAgree
-          (bcbrCompletedBound certificate)
+      , bodyConsumerEndpointIsCertifiedCompletion
+          certificate
           checkedCompletion
       ]
 
     originReachesDeclaration origin =
       bodyConsumerBoundRefinementsCertifyStatePathWithinRoute
         origin
-        checkedCompletion
+        (bcbrCompletedBound origin)
         ownerDeclaration
         [ certificate
         | certificate <- targetCertificates
@@ -7281,6 +8977,12 @@ bodyConsumerPreparedDeclarationStates certificate =
       (OrdinaryOwnerEmissionProgress sources transitions) ->
         sources
           ++ concatMap transitionStates transitions
+    BodyConsumerConsumedAtOwner
+      _
+      _
+      (OrdinaryOwnerEmissionProgress sources transitions) ->
+        sources
+          ++ concatMap transitionStates transitions
     _ -> []
   where
     transitionStates
@@ -7296,6 +8998,11 @@ bodyConsumerPreparedCompletionSources certificate =
       _
       (OrdinaryOwnerEmissionProgress sources _) ->
         sources
+    BodyConsumerConsumedAtOwner
+      _
+      _
+      (OrdinaryOwnerEmissionProgress sources _) ->
+        sources
     _ -> []
 
 bodyConsumerRecordedGammaTransitions
@@ -7304,6 +9011,11 @@ bodyConsumerRecordedGammaTransitions
 bodyConsumerRecordedGammaTransitions certificate =
   case bcbrDeclarationAuthority certificate of
     BodyConsumerOrdinaryOwnerEmission
+      _
+      (OrdinaryOwnerEmissionProgress _ transitions) ->
+        transitions
+    BodyConsumerConsumedAtOwner
+      _
       _
       (OrdinaryOwnerEmissionProgress _ transitions) ->
         transitions
@@ -7786,21 +9498,33 @@ bodyConsumerBoundRefinementExcludesAmbientRef ref certificate =
        )
   where
     -- These binders remain lexical to the closed operated endpoint even after
-    -- the route owner consumes the provisional declaration.  Finalizing the
-    -- owner changes the declaration's liveness, not the scope of its source
-    -- forall spine.
+    -- the route owner consumes the provisional declaration.  The sole
+    -- exception is a finalized cross-identity packet projection: there the
+    -- checked owner has consumed the old graph publication and exported the
+    -- packet's exact construction ref as its ambient result endpoint.
     privateOperatedBinder =
-      any
-        (typeBinderRefsSameIdentity ref . fst)
-        ( schemeBinderRefs
-            ( schemeFromType
-                ( bcrOperatedType
-                    ( authorizedBodyConsumerRoute
-                        (bcbrDeclarationAuthority certificate)
-                    )
-                )
-            )
-        )
+      not projectedAmbientBinder
+        && any
+          (typeBinderRefsSameIdentity ref . fst)
+          ( schemeBinderRefs
+              ( schemeFromType
+                  (bcrOperatedType route)
+              )
+          )
+
+    projectedAmbientBinder =
+      bodyConsumerBoundRefinementOwnerFinalized certificate
+        && bodyConsumerBoundRefinementConsumed certificate
+        && case bcbrConstructionProjection certificate of
+          PacketOperatedBodyConsumerConstructionProjection _ ->
+            typeBinderRefsSameIdentity
+              ref
+              (bcrConstructionRef route)
+          DirectBodyConsumerConstructionProjection -> False
+
+    route =
+      authorizedBodyConsumerRoute
+        (bcbrDeclarationAuthority certificate)
 
 -- | Advance an owner-targeted refinement after that owner has completed its
 -- constructor.  Local and ambient liveness remain distinct: an exact
@@ -7851,6 +9575,7 @@ finalizeBodyConsumerBoundRefinementAtOwner owner localRefs ambientRefs certifica
         ( BodyConsumerConsumedAtOwner
             route
             (bcbrCompletedBound certificate)
+            (ordinaryOwnerEmissionProgress certificate)
         )
         certificate
   | bcrOwner route == owner =
@@ -7873,6 +9598,11 @@ finalizeBodyConsumerBoundRefinementAtOwner owner localRefs ambientRefs certifica
     route =
       authorizedBodyConsumerRoute
         (bcbrDeclarationAuthority certificate)
+
+    ordinaryOwnerEmissionProgress currentCertificate =
+      case bcbrDeclarationAuthority currentCertificate of
+        BodyConsumerOrdinaryOwnerEmission _ progress -> progress
+        _ -> emptyOrdinaryOwnerEmissionProgress
 
 -- | Preserve a certified descendant completion until the exact route owner
 -- has incorporated it into that owner's construction Gamma.  Before that
@@ -8717,7 +10447,16 @@ installBodyConsumerConstructionRoutes certificates initialAliases initialRenames
               unless
                 ( typeBinderRefIdentity semanticRef
                     == typeBinderIdentityFromNode exterior
-                    && typeBinderRefsSameIdentity constructionRef targetRef
+                    && ( typeBinderRefsSameIdentity constructionRef targetRef
+                          || case
+                            certifiedPacketConsumerProjection certificate
+                          of
+                            Just (projectedRef, _) ->
+                              typeBinderRefsSameIdentity
+                                constructionRef
+                                projectedRef
+                            Nothing -> False
+                       )
                     && operationalEndpointTypesAgree
                       declaredBound
                       (bcbrPreviousBound certificate)
@@ -8771,13 +10510,26 @@ installBodyConsumerConstructionRoutes certificates initialAliases initialRenames
                 , "  semantic ref: " ++ show semanticRef
                 , "  certified ambient ref: " ++ show targetRef
                 ]
-        Nothing -> do
-          requireUniqueBinding
-            certificate
-            "provisional semantic route"
-            semanticRef
-            (bcbrPreviousBound certificate)
-          pure (IntMap.insert nodeKey targetRef aliases)
+        Nothing
+          | typeBinderRefsSameIdentity semanticRef targetRef -> do
+              -- The packet can retain the same semantic identity as its
+              -- ambient construction target.  Bound installation has
+              -- already advanced that declaration from the certified
+              -- previous state to the completed state; requiring Bottom
+              -- again here would reject the transition after it succeeded.
+              requireUniqueBinding
+                certificate
+                "completed identity route"
+                targetRef
+                (bcbrCompletedBound certificate)
+              pure (IntMap.insert nodeKey targetRef aliases)
+          | otherwise -> do
+              requireUniqueBinding
+                certificate
+                "provisional semantic route"
+                semanticRef
+                (bcbrPreviousBound certificate)
+              pure (IntMap.insert nodeKey targetRef aliases)
 
     -- An inherited ambient refinement reverses the provisional direction in
     -- which an earlier packet opened this occurrence.  Compose every route
@@ -8953,7 +10705,7 @@ installBodyConsumerBoundRefinementsWithOwner mbOwner closures certificates initi
           -- inspecting the enclosing map.
           pure bindings
       | otherwise =
-      case
+          case
           [ binding
           | binding@(ref, _) <- Map.toList bindings
           , typeBinderRefsSameIdentity
@@ -8988,6 +10740,13 @@ installBodyConsumerBoundRefinementsWithOwner mbOwner closures certificates initi
                   , "  current bound: " ++ show currentBound
                   ]
           []
+            | isJust (certifiedPacketConsumerProjection certificate) ->
+                -- The enclosing constructor can consume the graph-owned
+                -- declaration while retaining the packet's checked operated
+                -- binder for its exact Lambda(Gamma) candidate.  That
+                -- projection is construction evidence, not authority to
+                -- recreate the now-absent ambient graph declaration.
+                pure bindings
             | certificateCanInstallMissingDeclaration certificate ->
                 pure
                   ( Map.insert
@@ -9492,54 +11251,66 @@ completeOwnedBodyConsumerRequirementEndpoints owner edgeExteriors certificates e
     -- scheme).  The declaration identity and each private certificate are the
     -- positive authority for this comparison.
     selectCommonGeneralizedCompletion route certificate sharedExteriorEdges =
-      case currentDeclarationRepresentatives of
-        currentRepresentative : remainingCurrentRepresentatives
-          | all
-              ( operationalEndpointTypesAgree
-                  currentRepresentative
-              )
-              remainingCurrentRepresentatives ->
-              -- Preserve a declaration only when a live owned edge publishes
-              -- it or every exact sibling certificate seals it as a previous
-              -- declaration, and its recorded computation reaches every
-              -- sibling completion.  Bottom on a provisional edge is not a
-              -- declaration and therefore cannot become the representative.
-              pure currentRepresentative
-          | otherwise ->
+      case mostGeneralCurrentDeclarations of
+        [currentRepresentative] ->
+          -- Preserve a declaration only when a live owned edge publishes it
+          -- or every exact sibling certificate seals it as a previous
+          -- declaration, and its recorded computation reaches every sibling
+          -- completion.  More than one such state can be recorded when one
+          -- sibling observes a declaration and another observes its exact
+          -- instance; choose the unique declaration whose checked xMLF
+          -- computation constructs every other candidate.  Bottom on a
+          -- provisional edge is not a declaration and therefore cannot
+          -- become the representative.
+          pure currentRepresentative
+        _ : _ ->
+          completionFailure
+            (Just route)
+            (Just certificate)
+            [ "sibling edges have multiple equally general declarations"
+            , "  generalized edge candidates: "
+                ++ show currentDeclarationRepresentatives
+            , "  maximal candidates: "
+                ++ show mostGeneralCurrentDeclarations
+            , "  sibling certificates: " ++ show siblingCertificates
+            ]
+        [] ->
+          if null currentDeclarationRepresentatives
+            then case generalizedRepresentatives of
+              [] ->
+                completionFailure
+                  (Just route)
+                  (Just certificate)
+                  [ "sibling completion certificates have no common generalized endpoint"
+                  , "  sibling certificates: " ++ show siblingCertificates
+                  ]
+              representative : remainingRepresentatives
+                | all
+                    ( operationalEndpointTypesAgree
+                        (bcbrCompletedBound representative)
+                        . bcbrCompletedBound
+                    )
+                    remainingRepresentatives ->
+                    pure (bcbrCompletedBound representative)
+                | otherwise ->
+                    completionFailure
+                      (Just route)
+                      (Just certificate)
+                      [ "sibling completion certificates have multiple incomparable generalized endpoints"
+                      , "  generalized candidates: "
+                          ++ show generalizedRepresentatives
+                      , "  sibling certificates: " ++ show siblingCertificates
+                      ]
+            else
               completionFailure
                 (Just route)
                 (Just certificate)
                 [ "sibling edges have multiple incomparable generalized declarations"
                 , "  generalized edge candidates: "
                     ++ show currentDeclarationRepresentatives
+                , "  maximal candidates: []"
                 , "  sibling certificates: " ++ show siblingCertificates
                 ]
-        [] ->
-          case generalizedRepresentatives of
-            [] ->
-              completionFailure
-                (Just route)
-                (Just certificate)
-                [ "sibling completion certificates have no common generalized endpoint"
-                , "  sibling certificates: " ++ show siblingCertificates
-                ]
-            representative : remainingRepresentatives
-              | all
-                  ( operationalEndpointTypesAgree
-                      (bcbrCompletedBound representative)
-                      . bcbrCompletedBound
-                  )
-                  remainingRepresentatives ->
-                  pure (bcbrCompletedBound representative)
-              | otherwise ->
-                  completionFailure
-                    (Just route)
-                    (Just certificate)
-                    [ "sibling completion certificates have multiple incomparable generalized endpoints"
-                    , "  generalized candidates: "
-                        ++ show generalizedRepresentatives
-                    , "  sibling certificates: " ++ show siblingCertificates
-                    ]
       where
         siblingCertificates =
           [ siblingCertificate
@@ -9570,6 +11341,13 @@ completeOwnedBodyConsumerRequirementEndpoints owner edgeExteriors certificates e
               )
               siblingCertificates
           , all (declarationConstructs candidate) currentEndpoints
+          ]
+        mostGeneralCurrentDeclarations =
+          [ candidate
+          | candidate <- currentDeclarationRepresentatives
+          , all
+              (declarationConstructs candidate)
+              currentDeclarationRepresentatives
           ]
         generalizedRepresentatives =
           [ candidate
@@ -10133,6 +11911,7 @@ certifyAmbientPacketGammaConsumerBoundRefinement
   -> [LambdaParamBoundaryCertificate]
   -> ElabType
   -> SchemeInfo
+  -> Maybe CertifiedPacketConsumerBinder
   -> Map.Map TypeBinderRef ElabType
   -> Either
       ElabError
@@ -10147,6 +11926,7 @@ certifyAmbientPacketGammaConsumerBoundRefinement
   paramBoundaryCertificates
   checkedBodyType
   currentSchemeInfo
+  certifiedCurrentBinder
   ambientBindings = do
     unless
       ( lgoConstructor owner == LocalLambdaGamma
@@ -10203,10 +11983,38 @@ certifyAmbientPacketGammaConsumerBoundRefinement
             , "  declarations: " ++ show declarations
             ]
     currentRef <-
-      requireExteriorRoute
-        "current construction"
-        exterior
-        currentSchemeInfo
+      case certifiedCurrentBinder of
+        Nothing ->
+          requireExteriorRoute
+            "current construction"
+            exterior
+            currentSchemeInfo
+        Just (CertifiedPacketConsumerBinder certifiedIdentity certifiedRef _) -> do
+          operatedRef <-
+            requireExteriorRoute
+              "operated packet"
+              exterior
+              (subtermGeneralizationOperatedSchemeInfo packet)
+          unless
+            ( certifiedIdentity == consumerIdentity
+                && typeBinderRefsSameIdentity certifiedRef operatedRef
+                && any
+                  (typeBinderRefsSameIdentity certifiedRef)
+                  ( freeTypeVarRefsType
+                      (schemeToType (siScheme currentSchemeInfo))
+                  )
+            )
+            ( failure
+                [ "certified child consumer route does not occur in the current packet projection"
+                , "  certified exterior: " ++ show certifiedIdentity
+                , "  packet exterior: " ++ show consumerIdentity
+                , "  certified consumer: " ++ show certifiedRef
+                , "  operated consumer: " ++ show operatedRef
+                , "  current scheme: "
+                    ++ show (siScheme currentSchemeInfo)
+                ]
+            )
+          pure certifiedRef
     unless
       (typeBinderRefIdentity pendingRef == consumerIdentity)
       ( failure
@@ -10234,11 +12042,15 @@ certifyAmbientPacketGammaConsumerBoundRefinement
           , "  free occurrences: " ++ show currentConsumerOccurrences
           ]
       )
+    let ambientTargetRef =
+          case certifiedCurrentBinder of
+            Nothing -> currentRef
+            Just _ -> pendingRef
     (ambientRef, previousBound) <-
       case
           [ binding
           | binding@(ref, _) <- Map.toList ambientBindings
-          , typeBinderRefsSameIdentity ref currentRef
+          , typeBinderRefsSameIdentity ref ambientTargetRef
           ]
         of
           [binding] -> pure binding
@@ -10254,7 +12066,7 @@ certifyAmbientPacketGammaConsumerBoundRefinement
               ]
     unless
       ( operationalEndpointTypesAgree previousBound TBottom
-          && typeBinderRefsSameIdentity ambientRef currentRef
+          && typeBinderRefsSameIdentity ambientRef ambientTargetRef
       )
       ( failure
           [ "ambient consumer is not the packet's pending Bottom declaration"
@@ -10331,16 +12143,37 @@ certifyAmbientPacketGammaConsumerBoundRefinement
             , bcrOwner = owner
             , bcrExteriorNode = exterior
             , bcrSemanticRef = semanticRef
-            , bcrConstructionRef = ambientRef
+            , bcrConstructionRef = currentRef
             , bcrOperatedType = operatedAtBoundary
             , bcrConstructionOperatedType = completedBound
             }
         certificate =
-          pendingBodyConsumerBoundRefinementCertificate
-            (BodyConsumerInheritedAmbient route previousBound)
-            ambientRef
-            previousBound
-            completedBound
+          case certifiedCurrentBinder of
+            Just
+              ( CertifiedPacketConsumerBinder
+                  certifiedIdentity
+                  certifiedRef
+                  certifiedBound
+                )
+                | certifiedIdentity == consumerIdentity
+                , typeBinderRefsSameIdentity certifiedRef currentRef
+                , not
+                    ( typeBinderRefsSameIdentity
+                        currentRef
+                        ambientRef
+                    ) ->
+                    pendingPacketOperatedBodyConsumerBoundRefinementCertificate
+                      (BodyConsumerInheritedAmbient route previousBound)
+                      ambientRef
+                      certifiedBound
+                      previousBound
+                      completedBound
+            _ ->
+              pendingBodyConsumerBoundRefinementCertificate
+                (BodyConsumerInheritedAmbient route previousBound)
+                ambientRef
+                previousBound
+                completedBound
     pure (ambientRef, completedBound, certificate)
   where
     requireExteriorRoute label exterior schemeInfo =
@@ -10412,6 +12245,8 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
   :: LocalGammaOwner
   -> EdgeId
   -> PreparedSubtermGeneralization
+  -> TypeBinderRef
+  -> SchemeInfo
   -> [LambdaParamBoundaryCertificate]
   -> ElabType
   -> Maybe CertifiedLambdaBodyConstruction
@@ -10430,6 +12265,8 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
   currentOwner
   bodyEdge
   packet
+  selectedConsumerRef
+  constructionSchemeInfo
   parameterBoundaryCertificates
   checkedBodyType
   certifiedBodyConstruction
@@ -10466,9 +12303,18 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
         , "  Gamma authority: "
             ++ show (subtermGeneralizationGammaAuthority packet)
         ]
-    closure <-
+    mbClosure <-
       case subtermGeneralizationLocalConsumerClosure closures packet of
-        Just exactClosure -> pure exactClosure
+        Just exactClosure -> pure (Just exactClosure)
+        Nothing
+          | subtermConsumerAuthorityIsTopology authority
+          , currentOwner == enclosingOwner ->
+              -- Identity-topology authority already freezes the owner,
+              -- boundary edge, and exterior node.  Such a packet has no
+              -- ordinary binding-tree closure; requiring one would replace
+              -- its stronger topology proof with a fictitious lexical
+              -- declaration.
+              pure Nothing
         Nothing ->
           failure
             [ "packet has no exact enclosing local-Gamma closure"
@@ -10479,20 +12325,49 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
           typeBinderRefFromIdentity
             consumerIdentity
             (typeBinderIdentityStableName consumerIdentity)
-        exterior = lgcExteriorNode closure
-    unless
-      ( lgcOwner closure == enclosingOwner
-          && bodyEdge `elem` NonEmpty.toList (lgcEdgeIds closure)
-          && lgcConsumerIdentity closure == consumerIdentity
-          && typeBinderIdentityFromNode exterior == consumerIdentity
-      )
-      ( failure
-          [ "enclosing closure changed the packet's owner, edge, or exterior"
-          , "  closure: " ++ show closure
-          ]
-      )
+        isTopologyConsumer =
+          subtermConsumerAuthorityIsTopology authority
+        ambientSelectionRef
+          | isTopologyConsumer = selectedConsumerRef
+          | otherwise = semanticRef
+    exterior <-
+      case mbClosure of
+        Just closure -> pure (lgcExteriorNode closure)
+        Nothing ->
+          case typeBinderIdentityNode consumerIdentity of
+            Just node -> pure node
+            Nothing ->
+              failure
+                [ "topology consumer has no graph exterior"
+                , "  consumer: " ++ show consumerIdentity
+                ]
+    case mbClosure of
+      Just closure ->
+        unless
+          ( lgcOwner closure == enclosingOwner
+              && bodyEdge `elem` NonEmpty.toList (lgcEdgeIds closure)
+              && lgcConsumerIdentity closure == consumerIdentity
+              && typeBinderIdentityFromNode exterior == consumerIdentity
+          )
+          ( failure
+              [ "enclosing closure changed the packet's owner, edge, or exterior"
+              , "  closure: " ++ show closure
+              ]
+          )
+      Nothing ->
+        unless
+          ( subtermConsumerAuthorityIsTopology authority
+              && currentOwner == enclosingOwner
+              && scaEdgeId authority == bodyEdge
+              && typeBinderIdentityFromNode exterior == consumerIdentity
+          )
+          ( failure
+              [ "topology authority changed owner, edge, or exterior"
+              , "  authority: " ++ show authority
+              ]
+          )
     let pendingOwnerEmission =
-          isJust (lgcOwnerPendingScheme closure)
+          isJust (mbClosure >>= lgcOwnerPendingScheme)
             && currentOwner /= enclosingOwner
     ( ambientRef
       , previousBound
@@ -10502,7 +12377,7 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
       case
           [ binding
           | binding@(ref, _) <- Map.toList ambientBindings
-          , typeBinderRefsSameIdentity ref semanticRef
+          , typeBinderRefsSameIdentity ref ambientSelectionRef
           ]
         of
           [(ref, bound)] ->
@@ -10511,7 +12386,7 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
               , bound
               , currentOwner /= enclosingOwner
               , currentOwner /= enclosingOwner
-                  && isNothing (lgcOwnerPendingScheme closure)
+                  && isNothing (mbClosure >>= lgcOwnerPendingScheme)
               )
           []
             | currentOwner /= enclosingOwner ->
@@ -10525,14 +12400,14 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
                   ( semanticRef
                   , TBottom
                   , True
-                  , isNothing (lgcOwnerPendingScheme closure)
+                  , isNothing (mbClosure >>= lgcOwnerPendingScheme)
                   )
           [] ->
             failure
               [ "enclosing Gamma has no exact provisional consumer binding"
-              , "  consumer: " ++ show semanticRef
+              , "  consumer: " ++ show ambientSelectionRef
               , "  enclosing owner: " ++ show enclosingOwner
-              , "  enclosing closure: " ++ show closure
+              , "  enclosing closure: " ++ show mbClosure
               , "  available Gamma bindings: "
                   ++ show (Map.toList ambientBindings)
               ]
@@ -10549,10 +12424,26 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
             parameterBoundaryCertificates
             ambientRef
         publishedBound =
-          completeDeclarationBound
-            ( subtractAmbientLeadingBinders
-                (schemeToType gammaBoundScheme)
+          fromMaybe
+            ( completeDeclarationBound
+                ( subtractAmbientLeadingBinders
+                    (schemeToType gammaBoundScheme)
+                )
             )
+            sourceOwnerPublishedBound
+        sourceOwnerPublishedBound = do
+          guard (isNothing mbClosure)
+          ( completedAuthority
+            , completedOwner
+            , _
+            , completedEndpoint
+            ) <-
+              subtermGeneralizationSourceOwnerConsumerCompletion packet
+          guard
+            ( completedAuthority == authority
+                && completedOwner == enclosingOwner
+            )
+          pure (completeDeclarationBound completedEndpoint)
     completedBoundDependencies <-
       exactCompletedBoundDependencies
         ambientRef
@@ -10610,7 +12501,7 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
                     completedGammaBound
                     previousBound
                )
-    case lgcOwnerPendingScheme closure of
+    case mbClosure >>= lgcOwnerPendingScheme of
       Just pending ->
         validatePendingRoute
           "enclosing closure"
@@ -10619,15 +12510,29 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
           pending
       Nothing
         | currentOwner /= enclosingOwner -> pure ()
-      Nothing ->
+      Nothing
+        | isJust mbClosure ->
         failure
           [ "enclosing closure has no pending construction scheme" ]
+      Nothing -> pure ()
     unless deferredWithoutPendingRoute $
-      validatePendingRoute
-        "packet construction"
-        exterior
-        ambientRef
-        (subtermGeneralizationConsumerConstructionSchemeInfo packet)
+      if isTopologyConsumer
+        then
+          -- A topology consumer is ambient in the current construction even
+          -- when an ordinary closure still records where its enclosing owner
+          -- first opened the pending declaration.  The closure is validated
+          -- above; the projected packet must now retain a free exact route,
+          -- not redeclare that pending binder locally.
+          validateTopologyAmbientRoute
+            exterior
+            ambientRef
+            constructionSchemeInfo
+        else
+          validatePendingRoute
+            "packet construction"
+            exterior
+            ambientRef
+            (subtermGeneralizationConsumerConstructionSchemeInfo packet)
     let operatedSchemeInfo =
           subtermGeneralizationOperatedSchemeInfo packet
         operatedType =
@@ -10950,6 +12855,16 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
         packetDeclarations =
           concatMap schemeBinderRefs packetSchemes
 
+        certifiedChildAmbientBounds dependencyRef =
+          [ agaBound authority
+          | bodyConstruction <- maybeToList certifiedBodyConstruction
+          , authority <-
+              certifiedLambdaBodyAmbientDeclarations bodyConstruction
+          , typeBinderRefsSameIdentity
+              dependencyRef
+              (agaExactRef authority)
+          ]
+
         go dependencies [] = pure dependencies
         go dependencies (dependencyRef : rest)
           | typeBinderRefsSameIdentity dependencyRef consumerRef =
@@ -10962,12 +12877,14 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
               dependencyBound <-
                 case
                     distinctBounds
-                      [ maybe TBottom tyToElab mbBound
-                      | (declaredRef, mbBound) <- packetDeclarations
-                      , typeBinderRefsSameIdentity
-                          declaredRef
-                          dependencyRef
-                      ]
+                      ( [ maybe TBottom tyToElab mbBound
+                        | (declaredRef, mbBound) <- packetDeclarations
+                        , typeBinderRefsSameIdentity
+                            declaredRef
+                            dependencyRef
+                        ]
+                          ++ certifiedChildAmbientBounds dependencyRef
+                      )
                   of
                     [bound] -> pure bound
                     [] ->
@@ -11047,14 +12964,7 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
 
         distinctBounds rawBounds =
           foldl'
-            ( \bounds bound ->
-                if
-                  any
-                    (operationalEndpointTypesAgree bound)
-                    bounds
-                  then bounds
-                  else bounds ++ [bound]
-            )
+            insertConstructionCompatibleBound
             []
             preferredBounds
           where
@@ -11065,6 +12975,50 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
             preferredBounds
               | null informativeBounds = rawBounds
               | otherwise = informativeBounds
+
+            -- A packet spells a declaration underneath its preceding source
+            -- forall as the opened bound @a -> a@, while the recursively
+            -- checked child records the self-contained ambient declaration
+            -- @forall a. a -> a@.  They are one construction only when exact
+            -- full-spine inference proves that the closed declaration opens
+            -- to the packet presentation.  Prefer that closed authority so
+            -- the dependency remains valid after leaving the packet scope;
+            -- unrelated bounds remain distinct and fail closed above.
+            insertConstructionCompatibleBound bounds incoming
+              | any
+                  (operationalEndpointTypesAgree incoming)
+                  bounds = bounds
+              | uniqueEquivalentBounds existingClosures = bounds
+              | uniqueEquivalentBounds openedPresentations =
+                  incoming
+                    : [ existing
+                      | existing <- bounds
+                      , not
+                          ( any
+                              (operationalEndpointTypesAgree existing)
+                              openedPresentations
+                          )
+                      ]
+              | otherwise = bounds ++ [incoming]
+              where
+                existingClosures =
+                  [ existing
+                  | existing <- bounds
+                  , completeUnboundedForallSpecializesTo
+                      existing
+                      incoming
+                  ]
+                openedPresentations =
+                  [ existing
+                  | existing <- bounds
+                  , completeUnboundedForallSpecializesTo
+                      incoming
+                      existing
+                  ]
+
+            uniqueEquivalentBounds [] = False
+            uniqueEquivalentBounds (first : rest) =
+              all (operationalEndpointTypesAgree first) rest
 
     validatePendingRoute label exterior ambientRef schemeInfo = do
       routedRef <-
@@ -11095,7 +13049,45 @@ certifyEnclosingPacketBodyConsumerBoundRefinement
               [ label ++ " does not contain one pending consumer declaration"
               , "  consumer: " ++ show routedRef
               , "  declarations: " ++ show declarations
+              ]
+
+    validateTopologyAmbientRoute exterior ambientRef schemeInfo = do
+      routedRef <-
+        case
+            IntMap.lookup
+              (getNodeId exterior)
+              (schemeInfoBinderRefSubst schemeInfo)
+          of
+            Just ref
+              | typeBinderRefsSameIdentity ref ambientRef ->
+                  pure ref
+            route ->
+              failure
+                [ "topology packet does not route its exterior to the selected ambient declaration"
+                , "  exterior: " ++ show exterior
+                , "  route: " ++ show route
+                , "  ambient consumer: " ++ show ambientRef
+                ]
+      let scheme = siScheme schemeInfo
+          declarations =
+            [ mbBound
+            | (ref, mbBound) <- schemeBinderRefs scheme
+            , typeBinderRefsSameIdentity ref routedRef
             ]
+          freeOccurrences =
+            [ ref
+            | ref <- freeTypeVarRefsType (schemeToType scheme)
+            , typeBinderRefsSameIdentity ref routedRef
+            ]
+      unless
+        (null declarations && not (null freeOccurrences))
+        ( failure
+            [ "topology packet does not inherit exactly one ambient consumer route"
+            , "  consumer: " ++ show routedRef
+            , "  declarations: " ++ show declarations
+            , "  free occurrences: " ++ show freeOccurrences
+            ]
+        )
 
     subtractAmbientLeadingBinders ty =
       case ty of
@@ -11390,7 +13382,16 @@ authorizedBodyConsumerRoute authority =
     BodyConsumerEnclosingAmbient route _ -> route
     BodyConsumerPendingOwnerEmission route -> route
     BodyConsumerOrdinaryOwnerEmission route _ -> route
-    BodyConsumerConsumedAtOwner route _ -> route
+    BodyConsumerConsumedAtOwner route _ _ -> route
+
+-- | Exact route sealed inside a refinement certificate.  Keep the
+-- declaration-authority constructor private while allowing consumers to join
+-- a finalized transition to its owner and construction identity.
+bodyConsumerBoundRefinementRoute
+  :: BodyConsumerBoundRefinementCertificate
+  -> BodyConsumerRoute
+bodyConsumerBoundRefinementRoute =
+  authorizedBodyConsumerRoute . bcbrDeclarationAuthority
 
 authorizedBodyConsumerDeclarationBound
   :: BodyConsumerDeclarationAuthority
@@ -11407,7 +13408,7 @@ authorizedBodyConsumerDeclarationBound authority =
       TBottom
     BodyConsumerOrdinaryOwnerEmission _ _ ->
       TBottom
-    BodyConsumerConsumedAtOwner _ completedBound ->
+    BodyConsumerConsumedAtOwner _ completedBound _ ->
       completedBound
 
 -- | Finish construction of a body-consumer projection after the caller has
@@ -11523,7 +13524,7 @@ mkValidatedBodyConsumerProjection sourceBinderRefs constructionAliases construct
       ]
         ++ [ (checkedRef, constructionRef)
            | checkedRef <- checkedSourceRefs
-           , Just checkedNode <- [typeBinderRefNode checkedRef]
+           , Just checkedNode <- [typeBinderRefGraphOrigin checkedRef]
            , Just constructionRef <-
                [ IntMap.lookup
                    (getNodeId checkedNode)
@@ -12278,6 +14279,18 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
       Set.member
         (typeBinderRefIdentity (bcbrAmbientRef certificate))
         retainedRootConsumers
+        || isJust (retainedPacketProjection certificate)
+
+    retainedPacketProjection certificate = do
+      guard retainConsumedSpecializedEndpoint
+      projection@(projectionRef, _) <-
+        bodyConsumerBoundRefinementEscapedPacketBinder certificate
+      guard
+        ( any
+            (typeBinderRefsSameIdentity projectionRef . fst)
+            (schemeBinderRefs scheme0)
+        )
+      pure projection
 
     consumedCertificateGroups =
       foldl insertConsumedCertificateGroup [] consumedCertificates0
@@ -12299,7 +14312,7 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
 
     validateConsumedAuthority certificate =
       case bcbrDeclarationAuthority certificate of
-        BodyConsumerConsumedAtOwner _ authorityBound
+        BodyConsumerConsumedAtOwner _ authorityBound _
           | bodyConsumerBoundRefinementOwnerFinalized certificate
           , operationalEndpointTypesAgree
               authorityBound
@@ -12324,7 +14337,31 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
     -- eliminator @forall d. d@; the finalized certificate advances that
     -- identity to its completed bound before the root emits it.  These are
     -- certified construction transitions, not shape-driven final-type repairs.
-    retainConsumedDeclaration projected certificate =
+    retainConsumedDeclaration projected certificate
+      | Just (projectionRef, projectionBound) <-
+          retainedPacketProjection certificate =
+          case
+              filter
+                (typeBinderRefsSameIdentity projectionRef . fst)
+                projected
+            of
+              [(_, Just currentBound)]
+                | operationalEndpointTypesAgree
+                    (tyToElab currentBound)
+                    (tyToElab projectionBound) ->
+                    pure projected
+              matches ->
+                projectionFailure
+                  "escaped packet declaration does not retain its certified operated bound"
+                  [ "  target: " ++ show projectionRef
+                  , "  projected bound: " ++ show (tyToElab projectionBound)
+                  , "  matching declarations: " ++ show matches
+                  , "  certificate: " ++ show certificate
+                  ]
+      | otherwise =
+          retainOrdinaryConsumedDeclaration projected certificate
+
+    retainOrdinaryConsumedDeclaration projected certificate =
       case
           filter
             ( typeBinderRefsSameIdentity
@@ -12531,12 +14568,16 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
             ]
 
     projectConsumedCertificate scheme certificate = do
+      sourceOpenedScheme <-
+        openCertifiedConsumedDeclarationOccurrences
+          certificate
+          scheme
       let targetRef = bcbrAmbientRef certificate
           completedBound = bcbrCompletedBound certificate
           matchingBinders =
             filter
               (typeBinderRefsSameIdentity targetRef . fst)
-              (schemeBinderRefs scheme)
+              (schemeBinderRefs sourceOpenedScheme)
       projectedBound <-
         case matchingBinders of
           [] -> pure completedBound
@@ -12592,6 +14633,20 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
                       then maybe TBottom tyToElab mbBound
                       else completedBound
                   )
+            | certifiedCompletionClosesAtDeclaredBounds
+                sourceOpenedScheme
+                certificate
+                (maybe TBottom tyToElab mbBound) ->
+                -- The checked owner can consume a flexible completion such
+                -- as @b -> b@ while the root planner still carries its exact
+                -- closed instance @sigma -> sigma@ and separately declares
+                -- @b >= sigma@.  The finalized certificate owns @b -> b@;
+                -- the identity-matched root declaration owns the only
+                -- permitted substitution back to the stale closed state.
+                -- Project the consumed declaration to the certified
+                -- completion rather than requiring those two states to be
+                -- equal after the owner has already entered Hyp(b).
+                pure completedBound
             | otherwise ->
                 projectionFailure
                   "consumed root binder does not carry a certified declaration state"
@@ -12625,10 +14680,10 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
           projected =
             mkElabSchemeWithRefs
               [ (ref, fmap (mapBoundType substitute) mbBound)
-              | (ref, mbBound) <- schemeBinderRefs scheme
+              | (ref, mbBound) <- schemeBinderRefs sourceOpenedScheme
               , not (typeBinderRefsSameIdentity ref targetRef)
               ]
-              (substitute (schemeBody scheme))
+              (substitute (schemeBody sourceOpenedScheme))
           residualTargets =
             [ ref
             | ref <-
@@ -12647,6 +14702,51 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
         )
       pure projected
 
+    -- A consumed completion may mention exact flexible declarations that
+    -- remain in the root scheme.  Closing precisely the completion refs that
+    -- are absent from the planner state at their identity-matched declared
+    -- bounds must reproduce that state.  This is the construction-time
+    -- inverse of the owner's already checked Hyp steps; an arbitrary
+    -- same-shaped bound, an unbounded declaration, or a missing/duplicate
+    -- identity cannot authorize the projection.
+    certifiedCompletionClosesAtDeclaredBounds scheme certificate currentBound =
+      not (null refsToClose)
+        && length declaredBounds == length refsToClose
+        && operationalEndpointTypesAgree closedCompletion currentBound
+      where
+        completion = bcbrCompletedBound certificate
+        currentFreeRefs = freeTypeVarRefsType currentBound
+        refsToClose =
+          foldr insertCompletionRef []
+            [ ref
+            | ref <- freeTypeVarRefsType completion
+            , not
+                ( any
+                    (typeBinderRefsSameIdentity ref)
+                    currentFreeRefs
+                )
+            ]
+        declaredBounds =
+          mapMaybe exactDeclaredBound refsToClose
+        exactDeclaredBound ref =
+          case
+              filter
+                (typeBinderRefsSameIdentity ref . fst)
+                (schemeBinderRefs scheme)
+            of
+              [(_, Just bound)] -> Just (ref, tyToElab bound)
+              _ -> Nothing
+        closedCompletion =
+          foldl
+            ( \ty (ref, declaredBound) ->
+                substTypeCaptureRef ref declaredBound ty
+            )
+            completion
+            declaredBounds
+        insertCompletionRef ref refs
+          | any (typeBinderRefsSameIdentity ref) refs = refs
+          | otherwise = ref : refs
+
     projectionFailure detail context =
       Left
         ( ValidationFailed
@@ -12656,6 +14756,153 @@ projectCertifiedBodyConsumerScheme retainConsumedSpecializedEndpoint retainedRoo
                 ++ context
             )
         )
+
+-- | Open a consumed declaration's closed source-forall completion exactly at
+-- occurrences which are already underneath those same source declarations.
+-- A frozen construction can contain @forall a. b@ while the checked body
+-- certificate consumes @b@ at @forall a. a -> a@.  Substituting that closed
+-- bound directly would create @forall a. forall a. a -> a@: two lexical
+-- declarations with one identity.
+--
+-- The finalized certificate selects @b@, and matching binder identity plus
+-- bound proves that the surrounding @forall a@ is already the first
+-- declaration of the completion.  Open that one layer before the ordinary
+-- capture-avoiding substitution removes @b@.  This is intentionally not a
+-- duplicate-forall normalizer: it starts only at the exact completed leading
+-- spine, and a conflicting declaration after that point fails closed.
+openCertifiedConsumedDeclarationOccurrences
+  :: BodyConsumerBoundRefinementCertificate
+  -> ElabScheme
+  -> Either ElabError ElabScheme
+openCertifiedConsumedDeclarationOccurrences certificate scheme = do
+  binders <- traverse openBinder (schemeBinderRefs scheme)
+  body <- openType Nothing (schemeBody scheme)
+  pure (mkElabSchemeWithRefs binders body)
+  where
+    targetRef = bcbrAmbientRef certificate
+    completedBound = bcbrCompletedBound certificate
+
+    openBinder (ref, mbBound) = do
+      openedBound <- traverse (openBound Nothing) mbBound
+      pure (ref, openedBound)
+
+    openType mbOpened ty =
+      case ty of
+        TVarRef ref
+          | Just opened <- mbOpened
+          , typeBinderRefsSameIdentity ref targetRef ->
+              pure opened
+          | otherwise -> pure ty
+        TArrow domain codomain ->
+          TArrow
+            <$> openType mbOpened domain
+            <*> openType mbOpened codomain
+        TConWithIdentity identity constructor args ->
+          TConWithIdentity identity constructor
+            <$> traverse (openType mbOpened) args
+        TVarAppRef ref args -> do
+          openedArgs <- traverse (openType mbOpened) args
+          pure
+            ( case mbOpened of
+                Just opened
+                  | typeBinderRefsSameIdentity ref targetRef ->
+                      composeTypeHeadRef ref opened openedArgs
+                _ -> TVarAppRef ref openedArgs
+            )
+        TBaseWithIdentity {} -> pure ty
+        TBottom -> pure TBottom
+        TForallRef ref mbBound body -> do
+          (openedBound, openedBody) <-
+            openForall mbOpened ref mbBound body
+          pure (TForallRef ref openedBound openedBody)
+        TMuRef ref body
+          | typeBinderRefsSameIdentity ref targetRef ->
+              pure ty
+          | otherwise -> do
+              rejectConflictingOpenedBinder mbOpened ref body
+              TMuRef ref <$> openType mbOpened body
+
+    openBound mbOpened bound =
+      case bound of
+        TArrow domain codomain ->
+          TArrow
+            <$> openType mbOpened domain
+            <*> openType mbOpened codomain
+        TConWithIdentity identity constructor args ->
+          TConWithIdentity identity constructor
+            <$> traverse (openType mbOpened) args
+        TVarAppRef ref args -> do
+          openedArgs <- traverse (openType mbOpened) args
+          pure
+            ( case mbOpened of
+                Just opened
+                  | typeBinderRefsSameIdentity ref targetRef ->
+                      composeTypeHeadRef ref opened openedArgs
+                _ -> TVarAppRef ref openedArgs
+            )
+        TBaseWithIdentity {} -> pure bound
+        TBottom -> pure TBottom
+        TForallRef ref mbBound body -> do
+          (openedBound, openedBody) <-
+            openForall mbOpened ref mbBound body
+          pure (TForallRef ref openedBound openedBody)
+        TMuRef ref body
+          | typeBinderRefsSameIdentity ref targetRef ->
+              pure bound
+          | otherwise -> do
+              rejectConflictingOpenedBinder mbOpened ref body
+              TMuRef ref <$> openType mbOpened body
+
+    openForall mbOpened ref mbBound body = do
+      openedBound <- traverse (openBound mbOpened) mbBound
+      if typeBinderRefsSameIdentity ref targetRef
+        then pure (openedBound, body)
+        else
+          case matchingOpenedBody mbOpened ref mbBound of
+            Just completedBody
+              | targetOccursFree body -> do
+                  openedBody <- openType (Just completedBody) body
+                  pure (openedBound, openedBody)
+            _ -> do
+              rejectConflictingOpenedBinder mbOpened ref body
+              openedBody <- openType mbOpened body
+              pure (openedBound, openedBody)
+
+    matchingOpenedBody mbOpened ref mbBound =
+      case fromMaybe completedBound mbOpened of
+        TForallRef completedRef completedBinderBound completedBody
+          | typeBinderRefsSameIdentity ref completedRef
+          , binderBoundsAgree mbBound completedBinderBound ->
+              Just completedBody
+        _ -> Nothing
+
+    binderBoundsAgree left right =
+      operationalEndpointTypesAgree
+        (maybe TBottom tyToElab left)
+        (maybe TBottom tyToElab right)
+
+    targetOccursFree =
+      any (typeBinderRefsSameIdentity targetRef)
+        . freeTypeVarRefsType
+
+    rejectConflictingOpenedBinder Nothing _ _ = pure ()
+    rejectConflictingOpenedBinder (Just opened) ref body
+      | targetOccursFree body
+      , any
+          (typeBinderRefsSameIdentity ref)
+          ( typeBinderDeclarationRefs opened
+              ++ freeTypeVarRefsType opened
+          ) =
+          Left
+            ( ValidationFailed
+                [ "consumed source-forall completion has a conflicting lexical declaration"
+                , "  certificate: " ++ show certificate
+                , "  conflicting declaration: " ++ show ref
+                , "  opened completion: " ++ show opened
+                , "  occurrence body: " ++ show body
+                ]
+            )
+      | otherwise = pure ()
 
 projectCertifiedBodyConsumerRootBounds
   :: [LocalGammaClosure]
@@ -12886,28 +15133,29 @@ completeCertifiedSourceOpenBodyConsumerBounds sourceRefs certificates initialBin
       , BodyConsumerEnclosingAmbient route declaredBound <-
           [bcbrDeclarationAuthority certificate]
       , let completedBound = bcbrCompletedBound certificate
-            completedScheme = schemeFromType completedBound
-            completedSourceBinders =
-              map fst (schemeBinderRefs completedScheme)
+            sourceOperatedBound = bcrOperatedType route
+            sourceOperatedScheme = schemeFromType sourceOperatedBound
+            sourceOperatedBinders =
+              map fst (schemeBinderRefs sourceOperatedScheme)
       , operationalEndpointTypesAgree
           (bcbrPreviousBound certificate)
           TBottom
       , operationalEndpointTypesAgree declaredBound completedBound
-      , not (null completedSourceBinders)
-      , all sourceOwns completedSourceBinders
+      , not (null sourceOperatedBinders)
+      , all sourceOwns sourceOperatedBinders
       , all
           ( \sourceRef ->
               any
                 (typeBinderRefsSameIdentity sourceRef)
                 (freeTypeVarRefsType (tyToElab currentBound))
           )
-          completedSourceBinders
+          sourceOperatedBinders
       , operationalEndpointTypesAgree
-          (schemeBody completedScheme)
+          (schemeBody sourceOperatedScheme)
           (tyToElab currentBound)
       , operationalEndpointTypesAgree
-          (bcrOperatedType route)
-          completedBound
+          sourceOperatedBound
+          declaredBound
       , operationalEndpointTypesAgree
           (bcrConstructionOperatedType route)
           completedBound
@@ -13102,6 +15350,250 @@ projectCertifiedBodyConsumerBoundsIfPresent certificates binders =
         certificates
     )
 
+-- | Recover the child-local declaration only from the special packet
+-- projection constructor.  Revalidating the operated binder and bound here
+-- makes certificate renaming fail closed instead of allowing a stale ref to
+-- complete a same-shaped candidate.
+certifiedPacketConsumerProjection
+  :: BodyConsumerBoundRefinementCertificate
+  -> Maybe (TypeBinderRef, BoundType)
+certifiedPacketConsumerProjection certificate = do
+  projectedBound <-
+    case bcbrConstructionProjection certificate of
+      DirectBodyConsumerConstructionProjection -> Nothing
+      PacketOperatedBodyConsumerConstructionProjection bound -> Just bound
+  let authority = bcbrDeclarationAuthority certificate
+      route = authorizedBodyConsumerRoute authority
+      projectedRef = bcrConstructionRef route
+      ambientRef = bcbrAmbientRef certificate
+  guard
+    ( case authority of
+        BodyConsumerInheritedAmbient {} -> True
+        BodyConsumerEnclosingAmbient {} -> True
+        _ -> False
+    )
+  guard
+    ( not (typeBinderRefsSameIdentity projectedRef ambientRef)
+        && typeBinderRefIdentity (bcrSemanticRef route)
+          == typeBinderIdentityFromNode (bcrExteriorNode route)
+        && operationalEndpointTypesAgree
+          (bcrConstructionOperatedType route)
+          (bcbrCompletedBound certificate)
+    )
+  [(_, Just operatedBound)] <-
+    pure
+      [ binder
+      | binder@(ref, _) <-
+          schemeBinderRefs (schemeFromType (bcrOperatedType route))
+      , typeBinderRefsSameIdentity ref projectedRef
+      ]
+  guard
+    ( operationalEndpointTypesAgree
+        (tyToElab projectedBound)
+        (tyToElab operatedBound)
+    )
+  pure (projectedRef, projectedBound)
+
+-- | A finalized cross-identity packet projection can outlive the graph
+-- declaration consumed by its local owner.  The returned declaration is the
+-- exact packet-operated binder that an enclosing construction boundary must
+-- either already own or construct.  Requiring the finalized-and-consumed
+-- state keeps an ordinary ambient use from manufacturing a root forall.
+bodyConsumerBoundRefinementEscapedPacketBinder
+  :: BodyConsumerBoundRefinementCertificate
+  -> Maybe (TypeBinderRef, BoundType)
+bodyConsumerBoundRefinementEscapedPacketBinder certificate = do
+  guard
+    ( bodyConsumerBoundRefinementOwnerFinalized certificate
+        && bodyConsumerBoundRefinementConsumed certificate
+    )
+  projectedBound <-
+    case bcbrConstructionProjection certificate of
+      DirectBodyConsumerConstructionProjection -> Nothing
+      PacketOperatedBodyConsumerConstructionProjection bound -> Just bound
+  route <-
+    case bcbrDeclarationAuthority certificate of
+      BodyConsumerConsumedAtOwner consumedRoute authorityBound _
+        | operationalEndpointTypesAgree
+            authorityBound
+            (bcbrCompletedBound certificate) ->
+            Just consumedRoute
+      _ -> Nothing
+  let projectedRef = bcrConstructionRef route
+  guard
+    ( ( typeBinderRefIdentity (bcrSemanticRef route)
+          == typeBinderIdentityFromNode (bcrExteriorNode route)
+          || ( typeBinderRefsSameIdentity
+                 (bcrSemanticRef route)
+                 (bcbrAmbientRef certificate)
+                 && typeBinderRefsSameIdentity
+                   (bcbrAmbientRef certificate)
+                   projectedRef
+             )
+      )
+        && operationalEndpointTypesAgree
+          (bcrConstructionOperatedType route)
+          (bcbrCompletedBound certificate)
+    )
+  [(_, Just operatedBound)] <-
+    pure
+      [ binder
+      | binder@(ref, _) <-
+          schemeBinderRefs (schemeFromType (bcrOperatedType route))
+      , typeBinderRefsSameIdentity ref projectedRef
+      ]
+  guard
+    ( operationalEndpointTypesAgree
+        (tyToElab projectedBound)
+        (tyToElab operatedBound)
+    )
+  pure (projectedRef, projectedBound)
+
+-- | Proof that one finalized packet-operated consumer joins an already
+-- published ambient result to the exact child-local declaration selected by
+-- an enclosing lambda.  The constructor stays private because the two
+-- identities are intentionally not aliases: callers may only reuse the
+-- ambient result's pre-publication producer after this exact certificate has
+-- matched both endpoints and the target declaration bound.
+data CertifiedPacketConsumerBodyProjection =
+  CertifiedPacketConsumerBodyProjection
+    !TypeBinderRef
+    !ElabType
+    !TypeBinderRef
+    !ElabType
+  deriving (Eq, Show)
+
+certifiedPacketConsumerBodyProjectionSourceRef
+  :: CertifiedPacketConsumerBodyProjection
+  -> TypeBinderRef
+certifiedPacketConsumerBodyProjectionSourceRef
+  (CertifiedPacketConsumerBodyProjection sourceRef _ _ _) = sourceRef
+
+certifiedPacketConsumerBodyProjectionSourceType
+  :: CertifiedPacketConsumerBodyProjection
+  -> ElabType
+certifiedPacketConsumerBodyProjectionSourceType
+  (CertifiedPacketConsumerBodyProjection _ sourceTy _ _) = sourceTy
+
+certifiedPacketConsumerBodyProjectionTargetRef
+  :: CertifiedPacketConsumerBodyProjection
+  -> TypeBinderRef
+certifiedPacketConsumerBodyProjectionTargetRef
+  (CertifiedPacketConsumerBodyProjection _ _ targetRef _) = targetRef
+
+certifiedPacketConsumerBodyProjectionTargetType
+  :: CertifiedPacketConsumerBodyProjection
+  -> ElabType
+certifiedPacketConsumerBodyProjectionTargetType
+  (CertifiedPacketConsumerBodyProjection _ _ _ targetTy) = targetTy
+
+certifyPacketConsumerBodyProjection
+  :: Map.Map TypeBinderRef ElabType
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> CertifiedLambdaBodyConstruction
+  -> ElabType
+  -> BodyConsumerBoundRefinementCertificate
+  -> Maybe CertifiedPacketConsumerBodyProjection
+certifyPacketConsumerBodyProjection ambientBindings candidates bodyConstruction targetTy certificate = do
+  guard
+    ( bodyConsumerBoundRefinementOwnerFinalized certificate
+        && not (bodyConsumerBoundRefinementConsumed certificate)
+    )
+  sourceRef <-
+    case certifiedLambdaBodyConstructedType bodyConstruction of
+      TVarRef ref -> Just ref
+      _ -> Nothing
+  targetRef <-
+    case targetTy of
+      TVarRef ref -> Just ref
+      _ -> Nothing
+  (projectedRef, projectedBound) <-
+    certifiedPacketConsumerProjection certificate
+  guard
+    ( typeBinderRefsSameIdentity sourceRef (bcbrAmbientRef certificate)
+        && typeBinderRefsSameIdentity targetRef projectedRef
+    )
+  let matchingDeclarations =
+        [ (ref, maybe TBottom tyToElab mbBound)
+        | (ref, mbBound) <- candidates
+        , typeBinderRefsSameIdentity ref projectedRef
+        ]
+          ++ [ (ref, bound)
+             | (ref, bound) <- Map.toList ambientBindings
+             , typeBinderRefsSameIdentity ref projectedRef
+             ]
+      declarationStateIsAdmissible (_, currentBound) =
+        operationalEndpointTypesAgree
+          currentBound
+          (bcbrPreviousBound certificate)
+          || operationalEndpointTypesAgree
+            currentBound
+            (tyToElab projectedBound)
+  guard (not (null matchingDeclarations))
+  guard (all declarationStateIsAdmissible matchingDeclarations)
+  pure
+    ( CertifiedPacketConsumerBodyProjection
+        (bcbrAmbientRef certificate)
+        (bcbrCompletedBound certificate)
+        projectedRef
+        (tyToElab projectedBound)
+    )
+
+-- | Attach the exact cross-identity body projection to the already checked
+-- lambda plan.  The projection advances one ambient declaration for the
+-- final lambda check; it never adds that declaration to the lambda's local
+-- @Lambda(Gamma)@ binder spine.
+attachCertifiedPacketConsumerBodyProjection
+  :: CertifiedPacketConsumerBodyProjection
+  -> ExactLambdaConstructionPlan
+  -> Either ElabError ExactLambdaConstructionPlan
+attachCertifiedPacketConsumerBodyProjection projection plan = do
+  unless
+    ( exactLambdaEndpointTypesAgree
+        (exactLambdaConstructionBodyType plan)
+        (TVarRef targetRef)
+        && any
+          (typeBinderRefsSameIdentity targetRef)
+          ( freeTypeVarRefsType
+              (exactLambdaConstructionPublishedType plan)
+          )
+        && not (typeBinderRefsSameIdentity sourceRef targetRef)
+        && maybe True transitionAgrees existingTransition
+        && isNothing
+          (exactLambdaConstructionPacketBodyProjection plan)
+    )
+    ( Left
+        ( ValidationFailed
+            [ "cannot attach certified packet body projection to exact lambda plan"
+            , "  projection: " ++ show projection
+            , "  plan: " ++ show plan
+            ]
+        )
+    )
+  pure
+    plan
+      { exactLambdaConstructionAmbientBodyRefinement =
+          Just transition
+      , exactLambdaConstructionPacketBodyProjection =
+          Just projection
+      }
+  where
+    sourceRef =
+      certifiedPacketConsumerBodyProjectionSourceRef projection
+    sourceTy =
+      certifiedPacketConsumerBodyProjectionSourceType projection
+    targetRef =
+      certifiedPacketConsumerBodyProjectionTargetRef projection
+    targetTy =
+      certifiedPacketConsumerBodyProjectionTargetType projection
+    transition = (targetRef, sourceTy, targetTy)
+    existingTransition =
+      exactLambdaConstructionAmbientBodyRefinement plan
+    transitionAgrees (existingRef, existingSource, existingTarget) =
+      typeBinderRefsSameIdentity existingRef targetRef
+        && exactLambdaEndpointTypesAgree existingSource sourceTy
+        && exactLambdaEndpointTypesAgree existingTarget targetTy
+
 projectCertifiedBodyConsumerBound
   :: Bool
   -> [(TypeBinderRef, Maybe BoundType)]
@@ -13212,6 +15704,9 @@ alphaRenameBodyConsumerBoundRefinementCertificate renames certificate =
     { bcbrDeclarationAuthority =
         alphaRenameDeclarationAuthority
           (bcbrDeclarationAuthority certificate)
+    , bcbrConstructionProjection =
+        alphaRenameConstructionProjection
+          (bcbrConstructionProjection certificate)
     , bcbrPreviousBound = alphaRenameType (bcbrPreviousBound certificate)
     , bcbrCompletedBound = alphaRenameType (bcbrCompletedBound certificate)
     }
@@ -13238,17 +15733,34 @@ alphaRenameBodyConsumerBoundRefinementCertificate renames certificate =
           BodyConsumerOrdinaryOwnerEmission
             (alphaRenameRoute route)
             (alphaRenameOrdinaryOwnerProgress progress)
-        BodyConsumerConsumedAtOwner route completedBound ->
+        BodyConsumerConsumedAtOwner route completedBound progress ->
           BodyConsumerConsumedAtOwner
             (alphaRenameRoute route)
             (alphaRenameType completedBound)
+            (alphaRenameOrdinaryOwnerProgress progress)
 
     alphaRenameRoute route =
       route
-        { bcrOperatedType = alphaRenameType (bcrOperatedType route)
+        { bcrConstructionRef =
+            alphaRenameProjectedConstructionRef
+              (bcrConstructionRef route)
+        , bcrOperatedType = alphaRenameType (bcrOperatedType route)
         , bcrConstructionOperatedType =
             alphaRenameType (bcrConstructionOperatedType route)
         }
+
+    alphaRenameProjectedConstructionRef ref =
+      case bcbrConstructionProjection certificate of
+        DirectBodyConsumerConstructionProjection -> ref
+        PacketOperatedBodyConsumerConstructionProjection _ ->
+          renameRef ref
+
+    alphaRenameConstructionProjection projection =
+      case projection of
+        DirectBodyConsumerConstructionProjection -> projection
+        PacketOperatedBodyConsumerConstructionProjection bound ->
+          PacketOperatedBodyConsumerConstructionProjection
+            (renameBoundTypeBinderRefPayloads renames bound)
 
     alphaRenameOrdinaryOwnerProgress progress =
       case progress of
@@ -13270,20 +15782,256 @@ alphaRenameBodyConsumerBoundRefinementCertificate renames certificate =
           (alphaRenameType targetBound)
           (alphaRenameRoute <$> mbOriginRoute)
 
+    renameRef ref =
+      fromMaybe
+        ref
+        ( snd
+            <$> find
+              (typeBinderRefsSameIdentity ref . fst)
+              renames
+        )
+
+-- | Move the type payloads that depend on a lexically copied owner binder
+-- while retaining the declaration route that the refinement completes.  A
+-- body-local type abstraction may be copied from @a@ to @a'@ even though the
+-- historical consumer declaration remains graph-owned @r@.  The bound of
+-- @r@ must enter the copied dependency domain, but @r@ itself must not become
+-- the body's fresh type abstraction.  This operation is therefore distinct
+-- from both a scoped alpha-copy and a global construction quotient.
+renameBodyConsumerBoundRefinementScopeDependencies
+  :: [(TypeBinderRef, TypeBinderRef)]
+  -> BodyConsumerBoundRefinementCertificate
+  -> BodyConsumerBoundRefinementCertificate
+renameBodyConsumerBoundRefinementScopeDependencies =
+  renameBodyConsumerBoundRefinementCertificateWith False
+
+-- | Select the dependency half of a lexical body copy in the exact Gamma
+-- where its consumer declaration is published.  The copy itself supplies the
+-- only candidate identities; the current declaration bound decides which
+-- presentation is active.  This never discovers a rename from type shape:
+-- both refs come from the alpha-copy constructor, and the declaration is
+-- joined by the certificate's exact target identity.
+alignBodyConsumerBoundRefinementScopeDependencies
+  :: Map.Map TypeBinderRef ElabType
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> BodyConsumerBoundRefinementCertificate
+  -> Either ElabError BodyConsumerBoundRefinementCertificate
+alignBodyConsumerBoundRefinementScopeDependencies =
+  alignBodyConsumerBoundRefinementScopeDependenciesAt
+    RetainClosedCopiedDependency
+
+data CopiedDependencyAlignment
+  = RetainClosedCopiedDependency
+  | OpenClosedCopiedDependency
+
+consumeBodyConsumerBoundRefinementScopeDependencies
+  :: Map.Map TypeBinderRef ElabType
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> BodyConsumerBoundRefinementCertificate
+  -> Either ElabError BodyConsumerBoundRefinementCertificate
+consumeBodyConsumerBoundRefinementScopeDependencies =
+  alignBodyConsumerBoundRefinementScopeDependenciesAt
+    OpenClosedCopiedDependency
+
+alignBodyConsumerBoundRefinementScopeDependenciesAt
+  :: CopiedDependencyAlignment
+  -> Map.Map TypeBinderRef ElabType
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> BodyConsumerBoundRefinementCertificate
+  -> Either ElabError BodyConsumerBoundRefinementCertificate
+alignBodyConsumerBoundRefinementScopeDependenciesAt alignment bindings renames certificate =
+  foldM alignDependency certificate renames
+  where
+    alignDependency current rename@(sourceRef, targetRef)
+      | typeBinderRefsSameIdentity sourceRef targetRef = pure current
+      | not (mentionsRef sourceRef (bcbrCompletedBound current)) =
+          alignClosedDependency current rename
+      | mentionsRef targetRef (bcbrCompletedBound current) = pure current
+      | otherwise =
+          case matchingDeclarationBounds current of
+            [] -> pure current
+            [currentBound]
+              | mentionsRef sourceRef currentBound
+                  && not (mentionsRef targetRef currentBound) ->
+                  pure current
+              | mentionsRef targetRef currentBound
+                  && not (mentionsRef sourceRef currentBound) ->
+                  pure
+                    ( renameBodyConsumerBoundRefinementScopeDependencies
+                        [rename]
+                        current
+                    )
+              | closesOpenCopiedDependency
+                  rename
+                  currentBound
+                  (bcbrCompletedBound current) ->
+                  -- The active declaration can close an otherwise free
+                  -- copied dependency with @forall target@.  Its body is the
+                  -- renamed open completion, so retain the source
+                  -- certificate until the declaration is consumed.
+                  pure
+                    ( case alignment of
+                        RetainClosedCopiedDependency -> current
+                        OpenClosedCopiedDependency ->
+                          renameBodyConsumerBoundRefinementScopeDependencies
+                            [rename]
+                            current
+                    )
+              | anotherCopiedDependencyIsActive
+                  sourceRef
+                  targetRef
+                  currentBound ->
+                  -- Several sibling lexical scopes can copy the same source
+                  -- identity.  A declaration selecting one sibling must not
+                  -- be rejected while the fold visits another sibling's
+                  -- route first; the matching route will move the proof when
+                  -- it is visited.
+                  pure current
+              | operationalEndpointTypesAgree
+                  currentBound
+                  (bcbrPreviousBound current) ->
+                  -- The dependency can be locally bound by the exact
+                  -- previous endpoint (for example @forall a. a -> a@), so
+                  -- neither copy identity is free in the declaration bound.
+                  -- The certificate still proves that this is its source
+                  -- side.  Retain the directional copy route until the
+                  -- consumer transition selects the completed endpoint.
+                  pure current
+              | operationalEndpointTypesAgree currentBound TBottom ->
+                  pure current
+              | otherwise ->
+                  alignmentFailure
+                    current
+                    rename
+                    currentBound
+                    "the active declaration does not select one copied dependency identity"
+            currentBounds ->
+              Left
+                ( ValidationFailed
+                    [ "cannot align a body-consumer refinement to its lexical dependency copy"
+                    , "  detail: the exact consumer declaration is not unique"
+                    , "  target: " ++ show (bcbrAmbientRef current)
+                    , "  candidate rename: " ++ show rename
+                    , "  matching bounds: " ++ show currentBounds
+                    , "  certificate: " ++ show current
+                    ]
+                )
+
+    matchingDeclarationBounds current =
+      [ bound
+      | (ref, bound) <- Map.toList bindings
+      , typeBinderRefsSameIdentity ref (bcbrAmbientRef current)
+      ]
+
+    mentionsRef ref =
+      any (typeBinderRefsSameIdentity ref) . freeTypeVarRefsType
+
+    alignClosedDependency current rename@(sourceRef, targetRef)
+      | not
+          ( any
+              (typeBinderRefsSameIdentity sourceRef)
+              (typeBinderDeclarationRefs completedBound)
+          ) =
+          pure current
+      | any
+          (typeBinderRefsSameIdentity targetRef)
+          ( typeBinderDeclarationRefs completedBound
+              ++ freeTypeVarRefsType completedBound
+          ) =
+          pure current
+      | otherwise =
+          case matchingDeclarationBounds current of
+            [currentBound]
+              | currentBound == completedBound -> pure current
+              | currentBound == copiedCompletedBound ->
+                  -- A closed completion can carry its dependency only as a
+                  -- forall declaration, so free-variable selection cannot
+                  -- observe which lexical presentation is active.  The
+                  -- constructor-provided route and exact identity-bearing
+                  -- closed type select the copy.  Retain it while preparing
+                  -- Gamma, then move the certificate only when that exact
+                  -- consumer declaration is removed.
+                  pure
+                    ( case alignment of
+                        RetainClosedCopiedDependency -> current
+                        OpenClosedCopiedDependency ->
+                          renameBodyConsumerBoundRefinementScopeDependencies
+                            [rename]
+                            current
+                    )
+              | otherwise -> pure current
+            _ -> pure current
+      where
+        completedBound = bcbrCompletedBound current
+        copiedCompletedBound =
+          renameTypeBinderRefPayloads [rename] completedBound
+
+    closesOpenCopiedDependency
+      (sourceRef, targetRef)
+      currentBound
+      completedBound =
+        case currentBound of
+          TForallRef closedRef _ closedBody ->
+            typeBinderRefsSameIdentity closedRef targetRef
+              && operationalEndpointTypesAgree
+                closedBody
+                ( renameTypeBinderRefPayloads
+                    [(sourceRef, targetRef)]
+                    completedBound
+                )
+          _ -> False
+
+    anotherCopiedDependencyIsActive sourceRef targetRef currentBound =
+      any
+        ( \(otherSourceRef, otherTargetRef) ->
+            typeBinderRefsSameIdentity sourceRef otherSourceRef
+              && not
+                ( typeBinderRefsSameIdentity
+                    targetRef
+                    otherTargetRef
+                )
+              && mentionsRef otherTargetRef currentBound
+        )
+        renames
+
+    alignmentFailure current rename currentBound detail =
+      Left
+        ( ValidationFailed
+            [ "cannot align a body-consumer refinement to its lexical dependency copy"
+            , "  detail: " ++ detail
+            , "  target: " ++ show (bcbrAmbientRef current)
+            , "  candidate rename: " ++ show rename
+            , "  current declaration bound: " ++ show currentBound
+            , "  certified completed bound: "
+                ++ show (bcbrCompletedBound current)
+            , "  certificate: " ++ show current
+            ]
+        )
+
 -- | Rename every identity-bearing payload in one proof atomically with the
 -- elaborated term that carries it.  This is a global construction quotient;
--- lexical alpha-copies use
--- 'alphaRenameBodyConsumerBoundRefinementCertificate' instead.
+-- lexical alpha-copies use one of the two scope-specific operations above.
 renameBodyConsumerBoundRefinementCertificate
   :: [(TypeBinderRef, TypeBinderRef)]
   -> BodyConsumerBoundRefinementCertificate
   -> BodyConsumerBoundRefinementCertificate
-renameBodyConsumerBoundRefinementCertificate renames certificate =
+renameBodyConsumerBoundRefinementCertificate =
+  renameBodyConsumerBoundRefinementCertificateWith True
+
+renameBodyConsumerBoundRefinementCertificateWith
+  :: Bool
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> BodyConsumerBoundRefinementCertificate
+  -> BodyConsumerBoundRefinementCertificate
+renameBodyConsumerBoundRefinementCertificateWith renameDeclarationRefs renames certificate =
   certificate
     { bcbrDeclarationAuthority =
         renameDeclarationAuthority
           (bcbrDeclarationAuthority certificate),
-      bcbrAmbientRef = renameRef (bcbrAmbientRef certificate),
+      bcbrAmbientRef = renameDeclarationRef (bcbrAmbientRef certificate),
+      bcbrConstructionProjection =
+        renameConstructionProjection
+          (bcbrConstructionProjection certificate),
       bcbrPreviousBound =
         renameTypeBinderRefPayloads
           renames
@@ -13315,15 +16063,20 @@ renameBodyConsumerBoundRefinementCertificate renames certificate =
           BodyConsumerOrdinaryOwnerEmission
             (renameRoute route)
             (renameOrdinaryOwnerProgress progress)
-        BodyConsumerConsumedAtOwner route completedBound ->
+        BodyConsumerConsumedAtOwner route completedBound progress ->
           BodyConsumerConsumedAtOwner
             (renameRoute route)
             (renameTypeBinderRefPayloads renames completedBound)
+            (renameOrdinaryOwnerProgress progress)
 
     renameRoute route =
       route
-        { bcrSemanticRef = renameRef (bcrSemanticRef route),
-          bcrConstructionRef = renameRef (bcrConstructionRef route),
+        { -- The semantic endpoint is the immutable graph identity of
+          -- 'bcrExteriorNode'.  A construction quotient moves only the
+          -- routed declaration; renaming the semantic anchor would detach
+          -- the certificate from the edge occurrence that created it.
+          bcrConstructionRef =
+            renameDeclarationRef (bcrConstructionRef route),
           bcrOperatedType =
             renameTypeBinderRefPayloads
               renames
@@ -13339,7 +16092,27 @@ renameBodyConsumerBoundRefinementCertificate renames certificate =
         OrdinaryOwnerEmissionProgress sources transitions ->
           OrdinaryOwnerEmissionProgress
             (map (renameTypeBinderRefPayloads renames) sources)
-            (map (renameCertifiedGammaBoundTransition renames) transitions)
+            (map renameTransition transitions)
+
+    renameTransition
+      ( CertifiedGammaBoundTransition
+          ref
+          sourceBound
+          targetBound
+          mbOriginRoute
+        ) =
+        CertifiedGammaBoundTransition
+          (renameDeclarationRef ref)
+          (renameTypeBinderRefPayloads renames sourceBound)
+          (renameTypeBinderRefPayloads renames targetBound)
+          (renameRoute <$> mbOriginRoute)
+
+    renameConstructionProjection projection =
+      case projection of
+        DirectBodyConsumerConstructionProjection -> projection
+        PacketOperatedBodyConsumerConstructionProjection bound ->
+          PacketOperatedBodyConsumerConstructionProjection
+            (renameBoundTypeBinderRefPayloads renames bound)
 
     renameRef ref =
       fromMaybe
@@ -13349,6 +16122,10 @@ renameBodyConsumerBoundRefinementCertificate renames certificate =
               (typeBinderRefsSameIdentity ref . fst)
               renames
         )
+
+    renameDeclarationRef
+      | renameDeclarationRefs = renameRef
+      | otherwise = id
 
 -- | Checked result authority published by the exact nested application
 -- constructor.  A prepared non-empty local Gamma proves the residual by
@@ -13927,6 +16704,20 @@ completeLambdaParamBoundaryType
   -> ElabType
 completeLambdaParamBoundaryType =
   completeLambdaParamBoundaryTypeWithRootClosure False
+
+-- | Replay exact parameter construction without closing source identities
+-- that are already lexical in the recursively checked owner.  The caller
+-- supplies those identities from owner-final provenance; this function never
+-- infers lexical scope from the candidate type itself.
+completeLambdaParamBoundaryTypeInScope
+  :: [TypeBinderRef]
+  -> [LambdaParamBoundaryCertificate]
+  -> ElabType
+  -> ElabType
+completeLambdaParamBoundaryTypeInScope lexicalRefs =
+  completeLambdaParamBoundaryTypeWithRootClosureInScope
+    False
+    lexicalRefs
 
 -- | Complete a type stored as a Gamma declaration bound.  Unlike a general
 -- endpoint, the root of a bound is itself in the lexical position authorized
@@ -14898,7 +17689,19 @@ completeLambdaParamBoundarySchemeInfo
   :: [LambdaParamBoundaryCertificate]
   -> SchemeInfo
   -> SchemeInfo
-completeLambdaParamBoundarySchemeInfo certificates schemeInfo =
+completeLambdaParamBoundarySchemeInfo =
+  completeLambdaParamBoundarySchemeInfoInScope []
+
+-- | Complete a construction scheme without re-closing parameter identities
+-- that are already lexical in the consuming Gamma.  The caller supplies that
+-- scope from its checked environment; the scheme's type shape is not used to
+-- infer which free identities are ambient.
+completeLambdaParamBoundarySchemeInfoInScope
+  :: [TypeBinderRef]
+  -> [LambdaParamBoundaryCertificate]
+  -> SchemeInfo
+  -> SchemeInfo
+completeLambdaParamBoundarySchemeInfoInScope lexicalRefs certificates schemeInfo =
   rebuildSchemeInfoFromRefSubst
     schemeInfo
     completedScheme
@@ -14906,7 +17709,8 @@ completeLambdaParamBoundarySchemeInfo certificates schemeInfo =
   where
     completedScheme0 =
       schemeFromType
-        ( completeLambdaParamBoundaryType
+        ( completeLambdaParamBoundaryTypeInScope
+            lexicalRefs
             certificates
             (schemeToType (siScheme schemeInfo))
         )

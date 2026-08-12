@@ -160,6 +160,7 @@ import MLF.Types.Identity
     UniqueIdentity (..),
     envRefFromIdentity,
     envRefIdentity,
+    initialIdentityGenerator,
     localRefFromNodeId,
     typeBinderIdentityFromStructural,
     typeBinderIdentityStableName,
@@ -3638,6 +3639,52 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 ElabTypes.typeBinderRefsSameIdentity outerRef sharedGraphRef
                   `shouldBe` True
               _ -> expectationFailure "exact recursive construction lost the outer forall"
+
+    it "constructs an exact recursive owner from fresh graph-copy provenance" $ do
+      let graphRef = graphTypeBinderRef 992262 "graph-rec"
+          (producerRef, _) =
+            ElabTypes.freshenTypeBinderRef
+              graphRef
+              initialIdentityGenerator
+          exactRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 992362))
+              "exact-rec"
+          intTy = TestElab.tBase (BaseTy "Int")
+          producerTy =
+            ElabTypes.tMuWithRef
+              producerRef
+              (Elab.TArrow (ElabTypes.tVarWithRef producerRef) intTy)
+          exactTy =
+            ElabTypes.tMuWithRef
+              exactRef
+              (Elab.TArrow (ElabTypes.tVarWithRef exactRef) intTy)
+          producer =
+            ResolvedVar
+              { resolvedVarType = producerTy
+              , resolvedVarDetails = LocalId (localRefFromNodeId "producer" (NodeId 992263))
+              }
+          authority =
+            IntMap.singleton
+              (getNodeId (NodeId 992262))
+              exactRef
+          env =
+            Elab.mkTypeCheckEnvWithResolvedTerms
+              [(producer, producerTy)]
+              Map.empty
+      ElabTypes.typeBinderRefNode producerRef `shouldBe` Nothing
+      ElabTypes.typeBinderRefGraphOrigin producerRef `shouldBe` Just (NodeId 992262)
+      case
+          Annotation.elaborateClosedExactAnnotationTermAtTypeWithRecursiveOwnerAuthority
+            authority
+            env
+            exactTy
+            (EdgeId 992362)
+            (Elab.EVarNode producer)
+        of
+          Left err -> expectationFailure ("fresh graph-copy construction failed: " ++ show err)
+          Right constructed ->
+            Elab.typeCheckWithEnv env constructed `shouldBe` Right exactTy
 
     it "publishes an env-owned recursive producer through an exact lexical binding" $ do
       let producerRef = graphTypeBinderRef 992161 "producer-rec"

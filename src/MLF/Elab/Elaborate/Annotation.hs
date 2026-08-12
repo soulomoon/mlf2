@@ -170,6 +170,7 @@ import MLF.Elab.TermClosure
     alphaRenameTermRecursiveTypeBinderScopes,
     alignTopTyAbsToScheme,
     closeTermWithSchemeSubstRefsIfNeeded,
+    publishTermAtExactType,
     refreshLocalResolvedVarType,
     renameTermTypeVars,
     substInTermRefs,
@@ -188,16 +189,12 @@ import MLF.Elab.Types
     Ty (..),
     elabToBound,
     eTyAbsWithRef,
-    generatedIdentitiesInTerm,
-    generatedIdentitiesInType,
     instAbstrWithRef,
     instUnderWithRef,
-    localResolvedVarFromRef,
     mapResolvedVarType,
     mapBoundType,
     mkElabSchemeWithRefs,
     renameTypeBinderRef,
-    resolvedVarDetails,
     resolvedVarType,
     schemeBinderRefs,
     schemeBody,
@@ -210,6 +207,7 @@ import MLF.Elab.Types
     typeBinderRefFromIdentity,
     typeBinderRefIdentity,
     typeBinderRefName,
+    typeBinderRefGraphOrigin,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
     typeBinderRefsSameIdentityAndName,
@@ -244,11 +242,9 @@ import MLF.Types.Identity
   ( IdDetails,
     IdentityGenerator,
     TypeBinderIdentity,
-    freshLocalRef,
-    idDetailsGeneratedIdentities,
     idDetailsIdentityKey,
-    identityGeneratorAfter,
-    typeBinderGeneratedIdentities,
+    typeBinderIdentityIsCanonicalStructural,
+    typeBinderIdentityStructural,
   )
 import MLF.Util.Trace (TraceConfig, traceElab)
 
@@ -1071,6 +1067,14 @@ schemeInfoForInstantiationAt boundary annotationContext namedSetReify resolvedLo
           sourceNode
           targetNode =
             case sourceExpr of
+              ALam _ _ _ ownerScope _ _ _ ->
+                -- The annotated tree records the lambda body's exact lexical
+                -- owner.  A canonical result node can also occur at an
+                -- enclosing application/let scope after union-find merging;
+                -- recovering the owner from that node would therefore be an
+                -- ambiguous, post-hoc guess.  Generalize this source at the
+                -- constructor scope carried by the lambda itself.
+                pure (genRef ownerScope)
               AApp _ _ functionSite _ applicationNode -> do
                 applicationScopes <-
                   resolveApplicationConstructionScopes
@@ -1437,7 +1441,7 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
 
     validateCandidate candidate = do
       applied <- either (const Nothing) Just (applyInstantiation sourceTy candidate)
-      if alphaEqType applied targetTy
+      if exactTypesAgree applied targetTy
         then Just candidate
         else Nothing
 
@@ -1476,7 +1480,7 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
           expectedTy
       candidate <- instForTypeArguments currentTy args
       applied <- either (const Nothing) Just (applyInstantiation currentTy candidate)
-      if alphaEqType applied expectedTy
+      if exactTypesAgree applied expectedTy
         then Just candidate
         else Nothing
 
@@ -1490,7 +1494,7 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
       go initialTy InstId
       where
         go currentTy candidate
-          | alphaEqType currentTy expectedTy = Just candidate
+          | exactTypesAgree currentTy expectedTy = Just candidate
           | Just inferred <-
               inferredTypeApplicationFrom currentTy expectedTy =
               Just (composeInst candidate inferred)
@@ -1524,7 +1528,7 @@ inferPreservingAnnotationInstFor boundaryRole sourceTy targetTy
       case currentTy of
         TForallRef _ (Just bound) _
           | let boundTy = tyToElab bound ->
-              if alphaEqType arg boundTy
+              if exactTypesAgree arg boundTy
                 then Just (boundMatchingElimination currentTy)
                 else do
                   boundInst <- inferPreservingAnnotationInst boundTy arg
@@ -1703,46 +1707,67 @@ elaborateClosedExactAnnotationTermAtTypeFor boundaryRole recursiveOwnerAuthority
               ++ show sourceTerm
           )
       Right ty -> pure ty
-  constructed <-
+  shapeConstructed <-
     if alphaEqType sourceActual expectedTy
-      then do
+        || churchAwareEqType sourceActual expectedTy
+      then pure sourceTerm
+      else
+        constructExactAnnotationTermFor
+          boundaryRole
+          tcEnv
+          sourceActual
+          expectedTy
+          sourceTerm
+  shapeActual <-
+    case TypeCheck.typeCheckWithEnv tcEnv shapeConstructed of
+      Left err ->
+        exactFailure "specialized shape construction is not typable" expectedTy (show err)
+      Right ty -> pure ty
+  constructed <-
+    if alphaEqType shapeActual expectedTy
+      then
         constructExactRecursivePresentations
           recursiveOwnerAuthority
           tcEnv
           eid
-          sourceActual
+          shapeActual
           expectedTy
-          sourceTerm
+          shapeConstructed
       else
-        if churchAwareEqType sourceActual expectedTy
-          then pure sourceTerm
+        if churchAwareEqType shapeActual expectedTy
+            || implicitForallClosureMatches expectedTy shapeActual
+          then pure shapeConstructed
           else
-            constructExactAnnotationTermFor
-              boundaryRole
-              tcEnv
-              sourceActual
+            exactFailure
+              "specialized shape construction disagrees with exact type"
               expectedTy
-              sourceTerm
+              ( show shapeActual
+                  ++ "; source-type="
+                  ++ show sourceActual
+                  ++ "; source-construction="
+                  ++ exactTermConstructionSummary sourceTerm
+                  ++ "; shape-construction="
+                  ++ exactTermConstructionSummary shapeConstructed
+              )
   case TypeCheck.typeCheckWithEnv tcEnv constructed of
-    Left err -> exactFailure "specialized construction is not typable" expectedTy (show err)
+    Left err -> exactFailure "exact owner construction is not typable" expectedTy (show err)
     Right actualTy
-      | alphaEqType actualTy expectedTy
-          || churchAwareEqType actualTy expectedTy
-          || implicitForallClosureMatches expectedTy actualTy -> do
-          if alphaEqType actualTy expectedTy
-            then requireExactRecursivePresentations eid actualTy expectedTy
-            else pure ()
+      | alphaEqType actualTy expectedTy -> do
+          requireExactRecursivePresentations eid actualTy expectedTy
+          pure constructed
+      | churchAwareEqType actualTy expectedTy
+          || implicitForallClosureMatches expectedTy actualTy ->
           pure constructed
       | otherwise ->
           exactFailure
-            "specialized construction disagrees with exact type"
+            "exact owner construction disagrees with exact type"
             expectedTy
             ( show actualTy
                 ++ "; source-type="
                 ++ show sourceActual
                 ++ "; source-construction="
                 ++ exactTermConstructionSummary sourceTerm
-                ++ "; specialized-construction="
+                ++ "; exact-construction="
                 ++ exactTermConstructionSummary constructed
             )
   where
@@ -1856,19 +1881,44 @@ constructExactRecursivePresentations authority tcEnv eid sourceTy targetTy term 
     either recursiveOwnerFailure Right
       (collectRecursivePresentationRenames (Just authority) sourceTy targetTy)
   let renamed = alphaRenameTermRecursiveTypeBinderScopes renames term
-  pure
-    ( case TypeCheck.typeCheckWithEnv tcEnv renamed of
-        Right renamedTy
-          | alphaEqType renamedTy targetTy
-          , Left _ <-
-              collectRecursivePresentationRenames
-                Nothing
-                renamedTy
-                targetTy ->
-              publishExactRecursivePresentation tcEnv targetTy renamed
-        _ -> renamed
-    )
+  renamedTy <-
+    case TypeCheck.typeCheckWithEnv tcEnv renamed of
+      Right ty -> pure ty
+      Left cause ->
+        recursiveOwnerFailure
+          ( "recursive owner construction is not typable: "
+              ++ show cause
+          )
+  case requireExactRecursivePresentations eid renamedTy targetTy of
+    Right () -> pure renamed
+    Left _ -> do
+      let published =
+            publishTermAtExactType
+              tcEnv
+              "$exact-recursive-owner"
+              targetTy
+              renamed
+      publishedTy <-
+        case TypeCheck.typeCheckWithEnv tcEnv published of
+          Right ty -> pure ty
+          Left cause ->
+            recursiveOwnerFailure
+              ( "lexical recursive owner publication is not typable: "
+                  ++ show cause
+              )
+      case requireExactRecursivePresentations eid publishedTy targetTy of
+        Right () -> pure published
+        Left cause ->
+          recursiveOwnerFailure
+            ( "lexical recursive owner publication retained a mismatched owner; publication type="
+                ++ show publishedTy
+                ++ "; exact type="
+                ++ show targetTy
+                ++ "; cause="
+                ++ show cause
+            )
   where
+    recursiveOwnerFailure :: String -> Either ElabError a
     recursiveOwnerFailure detail =
       Left
         ( PhiInvariantError
@@ -1878,43 +1928,6 @@ constructExactRecursivePresentations authority tcEnv eid sourceTy targetTy term 
                 ++ detail
             )
         )
-
--- | An occurrence whose type is supplied by the term environment cannot
--- change that type by editing its resolved payload: the checker deliberately
--- reloads the authoritative environment entry. Publish the provenance-approved
--- presentation through a fresh lexical let instead. The RHS is still checked
--- at its original alpha-equivalent type, while the body can only observe the
--- exact recursive owner carried by the new scheme.
-publishExactRecursivePresentation
-  :: TypeCheck.Env
-  -> ElabType
-  -> XmlfTerm
-  -> XmlfTerm
-publishExactRecursivePresentation tcEnv exactTy term =
-  ELet exactResolved exactScheme term (EVarNode exactResolved)
-  where
-    exactScheme = schemeFromType exactTy
-    exactResolved = localResolvedVarFromRef exactLocalRef exactTy
-    (exactLocalRef, _) =
-      freshLocalRef
-        "$exact-recursive-owner"
-        (identityGeneratorAfter reservedIdentities)
-    reservedIdentities =
-      generatedIdentitiesInTerm term
-        ++ generatedIdentitiesInType exactTy
-        ++ concat
-          [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
-              ++ generatedIdentitiesInType ty
-          | (resolved, ty) <-
-              TypeCheck.resolvedTermEnvEntries
-                (TypeCheck.resolvedTermEnv tcEnv)
-          ]
-        ++ concatMap
-          generatedIdentitiesInType
-          (Map.elems (TypeCheck.typeEnv tcEnv))
-        ++ concatMap
-          (typeBinderGeneratedIdentities . typeBinderRefIdentity)
-          (Map.keys (TypeCheck.typeEnv tcEnv))
 
 -- | The final exact check never repairs a producer. Every corresponding
 -- recursive declaration must already carry the exact owner identity selected
@@ -1958,30 +1971,33 @@ collectRecursivePresentationRenames mbAuthority = go []
                 case mbAuthority of
                   Just refs -> pure refs
                   Nothing -> recursiveOwnerMismatch sourceRef targetRef
-              graphNode <-
-                case typeBinderRefNode sourceRef of
-                  Just node -> pure node
-                  Nothing -> recursiveOwnerMismatch sourceRef targetRef
               authorizedRef <-
-                case IntMap.lookup (getNodeId graphNode) authority of
-                  Just ref
-                    | typeBinderRefsSameIdentity ref targetRef -> pure ref
-                    | otherwise ->
+                case structuralCopyTarget sourceRef targetRef of
+                  Just structuralTarget -> pure structuralTarget
+                  Nothing -> do
+                    graphNode <-
+                      case typeBinderRefGraphOrigin sourceRef of
+                        Just node -> pure node
+                        Nothing -> recursiveOwnerMismatch sourceRef targetRef
+                    case IntMap.lookup (getNodeId graphNode) authority of
+                      Just ref
+                        | typeBinderRefsSameIdentity ref targetRef -> pure ref
+                        | otherwise ->
+                            Left
+                              ( "producer recursive graph owner is labelled with a different exact identity: graph="
+                                  ++ show sourceRef
+                                  ++ ", sidecar="
+                                  ++ show ref
+                                  ++ ", expected="
+                                  ++ show targetRef
+                              )
+                      Nothing ->
                         Left
-                          ( "producer recursive graph owner is labelled with a different exact identity: graph="
+                          ( "producer recursive graph owner has no exact declaration authority: graph="
                               ++ show sourceRef
-                              ++ ", sidecar="
-                              ++ show ref
                               ++ ", expected="
                               ++ show targetRef
                           )
-                  Nothing ->
-                    Left
-                      ( "producer recursive graph owner has no exact declaration authority: graph="
-                          ++ show sourceRef
-                          ++ ", expected="
-                          ++ show targetRef
-                      )
               renames' <- addRename sourceRef authorizedRef renames
               go
                 renames'
@@ -2014,6 +2030,23 @@ collectRecursivePresentationRenames mbAuthority = go []
           renames' <- goBounds renames sourceBound targetBound'
           go renames' sourceBody targetBody'
         _ -> pure renames
+
+    -- A freshened structural identity carries the canonical owner and binder
+    -- role that it was copied from.  That typed provenance authorizes the
+    -- exact boundary to rebuild the canonical recursive presentation.  A
+    -- generated identity, graph identity without its declaration sidecar, or
+    -- freshened target cannot use this route.
+    structuralCopyTarget sourceRef targetRef = do
+      guard
+        ( typeBinderIdentityIsCanonicalStructural
+            (typeBinderRefIdentity targetRef)
+        )
+      sourceOwner <-
+        typeBinderIdentityStructural (typeBinderRefIdentity sourceRef)
+      targetOwner <-
+        typeBinderIdentityStructural (typeBinderRefIdentity targetRef)
+      guard (sourceOwner == targetOwner)
+      pure targetRef
 
     goBounds renames Nothing Nothing = pure renames
     goBounds renames (Just sourceBound) (Just targetBound) =
@@ -2154,6 +2187,40 @@ constructExactAnnotationTermForWithIntroducedBinders boundaryRole introducedTarg
                   targetBody
                   term
               pure (ETyAbsRef targetRef targetBound body')
+        ( TForallRef sourceRef (Just sourceBound) _,
+          _,
+          ETyAbsRef termRef _ _
+          )
+            | typeBinderRefsSameIdentity sourceRef termRef -> do
+                let elimination =
+                      case boundaryRole of
+                        AnnotationProducerBoundary -> InstElim
+                        AnnotationApplicationArgumentBoundary ->
+                          InstApp (tyToElab sourceBound)
+                eliminatedTy <-
+                  case applyInstantiation sourceTy elimination of
+                    Right ty -> pure ty
+                    Left cause ->
+                      exactConstructionFailure
+                        sourceTy
+                        targetTy
+                        ( "leading bounded elimination failed: "
+                            ++ show cause
+                        )
+                let eliminatedTerm0 = ETyInst term elimination
+                    eliminatedTerm =
+                      fromMaybe
+                        eliminatedTerm0
+                        ( Reduce.reduceLeadingTypeInstantiationRedexes
+                            eliminatedTerm0
+                        )
+                constructExactAnnotationTermForWithIntroducedBinders
+                  boundaryRole
+                  introducedTargetRefs
+                  tcEnv
+                  eliminatedTy
+                  targetTy
+                  eliminatedTerm
         (TArrow sourceDom sourceCod, TArrow targetDom targetCod, ELam resolved body)
           | alphaEqType sourceDom targetDom || churchAwareEqType sourceDom targetDom -> do
               let resolved' = mapResolvedVarType (const targetDom) resolved
@@ -2212,10 +2279,81 @@ constructExactAnnotationTermForWithIntroducedBinders boundaryRole introducedTarg
                     Left err ->
                       exactConstructionFailure sourceTy targetTy (show err)
             Nothing ->
-              exactConstructionFailure
-                sourceTy
-                targetTy
-                "no preserving xMLF construction"
+              do
+                mbStructuralConstruction <-
+                  constructStructuralRecursivePresentations
+                case mbStructuralConstruction of
+                  Just (constructedTy, constructedTerm) ->
+                    constructExactAnnotationTermForWithIntroducedBinders
+                      boundaryRole
+                      introducedTargetRefs
+                      tcEnv
+                      constructedTy
+                      targetTy
+                      constructedTerm
+                  Nothing ->
+                    case targetTy of
+                      TForallRef targetRef targetBound targetBody -> do
+                        -- A higher-kinded phantom parameter can remain in the
+                        -- declared source contract after its structural
+                        -- runtime representation has erased the occurrence.
+                        -- Prefer every ordinary preserving computation above;
+                        -- only when none exists, construct the annotation
+                        -- body under the exact target binder and introduce
+                        -- that binder lexically.
+                        let boundTy = maybe TBottom tyToElab targetBound
+                            tcEnv' =
+                              TypeCheck.insertTypeBindingRef
+                                targetRef
+                                boundTy
+                                tcEnv
+                        body' <-
+                          constructExactAnnotationTermForWithIntroducedBinders
+                            boundaryRole
+                            (targetRef : introducedTargetRefs)
+                            tcEnv'
+                            sourceTy
+                            targetBody
+                            term
+                        pure (ETyAbsRef targetRef targetBound body')
+                      _ ->
+                        exactConstructionFailure
+                          sourceTy
+                          targetTy
+                          "no preserving xMLF construction"
+
+    -- Imported algebraic encodings can be alpha-copied while a source
+    -- annotation is constructed.  Before choosing any N computation, replay
+    -- only the recursive-binder renames certified by structural owner and
+    -- role provenance.  Supplying an empty graph authority makes graph-owner
+    -- guessing unrepresentable here; those identities remain the
+    -- responsibility of the edge-authority construction.
+    constructStructuralRecursivePresentations =
+      case
+          collectRecursivePresentationRenames
+            (Just IntMap.empty)
+            sourceTy
+            targetTy
+        of
+          Right renames@(_ : _) -> do
+            let constructedTerm =
+                  alphaRenameTermRecursiveTypeBinderScopes
+                    renames
+                    term
+            constructedTy <-
+              case TypeCheck.typeCheckWithEnv tcEnv constructedTerm of
+                Left cause ->
+                  exactConstructionFailure
+                    sourceTy
+                    targetTy
+                    ( "structural recursive presentation construction is not typable: "
+                        ++ show cause
+                    )
+                Right ty -> pure ty
+            if constructedTy == sourceTy
+              then pure Nothing
+              else pure (Just (constructedTy, constructedTerm))
+          _ -> pure Nothing
 
     boundsAgree Nothing Nothing = True
     boundsAgree (Just left) (Just right) =
@@ -2249,6 +2387,29 @@ constructExactAnnotationTermForWithIntroducedBinders boundaryRole introducedTarg
                 ++ show target
                 ++ "; reason="
                 ++ reason
+                ++ "; leading bound elimination="
+                ++ show
+                  ( do
+                      TForallRef _ (Just _) _ <- pure source
+                      let elimination =
+                            case boundaryRole of
+                              AnnotationApplicationArgumentBoundary ->
+                                case source of
+                                  TForallRef _ (Just bound) _ ->
+                                    InstApp (tyToElab bound)
+                                  _ -> InstElim
+                              AnnotationProducerBoundary -> InstElim
+                      applied <-
+                        either
+                          (const Nothing)
+                          Just
+                          (applyInstantiation source elimination)
+                      pure
+                        ( elimination
+                        , alphaEqType applied target
+                        , churchAwareEqType applied target
+                        )
+                  )
                 ++ "; term outer shape="
                 ++ termOuterShape term
             )

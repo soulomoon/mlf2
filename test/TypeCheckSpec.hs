@@ -31,6 +31,7 @@ import MLF.Elab.Pipeline
     , schemeToType
     , typeCheck
     , typeCheckWithEnv
+    , checkInstantiation
     , unionEnvs
     )
 import MLF.Elab.Run.Pipeline.TestSupport
@@ -43,6 +44,7 @@ import MLF.Elab.Run.Pipeline.TestSupport
     , preparedExternalTypeCheckEnv
     , preparedSourceTypeIdentityMaps
     , freshenTypeAbsAgainstEnvFromSupply
+    , constructLexicalForallCopyInstantiation
     , restrictPreparedExternalBindings
     , runPipelineElabDetailedWithExternalBindings
     , runPipelineElabDetailedWithPreparedExternalBindings
@@ -50,6 +52,7 @@ import MLF.Elab.Run.Pipeline.TestSupport
     )
 import MLF.Elab.TermClosure
     ( alphaRenameTermTypeBinderScopes
+    , alphaRenameTypeBinderScopes
     , alignTermTypeVarsToScheme
     , alignTopTyAbsToScheme
     , closeTermWithSchemeSubstRefsIfNeeded
@@ -80,6 +83,7 @@ import MLF.Types.Elab
     , schemeBinderRefs
     , tForallWithRef
     , tVarWithRef
+    , tyToElab
     , typeBinderIdentityFromNode
     , typeBinderIdentityFromUnique
     , typeBinderIdentityKey
@@ -273,6 +277,41 @@ spec = describe "Phase 7 typecheck" $ do
             case typeCheck (ETyInst (ELit (LInt 1)) (InstBot intTy)) of
                 Left TCInstantiationError{} -> pure ()
                 other -> expectationFailure ("Expected InstBot rejection on non-bottom term type, got: " ++ show other)
+
+        it "constructs a fresh lexical copy of a complete forall spine" $ do
+            let sourceRef = typeRef 991879 "a"
+                sourceTy =
+                    tForallWithRef
+                        sourceRef
+                        Nothing
+                        (TArrow (tVarWithRef sourceRef) (tVarWithRef sourceRef))
+                env = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+            case
+                constructLexicalForallCopyInstantiation
+                    env
+                    TypeOps.alphaEqType
+                    sourceTy
+                    sourceTy
+                of
+                Nothing ->
+                    expectationFailure "Expected an explicit lexical-forall copy computation"
+                Just (_, InstId) ->
+                    expectationFailure "Expected M/N construction rather than identity"
+                Just (bodyCopies, instantiation) ->
+                    let copiedSourceTy =
+                            alphaRenameTypeBinderScopes
+                                bodyCopies
+                                sourceTy
+                     in case checkInstantiation env copiedSourceTy instantiation of
+                        Right copiedTy@(TForallRef copiedRef Nothing copiedBody) -> do
+                            typeBinderRefIdentity copiedRef
+                                `shouldNotBe` typeBinderRefIdentity sourceRef
+                            copiedBody
+                                `shouldBe` TArrow (tVarWithRef copiedRef) (tVarWithRef copiedRef)
+                            TypeOps.alphaEqType sourceTy copiedTy `shouldBe` True
+                        other ->
+                            expectationFailure
+                                ("Expected one checked fresh forall copy, got: " ++ show other)
 
     it "reports unbound variables" $ do
         case typeCheck (mkTestDeferredVar "x") of
@@ -925,7 +964,7 @@ spec = describe "Phase 7 typecheck" $ do
             term
             `shouldBe` term
 
-    it "closes a bounded result over an annotated polymorphic self-application" $ do
+    it "does not invent a bounded result without result-construction provenance" $ do
         let annotationRef =
                 typeBinderRefFromIdentity
                     (typeBinderIdentityFromUnique (UniqueIdentity 0))
@@ -965,7 +1004,63 @@ spec = describe "Phase 7 typecheck" $ do
                             openTerm
                 closed `shouldBe` openTerm
                 typeCheckWithEnv emptyTcEnv closed
-                    `shouldBe` Right (TArrow annotationTy annotationTy)
+                    `shouldBeRightAlphaEq` TArrow annotationTy annotationTy
+
+    it "constructs the paper g g result from certified publication provenance" $ do
+        let annotationRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromUnique (UniqueIdentity 0))
+                    "a"
+            resultRef =
+                typeBinderRefFromIdentity
+                    (typeBinderIdentityFromNode (NodeId 11))
+                    "result"
+            annotationTy =
+                TForallRef
+                    annotationRef
+                    Nothing
+                    (TArrow (tVarWithRef annotationRef) (tVarWithRef annotationRef))
+            binder = generatedResolvedLocal 0 "g" "g" annotationTy
+            application =
+                EApp
+                    (ETyInst (EVarNode binder) (InstApp annotationTy))
+                    (EVarNode binder)
+            openTerm = ELam binder application
+            emptyTcEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
+        case elabToBound annotationTy of
+            Left err -> expectationFailure err
+            Right annotationBound -> do
+                let rootScheme =
+                        mkElabSchemeWithRefs
+                            [(resultRef, Just annotationBound)]
+                            (TArrow annotationTy (tVarWithRef resultRef))
+                    rootSubst = IntMap.singleton 11 resultRef
+                    (closed, _) =
+                        constructTermWithCertifiedResultSchemeAtPublicationWithRoutes
+                            emptyTcEnv
+                            rootSubst
+                            rootScheme
+                            openTerm
+                case closed of
+                    ETyAbsRef closedRef (Just closedBound)
+                        (ELam closedBinder (ETyInst closedApplication (InstAbstrRef abstractedRef))) -> do
+                            typeBinderRefIdentity closedRef
+                                `shouldBe` typeBinderRefIdentity resultRef
+                            typeBinderRefIdentity abstractedRef
+                                `shouldBe` typeBinderRefIdentity resultRef
+                            TypeOps.alphaEqType
+                                (tyToElab closedBound)
+                                annotationTy
+                                `shouldBe` True
+                            closedBinder `shouldBe` binder
+                            closedApplication `shouldBe` application
+                    other ->
+                        expectationFailure
+                            ( "expected the certified paper g g construction, got "
+                                ++ show other
+                            )
+                typeCheckWithEnv emptyTcEnv closed
+                    `shouldBeRightAlphaEq` schemeToType rootScheme
 
     it "collects owner identities from type heads" $ do
         let ownerIdentity = generatedSymbolIdentity 6001 SymbolType "Main" "Box" Nothing
@@ -2626,6 +2721,33 @@ spec = describe "Phase 7 typecheck" $ do
             term = EApp (ELam parameter (EVarNode parameter)) argument
         typeCheckWithEnv env term `shouldBe` Right (tVarWithRef boundedRef)
 
+    it "accepts Hyp across the narrow Church recursive representation transition" $ do
+        let sourceSelfRef = typeRef 991833 "source-self"
+            boundSelfRef = typeRef 991834 "bound-self"
+            resultRef = typeRef 991835 "result"
+            boundedRef = typeRef 991836 "a"
+            sourceTy =
+                TMuRef
+                    sourceSelfRef
+                    (TArrow TBottom TBottom)
+            boundTy =
+                TMuRef
+                    boundSelfRef
+                    ( TForallRef
+                        resultRef
+                        Nothing
+                        (TArrow (TVarRef resultRef) (TVarRef resultRef))
+                    )
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    []
+                    (Map.singleton boundedRef boundTy)
+
+        TypeOps.alphaEqType sourceTy boundTy `shouldBe` False
+        TypeOps.churchRepresentationEqType sourceTy boundTy `shouldBe` True
+        checkInstantiation env sourceTy (InstAbstrRef boundedRef)
+            `shouldBe` Right (TVarRef boundedRef)
+
     it "does not treat a same-named fake IO type identity as builtin opaque IO" $ do
         let fakeIOIdentity = generatedSymbolIdentity 991821 SymbolType "Other" "IO" Nothing
             fakeIOTy = ElabTypes.TConWithIdentity fakeIOIdentity (BaseTy "IO") (intTy :| [])
@@ -2696,10 +2818,93 @@ spec = describe "Phase 7 typecheck" $ do
         let term = ETyInst (mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))) (InstApp intTy)
         typeCheck term `shouldBe` Right (TArrow intTy intTy)
 
+    it "freshens copied forall declarations during bounded quantification elimination" $ do
+        let boundRef = typeRef 991913 "b"
+            boundTy =
+                tForallWithRef
+                    boundRef
+                    Nothing
+                    (TArrow (tVarWithRef boundRef) (tVarWithRef boundRef))
+            flexibleRef = typeRef 991914 "a"
+            parameter =
+                generatedResolvedLocal
+                    991915
+                    "$x#bounded"
+                    "x"
+                    (tVarWithRef flexibleRef)
+        case elabToBound boundTy of
+            Left err -> expectationFailure err
+            Right bound ->
+                case
+                    typeCheck
+                        ( ETyInst
+                            ( ETyAbsRef
+                                flexibleRef
+                                (Just bound)
+                                (ELam parameter (EVarNode parameter))
+                            )
+                            InstElim
+                        )
+                of
+                    Right
+                        ( TArrow
+                            left@(TForallRef leftRef Nothing _)
+                            right@(TForallRef rightRef Nothing _)
+                          ) -> do
+                            left `shouldSatisfy` TypeOps.alphaEqType boundTy
+                            right `shouldSatisfy` TypeOps.alphaEqType boundTy
+                            typeBinderRefIdentity leftRef
+                                `shouldNotBe` typeBinderRefIdentity rightRef
+                    other ->
+                        expectationFailure
+                            ( "expected two lexical copies of the bounded forall, got: "
+                                ++ show other
+                            )
+
     it "typechecks internal recursive roll/unroll runtime terms" $ do
         typeCheck (ERoll recursiveIntTy recursiveBody) `shouldBe` Right recursiveIntTy
         typeCheck (EUnroll (ERoll recursiveIntTy recursiveBody))
             `shouldBe` Right (TArrow recursiveIntTy intTy)
+
+    it "freshens repeated recursive declarations while unrolling" $ do
+        let recursiveRef = typeRef 991916 "self"
+            recursiveTy =
+                TMuRef
+                    recursiveRef
+                    ( TArrow
+                        (TVarRef recursiveRef)
+                        (TArrow (TVarRef recursiveRef) (TVarRef recursiveRef))
+                    )
+            recursiveValue =
+                generatedResolvedLocal
+                    991917
+                    "$f#recursive"
+                    "f"
+                    recursiveTy
+            env =
+                mkTypeCheckEnvWithResolvedTerms
+                    [(recursiveValue, recursiveTy)]
+                    Map.empty
+        case typeCheckWithEnv env (EUnroll (EVarNode recursiveValue)) of
+            Right
+                ( TArrow
+                    left@(TMuRef leftRef _)
+                    (TArrow middle@(TMuRef middleRef _) right@(TMuRef rightRef _))
+                  ) -> do
+                    left `shouldSatisfy` TypeOps.alphaEqType recursiveTy
+                    middle `shouldSatisfy` TypeOps.alphaEqType recursiveTy
+                    right `shouldSatisfy` TypeOps.alphaEqType recursiveTy
+                    typeBinderRefIdentity leftRef
+                        `shouldNotBe` typeBinderRefIdentity middleRef
+                    typeBinderRefIdentity leftRef
+                        `shouldNotBe` typeBinderRefIdentity rightRef
+                    typeBinderRefIdentity middleRef
+                        `shouldNotBe` typeBinderRefIdentity rightRef
+            other ->
+                expectationFailure
+                    ( "expected three fresh lexical recursive copies, got: "
+                        ++ show other
+                    )
 
     it "does not treat a recursive lower bound as an implicit downcast" $ do
         let flexibleRef = typeRef 991900 "a"
@@ -2720,8 +2925,21 @@ spec = describe "Phase 7 typecheck" $ do
         let polyId = mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))
         typeCheck (mkTestLocalLam "x" listSelfTy (mkTestDeferredVar "x"))
             `shouldBe` Right (TArrow listSelfTy listSelfTy)
-        typeCheck (ETyInst polyId (InstApp listSelfTy))
-            `shouldBe` Right (TArrow listSelfTy listSelfTy)
+        case typeCheck (ETyInst polyId (InstApp listSelfTy)) of
+            Right
+                ( TArrow
+                    left@(TMuRef leftRef _)
+                    right@(TMuRef rightRef _)
+                  ) -> do
+                    left `shouldSatisfy` TypeOps.alphaEqType listSelfTy
+                    right `shouldSatisfy` TypeOps.alphaEqType listSelfTy
+                    typeBinderRefIdentity leftRef
+                        `shouldNotBe` typeBinderRefIdentity rightRef
+            other ->
+                expectationFailure
+                    ( "expected two lexical copies of the recursive instantiation argument, got: "
+                        ++ show other
+                    )
 
     it "rejects malformed recursive roll/unroll runtime terms" $ do
         case typeCheck (ERoll recursiveIntTy (ELit (LInt 1))) of

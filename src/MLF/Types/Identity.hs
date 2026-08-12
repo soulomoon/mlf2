@@ -5,8 +5,10 @@ module MLF.Types.Identity
     TypeBinderIdentity,
     typeBinderIdentityFromNode,
     typeBinderIdentityNode,
+    typeBinderIdentityGraphOrigin,
     typeBinderIdentityGeneratedUnique,
     typeBinderIdentityStructural,
+    typeBinderIdentityIsCanonicalStructural,
     typeBinderIdentityKey,
     typeBinderIdentityStableName,
     typeBinderIdentityAliasNames,
@@ -93,6 +95,7 @@ data StructuralTypeBinderRole
 
 data TypeBinderIdentity
   = GraphTypeBinderIdentity NodeId
+  | FreshenedGraphTypeBinderIdentity NodeId UniqueIdentity
   | GeneratedTypeBinderIdentity UniqueIdentity
   | StructuralTypeBinderIdentity UniqueIdentity StructuralTypeBinderRole
   | FreshenedStructuralTypeBinderIdentity
@@ -108,6 +111,19 @@ typeBinderIdentityNode :: TypeBinderIdentity -> Maybe NodeId
 typeBinderIdentityNode identity =
   case identity of
     GraphTypeBinderIdentity node -> Just node
+    FreshenedGraphTypeBinderIdentity {} -> Nothing
+    GeneratedTypeBinderIdentity {} -> Nothing
+    StructuralTypeBinderIdentity {} -> Nothing
+    FreshenedStructuralTypeBinderIdentity {} -> Nothing
+
+-- | The graph declaration from which a binder was constructed.  Unlike
+-- 'typeBinderIdentityNode', this includes fresh lexical copies and therefore
+-- carries provenance without making the copy itself a graph-owned identity.
+typeBinderIdentityGraphOrigin :: TypeBinderIdentity -> Maybe NodeId
+typeBinderIdentityGraphOrigin identity =
+  case identity of
+    GraphTypeBinderIdentity node -> Just node
+    FreshenedGraphTypeBinderIdentity node _ -> Just node
     GeneratedTypeBinderIdentity {} -> Nothing
     StructuralTypeBinderIdentity {} -> Nothing
     FreshenedStructuralTypeBinderIdentity {} -> Nothing
@@ -116,6 +132,7 @@ typeBinderIdentityGeneratedUnique :: TypeBinderIdentity -> Maybe UniqueIdentity
 typeBinderIdentityGeneratedUnique identity =
   case identity of
     GeneratedTypeBinderIdentity unique -> Just unique
+    FreshenedGraphTypeBinderIdentity _ freshUnique -> Just freshUnique
     FreshenedStructuralTypeBinderIdentity _ _ freshUnique -> Just freshUnique
     GraphTypeBinderIdentity {} -> Nothing
     StructuralTypeBinderIdentity {} -> Nothing
@@ -133,11 +150,17 @@ typeBinderIdentityFromStructural =
 -- occurrence identity.
 freshenTypeBinderIdentity :: TypeBinderIdentity -> UniqueIdentity -> TypeBinderIdentity
 freshenTypeBinderIdentity identity freshUnique =
-  case typeBinderIdentityStructural identity of
-    Just (ownerUnique, role) ->
-      FreshenedStructuralTypeBinderIdentity ownerUnique role freshUnique
-    Nothing ->
-      GeneratedTypeBinderIdentity freshUnique
+  case identity of
+    GraphTypeBinderIdentity node ->
+      FreshenedGraphTypeBinderIdentity node freshUnique
+    FreshenedGraphTypeBinderIdentity node _ ->
+      FreshenedGraphTypeBinderIdentity node freshUnique
+    _ ->
+      case typeBinderIdentityStructural identity of
+        Just (ownerUnique, role) ->
+          FreshenedStructuralTypeBinderIdentity ownerUnique role freshUnique
+        Nothing ->
+          GeneratedTypeBinderIdentity freshUnique
 
 typeBinderIdentityStructural :: TypeBinderIdentity -> Maybe (UniqueIdentity, StructuralTypeBinderRole)
 typeBinderIdentityStructural identity =
@@ -145,12 +168,24 @@ typeBinderIdentityStructural identity =
     StructuralTypeBinderIdentity unique role -> Just (unique, role)
     FreshenedStructuralTypeBinderIdentity unique role _ -> Just (unique, role)
     GraphTypeBinderIdentity {} -> Nothing
+    FreshenedGraphTypeBinderIdentity {} -> Nothing
     GeneratedTypeBinderIdentity {} -> Nothing
+
+-- | Whether this is the canonical reusable presentation of a structural
+-- owner. A freshened structural identity deliberately returns 'False': it
+-- denotes one lexical alpha-copy while retaining canonical provenance.
+typeBinderIdentityIsCanonicalStructural :: TypeBinderIdentity -> Bool
+typeBinderIdentityIsCanonicalStructural identity =
+  case identity of
+    StructuralTypeBinderIdentity {} -> True
+    _ -> False
 
 typeBinderIdentityKey :: TypeBinderIdentity -> Int
 typeBinderIdentityKey identity =
   case identity of
     GraphTypeBinderIdentity node -> getNodeId node
+    FreshenedGraphTypeBinderIdentity _ freshUnique ->
+      negate (uniqueIdentityValue freshUnique + 1)
     GeneratedTypeBinderIdentity unique -> negate (uniqueIdentityValue unique + 1)
     StructuralTypeBinderIdentity unique role ->
       negate (uniqueIdentityValue unique * 2 + structuralRoleKey role + 1000000)
@@ -161,6 +196,11 @@ typeBinderIdentityStableName :: TypeBinderIdentity -> String
 typeBinderIdentityStableName identity =
   case identity of
     GraphTypeBinderIdentity node -> "$typevar#node#" ++ show (getNodeId node)
+    FreshenedGraphTypeBinderIdentity node freshUnique ->
+      "$typevar#node#"
+        ++ show (getNodeId node)
+        ++ "#fresh#"
+        ++ show (uniqueIdentityValue freshUnique)
     GeneratedTypeBinderIdentity unique -> "$typevar#" ++ show (uniqueIdentityValue unique)
     StructuralTypeBinderIdentity unique role ->
       "$typevar#structural#" ++ show (uniqueIdentityValue unique) ++ "#" ++ structuralRoleName role
@@ -203,6 +243,7 @@ typeBinderGeneratedIdentities identity =
   case identity of
     GeneratedTypeBinderIdentity unique -> [unique]
     GraphTypeBinderIdentity {} -> []
+    FreshenedGraphTypeBinderIdentity _ freshUnique -> [freshUnique]
     StructuralTypeBinderIdentity unique _ -> [unique]
     FreshenedStructuralTypeBinderIdentity unique _ freshUnique ->
       [unique, freshUnique]

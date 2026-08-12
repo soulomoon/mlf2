@@ -10,6 +10,7 @@ module MLF.Elab.Run.Instantiation (
     inferInstAppArgsFromSchemeRefsExact,
     constructExactInstantiation,
     constructExactInstantiationAtSourceArguments,
+    constructLexicalForallCopyInstantiation,
     resolvedSourceApplicationArgumentEndpoint,
     sourceSchemeConstructsExactEndpoint,
     residualTopologyAgreesExact,
@@ -32,7 +33,8 @@ import MLF.Elab.Inst
     , schemeToType
     )
 import MLF.Elab.TermClosure
-    ( renameBoundTypeBinderRefPayloads
+    ( alphaRenameTypeBinderScopes
+    , renameBoundTypeBinderRefPayloads
     , renameTypeBinderRefPayloads
     )
 import qualified MLF.Elab.TypeCheck as TypeCheck
@@ -566,6 +568,137 @@ constructExactInstantiationAtSourceArguments
                 (TypeCheck.checkInstantiation typeEnv source instantiation)
         guard (typesAgree checked target)
         pure instantiation
+
+-- | Construct a fresh lexical copy of one complete leading forall spine.
+-- Merely accepting alpha-equivalence would leave the source declarations in
+-- place, which is invalid when the copied value is placed beside the source
+-- value in a larger type (for example the domain and codomain of @\x -> x@).
+-- Introduce the target spine with M, then specialize the source spine at those
+-- freshly introduced declarations with N beneath the corresponding M binders.
+-- The final check is deliberately repeated from the original source so this
+-- helper returns an executable xMLF construction, not an alpha-renaming hint.
+constructLexicalForallCopyInstantiation
+    :: TypeCheck.Env
+    -> (ElabType -> ElabType -> Bool)
+    -> ElabType
+    -> ElabType
+    -> Maybe ([(TypeBinderRef, TypeBinderRef)], Instantiation)
+constructLexicalForallCopyInstantiation typeEnv typesAgree source target = do
+    let sourceScheme = schemeFromType source
+        targetScheme0 = schemeFromType target
+        targetDeclarationRefs = declarationRefs target
+        (targetDeclarationCopies, _) =
+            foldl allocateDeclarationCopy
+                ([], identityGeneratorAfterType (TArrow source target))
+                targetDeclarationRefs
+        copiedTarget =
+            alphaRenameTypeBinderScopes targetDeclarationCopies target
+        targetScheme = schemeFromType copiedTarget
+        sourceResidualDeclarationRefs =
+            declarationRefs (schemeBody sourceScheme)
+        targetResidualDeclarationRefs =
+            declarationRefs (schemeBody targetScheme0)
+        copiedTargetResidualDeclarationRefs =
+            declarationRefs (schemeBody targetScheme)
+        sourceResidualCopies =
+            zip
+                sourceResidualDeclarationRefs
+                copiedTargetResidualDeclarationRefs
+        sourceAtResidualCopies =
+            alphaRenameTypeBinderScopes sourceResidualCopies source
+        constructionSourceScheme = schemeFromType sourceAtResidualCopies
+        sourceBinders = schemeBinderRefs sourceScheme
+        targetBinders = schemeBinderRefs targetScheme
+    guard
+        ( length targetDeclarationRefs
+            == length (distinctDeclarationRefs targetDeclarationRefs)
+        )
+    guard (not (null sourceBinders))
+    guard (length sourceBinders == length targetBinders)
+    guard
+        ( length sourceResidualDeclarationRefs
+            == length targetResidualDeclarationRefs
+            && length targetResidualDeclarationRefs
+                == length copiedTargetResidualDeclarationRefs
+        )
+    guard (typesAgree sourceAtResidualCopies copiedTarget)
+    let targetTypeEnv =
+            foldr
+                ( \(ref, mbBound) env ->
+                    TypeCheck.insertTypeBindingRef
+                        ref
+                        (maybe TBottom tyToElab mbBound)
+                        env
+                )
+                typeEnv
+                targetBinders
+        targetArguments = map (TVarRef . fst) targetBinders
+    specialization <-
+        constructExactInstantiationAtSourceArguments
+            targetTypeEnv
+            typesAgree
+            sourceAtResidualCopies
+            targetArguments
+            (schemeBody targetScheme)
+    let instantiation =
+            foldr introduceTargetBinder specialization targetBinders
+    constructed <-
+        either
+            (const Nothing)
+            Just
+            (TypeCheck.checkInstantiation typeEnv source instantiation)
+    checkedFromCopiedSource <-
+        either
+            (const Nothing)
+            Just
+            ( TypeCheck.checkInstantiation
+                typeEnv
+                (schemeToType constructionSourceScheme)
+                instantiation
+            )
+    guard (typesAgree constructed target)
+    guard (typesAgree checkedFromCopiedSource copiedTarget)
+    pure (sourceResidualCopies, instantiation)
+  where
+    allocateDeclarationCopy (renames, generator) sourceRef =
+        let (copiedRef, nextGenerator) =
+                freshTypeBinderRef
+                    (typeBinderRefName sourceRef)
+                    generator
+         in (renames ++ [(sourceRef, copiedRef)], nextGenerator)
+
+    distinctDeclarationRefs = foldl insertDeclarationRef []
+    insertDeclarationRef refs ref
+        | any (typeBinderRefsSameIdentity ref) refs = refs
+        | otherwise = refs ++ [ref]
+
+    declarationRefs ty =
+        case ty of
+            TBottom -> []
+            TBaseWithIdentity _ _ -> []
+            TVarRef _ -> []
+            TArrow domain codomain ->
+                declarationRefs domain ++ declarationRefs codomain
+            TConWithIdentity _ _ arguments ->
+                concatMap declarationRefs arguments
+            TVarAppRef _ arguments ->
+                concatMap declarationRefs arguments
+            TForallRef ref mbBound body ->
+                ref
+                    : maybe [] (declarationRefs . tyToElab) mbBound
+                        ++ declarationRefs body
+            TMuRef ref body -> ref : declarationRefs body
+
+    introduceTargetBinder (ref, mbBound) bodyInstantiation =
+        composeInst
+            InstIntro
+            ( composeInst
+                ( case mbBound of
+                    Nothing -> InstId
+                    Just bound -> InstInside (InstBot (tyToElab bound))
+                )
+                (InstUnderRef ref bodyInstantiation)
+            )
 
 applyExactSourceArgument
     :: TypeCheck.Env

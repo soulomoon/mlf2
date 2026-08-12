@@ -35,6 +35,7 @@ import MLF.Elab.Inst
     identityGeneratorAfterTypeAndInstantiation,
     renameInstBoundRef,
     schemeToType,
+    substBinderWithFreshDeclarationCopies,
   )
 import MLF.Elab.Types
 import qualified MLF.Frontend.Program.Builtins as Builtins
@@ -337,7 +338,14 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
   EUnroll e -> do
     ty <- typeCheckWithEnvSummary envSummary resolvedEnv env e
     case ty of
-      TMuRef ref body -> Right (substTypeCaptureRef ref ty body)
+      TMuRef ref body ->
+        let (_, unfolded) =
+              substBinderWithFreshDeclarationCopies
+                (identityGeneratorAfterTypeAndInstantiation ty InstId)
+                ref
+                ty
+                body
+         in Right unfolded
       _ -> Left (TCExpectedRecursive ty)
 
 ensureContractiveType :: ElabType -> Either TypeCheckError ()
@@ -381,7 +389,9 @@ checkInstantiation env ty inst =
              in case lookupTypeBindingRef ref env' of
                   Nothing -> Left (TCUnboundTypeVar v)
                   Just bound ->
-                    if t == bound || alphaEqType t bound
+                    if t == bound
+                      || alphaEqType t bound
+                      || churchRepresentationEqType t bound
                       then Right (k, env', TVarRef ref)
                       else Left (TCInstantiationError (InstAbstrRef ref) t ("InstAbstr expects bound " ++ pretty bound)),
           instElimError = \inst0 t ->
@@ -755,6 +765,9 @@ opaqueIOCompatible expected actual =
 -- type has already been expanded to @mu@.  Propagating the representation
 -- equivalence through an otherwise identity-equal type keeps those two
 -- checked presentations coherent without admitting display-name matching.
+-- Fresh lexical copies of structural binders retain their owner and role but
+-- intentionally have distinct identities, so align their bound occurrences
+-- before descending instead of requiring the two declarations to be equal.
 nominalStructuralTypeCompatible :: ElabType -> ElabType -> Bool
 nominalStructuralTypeCompatible = go
   where
@@ -771,12 +784,16 @@ nominalStructuralTypeCompatible = go
     go (TBaseWithIdentity expectedIdentity _) (TBaseWithIdentity actualIdentity _) =
       expectedIdentity == actualIdentity
     go (TForallRef expectedRef expectedBound expectedBody) (TForallRef actualRef actualBound actualBody) =
-      typeBinderRefsSameIdentity expectedRef actualRef
+      compatibleBinderOwners expectedRef actualRef
         && compatibleBounds expectedBound actualBound
-        && go expectedBody actualBody
+        && go
+          expectedBody
+          (substTypeCaptureRef actualRef (TVarRef expectedRef) actualBody)
     go (TMuRef expectedRef expectedBody) (TMuRef actualRef actualBody) =
-      typeBinderRefsSameIdentity expectedRef actualRef
-        && go expectedBody actualBody
+      compatibleBinderOwners expectedRef actualRef
+        && go
+          expectedBody
+          (substTypeCaptureRef actualRef (TVarRef expectedRef) actualBody)
     go (TBaseWithIdentity expectedIdentity expectedBase) actualMu@TMuRef {} =
       nominalHeadMatchesStructuralMu expectedIdentity expectedBase actualMu
     go (TConWithIdentity expectedIdentity expectedBase _) actualMu@TMuRef {} =
@@ -801,6 +818,17 @@ nominalStructuralTypeCompatible = go
     compatibleBounds (Just expectedBound) (Just actualBound) =
       go (tyToElab expectedBound) (tyToElab actualBound)
     compatibleBounds _ _ = False
+
+    compatibleBinderOwners expectedRef actualRef =
+      case
+          ( typeBinderIdentityStructural (typeBinderRefIdentity expectedRef)
+          , typeBinderIdentityStructural (typeBinderRefIdentity actualRef)
+          )
+        of
+          (Nothing, Nothing) -> True
+          (Just expectedOwner, Just actualOwner) ->
+            expectedOwner == actualOwner
+          _ -> False
 
 nominalHeadMatchesStructuralMu :: SymbolIdentity -> BaseTy -> ElabType -> Bool
 nominalHeadMatchesStructuralMu nominalIdentity _ (TMuRef selfRef _) =

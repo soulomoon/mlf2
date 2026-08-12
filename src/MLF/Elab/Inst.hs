@@ -10,14 +10,21 @@ module MLF.Elab.Inst
     instMany,
     renameInstBoundRef,
     schemeToType,
+    substBinderWithFreshDeclarationCopies,
   )
 where
 
 import Data.Functor.Foldable (Recursive (project), para)
+import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
 import MLF.Types.Elab (generatedIdentitiesInInstantiation)
-import MLF.Types.Identity (IdentityGenerator, identityGeneratorAfter)
+import MLF.Types.Identity
+  ( IdentityGenerator,
+    freshIdentity,
+    freshenTypeBinderIdentity,
+    identityGeneratorAfter,
+  )
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
@@ -38,6 +45,157 @@ instMany = foldr composeInst InstId
 identityGeneratorAfterTypeAndInstantiation :: ElabType -> Instantiation -> IdentityGenerator
 identityGeneratorAfterTypeAndInstantiation ty inst =
   identityGeneratorAfter (generatedIdentitiesInType ty ++ generatedIdentitiesInInstantiation inst)
+
+-- | Perform a capture-avoiding binder substitution while allocating a fresh
+-- lexical declaration for every repeated copy of a declaration in the
+-- replacement.  Quant-Elim and recursive unfolding share this rule.  The
+-- thesis identifies types up to renaming of bound variables, so substituting
+-- @forall b. tau@ or @mu b. tau@ into both sides of @a -> a@ constructs two
+-- alpha-equivalent scopes, not two declarations with one identity.
+--
+-- Keep the first declaration identity when it is available.  Later copies are
+-- allocated from the instantiation's threaded supply, preserving structural
+-- provenance when the copied declaration is a structural binder.  Existing
+-- duplicate declarations unrelated to the replacement are deliberately not
+-- repaired here; their owner remains responsible for rejecting them.
+substBinderWithFreshDeclarationCopies
+  :: IdentityGenerator
+  -> TypeBinderRef
+  -> ElabType
+  -> ElabType
+  -> (IdentityGenerator, ElabType)
+substBinderWithFreshDeclarationCopies generator target replacement body =
+  let substituted = substTypeCaptureRef target replacement body
+      replacementDeclarations = declarationRefs replacement
+      (substituted', (_, generator')) =
+        freshenRepeatedDeclarations
+          replacementDeclarations
+          []
+          ([], generator)
+          substituted
+   in (generator', substituted')
+  where
+    declarationRefs :: Ty v -> [TypeBinderRef]
+    declarationRefs ty =
+      case ty of
+        TVarRef _ -> []
+        TArrow domain codomain ->
+          declarationRefs domain ++ declarationRefs codomain
+        TConWithIdentity _ _ arguments ->
+          concatMap declarationRefs arguments
+        TVarAppRef _ arguments ->
+          concatMap declarationRefs arguments
+        TBaseWithIdentity _ _ -> []
+        TForallRef ref mbBound forallBody ->
+          ref
+            : maybe [] declarationRefs mbBound
+              ++ declarationRefs forallBody
+        TMuRef ref muBody -> ref : declarationRefs muBody
+        TBottom -> []
+
+    freshenRepeatedDeclarations
+      :: [TypeBinderRef]
+      -> [(TypeBinderRef, TypeBinderRef)]
+      -> ([TypeBinderRef], IdentityGenerator)
+      -> Ty v
+      -> (Ty v, ([TypeBinderRef], IdentityGenerator))
+    freshenRepeatedDeclarations eligible active state ty =
+      case ty of
+        TVarRef ref -> (TVarRef (activeRef active ref), state)
+        TArrow domain codomain ->
+          let (domain', state') =
+                freshenRepeatedDeclarations eligible active state domain
+              (codomain', state'') =
+                freshenRepeatedDeclarations eligible active state' codomain
+           in (TArrow domain' codomain', state'')
+        TConWithIdentity identity constructor arguments ->
+          let (arguments', state') =
+                freshenNonEmpty eligible active state arguments
+           in (TConWithIdentity identity constructor arguments', state')
+        TVarAppRef ref arguments ->
+          let (arguments', state') =
+                freshenNonEmpty eligible active state arguments
+           in ( TVarAppRef (activeRef active ref) arguments'
+              , state'
+              )
+        TBaseWithIdentity identity base ->
+          (TBaseWithIdentity identity base, state)
+        TForallRef ref mbBound forallBody ->
+          let (mbBound', state') =
+                freshenMaybeBound eligible active state mbBound
+              (ref', state'') =
+                allocateDeclaration eligible ref state'
+              bodyActive = enterActiveRef ref ref' active
+              (forallBody', state''') =
+                freshenRepeatedDeclarations
+                  eligible
+                  bodyActive
+                  state''
+                  forallBody
+           in (TForallRef ref' mbBound' forallBody', state''')
+        TMuRef ref muBody ->
+          let (ref', state') = allocateDeclaration eligible ref state
+              bodyActive = enterActiveRef ref ref' active
+              (muBody', state'') =
+                freshenRepeatedDeclarations
+                  eligible
+                  bodyActive
+                  state'
+                  muBody
+           in (TMuRef ref' muBody', state'')
+        TBottom -> (TBottom, state)
+
+    freshenMaybeBound _ _ state Nothing = (Nothing, state)
+    freshenMaybeBound eligible active state (Just bound) =
+      let (bound', state') =
+            freshenRepeatedDeclarations eligible active state bound
+       in (Just bound', state')
+
+    freshenNonEmpty eligible active state (first :| remaining) =
+      let (first', state') =
+            freshenRepeatedDeclarations eligible active state first
+          (remaining', state'') =
+            freshenList eligible active state' remaining
+       in (first' :| remaining', state'')
+
+    freshenList _ _ state [] = ([], state)
+    freshenList eligible active state (ty : types) =
+      let (ty', state') =
+            freshenRepeatedDeclarations eligible active state ty
+          (types', state'') =
+            freshenList eligible active state' types
+       in (ty' : types', state'')
+
+    allocateDeclaration eligible ref (seen, generator')
+      | refMember ref seen
+      , refMember ref eligible =
+          let (freshUnique, nextGenerator) = freshIdentity generator'
+              freshRef =
+                typeBinderRefFromIdentity
+                  ( freshenTypeBinderIdentity
+                      (typeBinderRefIdentity ref)
+                      freshUnique
+                  )
+                  (typeBinderRefName ref)
+           in (freshRef, (freshRef : seen, nextGenerator))
+      | otherwise = (ref, (insertRef ref seen, generator'))
+
+    activeRef [] ref = ref
+    activeRef ((sourceRef, targetRef) : remaining) ref
+      | typeBinderRefsSameIdentity sourceRef ref = targetRef
+      | otherwise = activeRef remaining ref
+
+    enterActiveRef sourceRef targetRef active =
+      (sourceRef, targetRef)
+        : filter
+          (not . typeBinderRefsSameIdentity sourceRef . fst)
+          active
+
+    insertRef ref refs
+      | refMember ref refs = refs
+      | otherwise = ref : refs
+
+    refMember ref = any (typeBinderRefsSameIdentity ref)
 
 -- | Construct the computation for applying the leading quantifier to an
 -- argument type.  A flexible quantifier instantiated at its own explicit
@@ -77,7 +235,9 @@ evalInstantiationWith spec inst = eval inst
       TForallRef ref mbBound body -> do
         let bTy = maybe TBottom tyToElab mbBound
             env'' = instElimEnv spec ref bTy env'
-        Right (k, env'', substTypeCaptureRef ref bTy body)
+            (k', substituted) =
+              substBinderWithFreshDeclarationCopies k ref bTy body
+        Right (k', env'', substituted)
       _ -> Left (instElimError spec errInst t)
 
     instInsideFn errInst phiFn (k, env', t) = case t of
@@ -106,7 +266,13 @@ evalInstantiationWith spec inst = eval inst
             _ ->
               instBot spec argTy (k, env', b0)
         let env''' = instElimEnv spec ref checkedArg env''
-        Right (k1, env''', substTypeCaptureRef ref checkedArg body)
+            (k2, substituted) =
+              substBinderWithFreshDeclarationCopies
+                k1
+                ref
+                checkedArg
+                body
+        Right (k2, env''', substituted)
       _ ->
         Left
           (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)

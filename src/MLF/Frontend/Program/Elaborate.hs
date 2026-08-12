@@ -71,7 +71,7 @@ import qualified MLF.Elab.Types as X
 import MLF.Frontend.Normalize (substSrcType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -287,18 +287,8 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
     validRuntimeTypeInfosByIdentity =
       indexInfoListByIdentity valueInfoSymbolIdentity runtimeTypeValueInfos
 
-    instanceMethodValueIdentities =
-      Set.fromList
-        [ valueInfoSymbolIdentity methodInfo
-        | methodInfo <- instanceMethodValues
-        ]
-
-    valueRuntimeTypeViewFor valueInfo@OrdinaryValue {valueConstraintInfos = constraints}
-      | null constraints,
-        not (memberSymbolIdentityExact (valueInfoSymbolIdentity valueInfo) instanceMethodValueIdentities) =
-          loweredRuntimeTypeViewFor valueInfo
-      | otherwise =
-          constrainedRuntimeTypeInfoViewRaw dataTypes classesByIdentity constraints (ordinaryValueTypeView valueInfo)
+    valueRuntimeTypeViewFor valueInfo@OrdinaryValue {} =
+      loweredRuntimeTypeViewFor valueInfo
     valueRuntimeTypeViewFor valueInfo =
       loweredRuntimeTypeViewFor valueInfo
 
@@ -2022,7 +2012,7 @@ globalValueSurfaceName scope valueInfo =
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       let stableName = symbolIdentityStableName (valueInfoSymbolIdentity ordinary)
-      recordExternalTypeView stableName (resolvedOrdinaryValueExternalTypeView scope ordinary)
+      recordLoweredExternalTypeView scope stableName (resolvedOrdinaryValueExternalTypeView scope ordinary)
       pure stableName
     _ ->
       pure (symbolIdentityStableName (valueInfoSymbolIdentity valueInfo))
@@ -2064,13 +2054,20 @@ resolvedOrdinaryValueExternalTypeView scope valueInfo@OrdinaryValue {valueConstr
 resolvedOrdinaryValueExternalTypeView _ _ =
   typeViewBottom
 
-recordExternalTypeView :: String -> TypeView -> ElaborateM ()
-recordExternalTypeView name view =
+-- External views cross directly into the surface-pipeline environment.  Store
+-- their identity-lowered representation at the point where the resolved
+-- global reference is constructed, so every later consumer sees the same
+-- nominal/structural boundary and does not have to lower a module-wide union.
+recordLoweredExternalTypeView :: ElaborateScope -> String -> TypeView -> ElaborateM ()
+recordLoweredExternalTypeView scope name view =
   modify
     ( \state ->
         state
           { elaborateExternalTypeViews =
-              Map.insert name view (elaborateExternalTypeViews state)
+              Map.insert
+                name
+                (lowerTypeViewWithIdentities scope view)
+                (elaborateExternalTypeViews state)
           }
     )
 

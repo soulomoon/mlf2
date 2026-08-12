@@ -74,12 +74,14 @@ module MLF.Types.Elab (
     typeBinderRefFromIdentity,
     typeBinderRefIdentity,
     typeBinderRefNode,
+    typeBinderRefGraphOrigin,
     typeBinderRefName,
     typeBinderRefAliasNames,
     typeBinderRefsSameIdentity,
     typeBinderRefsSameIdentityAndName,
     renameTypeBinderRef,
     freshTypeBinderRef,
+    freshenTypeBinderRef,
     sourceTypeBinderRefForName,
     sourceTypeBinderRefsFromIdentities,
     sourceTypeBinderRefOrFresh,
@@ -214,6 +216,7 @@ import MLF.Types.Identity
     , idDetailsSameIdentity
     , idDetailsSymbolIdentity
     , freshIdentity
+    , freshenTypeBinderIdentity
     , freshenLocalRef
     , identityGeneratorAfter
     , lookupTypeBinderIdentityAlias
@@ -223,6 +226,7 @@ import MLF.Types.Identity
     , typeBinderGeneratedIdentities
     , typeBinderIdentityFromNode
     , typeBinderIdentityFromUnique
+    , typeBinderIdentityGraphOrigin
     , typeBinderIdentityKey
     , typeBinderIdentityNode
     )
@@ -486,6 +490,10 @@ typeBinderRefNode :: TypeBinderRef -> Maybe NodeId
 typeBinderRefNode =
     typeBinderIdentityNode . typeBinderRefIdentity
 
+typeBinderRefGraphOrigin :: TypeBinderRef -> Maybe NodeId
+typeBinderRefGraphOrigin =
+    typeBinderIdentityGraphOrigin . typeBinderRefIdentity
+
 typeBinderRefAliasNames :: TypeBinderRef -> Set.Set String
 typeBinderRefAliasNames ref =
     Set.fromList (typeBinderIdentityAliasNames (typeBinderRefName ref) (typeBinderRefIdentity ref))
@@ -507,6 +515,20 @@ freshTypeBinderRef :: String -> IdentityGenerator -> (TypeBinderRef, IdentityGen
 freshTypeBinderRef name generator =
     let (identity, generator') = freshIdentity generator
      in (typeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name, generator')
+
+-- | Allocate an alpha-copy of an existing binder while retaining its semantic
+-- provenance.  A graph binder retains its source node and a structural
+-- recursive/result binder retains its nominal owner and role; both still
+-- receive a distinct lexical identity.  Use 'freshTypeBinderRef' only when
+-- introducing a genuinely new binder with no source declaration.
+freshenTypeBinderRef :: TypeBinderRef -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+freshenTypeBinderRef ref generator =
+    let (freshUnique, generator') = freshIdentity generator
+     in ( typeBinderRefFromIdentity
+            (freshenTypeBinderIdentity (typeBinderRefIdentity ref) freshUnique)
+            (typeBinderRefName ref)
+        , generator'
+        )
 
 sourceTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefForName name generator =

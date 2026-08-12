@@ -133,6 +133,9 @@ import MLF.Elab.Generalize
     subtermGeneralizationCompilerExactBoundary,
   )
 import MLF.Elab.Inst (schemeToType)
+import MLF.Elab.Phi.Computation
+  ( quantifierReorderingInstantiation
+  )
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
   ( PipelineError (..),
@@ -149,6 +152,7 @@ import MLF.Elab.Run.Generalize.Prepare
     PreparedRootClosure (..),
     PreparedRootGeneralization (..),
     preparedRootClosureScheme,
+    preparedRootClosureQuantifierReordering,
     preparedRootCertifiedTermBinderRenames,
     preparedRootConstructionScopeAliases,
     preparedRootConstructionScopeBinderRenames,
@@ -183,6 +187,7 @@ import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstRefsIfNeeded,
     constructTermWithInterleavedSchemeSubstRefsAtPublication,
     constructTermWithSchemeSubstRefs,
+    constructTermWithSchemeSubstRefsAtPublication,
     constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
     preserveRetainedChildAuthoritativeResult,
@@ -3158,13 +3163,22 @@ closePreparedExactExpectedType rootClosure expectedType =
 
 closePipelineTermFromSupply :: IdentityGenerator -> PreparedRootExactness -> [(TypeBinderRef, TypeBinderRef)] -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> PreparedRootClosure -> XmlfTerm -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
 closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoutes initialTcEnv rootSubst rootClosure term termSubst =
-  let termSubstType = typeCheckWithEnv initialTcEnv termSubst
+  let applyPreparedReordering candidate =
+        case preparedRootClosureQuantifierReordering rootClosure of
+          Nothing -> candidate
+          Just reordering ->
+            ETyInst
+              candidate
+              (quantifierReorderingInstantiation reordering)
+      termForClosure = applyPreparedReordering term
+      termSubstForClosure = applyPreparedReordering termSubst
+      termSubstType = typeCheckWithEnv initialTcEnv termSubstForClosure
       rootClosureScheme = preparedRootClosureScheme rootClosure
       rootType = schemeToType rootClosureScheme
       generator0 =
         advanceIdentityGeneratorPastMany
-          ( generatedIdentitiesInTerm term
-              ++ generatedIdentitiesInTerm termSubst
+          ( generatedIdentitiesInTerm termForClosure
+              ++ generatedIdentitiesInTerm termSubstForClosure
               ++ generatedIdentitiesInType rootType
               ++ pipelineTypeCheckEnvGeneratedIdentities initialTcEnv
           )
@@ -3173,9 +3187,10 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
         case rootClosure of
           PreparedLocalRootClosure{} -> False
           PreparedInterleavedLocalRootClosure{} -> False
+          PreparedScopedPublicationRootClosure{} -> False
           PreparedTopologyPacketRootClosure{} -> False
           PreparedWholeRootClosure{} ->
-            case preserveRetainedChildAuthoritativeResult termSubst of
+            case preserveRetainedChildAuthoritativeResult termSubstForClosure of
               Just _ -> True
               Nothing -> False
       termClosed0 =
@@ -3188,7 +3203,7 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                 rootSubst
                 localRefs
                 rootClosureScheme
-                term
+                termForClosure
           (PreparedExactRoot{}, _) ->
             -- Exact source binders are outer construction authority. Reuse
             -- only an abstraction with the same identity; a distinct leading
@@ -3198,15 +3213,21 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
               exactRootBinderRoutes
               rootSubst
               rootClosureScheme
-              term
+              termForClosure
           -- A local root closure has already constructed the leading forall
-          -- spine stored in the scheme body.  Its explicit scheme binders are
-          -- the distinct outer/root-owned spine, so emit exactly those here.
+          -- spine stored in the scheme body.  When Typ and Typexp order that
+          -- spine differently, preparation has inserted the validated phi_R
+          -- computation into 'termForClosure' above.  Its explicit scheme
+          -- binders are the distinct outer/root-owned spine, so emit exactly
+          -- those here.
           -- The generic "if needed" closer cannot infer this split from the
           -- finished term: it would align the first local abstraction with the
           -- first root binder and then decline to add the missing outer binder.
           (PreparedOrdinaryRoot, PreparedLocalRootClosure{}) ->
-            constructTermWithSchemeSubstRefs rootSubst rootClosureScheme term
+            constructTermWithSchemeSubstRefs
+              rootSubst
+              rootClosureScheme
+              termForClosure
           ( PreparedOrdinaryRoot,
             PreparedInterleavedLocalRootClosure _ localRefs _
             ) ->
@@ -3215,7 +3236,18 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                 rootSubst
                 localRefs
                 rootClosureScheme
-                term
+                termForClosure
+          -- Preparation has proved that at least one declaration in the root
+          -- spine was ambient to the checked source owner/application.  Enter
+          -- that exact spine before checking or substituting the open producer.
+          -- This authority does not permit descending through value-lambda
+          -- results; topology packet placement is the separate proof for that.
+          (PreparedOrdinaryRoot, PreparedScopedPublicationRootClosure{}) ->
+            constructTermWithSchemeSubstRefsAtPublication
+              initialTcEnv
+              rootSubst
+              rootClosureScheme
+              termForClosure
           -- Packet placement positively records that the generalization plan
           -- moved a planned dependency spine into an enclosing flexible
           -- consumer bound.  Construct that exact result through the source
@@ -3226,12 +3258,10 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
               initialTcEnv
               rootSubst
               rootClosureScheme
-              term
+              termForClosure
           (PreparedOrdinaryRoot, PreparedWholeRootClosure{}) ->
             if retainedChildAuthoritativeCandidate
-              then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
-              else if rootSchemeHasPolymorphicBound rootClosureScheme
-                then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme termSubst
+              then closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme termForClosure
               else
                 case termSubstType of
                   Right ty
@@ -3250,16 +3280,16 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                         if
                             termConstructsRootForallSpine
                               rootClosureScheme
-                              termSubst
+                              termSubstForClosure
                               || termCarriesRootSchemeAuthority
                                 rootClosureScheme
-                                termSubst
-                          then termSubst
+                                termSubstForClosure
+                          then termSubstForClosure
                           else
                             closeTermWithSchemeSubstRefsIfNeeded
                               rootSubst
                               rootClosureScheme
-                              termSubst
+                              termSubstForClosure
                     | not (null (freeTypeVarRefsType ty)),
                       termConstructsRootForallSubsequence
                         rootClosureScheme
@@ -3267,15 +3297,17 @@ closePipelineTermFromSupply suppliedGenerator rootExactness exactRootBinderRoute
                         closeTermWithSchemeSubstRefsIfNeeded
                           rootSubst
                           rootClosureScheme
-                          term
+                          termForClosure
                     | not (null (freeTypeVarRefsType ty)),
                       rootSchemeMatchesOpenTerm rootClosureScheme ty ->
-                        closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
-                    | otherwise -> termSubst
-                  Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme term
+                        closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme termForClosure
+                    | otherwise -> termSubstForClosure
+                  Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootClosureScheme termForClosure
    in case rootClosure of
         PreparedLocalRootClosure{} -> (termClosed0, generator0)
         PreparedInterleavedLocalRootClosure{} ->
+          (termClosed0, generator0)
+        PreparedScopedPublicationRootClosure{} ->
           (termClosed0, generator0)
         PreparedTopologyPacketRootClosure{} ->
           (termClosed0, generator0)
@@ -3385,19 +3417,6 @@ termConstructsRootForallSubsequence scheme term =
           rest `isIdentitySubsequenceOf` candidates
       | otherwise =
           refs `isIdentitySubsequenceOf` candidates
-
-rootSchemeHasPolymorphicBound :: ElabScheme -> Bool
-rootSchemeHasPolymorphicBound =
-  any (maybe False (containsForall . tyToElab) . snd) . schemeBinderRefs
-  where
-    containsForall ty =
-      case ty of
-        TForallRef {} -> True
-        TArrow dom cod -> containsForall dom || containsForall cod
-        TConWithIdentity _ _ args -> any containsForall args
-        TVarAppRef _ args -> any containsForall args
-        TMuRef _ body -> containsForall body
-        _ -> False
 
 closeRetainedChildAuthoritativeTermFromSupply :: IdentityGenerator -> TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> (XmlfTerm, IdentityGenerator)
 closeRetainedChildAuthoritativeTermFromSupply generator initialTcEnv rootSubst rootScheme termAdjusted =

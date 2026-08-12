@@ -10,17 +10,22 @@ module MLF.Elab.Run.Pipeline.TestSupport
     preferPreparedExternalBindingTypeIdentities,
     restrictPreparedExternalBindings,
     runPipelineElabDetailedWithExternalBindings,
+    runPipelineElabDetailedUncheckedWithExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedModuleKeyedForTest,
     unionPreparedExternalBindings,
     closePipelineTerm,
     freshenTypeAbsAgainstEnvFromSupply,
+    constructLexicalForallCopyInstantiation,
   )
 where
 
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Types.Graph (PolySyms)
 import MLF.Elab.PipelineError (PipelineError)
+import MLF.Elab.Run.Instantiation
+  ( constructLexicalForallCopyInstantiation,
+  )
 import MLF.Elab.Run.Pipeline
   ( PipelineElabDetailedResult (..),
     PreparedExternalBindings,
@@ -33,6 +38,7 @@ import MLF.Elab.Run.Pipeline
     preferPreparedExternalBindingTypeIdentities,
     restrictPreparedExternalBindings,
     runPipelineElabDetailedWithExternalBindings,
+    runPipelineElabDetailedUncheckedWithExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsWithTiming,
     unionPreparedExternalBindings,

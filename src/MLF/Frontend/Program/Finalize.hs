@@ -283,7 +283,6 @@ import MLF.Types.Identity
     StructuralTypeBinderRole (StructuralSelfBinder),
     UniqueIdentity,
     freshLocalRef,
-    idDetailsAliasMapWith,
     idDetailsAliasNamesWith,
     idDetailsRuntimeName,
     advanceIdentityGeneratorPastMany,
@@ -302,6 +301,7 @@ import MLF.Util.Timing (TimingConfig(..), defaultTimingConfig, timeProgramDetail
 data FinalizeContext = FinalizeContext
   { finalizeContextScope :: ElaborateScope,
     finalizeContextRuntimeBindings :: PreparedExternalBindings,
+    finalizeContextSurfaceInputsByKey :: Map ModuleBindingReadKey SurfaceExternalBindingInput,
     finalizeContextRuntimeSourceTypes :: Map String SrcType,
     finalizeContextRuntimeTypeEnv :: Map String ElabType,
     finalizeContextRuntimeBindingIndex :: RuntimeExternalBindingIndex
@@ -322,10 +322,15 @@ data ModuleBindingReadContext = ModuleBindingReadContext
     moduleBindingReadCheckContext :: BindingCheckReadContext
   }
 
+-- The cache cell is intentionally lazy.  Its key and source input are fixed
+-- while the module read contexts are built, but an external scheme is only
+-- prepared if a checked root actually references that exact identity.
+data CachedExternalBinding = CachedExternalBinding
+  { cachedExternalBindingPrepared :: Either ProgramError PreparedExternalBindings
+  }
+
 data DeferredExternalBindingIndex = DeferredExternalBindingIndex
-  { deferredExternalBindingByRef :: Map DeferredRef DeferredProgramObligation,
-    deferredExternalBindingByKey :: Map ModuleBindingReadKey DeferredProgramObligation,
-    deferredExternalBindingRefByAlias :: Map String DeferredRef
+  { deferredExternalBindingByKey :: Map ModuleBindingReadKey DeferredProgramObligation
   }
 
 data RuntimeExternalBindingIndex = RuntimeExternalBindingIndex
@@ -383,8 +388,7 @@ fromProgramEither result =
 
 mkFinalizeContext :: ElaborateScope -> Either ProgramError FinalizeContext
 mkFinalizeContext scope = do
-  let runtimeTypeViews =
-        lowerTypeViewsWithIdentities scope (runtimeTypeViewsWithVisibleConstructors scope)
+  let runtimeTypeViews = runtimeTypeViewsWithVisibleConstructors scope
       runtimeSourceTypes = Map.map typeViewDisplay runtimeTypeViews
   runtimeTypeEnv <- traverse resolvedTypeViewToElabType runtimeTypeViews
   let runtimeIndex = runtimeExternalBindingIndexFromScope scope runtimeTypeEnv
@@ -398,10 +402,13 @@ mkFinalizeContext scope = do
       (externalBindingModeForRuntime scope runtimeSourceTypes runtimeIndex)
       (runtimeExternalBindingIdentityByAlias runtimeIndex)
       runtimeTypeViews
+  surfaceInputsByKey <-
+    runtimeSurfaceExternalBindingInputs runtimeTypeViews runtimeIndex
   pure
     FinalizeContext
       { finalizeContextScope = scope,
         finalizeContextRuntimeBindings = runtimeBindings,
+        finalizeContextSurfaceInputsByKey = surfaceInputsByKey,
         finalizeContextRuntimeSourceTypes = runtimeSourceTypesWithAliases,
         finalizeContextRuntimeTypeEnv = runtimeTypeEnv,
         finalizeContextRuntimeBindingIndex = runtimeIndex
@@ -411,8 +418,7 @@ mkFinalizeContextWithTiming :: TimingConfig -> String -> ElaborateScope -> IO (E
 mkFinalizeContextWithTiming timing label scope = do
   runtimeTypeViews <-
     timeProgramDetailIO timing (label ++ ".runtime-type-views") $
-      evaluate $
-        lowerTypeViewsWithIdentities scope (runtimeTypeViewsWithVisibleConstructors scope)
+      evaluate (runtimeTypeViewsWithVisibleConstructors scope)
   let runtimeSourceTypes = Map.map typeViewDisplay runtimeTypeViews
   runtimeTypeEnvResult <-
     timeProgramDetailIO timing (label ++ ".runtime-type-env") $
@@ -430,12 +436,17 @@ mkFinalizeContextWithTiming timing label scope = do
               (externalBindingModeForRuntime scope runtimeSourceTypes runtimeIndex)
               (runtimeExternalBindingIdentityByAlias runtimeIndex)
               runtimeTypeViews
+      surfaceInputsResult <-
+        timeProgramDetailIO timing (label ++ ".surface-inputs") $
+          evaluate (runtimeSurfaceExternalBindingInputs runtimeTypeViews runtimeIndex)
       pure $ do
         runtimeBindings <- runtimeBindingsResult
+        surfaceInputsByKey <- surfaceInputsResult
         pure
           FinalizeContext
             { finalizeContextScope = scope,
               finalizeContextRuntimeBindings = runtimeBindings,
+              finalizeContextSurfaceInputsByKey = surfaceInputsByKey,
               finalizeContextRuntimeSourceTypes = runtimeSourceTypesWithAliases,
               finalizeContextRuntimeTypeEnv = runtimeTypeEnv,
               finalizeContextRuntimeBindingIndex = runtimeIndex
@@ -447,7 +458,7 @@ runtimeTypeViewsWithVisibleConstructors scope =
   where
     uniqueConstructorViews =
       Map.fromList
-        [ (alias, view)
+        [ (alias, lowerTypeViewWithIdentities scope view)
         | (alias, view : rest) <- Map.toList constructorViewsByAlias,
           all (== view) rest
         ]
@@ -464,19 +475,25 @@ mkModuleFinalizeContext :: FinalizeContext -> [LoweredBinding] -> Either Program
 mkModuleFinalizeContext context lowereds0 = do
   validateLoweredBindingsDeferredObligations lowereds0
   let lowereds = lowereds0
-      schemeExternalTypeViews = Map.unions (map loweredBindingExternalTypeViews lowereds)
-      schemeExternalTypes = Map.map typeViewDisplay schemeExternalTypeViews
-      schemeDeferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
-      schemeDeferredIndex = deferredExternalBindingIndex schemeDeferredObligations
-  schemeExternalBindings <-
-    prepareSurfaceExternalBindingsWithIdentity
-      (finalizeContextScope context)
-      (const ExternalBindingScheme)
-      (externalBindingIdentityFromIndexes (finalizeContextRuntimeBindingIndex context) schemeDeferredIndex)
-      (lowerExternalTypeViews (finalizeContextScope context) schemeExternalTypeViews)
+  let runtimeInputEntries =
+        [ (ResolvedBindingKey key, input)
+        | (key, input) <- Map.toList (finalizeContextSurfaceInputsByKey context)
+        ]
+      externalInputsByKey = Map.fromList runtimeInputEntries
+  -- Only declaration bindings are shared: each comes from the single exact
+  -- runtime authority in FinalizeContext.  DeferredRef placeholders belong to
+  -- one root and are prepared lazily in that root's read context instead of
+  -- being speculatively indexed module-wide.
+  let cachedExternalBindings =
+        Map.map
+          ( CachedExternalBinding
+              . prepareSurfaceExternalBindingInputs (finalizeContextScope context)
+              . pure
+          )
+          externalInputsByKey
   let keyedBindingRead lowered = do
         key <- loweredBindingReadKey lowered
-        pure (key, mkModuleBindingReadContext context schemeExternalTypes schemeExternalBindings lowered)
+        pure (key, mkModuleBindingReadContext context cachedExternalBindings lowered)
   bindingReads <-
     traverse keyedBindingRead lowereds
   if Set.size (Set.fromList (map fst bindingReads)) == length bindingReads
@@ -490,25 +507,29 @@ mkModuleFinalizeContext context lowereds0 = do
 
 mkModuleBindingReadContext ::
   FinalizeContext ->
-  Map String SrcType ->
-  PreparedExternalBindings ->
+  Map BindingKey CachedExternalBinding ->
   LoweredBinding ->
   ModuleBindingReadContext
-mkModuleBindingReadContext context schemeExternalTypes schemeExternalBindings lowered =
+mkModuleBindingReadContext context cachedExternalBindings lowered =
   ModuleBindingReadContext
     { moduleBindingReadLowered = lowered,
       moduleBindingReadResolvedFreeVars = mapM_ resolveRuntimeType freeReferences,
       moduleBindingReadExternalBindings =
         do
-          overlayBindings <-
+          globalBindings <- cachedBindingsForReferences globalExternalReferences
+          deferredBindings <-
             prepareSurfaceExternalBindingsForReferences
               scope
               runtimeSourceTypes
               runtimeIndex
               deferredExternalIndex
-              (lowerExternalTypeViews scope externalTypeViews0)
-              overlayExternalReferences
-          Right (overlayBindings `unionPreparedExternalBindings` sharedSchemeBindings `unionPreparedExternalBindings` runtimeBindings),
+              externalTypeViews0
+              deferredExternalReferences
+          Right
+            ( deferredBindings
+                `unionPreparedExternalBindings` globalBindings
+                `unionPreparedExternalBindings` runtimeBindings
+            ),
       moduleBindingReadNormalizedExpr =
         either
           (Left . ProgramPipelineError . show)
@@ -536,23 +557,31 @@ mkModuleBindingReadContext context schemeExternalTypes schemeExternalBindings lo
         Just _ <- [surfaceBindingReferenceValue runtimeIndex deferredExternalIndex externalTypeViews0 reference]
       ]
     externalReferenceKeys = surfaceBindingReferenceKeys externalReferences
+    deferredExternalReferences =
+      filter (surfaceBindingReferenceIsDeferred deferredExternalIndex) externalReferences
+    globalExternalReferences =
+      filter (not . surfaceBindingReferenceIsDeferred deferredExternalIndex) externalReferences
     runtimeReferences =
       filter ((`Set.notMember` externalReferenceKeys) . surfaceBindingReferenceKey) freeReferences
-    sharedSchemeExternalReferences =
-      [ reference
-      | reference <- externalReferences,
-        Just _ <- [surfaceBindingReferenceValue runtimeIndex deferredExternalIndex schemeExternalTypes reference],
-        surfaceBindingReferenceMode scope runtimeSourceTypes runtimeIndex deferredExternalIndex reference == ExternalBindingScheme
-      ]
-    sharedSchemeKeys = surfaceBindingReferenceKeys sharedSchemeExternalReferences
-    overlayExternalReferences =
-      filter ((`Set.notMember` sharedSchemeKeys) . surfaceBindingReferenceKey) externalReferences
-    sharedSchemeBindings = restrictPreparedExternalBindingsByKeys sharedSchemeKeys schemeExternalBindings
     runtimeBindings =
       restrictPreparedExternalBindingsByKeys
         (surfaceBindingReferenceKeys runtimeReferences)
         (finalizeContextRuntimeBindings context)
     expectedType = loweredExpectedTypeToElabType scope lowered
+
+    cachedBindingsForReferences references = do
+      bindings <-
+        traverse
+          ( \key ->
+              case Map.lookup key cachedExternalBindings of
+                Just cached -> cachedExternalBindingPrepared cached
+                Nothing -> Left (ProgramPipelineError ("missing cached external binding: " ++ show key))
+          )
+          (Set.toList (surfaceBindingReferenceKeys references))
+      case bindings of
+        [] -> prepareSurfaceExternalBindingInputs scope []
+        firstBinding : rest ->
+          Right (foldl' unionPreparedExternalBindings firstBinding rest)
 
     resolveRuntimeType reference =
       case surfaceBindingReferenceSourceType context externalTypes deferredExternalIndex reference of
@@ -3077,6 +3106,39 @@ runtimeExternalBindingResolvedByKey :: RuntimeExternalBindingIndex -> ModuleBind
 runtimeExternalBindingResolvedByKey index key =
   Map.lookup key (runtimeExternalBindingByKey index)
 
+runtimeSurfaceExternalBindingInputs ::
+  Map String TypeView ->
+  RuntimeExternalBindingIndex ->
+  Either ProgramError (Map ModuleBindingReadKey SurfaceExternalBindingInput)
+runtimeSurfaceExternalBindingInputs runtimeTypeViews index = do
+  inputs <-
+    Map.traverseWithKey inputForResolvedBinding (runtimeExternalBindingByKey index)
+  Map.size inputs `seq` Right inputs
+  where
+    inputForResolvedBinding key resolved = do
+      let details = X.resolvedVarDetails resolved
+      view <-
+        -- Runtime TypeViews are populated under every valid identity-runtime
+        -- alias when ElaborateScope is built.  The identity's own runtime name
+        -- is therefore the canonical key; consulting and comparing all display
+        -- aliases here only repeats work and can force enormous TypeViews.
+        case Map.lookup (idDetailsRuntimeName details) runtimeTypeViews of
+          Just candidate -> Right candidate
+          Nothing ->
+            Left
+              ( ProgramPipelineError
+                  ("resolved runtime binding has no unique canonical TypeView: " ++ show key)
+              )
+      pure
+        SurfaceExternalBindingInput
+          { surfaceExternalBindingInputName = idDetailsRuntimeName details,
+            surfaceExternalBindingInputView = view,
+            surfaceExternalBindingInputMode =
+              externalBindingModeForSourceType (typeViewDisplay view),
+            surfaceExternalBindingInputIdentity =
+              externalBindingIdentityFromDetails details
+          }
+
 runtimeExternalBindingIdentityByAlias :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentityByAlias index name = do
   resolved <- runtimeExternalBindingResolvedByAlias index name
@@ -3123,36 +3185,13 @@ runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
 deferredExternalBindingIndex :: DeferredObligations -> DeferredExternalBindingIndex
 deferredExternalBindingIndex obligations =
   DeferredExternalBindingIndex
-    { deferredExternalBindingByRef =
-        Map.fromList
-          [ (deferredProgramObligationRef obligation, obligation)
-          | obligation <- Map.elems obligations
-          ],
-      deferredExternalBindingByKey =
+    { deferredExternalBindingByKey =
         Map.fromList
           [ (X.idDetailsIdentityKey (DeferredId ref), obligation)
           | obligation <- Map.elems obligations,
             let ref = deferredProgramObligationRef obligation
-          ],
-      deferredExternalBindingRefByAlias =
-        Map.fromList
-          [ (alias, ref)
-          | (alias, DeferredId ref) <- Map.toList refAliases
           ]
     }
-  where
-    refAliases =
-      idDetailsAliasMapWith
-        [ (deferredRefName ref, DeferredId ref)
-        | obligation <- Map.elems obligations,
-          let ref = deferredProgramObligationRef obligation
-        ]
-
-deferredExternalBindingIdentityByAlias :: DeferredExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
-deferredExternalBindingIdentityByAlias index name = do
-  obligation <- lookupDeferredExternalBindingByAlias name index
-  let ref = deferredProgramObligationRef obligation
-  pure (externalBindingIdentityFromDeferredRef ref)
 
 deferredExternalBindingIdentityByKey :: DeferredExternalBindingIndex -> ModuleBindingReadKey -> Maybe ExternalBindingIdentity
 deferredExternalBindingIdentityByKey index key = do
@@ -3170,13 +3209,14 @@ externalBindingIdentityByKey runtimeIndex deferredIndex key =
   deferredExternalBindingIdentityByKey deferredIndex key
     <|> (externalBindingIdentityFromDetails . X.resolvedVarDetails <$> runtimeExternalBindingResolvedByKey runtimeIndex key)
 
-externalBindingIdentityFromIndexes :: RuntimeExternalBindingIndex -> DeferredExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
-externalBindingIdentityFromIndexes runtimeIndex deferredIndex name =
-  deferredExternalBindingIdentityByAlias deferredIndex name <|> runtimeExternalBindingIdentityByAlias runtimeIndex name
-
 surfaceBindingReferenceKeys :: [SurfaceBindingReference] -> Set BindingKey
 surfaceBindingReferenceKeys =
   Set.fromList . map surfaceBindingReferenceKey
+
+surfaceBindingReferenceIsDeferred :: DeferredExternalBindingIndex -> SurfaceBindingReference -> Bool
+surfaceBindingReferenceIsDeferred index reference =
+  case surfaceBindingReferenceKey reference of
+    ResolvedBindingKey key -> Map.member key (deferredExternalBindingByKey index)
 
 surfaceBindingReferenceValue :: Eq a => RuntimeExternalBindingIndex -> DeferredExternalBindingIndex -> Map String a -> SurfaceBindingReference -> Maybe a
 surfaceBindingReferenceValue runtimeIndex deferredIndex values reference =
@@ -3667,15 +3707,6 @@ sourceArrowCountAfterForalls ty =
     STForall _ _ body -> sourceArrowCountAfterForalls body
     STArrow _ cod -> 1 + sourceArrowCountAfterForalls cod
     _ -> 0
-
-lookupDeferredExternalBindingByAlias :: String -> DeferredExternalBindingIndex -> Maybe DeferredProgramObligation
-lookupDeferredExternalBindingByAlias name index =
-  Map.lookup name (deferredExternalBindingRefByAlias index)
-    >>= lookupDeferredExternalBindingByRef index
-
-lookupDeferredExternalBindingByRef :: DeferredExternalBindingIndex -> DeferredRef -> Maybe DeferredProgramObligation
-lookupDeferredExternalBindingByRef index ref =
-  Map.lookup ref (deferredExternalBindingByRef index)
 
 lookupUniqueAliasValue :: Eq a => Map String a -> String -> IdDetails -> Maybe a
 lookupUniqueAliasValue values runtimeName details =

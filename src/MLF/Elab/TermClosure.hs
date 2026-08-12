@@ -8,6 +8,9 @@ module MLF.Elab.TermClosure
     constructTermWithSchemeSubstRefsAtPublicationWithRoutes,
     constructTermWithCertifiedResultSchemeAtPublicationWithRoutes,
     constructTermWithCertifiedInstantiationAtLambdaResult,
+    constructTermWithCertifiedInstantiationAtLambdaResultWithCause,
+    constructTermAtCertifiedLexicalCopy,
+    publishTermAtExactType,
     constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
     etaExpandTermToSchemeSubstRefs,
@@ -31,6 +34,8 @@ module MLF.Elab.TermClosure
   )
 where
 
+import Control.Monad (unless)
+import qualified Data.Bifunctor as Bifunctor
 import Data.Functor.Foldable (Recursive (project), cata)
 import Data.Either (isRight)
 import qualified Data.IntMap.Strict as IntMap
@@ -46,8 +51,46 @@ import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Frontend.Syntax (Lit (LInt))
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef, substTypeSimpleRef)
+import MLF.Types.Identity
+  ( freshLocalRef,
+    idDetailsGeneratedIdentities,
+    identityGeneratorAfter,
+    typeBinderIdentityIsCanonicalStructural,
+  )
 
 type TypeVarRename = (TypeBinderRef, TypeBinderRef)
+
+-- | Publish a term through a fresh lexical binding carrying an exact
+-- alpha-equivalent type presentation.  This is needed when the producer is an
+-- environment-owned occurrence: changing its payload cannot change the type
+-- returned by the identity-keyed checker, while the new binding makes the
+-- constructed presentation authoritative for its body.
+publishTermAtExactType
+  :: TypeCheck.Env
+  -> String
+  -> ElabType
+  -> XmlfTerm
+  -> XmlfTerm
+publishTermAtExactType tcEnv name exactTy term =
+  ELet exactResolved exactScheme term (EVarNode exactResolved)
+  where
+    exactScheme = schemeFromType exactTy
+    exactResolved = localResolvedVarFromRef exactLocalRef exactTy
+    (exactLocalRef, _) =
+      freshLocalRef name (identityGeneratorAfter reservedIdentities)
+    reservedIdentities =
+      generatedIdentitiesInTerm term
+        ++ generatedIdentitiesInType exactTy
+        ++ concat
+          [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+              ++ generatedIdentitiesInType ty
+          | (resolved, ty) <-
+              TypeCheck.resolvedTermEnvEntries
+                (TypeCheck.resolvedTermEnv tcEnv)
+          ]
+        ++ concatMap
+          generatedIdentitiesInType
+          (Map.elems (TypeCheck.typeEnv tcEnv))
 
 -- | Alpha-rename type abstractions that would capture an exact type identity
 -- already visible in the checking environment.  This is needed when a child
@@ -155,14 +198,16 @@ freshenTypeAbsIdentitiesAgainstEnvWithRenames initialEnv term0 =
               )
         ETyAbsFRef ref mbBound body ->
           let collision =
-                any (typeBinderRefsSameIdentity ref) visible
+                not
+                  ( typeBinderIdentityIsCanonicalStructural
+                      (typeBinderRefIdentity ref)
+                  )
+                  && any (typeBinderRefsSameIdentity ref) visible
               (ref', bodyForRef, generator') =
                 if collision
                   then
                     let (freshRef, nextGenerator) =
-                          freshTypeBinderRef
-                            (typeBinderRefName ref)
-                            generator
+                          freshenTypeBinderRef ref generator
                      in
                       ( freshRef
                       , renameTypeVarInTermAgainstEnv
@@ -222,11 +267,13 @@ freshenTypeAbsIdentitiesAgainstEnvWithRenames initialEnv term0 =
             (map fst (schemeBinderRefs scheme))
 
         chooseBinder (chosen, nextGenerator, reserved) ref
-          | any (typeBinderRefsSameIdentity ref) reserved =
+          | not
+              ( typeBinderIdentityIsCanonicalStructural
+                  (typeBinderRefIdentity ref)
+              )
+          , any (typeBinderRefsSameIdentity ref) reserved =
               let (freshRef, generatorAfterFresh) =
-                    freshTypeBinderRef
-                      (typeBinderRefName ref)
-                      nextGenerator
+                    freshenTypeBinderRef ref nextGenerator
                in ( chosen ++ [(ref, freshRef)]
                   , generatorAfterFresh
                   , insertRef freshRef reserved
@@ -537,15 +584,14 @@ alphaRenameTermTypeBinderScopesSelecting selectBinder selectedRenames = renameTe
             (renameInstantiation activeRenames left)
             (renameInstantiation activeRenames right)
 
+    renameType :: [TypeVarRename] -> Ty v -> Ty v
     renameType =
       alphaRenameTypeBinderScopesSelecting
         selectBinder
         selectedRenames
 
-    renameScopedBound activeRenames bound =
-      case elabToBound (renameType activeRenames (tyToElab bound)) of
-        Right renamed -> renamed
-        Left _ -> bound
+    renameScopedBound activeRenames =
+      renameType activeRenames
 
     renameActiveRef activeRenames ref =
       fromMaybe ref (lookupRename activeRenames ref)
@@ -581,8 +627,8 @@ alphaRenameTermTypeBinderScopesSelecting selectBinder selectedRenames = renameTe
 -- rewritten only while that copied declaration is lexically active.
 alphaRenameTypeBinderScopes
   :: [TypeVarRename]
-  -> ElabType
-  -> ElabType
+  -> Ty v
+  -> Ty v
 alphaRenameTypeBinderScopes selectedRenames =
   alphaRenameTypeBinderScopesSelecting
     (const True)
@@ -593,10 +639,11 @@ alphaRenameTypeBinderScopesSelecting
   :: (TypeBinderDeclarationKind -> Bool)
   -> [TypeVarRename]
   -> [TypeVarRename]
-  -> ElabType
-  -> ElabType
+  -> Ty v
+  -> Ty v
 alphaRenameTypeBinderScopesSelecting selectBinder selectedRenames = renameType
   where
+    renameType :: [TypeVarRename] -> Ty v -> Ty v
     renameType activeRenames ty =
       case ty of
         TVarRef ref -> TVarRef (renameActiveRef activeRenames ref)
@@ -627,10 +674,8 @@ alphaRenameTypeBinderScopesSelecting selectBinder selectedRenames = renameType
            in TMuRef ref' (renameType bodyRenames body)
         TBottom -> TBottom
 
-    renameScopedBound activeRenames bound =
-      case elabToBound (renameType activeRenames (tyToElab bound)) of
-        Right renamed -> renamed
-        Left _ -> bound
+    renameScopedBound activeRenames =
+      renameType activeRenames
 
     renameActiveRef activeRenames ref =
       fromMaybe ref (lookupRename activeRenames ref)
@@ -887,17 +932,58 @@ constructTermWithCertifiedInstantiationAtLambdaResult
   -> Instantiation
   -> XmlfTerm
   -> Maybe XmlfTerm
-constructTermWithCertifiedInstantiationAtLambdaResult env sourceTy targetTy inst term = do
-  actualTy <- either (const Nothing) Just (typeCheckWithEnv env term)
-  if typesAgree actualTy sourceTy
-    then pure ()
-    else Nothing
-  constructed <- descend sourceTy targetTy term
+constructTermWithCertifiedInstantiationAtLambdaResult env sourceTy targetTy inst term =
+  either
+    (const Nothing)
+    Just
+    ( constructTermWithCertifiedInstantiationAtLambdaResultWithCause
+        env
+        sourceTy
+        targetTy
+        inst
+        term
+    )
+
+constructTermWithCertifiedInstantiationAtLambdaResultWithCause
+  :: Env
+  -> ElabType
+  -> ElabType
+  -> Instantiation
+  -> XmlfTerm
+  -> Either String XmlfTerm
+constructTermWithCertifiedInstantiationAtLambdaResultWithCause env sourceTy targetTy inst term = do
+  actualTy <-
+    Bifunctor.first
+      (("source term does not typecheck: " ++) . show)
+      (typeCheckWithEnv env term)
+  unless
+    (typesAgree actualTy sourceTy)
+    ( Left
+        ( "source term has endpoint "
+            ++ show actualTy
+            ++ ", expected "
+            ++ show sourceTy
+        )
+    )
+  constructed <-
+    maybe
+      (Left "no certified transparent result path accepts the instantiation")
+      Right
+      (descend sourceTy targetTy term)
   constructedTy <-
-    either (const Nothing) Just (typeCheckWithEnv env constructed)
-  if typesAgree constructedTy targetTy
-    then Just constructed
-    else Nothing
+    Bifunctor.first
+      (("constructed result path does not typecheck: " ++) . show)
+      (typeCheckWithEnv env constructed)
+  unless
+    (typesAgree constructedTy targetTy)
+    ( Left
+        ( "constructed result path has endpoint "
+            ++ show constructedTy
+            ++ ", expected "
+            ++ show targetTy
+        )
+    )
+  pure constructed
   where
     descend actualTy expectedTy currentTerm =
       case TypeCheck.checkInstantiation env actualTy inst of
@@ -906,6 +992,27 @@ constructTermWithCertifiedInstantiationAtLambdaResult env sourceTy targetTy inst
               Just (ETyInst currentTerm inst)
         _ ->
           case currentTerm of
+            ELet resolved scheme rhs (EVarNode occurrence)
+              | resolvedVarSameIdentity resolved occurrence
+              , not
+                  ( any
+                      (resolvedVarSameIdentity resolved)
+                      (Reduce.freeResolvedTermVars rhs)
+                  )
+              , let schemeTy = schemeToType scheme
+              , typesAgree schemeTy actualTy -> do
+                  constructedRhs <- descend actualTy expectedTy rhs
+                  let resolvedAtExpected =
+                        mapResolvedVarType (const expectedTy) resolved
+                      occurrenceAtExpected =
+                        mapResolvedVarType (const expectedTy) occurrence
+                  pure
+                    ( ELet
+                        resolvedAtExpected
+                        (schemeFromType expectedTy)
+                        constructedRhs
+                        (EVarNode occurrenceAtExpected)
+                    )
             ELet resolved scheme rhs body ->
               ELet resolved scheme rhs
                 <$> descend actualTy expectedTy body
@@ -981,10 +1088,23 @@ constructTermWithResultModeAtPublicationWithRoutes resultConstruction env subst 
               producerSubst =
                 renameTermTypeVars renames (substInTermRefs subst' producer)
               constructedBody = do
-                actualTy <- either (const Nothing) Just (typeCheckWithEnv env producerSubst)
+                -- The publication scheme is the construction authority for
+                -- these exact declarations.  Its body is checked under the
+                -- declarations that the surrounding ETyAbs spine will
+                -- introduce, then the complete wrapped term is checked in
+                -- the caller's environment below.  Checking the open body in
+                -- @env@ would reject a correctly constructed bounded root
+                -- before its binder exists.
+                actualTy <-
+                  either
+                    (const Nothing)
+                    Just
+                    (typeCheckWithEnv schemeScopeEnv producerSubst)
                 constructTermToTypeWithRoutes
+                  OperationalEndpointMatch
                   resultConstruction
                   (schemeBinderRefs scheme')
+                  []
                   actualTy
                   (schemeBody scheme')
                   producerSubst
@@ -1036,7 +1156,7 @@ constructTermWithSchemeSubstRefsAtResult env subst scheme term =
           renames
           (substInTermRefs subst' producer)
       termConstructed =
-        case typeCheckWithEnv env termSubst of
+        case typeCheckWithEnv schemeScopeEnv termSubst of
           Right actualTy ->
             maybe
               termSubst
@@ -1394,6 +1514,98 @@ data ConstructedTerm = ConstructedTerm
     constructedBinderRoutes :: ![TypeVarRename]
   }
 
+data EndpointMatch
+  = OperationalEndpointMatch
+  | ExactEndpointMatch
+
+endpointTypesMatch :: EndpointMatch -> ElabType -> ElabType -> Bool
+endpointTypesMatch endpointMatch actualTy expectedTy =
+  case endpointMatch of
+    OperationalEndpointMatch ->
+      alphaEqType actualTy expectedTy
+        || churchAwareEqType actualTy expectedTy
+    ExactEndpointMatch -> actualTy == expectedTy
+
+-- | Re-present a checked local result at lexical forall identities allocated
+-- by the surrounding constructor.  Every identity change must be named by a
+-- construction-time copy route, and the resulting xMLF term must check at the
+-- exact target presentation.  The construction uses only type abstractions
+-- and type computations, so it preserves value erasure; environment-owned
+-- occurrences that cannot change presentation this way use
+-- 'publishTermAtExactType' at their separate lexical publication boundary.
+constructTermAtCertifiedLexicalCopy
+  :: Env
+  -> [TypeVarRename]
+  -> ElabType
+  -> XmlfTerm
+  -> Either String XmlfTerm
+constructTermAtCertifiedLexicalCopy env authorizedCopies expectedTy term = do
+  unless (not (null authorizedCopies)) $
+    Left "lexical-copy construction requires non-empty copy provenance"
+  actualTy <-
+    Bifunctor.first
+      (("lexical-copy source does not typecheck: " ++) . show)
+      (typeCheckWithEnv env term)
+  let copiedPresentation =
+        alphaRenameTypeBinderScopes authorizedCopies actualTy
+  unless
+    (copiedPresentation == expectedTy)
+    ( Left
+        ( "lexical-copy provenance does not construct the target presentation; source="
+            ++ show actualTy
+            ++ "; copies="
+            ++ show authorizedCopies
+            ++ "; copied="
+            ++ show copiedPresentation
+            ++ "; target="
+            ++ show expectedTy
+        )
+    )
+  construction <-
+    maybe
+      (Left "no erasure-preserving xMLF construction reaches the lexical-copy target")
+      Right
+      ( constructTermToTypeWithRoutes
+          ExactEndpointMatch
+          ConstructLambdaResults
+          (forallDeclarationsInType expectedTy)
+          authorizedCopies
+          actualTy
+          expectedTy
+          term
+      )
+  unless
+    (all routeIsAuthorized (constructedBinderRoutes construction))
+    ( Left
+        ( "lexical-copy construction used an unauthorized binder route; authorized="
+            ++ show authorizedCopies
+            ++ "; used="
+            ++ show (constructedBinderRoutes construction)
+        )
+    )
+  constructedTy <-
+    Bifunctor.first
+      (("lexical-copy result does not typecheck: " ++) . show)
+      (typeCheckWithEnv env (constructedTerm construction))
+  unless
+    (constructedTy == expectedTy)
+    ( Left
+        ( "lexical-copy result has a non-exact endpoint; actual="
+            ++ show constructedTy
+            ++ "; expected="
+            ++ show expectedTy
+        )
+    )
+  pure (constructedTerm construction)
+  where
+    routeIsAuthorized (sourceRef, targetRef) =
+      any
+        ( \(authorizedSourceRef, authorizedTargetRef) ->
+            typeBinderRefsSameIdentity sourceRef authorizedSourceRef
+              && typeBinderRefsSameIdentity targetRef authorizedTargetRef
+        )
+        authorizedCopies
+
 constructTermToType
   :: LambdaResultConstruction
   -> [(TypeBinderRef, Maybe BoundType)]
@@ -1404,21 +1616,25 @@ constructTermToType
 constructTermToType lambdaResultConstruction binders actualTy expectedTy term =
   constructedTerm
     <$> constructTermToTypeWithRoutes
+      OperationalEndpointMatch
       lambdaResultConstruction
       binders
+      []
       actualTy
       expectedTy
       term
 
 constructTermToTypeWithRoutes
-  :: LambdaResultConstruction
+  :: EndpointMatch
+  -> LambdaResultConstruction
   -> [(TypeBinderRef, Maybe BoundType)]
+  -> [TypeVarRename]
   -> ElabType
   -> ElabType
   -> XmlfTerm
   -> Maybe ConstructedTerm
-constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expectedTy term
-  | alphaEqType actualTy expectedTy || churchAwareEqType actualTy expectedTy =
+constructTermToTypeWithRoutes endpointMatch lambdaResultConstruction binders authorizedRecursiveCopies actualTy expectedTy term
+  | endpointTypesMatch endpointMatch actualTy expectedTy =
       Just (ConstructedTerm term [])
   | ConstructLambdaResults <- lambdaResultConstruction
   , ELet resolved scheme rhs (EVarNode occurrence) <- term
@@ -1437,8 +1653,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
       -- a polymorphic returned function.
       construction <-
         constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           actualTy
           expectedTy
           rhs
@@ -1458,8 +1676,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
   | ELet resolved scheme rhs body <- term =
       mapConstructedTerm (ELet resolved scheme rhs)
         <$> constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           actualTy
           expectedTy
           body
@@ -1470,8 +1690,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
       -- and exposes the already checked result path; the caller rechecks the
       -- complete constructed term at the target endpoint.
       constructTermToTypeWithRoutes
+        endpointMatch
         lambdaResultConstruction
         binders
+        authorizedRecursiveCopies
         actualTy
         expectedTy
         reducedTerm
@@ -1499,8 +1721,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
                 (ELam parameterAtExpected (EVarNode occurrenceAtExpected))
             )
             <$> constructTermToTypeWithRoutes
+              endpointMatch
               lambdaResultConstruction
               binders
+              authorizedRecursiveCopies
               actualTy
               expectedTy
               argument
@@ -1515,8 +1739,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
       mapConstructedTerm
         (\constructedBody -> EApp (ELam parameter constructedBody) argument)
         <$> constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           actualTy
           expectedTy
           body
@@ -1524,12 +1750,13 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
   , ELam resolved body <- term
   , TArrow actualDomain actualCodomain <- actualTy
   , TArrow expectedDomain expectedCodomain <- expectedTy
-  , alphaEqType actualDomain expectedDomain
-      || churchAwareEqType actualDomain expectedDomain =
+  , endpointTypesMatch endpointMatch actualDomain expectedDomain =
       mapConstructedTerm (ELam resolved)
         <$> constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           actualCodomain
           expectedCodomain
           body
@@ -1542,11 +1769,34 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
   , binderBoundsAgree actualBound expectedBound =
       mapConstructedTerm (eTyAbsWithRef termRef termBound)
         <$> constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           actualBody
           expectedBody
           body
+  | TMuRef actualRef _ <- actualTy
+  , TMuRef expectedRef _ <- expectedTy
+  , Just authorizedRoute@(authorizedSourceRef, authorizedTargetRef) <-
+      find
+        ( \(sourceRef, targetRef) ->
+            typeBinderRefsSameIdentity sourceRef actualRef
+              && typeBinderRefsSameIdentity targetRef expectedRef
+        )
+        authorizedRecursiveCopies
+  , alphaRenameTypeBinderScopes [authorizedRoute] actualTy == expectedTy =
+      -- A certified lexical copy may rename a recursive declaration as well
+      -- as a forall declaration.  The corresponding xMLF computation is an
+      -- explicit unfold at the source owner followed by a roll at the copied
+      -- owner.  Requiring the exact construction-time route and the exact
+      -- renamed endpoint prevents equal-shaped recursive owners from being
+      -- exchanged after type checking.
+      Just
+        ( ConstructedTerm
+            (ERoll expectedTy (EUnroll term))
+            [(authorizedSourceRef, authorizedTargetRef)]
+        )
   | ConstructLambdaResults <- lambdaResultConstruction
   , TForallRef actualRef actualBound actualBody <- actualTy
   , TForallRef expectedRef expectedBound expectedBody <- expectedTy
@@ -1559,8 +1809,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
       steppedTy <- either (const Nothing) Just (applyInstantiation actualTy step)
       construction <-
         constructTermToTypeWithRoutes
+          endpointMatch
           lambdaResultConstruction
           binders
+          authorizedRecursiveCopies
           steppedTy
           expectedBody
           steppedTerm
@@ -1595,7 +1847,15 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
             []
         )
   | TForallRef actualRef actualBound actualBody <- actualTy
-  , length (topTyAbsRefs term) < length binders =
+  , case lambdaResultConstruction of
+      ConstructLambdaResults -> True
+      PreserveLambdaResults ->
+        length (topTyAbsRefs term) < length binders =
+      -- A certified returned-lambda construction may need to open an
+      -- already-complete outer publication prefix before it can descend
+      -- through a value arrow and move a later forall outward.  The caller's
+      -- owner certificate is the authority for that descent; ordinary
+      -- publication retains the stricter missing-prefix check.
       constructFromLeadingForall actualRef actualBound actualBody
   | TForallRef actualRef actualBound actualBody <- actualTy
   , [(expectedRef, _)] <-
@@ -1672,8 +1932,10 @@ constructTermToTypeWithRoutes lambdaResultConstruction binders actualTy expected
                   (Reduce.reduceLeadingTypeInstantiationRedexes explicitStep)
           construction <-
             constructTermToTypeWithRoutes
+              endpointMatch
               lambdaResultConstruction
               binders
+              authorizedRecursiveCopies
               appliedTy
               expectedTy
               steppedTerm
