@@ -146,6 +146,7 @@ library mlf2-internal
                       MLF.Elab.Elaborate.Algebra.TestSupport,
                       MLF.Elab.Elaborate.Annotation,
                       MLF.Elab.Elaborate.Annotation.TestSupport,
+                      MLF.Elab.Inst.TestSupport,
                       MLF.Elab.TermClosure,
                       MLF.Elab.Run.Provenance,
                       MLF.Elab.Run.Util,

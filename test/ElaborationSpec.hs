@@ -1561,13 +1561,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 ElabTypes.resolvedVarType bodyVar `shouldBe` Elab.TVarRef outerRef
                 ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails xResolved)
                   `shouldBe` ElabTypes.idDetailsIdentityKey (ElabTypes.resolvedVarDetails bodyVar)
-                case boundToType resultBound of
+                mbResultBoundRef <- case boundToType resultBound of
                   Elab.TForallRef boundRef Nothing
                     (Elab.TArrow (Elab.TVarRef boundDomainRef) (Elab.TVarRef boundOuterRef)) -> do
                       ElabTypes.typeBinderRefsSameIdentity boundRef boundDomainRef `shouldBe` True
                       ElabTypes.typeBinderRefsSameIdentity boundOuterRef outerRef `shouldBe` True
-                      ElabTypes.typeBinderRefsSameIdentity innerRef boundRef `shouldBe` True
-                  other -> expectationFailure ("Expected paper K result bound, got " ++ show other)
+                      ElabTypes.typeBinderRefsSameIdentity innerRef boundRef `shouldBe` False
+                      ElabTypes.typeBinderRefGraphOrigin innerRef
+                        `shouldBe` ElabTypes.typeBinderRefNode boundRef
+                      pure (Just boundRef)
+                  other -> do
+                    expectationFailure ("Expected paper K result bound, got " ++ show other)
+                    pure Nothing
                 case ty of
                   Elab.TForallRef typeOuterRef Nothing
                     ( Elab.TForallRef typeResultRef (Just typeResultBound)
@@ -1582,7 +1587,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                           (Elab.TArrow (Elab.TVarRef typeBoundDomainRef) (Elab.TVarRef typeBoundOuterRef)) -> do
                             ElabTypes.typeBinderRefsSameIdentity typeBoundRef typeBoundDomainRef `shouldBe` True
                             ElabTypes.typeBinderRefsSameIdentity typeBoundOuterRef outerRef `shouldBe` True
-                            ElabTypes.typeBinderRefsSameIdentity typeBoundRef innerRef `shouldBe` True
+                            case mbResultBoundRef of
+                              Just resultBoundRef ->
+                                ElabTypes.typeBinderRefsSameIdentity typeBoundRef resultBoundRef `shouldBe` True
+                              Nothing ->
+                                expectationFailure "Expected the paper K result-bound identity"
+                            ElabTypes.typeBinderRefsSameIdentity typeBoundRef innerRef `shouldBe` False
                         other -> expectationFailure ("Expected closed paper K type bound, got " ++ show other)
                   other -> expectationFailure ("Expected paper K principal type, got " ++ show other)
             | otherwise ->

@@ -1,3 +1,3 @@
 -- xMLF golden output for: choose
-term: Λ(a1 ⩾ ⊥) Λ(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) λ(x : a1) (Λ(t1 ⩾ ⊥) λ(y : t1) x)[a⊳]
+term: Λ(a1 ⩾ ⊥) Λ(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) λ(x : a1) (Λ(t11 ⩾ ⊥) λ(y : t11) x)[a⊳]
 type: ∀(a1 ⩾ ⊥) ∀(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) a1 -> a

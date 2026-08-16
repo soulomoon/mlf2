@@ -29,6 +29,7 @@ import Data.List (find)
 import MLF.Elab.Inst
     ( applyInstantiation
     , composeInst
+    , freshenInstantiationTypeDeclarationScopes
     , instForLeadingTypeArgument
     , schemeToType
     )
@@ -393,7 +394,11 @@ constructExactInstantiation
     -> ElabType
     -> Maybe Instantiation
 constructExactInstantiation typeEnv typesAgree source target = do
-    instantiation <- go typeEnv source target
+    provisionalInstantiation <- go typeEnv source target
+    let instantiation =
+            freshenInstantiationTypeDeclarationScopes
+                source
+                provisionalInstantiation
     constructed <-
         either
             (const Nothing)

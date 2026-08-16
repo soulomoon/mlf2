@@ -4665,7 +4665,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ofcOwnLambdaParamBoundaryCertificate = Nothing,
                 ofcOpenValueLambdaParameterRefs = [],
                 ofcBodyConsumerBoundRefinements = [],
-                ofcBodyConsumerScopeDependencyRenames = []
+                ofcBodyConsumerScopeDependencyRenames = [],
+                ofcLexicalCopyProvenance = []
               }
           expectCertificateFailure label result =
             case result of
@@ -5409,6 +5410,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             returnedConstruction =
               ExactResultConstruction
                 { ercOwner = owner,
+                  ercOwnLambdaParamBoundaryCertificate = Nothing,
                   ercConstructedType = returnedType,
                   ercExactEndpointCompletion = Nothing,
                   ercConstructedBinders = [(returnedRef, Nothing)],
@@ -5617,7 +5619,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   ofcOwnLambdaParamBoundaryCertificate = Nothing,
                   ofcOpenValueLambdaParameterRefs = [],
                   ofcBodyConsumerBoundRefinements = [],
-                  ofcBodyConsumerScopeDependencyRenames = []
+                  ofcBodyConsumerScopeDependencyRenames = [],
+                  ofcLexicalCopyProvenance = []
                 }
             refinementSubst =
               IntMap.singleton 991883 semanticRef

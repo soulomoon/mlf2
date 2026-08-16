@@ -1,3 +1,49 @@
+## 2026-08-16 - Exact lexical copies through paper `g g`
+
+- Extended construction certificates across the remaining lambda/application
+  boundaries.  A copied owner scope records its result-closure source, exact
+  lambda bodies construct under their own parameter boundary, and sibling
+  result copies remain connected by positional binder routes instead of being
+  reconciled from their final types.  Consumed declarations are completed
+  occurrence by occurrence, so independently copied binders are not collapsed
+  merely because their schemes are alpha-equivalent.
+- `TermClosure` now freshens declarations nested in parameter types and
+  schemes, including recursive declarations, and reconstructs the checked
+  term at the certified lexical endpoint.  The type checker keeps an
+  environment-owned `mu` presentation canonical: changing a variable payload
+  cannot override the identity-keyed environment entry.  When a certified
+  copy genuinely changes a nested recursive declaration, the constructor
+  publishes a fresh lexical binding at the exact copied type and rechecks that
+  complete term.
+- Ordinary root preconstruction can reserve an incomplete local-Gamma slot
+  only when every free identity in its operated type is a delayed source
+  declaration, that declaration occurs inside the operated type, and an
+  enclosing pending scheme already exposes the exact unbounded declaration and
+  graph route.  This provisional carrier is unavailable to final root
+  preparation.  After the owner term has been checked, its owner-final
+  certificate completes the requirement's bound before the final Gamma plan is
+  built.
+- A free solve-created semantic meta in a locally completed Gamma bound now
+  enters the pre-elaboration scope only when the expansion-construction
+  placement names that exact live unbounded node and an all-flex path reaches
+  the requirement's recorded owner.  The frozen source binder is not treated as
+  an alias for the meta.
+- Exact xMLF instantiation construction now reserves the source declarations and
+  every preceding payload scope before embedding `InstBot` or `InstApp` types.
+  Repeated source-forall identities in independent target positions are
+  alpha-copied from the instantiation's own identity supply, so the computation
+  produces a valid lexical endpoint directly rather than leaving an enclosing
+  lambda to repair duplicate declarations.
+- Frozen regressions cover the future-wrapper counterexample from generated
+  seed `1936552889`, the returned paper `g g` domain from seed `1799129115`,
+  all three successive counterexamples from seed `839296932`, recursive
+  environment publication, distinct sibling copies, and declaration freshening
+  beneath parameter schemes.  The fixed annotation group passes 379 examples,
+  the Phase 7 typecheck group passes 142 examples, 15 historical generated
+  seeds pass 1,500 programs, and the suite contains 4,141 examples.
+  This is executable evidence for the covered eMLF construction paths, not a
+  mechanized proof of the complete calculus.
+
 ## 2026-08-12 - Construction-certified paper `g g` publication
 
 - Removed the final type-shape test that treated a polymorphic root bound as

@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Changed
+- Completed the identity-directed lexical-copy path used by the paper's
+  annotated self-application family.  Lambda/application construction now
+  carries exact result-closure provenance, copies nested `forall` and `mu`
+  declarations occurrence by occurrence, and keeps sibling copies connected
+  by certified binder routes.  Environment-owned recursive occurrences remain
+  at their canonical environment type; a copied recursive presentation is
+  introduced only by an explicit, exactly rechecked lexical publication.
+  Ordinary preconstruction may reserve a future local-Gamma slot only when a
+  pending owner scheme already declares and routes that exact delayed source
+  identity, while final construction replaces the provisional bound from the
+  checked owner-final certificate.  A solve-created dependency can enter that
+  construction scope only through its exact expansion placement and all-flex
+  owner path.  Exact instantiations reserve source and preceding payload scopes
+  while they are built, alpha-copying repeated lexical declarations inside
+  `InstBot` and `InstApp` payloads before the computation is checked.  These
+  paths fail closed without a type shape, spelling, graph-number, or
+  post-typecheck repair fallback.
 - Replaced the last polymorphic-bound shape heuristic in root closure with two
   explicit construction authorities.  A scoped-publication certificate names
   exact checked declarations in the planned root binder spine and permits
@@ -31,8 +48,8 @@
   self-bound abstraction.  Packet placement also projects independently
   ordered source prefixes only when every declaration is unbounded, uniquely
   identity-owned by the enclosing Gamma, and bound-preserving.  The fixed
-  annotation group passes 355 examples, 15 historical generated seeds pass
-  1,500 programs, and the complete serialized suite passes 4,114 examples.
+  annotation group passes 379 examples, 15 historical generated seeds pass
+  1,500 programs, and the complete serialized suite passes 4,141 examples.
 - Removed the exact-annotation fallback that recursively retyped a completed
   `XmlfTerm` when its inferred recursive type was only alpha-equivalent to the
   exact source type. Compiler-exact preparation now carries occurrence-sensitive

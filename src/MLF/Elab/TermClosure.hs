@@ -9,7 +9,10 @@ module MLF.Elab.TermClosure
     constructTermWithCertifiedResultSchemeAtPublicationWithRoutes,
     constructTermWithCertifiedInstantiationAtLambdaResult,
     constructTermWithCertifiedInstantiationAtLambdaResultWithCause,
+    constructTermWithCertifiedResultArguments,
     constructTermAtCertifiedLexicalCopy,
+    constructTermAtCertifiedLexicalCopyGraph,
+    certifiedLexicalCopyGraphRenames,
     publishTermAtExactType,
     constructTermWithSchemeSubstRefsAtResult,
     constructTermWithSchemeSubstRefsByBinderRoutes,
@@ -21,9 +24,11 @@ module MLF.Elab.TermClosure
     refreshLocalResolvedVarType,
     freshenTypeAbsIdentitiesAgainstEnv,
     freshenTypeAbsIdentitiesAgainstEnvWithRenames,
+    freshenTypeAbsIdentitiesAgainstScopeWithRenames,
     renameTypeVarInTermAgainstEnv,
     alphaRenameTermTypeBinderScopes,
     alphaRenameTermRecursiveTypeBinderScopes,
+    alphaRenameTypeForallBinderScopes,
     alphaRenameTypeBinderScopes,
     renameTermTypeBinderRefPayloads,
     renameBoundTypeBinderRefPayloads,
@@ -40,6 +45,7 @@ import Data.Functor.Foldable (Recursive (project), cata)
 import Data.Either (isRight)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (find)
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
@@ -50,9 +56,10 @@ import MLF.Elab.TypeCheck (Env, emptyEnv, emptyResolvedTermEnv, insertResolvedTe
 import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Frontend.Syntax (Lit (LInt))
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef, substTypeSimpleRef)
+import MLF.Reify.TypeOps (alphaEqType, alphaEqTypePreservingRecursiveBinders, alphaEqTypePreservingStructuralBinders, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeCaptureRef, substTypeSimpleRef)
 import MLF.Types.Identity
-  ( freshLocalRef,
+  ( IdentityGenerator,
+    freshLocalRef,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     typeBinderIdentityIsCanonicalStructural,
@@ -114,10 +121,24 @@ freshenTypeAbsIdentitiesAgainstEnvWithRenames
   -> XmlfTerm
   -> (XmlfTerm, [TypeVarRename])
 freshenTypeAbsIdentitiesAgainstEnvWithRenames initialEnv term0 =
+  freshenTypeAbsIdentitiesAgainstScopeWithRenames [] initialEnv term0
+
+-- | Variant used when a constructor is about to place additional lexical
+-- declarations beside the term.  Those declarations are not ambient Gamma,
+-- but they are already allocated siblings: include them in collision checks
+-- and in the fresh-name supply so this pass cannot merge their identities.
+freshenTypeAbsIdentitiesAgainstScopeWithRenames
+  :: [TypeBinderRef]
+  -> TypeCheck.Env
+  -> XmlfTerm
+  -> (XmlfTerm, [TypeVarRename])
+freshenTypeAbsIdentitiesAgainstScopeWithRenames siblingDeclarationRefs initialEnv term0 =
   let (term, _, renames) = go generator0 visibleRefs initialEnv term0
    in (term, renames)
   where
     visibleRefs =
+      foldr insertRef environmentVisibleRefs siblingDeclarationRefs
+    environmentVisibleRefs =
       foldr insertRef (Map.keys (TypeCheck.typeEnv initialEnv))
         ( concatMap
             (freeTypeVarRefsType . snd)
@@ -144,19 +165,37 @@ freshenTypeAbsIdentitiesAgainstEnvWithRenames initialEnv term0 =
         EVarNodeF {} -> (term, generator, [])
         ELitF {} -> (term, generator, [])
         ELamF resolved body ->
-          let tcEnv' =
-                TypeCheck.insertResolvedTermBinding
-                  resolved
+          let (parameterTy, parameterRenames, generator') =
+                freshenLexicalTypeBinders
+                  generator
+                  visible
                   (resolvedVarType resolved)
+              resolved' = mapResolvedVarType (const parameterTy) resolved
+              bodyAtFreshParameter =
+                if null parameterRenames
+                  then body
+                  else
+                    refreshLocalResolvedVarTypeExactly
+                      resolved'
+                      (resolvedVarType resolved)
+                      parameterTy
+                      body
+              tcEnv' =
+                TypeCheck.insertResolvedTermBinding
+                  resolved'
+                  parameterTy
                   tcEnv
               visible' =
                 foldr
                   insertRef
                   visible
-                  (freeTypeVarRefsType (resolvedVarType resolved))
-              (body', generator', renames) =
-                go generator visible' tcEnv' body
-           in (ELam resolved body', generator', renames)
+                  (freeTypeVarRefsType parameterTy)
+              (body', generator'', bodyRenames) =
+                go generator' visible' tcEnv' bodyAtFreshParameter
+           in ( ELam resolved' body'
+              , generator''
+              , parameterRenames ++ bodyRenames
+              )
         EAppF function argument ->
           let (function', generator', functionRenames) =
                 go generator visible tcEnv function
@@ -245,6 +284,218 @@ freshenTypeAbsIdentitiesAgainstEnvWithRenames initialEnv term0 =
           let (body', generator', renames) =
                 go generator visible tcEnv body
            in (EUnroll body', generator', renames)
+
+    -- A higher-rank value parameter owns the forall and source-recursive
+    -- declarations in its carried type.  They are lexical declarations just
+    -- like an explicit 'ETyAbsRef': if an enclosing construction Gamma uses
+    -- the same identity, retaining it would make the parameter declaration
+    -- capture that ambient identity before the lambda is typechecked.
+    --
+    -- Allocate the copy while traversing the declared type, and rewrite only
+    -- occurrences beneath that declaration.  Bounds are outside their own
+    -- binder's scope.  Canonical structural identities are nominal owners and
+    -- may move only through their dedicated Roll/Unroll construction.
+    freshenLexicalTypeBinders
+      :: IdentityGenerator
+      -> [TypeBinderRef]
+      -> ElabType
+      -> (ElabType, [TypeVarRename], IdentityGenerator)
+    freshenLexicalTypeBinders generator visible ty =
+      let (ty', generator', _, renames) =
+            freshenType generator visible [] ty
+       in (ty', renames, generator')
+
+    freshenType
+      :: IdentityGenerator
+      -> [TypeBinderRef]
+      -> [TypeVarRename]
+      -> Ty v
+      -> (Ty v, IdentityGenerator, [TypeBinderRef], [TypeVarRename])
+    freshenType generator reserved activeRenames ty =
+      case ty of
+        TVarRef ref ->
+          ( TVarRef (renameActiveRef activeRenames ref)
+          , generator
+          , reserved
+          , []
+          )
+        TArrow domain codomain ->
+          let (domain', generator', reserved', domainRenames) =
+                freshenType generator reserved activeRenames domain
+              (codomain', generator'', reserved'', codomainRenames) =
+                freshenType generator' reserved' activeRenames codomain
+           in ( TArrow domain' codomain'
+              , generator''
+              , reserved''
+              , domainRenames ++ codomainRenames
+              )
+        TConWithIdentity identity constructor arguments ->
+          let (arguments', generator', reserved', renames) =
+                freshenTypeArguments
+                  generator
+                  reserved
+                  activeRenames
+                  arguments
+           in ( TConWithIdentity identity constructor arguments'
+              , generator'
+              , reserved'
+              , renames
+              )
+        TVarAppRef ref arguments ->
+          let (arguments', generator', reserved', renames) =
+                freshenTypeArguments
+                  generator
+                  reserved
+                  activeRenames
+                  arguments
+           in ( TVarAppRef
+                  (renameActiveRef activeRenames ref)
+                  arguments'
+              , generator'
+              , reserved'
+              , renames
+              )
+        TBaseWithIdentity identity base ->
+          (TBaseWithIdentity identity base, generator, reserved, [])
+        TBottom -> (TBottom, generator, reserved, [])
+        TForallRef ref mbBound body ->
+          let (mbBound', generator', reserved', boundRenames) =
+                freshenOptionalBound
+                  generator
+                  reserved
+                  activeRenames
+                  mbBound
+              (ref', generator'', copied) =
+                freshenDeclaration generator' reserved' ref
+              bodyActiveRenames =
+                enterFreshenedDeclaration ref ref' copied activeRenames
+              (body', generator''', reserved'', bodyRenames) =
+                freshenType
+                  generator''
+                  (insertRef ref' reserved')
+                  bodyActiveRenames
+                  body
+              declarationRenames
+                | copied = [(ref, ref')]
+                | otherwise = []
+           in ( TForallRef ref' mbBound' body'
+              , generator'''
+              , reserved''
+              , boundRenames ++ declarationRenames ++ bodyRenames
+              )
+        TMuRef ref body ->
+          let (ref', generator', copied) =
+                freshenDeclaration generator reserved ref
+              bodyActiveRenames =
+                enterFreshenedDeclaration ref ref' copied activeRenames
+              (body', generator'', reserved', bodyRenames) =
+                freshenType
+                  generator'
+                  (insertRef ref' reserved)
+                  bodyActiveRenames
+                  body
+              declarationRenames
+                | copied = [(ref, ref')]
+                | otherwise = []
+           in ( TMuRef ref' body'
+              , generator''
+              , reserved'
+              , declarationRenames ++ bodyRenames
+              )
+
+    freshenTypeArguments
+      generator
+      reserved
+      activeRenames
+      ((NonEmpty.:|) first rest) =
+        let (first', generator', reserved', firstRenames) =
+              freshenType generator reserved activeRenames first
+            (rest', generator'', reserved'', restRenames) =
+              freshenTypeList generator' reserved' activeRenames rest
+         in ( (NonEmpty.:|) first' rest'
+            , generator''
+            , reserved''
+            , firstRenames ++ restRenames
+            )
+
+    freshenTypeList generator reserved _activeRenames [] =
+      ([], generator, reserved, [])
+    freshenTypeList generator reserved activeRenames (ty : rest) =
+      let (ty', generator', reserved', tyRenames) =
+            freshenType generator reserved activeRenames ty
+          (rest', generator'', reserved'', restRenames) =
+            freshenTypeList generator' reserved' activeRenames rest
+       in ( ty' : rest'
+          , generator''
+          , reserved''
+          , tyRenames ++ restRenames
+          )
+
+    freshenOptionalBound generator reserved activeRenames mbBound =
+      case mbBound of
+        Nothing -> (Nothing, generator, reserved, [])
+        Just bound ->
+          let (bound', generator', reserved', renames) =
+                freshenType generator reserved activeRenames bound
+           in (Just bound', generator', reserved', renames)
+
+    freshenDeclaration generator reserved ref
+      | not
+          ( typeBinderIdentityIsCanonicalStructural
+              (typeBinderRefIdentity ref)
+          )
+      , any (typeBinderRefsSameIdentity ref) reserved =
+          let (freshRef, generator') =
+                freshenTypeBinderRef ref generator
+           in (freshRef, generator', True)
+      | otherwise = (ref, generator, False)
+
+    enterFreshenedDeclaration ref ref' copied activeRenames
+      | copied =
+          (ref, ref') : removeActiveRename ref activeRenames
+      | otherwise = removeActiveRename ref activeRenames
+
+    renameActiveRef activeRenames ref =
+      fromMaybe ref
+        ( snd
+            <$> find
+              (typeBinderRefsSameIdentity ref . fst)
+              activeRenames
+        )
+
+    removeActiveRename ref =
+      filter (not . typeBinderRefsSameIdentity ref . fst)
+
+    -- Unlike the public refresh helper, this operation intentionally updates
+    -- an alpha-equivalent carried type: the fresh identity is the construction
+    -- boundary we are establishing, not a presentation-only change.
+    refreshLocalResolvedVarTypeExactly target previousTy ty = refresh
+      where
+        matches = resolvedVarSameIdentity target
+
+        refresh term =
+          case term of
+            EVarNode resolved
+              | matches resolved
+              , resolvedVarType resolved == previousTy ->
+                  EVarNode (mapResolvedVarType (const ty) resolved)
+              | otherwise -> term
+            ELit {} -> term
+            ELam resolved body
+              | matches resolved -> ELam resolved body
+              | otherwise -> ELam resolved (refresh body)
+            EApp function argument ->
+              EApp (refresh function) (refresh argument)
+            ELet resolved scheme rhs body
+              | matches resolved -> ELet resolved scheme rhs body
+              | otherwise ->
+                  ELet resolved scheme (refresh rhs) (refresh body)
+            ETyAbsRef ref mbBound body ->
+              ETyAbsRef ref mbBound (refresh body)
+            ETyInst inner instantiation ->
+              ETyInst (refresh inner) instantiation
+            ERoll rollTy body -> ERoll rollTy (refresh body)
+            EUnroll body -> EUnroll (refresh body)
 
     -- A let scheme is a lexical type-binder boundary just like the explicit
     -- abstractions that construct its RHS.  If an enclosing Gamma already
@@ -515,7 +766,7 @@ data TypeBinderDeclarationKind
   = ExplicitTypeBinder
   | ForallTypeBinder
   | RecursiveTypeBinder
-  deriving (Eq)
+  deriving (Eq, Show)
 
 alphaRenameTermTypeBinderScopesSelecting
   :: (TypeBinderDeclarationKind -> Bool)
@@ -632,6 +883,20 @@ alphaRenameTypeBinderScopes
 alphaRenameTypeBinderScopes selectedRenames =
   alphaRenameTypeBinderScopesSelecting
     (const True)
+    selectedRenames
+    []
+
+-- | Alpha-copy only forall declarations.  Construction sites use this when
+-- a graph identity is shared by a flexible declaration and an iso-recursive
+-- owner: copying the forall must not silently rename the recursive owner,
+-- whose identity can change only through explicit Roll/Unroll evidence.
+alphaRenameTypeForallBinderScopes
+  :: [TypeVarRename]
+  -> Ty v
+  -> Ty v
+alphaRenameTypeForallBinderScopes selectedRenames =
+  alphaRenameTypeBinderScopesSelecting
+    (== ForallTypeBinder)
     selectedRenames
     []
 
@@ -975,9 +1240,9 @@ constructTermWithCertifiedInstantiationAtLambdaResultWithCause env sourceTy targ
       (("constructed result path does not typecheck: " ++) . show)
       (typeCheckWithEnv env constructed)
   unless
-    (typesAgree constructedTy targetTy)
+    (constructedTy == targetTy)
     ( Left
-        ( "constructed result path has endpoint "
+        ( "constructed result path has non-exact endpoint "
             ++ show constructedTy
             ++ ", expected "
             ++ show targetTy
@@ -1029,6 +1294,100 @@ constructTermWithCertifiedInstantiationAtLambdaResultWithCause env sourceTy targ
                             body
                 _ -> Nothing
             _ -> Nothing
+
+    typesAgree left right =
+      alphaEqType left right || churchAwareEqType left right
+
+-- | Construct a certified returned-value path using exact type declarations
+-- supplied by the caller's exact construction authority as the only
+-- permitted forall arguments.  This is the multi-step counterpart of
+-- 'constructTermWithCertifiedInstantiationAtLambdaResult': a returned value
+-- may first eliminate a vacuous leading forall, cross one or more value
+-- lambdas, and only then apply a source forall to an open ambient identity.
+--
+-- The caller supplies construction provenance for descending through the
+-- returned value.  This helper seals the remaining mechanical invariant:
+-- every argument identity is unique, every binder route chosen by the xMLF
+-- constructor ends at one of those identities, and the complete rebuilt term
+-- checks at the requested endpoint.  The pair form is intentional: an
+-- enclosing endpoint can own a future unbounded result identity before that
+-- identity is installed in the current type-checking environment.
+constructTermWithCertifiedResultArguments
+  :: Env
+  -> [(TypeBinderRef, Maybe BoundType)]
+  -> ElabType
+  -> ElabType
+  -> XmlfTerm
+  -> Either String (XmlfTerm, [TypeVarRename])
+constructTermWithCertifiedResultArguments env argumentBinders sourceTy targetTy term = do
+  unless (not (null argumentBinders)) $
+    Left "certified returned-result construction requires an exact Gamma argument"
+  unless (distinctArgumentRefs (map fst argumentBinders)) $
+    Left
+      ( "certified returned-result construction repeats a Gamma argument: "
+          ++ show argumentBinders
+      )
+  actualTy <-
+    Bifunctor.first
+      (("certified returned-result source does not typecheck: " ++) . show)
+      (typeCheckWithEnv env term)
+  unless (typesAgree actualTy sourceTy) $
+    Left
+      ( "certified returned-result source has endpoint "
+          ++ show actualTy
+          ++ ", expected "
+          ++ show sourceTy
+      )
+  construction <-
+    maybe
+      (Left "no exact xMLF result construction uses the certified Gamma arguments")
+      Right
+      ( constructTermToTypeWithRoutes
+          ExactEndpointMatch
+          ConstructLambdaResults
+          argumentBinders
+          []
+          sourceTy
+          targetTy
+          term
+      )
+  unless (all routeTargetsCertified (constructedBinderRoutes construction)) $
+    Left
+      ( "returned-result construction selected an uncertified Gamma argument; certified="
+          ++ show argumentBinders
+          ++ "; routes="
+          ++ show (constructedBinderRoutes construction)
+      )
+  constructedTy <-
+    Bifunctor.first
+      (("certified returned-result construction does not typecheck: " ++) . show)
+      (typeCheckWithEnv env (constructedTerm construction))
+  unless (constructedTy == targetTy) $
+    Left
+      ( "certified returned-result construction has non-exact endpoint "
+          ++ show constructedTy
+          ++ ", expected "
+          ++ show targetTy
+      )
+  pure
+    ( constructedTerm construction
+    , constructedBinderRoutes construction
+    )
+  where
+    distinctArgumentRefs refs =
+      and
+        [ not
+            ( any
+                (typeBinderRefsSameIdentity ref)
+                (drop (index + 1) refs)
+            )
+        | (index, ref) <- zip [0 :: Int ..] refs
+        ]
+
+    routeTargetsCertified (_, targetRef) =
+      any
+        (typeBinderRefsSameIdentity targetRef . fst)
+        argumentBinders
 
     typesAgree left right =
       alphaEqType left right || churchAwareEqType left right
@@ -1411,6 +1770,11 @@ refreshLocalResolvedVarType target ty = go
     go term =
       case term of
         EVarNode resolved
+          | matches resolved,
+            alphaEqTypePreservingRecursiveBinders
+              ty
+              (resolvedVarType resolved) ->
+              term
           | matches resolved -> EVarNode (mapResolvedVarType (const ty) resolved)
           | otherwise -> term
         ELit {} -> term
@@ -1562,18 +1926,25 @@ constructTermAtCertifiedLexicalCopy env authorizedCopies expectedTy term = do
         )
     )
   construction <-
-    maybe
-      (Left "no erasure-preserving xMLF construction reaches the lexical-copy target")
-      Right
-      ( constructTermToTypeWithRoutes
-          ExactEndpointMatch
-          ConstructLambdaResults
-          (forallDeclarationsInType expectedTy)
-          authorizedCopies
-          actualTy
-          expectedTy
-          term
-      )
+    case occurrencePresentationConstruction of
+      Just constructed -> Right constructed
+      Nothing ->
+        case
+            constructTermToTypeWithRoutes
+              ExactEndpointMatch
+              ConstructLambdaResults
+              (forallDeclarationsInType expectedTy)
+              authorizedCopies
+              actualTy
+              expectedTy
+              term
+          of
+          Just constructed -> Right constructed
+          Nothing ->
+            maybe
+              (Left "no erasure-preserving xMLF construction reaches the lexical-copy target")
+              Right
+              (recursivePresentationPublication actualTy)
   unless
     (all routeIsAuthorized (constructedBinderRoutes construction))
     ( Left
@@ -1598,6 +1969,50 @@ constructTermAtCertifiedLexicalCopy env authorizedCopies expectedTy term = do
     )
   pure (constructedTerm construction)
   where
+    -- Figure 15.3.5 preserves the value-term shape.  When a certified route
+    -- changes only binders declared inside the term's carried types,
+    -- alpha-convert those lexical scopes in place instead of introducing a
+    -- value-level administrative let.  The exact recheck below rejects a
+    -- route that would affect a free or structurally owned identity.
+    occurrencePresentationConstruction =
+      let presented =
+            alphaRenameTermTypeBinderScopes authorizedCopies term
+       in case typeCheckWithEnv env presented of
+            Right presentedTy
+              | presentedTy == expectedTy ->
+                  Just (ConstructedTerm presented authorizedCopies)
+            _ -> Nothing
+
+    -- An environment-owned occurrence keeps the recursive presentation of
+    -- its identity-keyed binding.  When a certified copy changes a nested mu
+    -- declaration, no local roll/unroll can reach through the surrounding
+    -- forall/arrow structure.  Publish the alpha-renamed producer at a fresh
+    -- lexical binding whose scheme is the exact copied endpoint.  The let
+    -- checker validates the producer against that scheme; the fresh body
+    -- occurrence is then born at the requested recursive presentation.
+    -- Restrict this construction to an actual recursive-identity change so
+    -- ordinary forall copies still require their explicit xMLF computation.
+    recursivePresentationPublication actualTy
+      | alphaEqTypePreservingRecursiveBinders actualTy expectedTy = Nothing
+      | otherwise =
+          let presented =
+                alphaRenameTermTypeBinderScopes authorizedCopies term
+              published =
+                publishTermAtExactType
+                  env
+                  "$lexical-recursive-copy"
+                  expectedTy
+                  presented
+           in case typeCheckWithEnv env published of
+                Right publishedTy
+                  | publishedTy == expectedTy ->
+                      Just
+                        ( ConstructedTerm
+                            published
+                            authorizedCopies
+                        )
+                _ -> Nothing
+
     routeIsAuthorized (sourceRef, targetRef) =
       any
         ( \(authorizedSourceRef, authorizedTargetRef) ->
@@ -1605,6 +2020,178 @@ constructTermAtCertifiedLexicalCopy env authorizedCopies expectedTy term = do
               && typeBinderRefsSameIdentity targetRef authorizedTargetRef
         )
         authorizedCopies
+
+-- | Re-present a checked result through the equivalence class generated by
+-- construction-time lexical-copy certificates.  A child and its enclosing
+-- exact plan can independently copy the same source declaration, leaving the
+-- checked term at @source -> childCopy@ while the selected result endpoint is
+-- at @source -> resultCopy@.  Neither final type is authority for relating
+-- those copies: this constructor accepts the transition only when both refs
+-- are connected by the supplied copy graph, then emits the direct
+-- @childCopy -> resultCopy@ route before rebuilding the term.
+--
+-- Declaration positions are paired only after structural-owner-preserving
+-- alpha equivalence has established that the two endpoints have the same
+-- binder shape.  Forall and mu positions are tagged separately, preventing a
+-- reused graph identity from connecting declarations of different kinds.
+constructTermAtCertifiedLexicalCopyGraph
+  :: Env
+  -> [TypeVarRename]
+  -> ElabType
+  -> XmlfTerm
+  -> Either String XmlfTerm
+constructTermAtCertifiedLexicalCopyGraph env copyGraph expectedTy term = do
+  actualTy <-
+    Bifunctor.first
+      (("lexical-copy graph source does not typecheck: " ++) . show)
+      (typeCheckWithEnv env term)
+  requiredCopies <-
+    certifiedLexicalCopyGraphRenames copyGraph actualTy expectedTy
+  if null requiredCopies
+    then
+      pure term
+    else
+      constructTermAtCertifiedLexicalCopy
+        env
+        requiredCopies
+        expectedTy
+        term
+
+-- | Select the direct declaration copies constructed by a lexical-copy
+-- provenance graph.  This is the proof-producing half shared by term
+-- construction and owner-final certificate transport: endpoint shape only
+-- pairs declaration positions, while every identity change must be connected
+-- by the supplied construction graph.  Sibling copies may meet through their
+-- common source, but the returned evidence always names the direct
+-- source-presentation to target-presentation alpha construction.
+certifiedLexicalCopyGraphRenames
+  :: [TypeVarRename]
+  -> ElabType
+  -> ElabType
+  -> Either String [TypeVarRename]
+certifiedLexicalCopyGraphRenames copyGraph actualTy expectedTy = do
+  unless (not (null copyGraph)) $
+    Left "lexical-copy graph construction requires non-empty provenance"
+  unless
+    (alphaEqTypePreservingStructuralBinders actualTy expectedTy)
+    ( Left
+        ( "lexical-copy graph endpoints are not structurally alpha-equivalent; source="
+            ++ show actualTy
+            ++ "; target="
+            ++ show expectedTy
+        )
+    )
+  let actualDeclarations = binderDeclarations actualTy
+      expectedDeclarations = binderDeclarations expectedTy
+  unless
+    (length actualDeclarations == length expectedDeclarations)
+    ( Left
+        ( "lexical-copy graph endpoints have different declaration counts; source="
+            ++ show actualDeclarations
+            ++ "; target="
+            ++ show expectedDeclarations
+        )
+    )
+  directCopies <-
+    traverse certifiedPair (zip actualDeclarations expectedDeclarations)
+  let requiredCopies = [copy | Just copy <- directCopies]
+  unless
+    (not (null requiredCopies) || actualTy == expectedTy)
+    ( Left
+        ( "lexical-copy graph has no constructed route for a non-exact endpoint; source="
+            ++ show actualTy
+            ++ "; target="
+            ++ show expectedTy
+        )
+    )
+  pure requiredCopies
+  where
+    certifiedPair
+      ( (actualKind, actualRef)
+        , (expectedKind, expectedRef)
+        )
+      | actualKind /= expectedKind =
+          Left
+            ( "lexical-copy graph would cross binder kinds: "
+                ++ show (actualRef, expectedRef)
+            )
+      | typeBinderRefsSameIdentity actualRef expectedRef =
+          pure Nothing
+      | refsConnected actualRef expectedRef =
+          pure (Just (actualRef, expectedRef))
+      | targetWasConstructed expectedRef
+      , declarationCanEnterConstructedTarget actualRef expectedRef =
+          -- The checked term owns @actualRef@ at this exact declaration
+          -- position, while the copy graph owns the fresh destination.
+          -- Alpha-converting the local declaration directly to that named
+          -- destination is construction, not a type-shape-derived alias.
+          pure (Just (actualRef, expectedRef))
+      | otherwise =
+          Left
+            ( "lexical-copy graph does not connect corresponding declarations: "
+                ++ show (actualRef, expectedRef)
+                ++ "; provenance="
+                ++ show copyGraph
+            )
+
+    targetWasConstructed targetRef =
+      any
+        (typeBinderRefsSameIdentity targetRef . snd)
+        copyGraph
+
+    declarationCanEnterConstructedTarget sourceRef targetRef =
+      not
+        ( typeBinderIdentityIsCanonicalStructural
+            (typeBinderRefIdentity sourceRef)
+        )
+        && not
+          ( typeBinderIdentityIsCanonicalStructural
+              (typeBinderRefIdentity targetRef)
+          )
+        && typeBinderRefNode targetRef == Nothing
+
+    refsConnected sourceRef targetRef =
+      any
+        (typeBinderRefsSameIdentity targetRef)
+        (closure [sourceRef])
+
+    closure refs =
+      let expanded = foldr insertRef refs (concatMap neighbours refs)
+       in if length expanded == length refs
+            then refs
+            else closure expanded
+
+    neighbours ref =
+      [ targetRef
+      | (sourceRef, targetRef) <- copyGraph
+      , typeBinderRefsSameIdentity ref sourceRef
+      ]
+        ++ [ sourceRef
+           | (sourceRef, targetRef) <- copyGraph
+           , typeBinderRefsSameIdentity ref targetRef
+           ]
+
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
+    binderDeclarations ty =
+      case ty of
+        TVarRef {} -> []
+        TVarAppRef _ arguments ->
+          foldMap binderDeclarations arguments
+        TArrow domain codomain ->
+          binderDeclarations domain ++ binderDeclarations codomain
+        TConWithIdentity _ _ arguments ->
+          foldMap binderDeclarations arguments
+        TBaseWithIdentity {} -> []
+        TForallRef ref mbBound body ->
+          (ForallTypeBinder, ref)
+            : maybe [] (binderDeclarations . tyToElab) mbBound
+              ++ binderDeclarations body
+        TMuRef ref body ->
+          (RecursiveTypeBinder, ref) : binderDeclarations body
+        TBottom -> []
 
 constructTermToType
   :: LambdaResultConstruction

@@ -18,6 +18,7 @@ module MLF.Reify.TypeOps
     freshNameLike,
     alphaEqType,
     alphaEqTypePreservingStructuralBinders,
+    alphaEqTypePreservingRecursiveBinders,
     churchMuEquivalent,
     churchAwareEqType,
     churchRepresentationEqType,
@@ -600,6 +601,58 @@ alphaEqTypePreservingStructuralBinders left right =
           (Just leftIdentity, Just rightIdentity) ->
             leftIdentity == rightIdentity
           _ -> False
+
+-- | Identity-sensitive alpha-equivalence for an exact occurrence refresh.
+-- Forall declarations may retain an already constructed lexical
+-- presentation, but a mu declaration selected by the current sibling-scope
+-- constructor must already name that exact copy or be rewritten together
+-- with the occurrence payload.
+--
+-- This is deliberately not the general equality for recursive types:
+-- lexical mu binders are alpha-renamable under ordinary alpha-equivalence.
+-- The stricter relation exists only to decide whether an exact
+-- construction-time refresh still has work to do.
+alphaEqTypePreservingRecursiveBinders :: ElabType -> ElabType -> Bool
+alphaEqTypePreservingRecursiveBinders left right =
+  alphaEqType left right
+    && recursiveBindersAgree left right
+  where
+    recursiveBindersAgree :: Ty v -> Ty v -> Bool
+    recursiveBindersAgree leftTy rightTy =
+      case (leftTy, rightTy) of
+        (TVarRef {}, TVarRef {}) -> True
+        (TArrow leftDomain leftCodomain, TArrow rightDomain rightCodomain) ->
+          recursiveBindersAgree leftDomain rightDomain
+            && recursiveBindersAgree leftCodomain rightCodomain
+        (TConWithIdentity _ _ leftArgs, TConWithIdentity _ _ rightArgs) ->
+          allRecursiveBindersAgree (toList leftArgs) (toList rightArgs)
+        (TVarAppRef _ leftArgs, TVarAppRef _ rightArgs) ->
+          allRecursiveBindersAgree (toList leftArgs) (toList rightArgs)
+        (TBaseWithIdentity {}, TBaseWithIdentity {}) -> True
+        (TBottom, TBottom) -> True
+        (TForallRef _ leftBound leftBody, TForallRef _ rightBound rightBody) ->
+          maybeRecursiveBindersAgree leftBound rightBound
+            && recursiveBindersAgree leftBody rightBody
+        (TMuRef leftRef leftBody, TMuRef rightRef rightBody) ->
+          typeBinderRefsSameIdentity leftRef rightRef
+            && recursiveBindersAgree leftBody rightBody
+        _ -> False
+
+    allRecursiveBindersAgree leftTypes rightTypes =
+      length leftTypes == length rightTypes
+        && and
+          ( zipWith
+              recursiveBindersAgree
+              leftTypes
+              rightTypes
+          )
+
+    maybeRecursiveBindersAgree leftBound rightBound =
+      case (leftBound, rightBound) of
+        (Nothing, Nothing) -> True
+        (Just leftTy, Just rightTy) ->
+          recursiveBindersAgree leftTy rightTy
+        _ -> False
 
 stripChurchForallsType :: ElabType -> ([TypeBinderRef], ElabType)
 stripChurchForallsType ty =

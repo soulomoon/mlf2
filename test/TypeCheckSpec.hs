@@ -34,6 +34,9 @@ import MLF.Elab.Pipeline
     , checkInstantiation
     , unionEnvs
     )
+import MLF.Elab.Inst.TestSupport
+    ( substBinderAtOccurrencesWithFreshDeclarationCopiesForTest
+    )
 import MLF.Elab.Run.Pipeline.TestSupport
     ( PipelineElabDetailedResult(..)
     , closePipelineTerm
@@ -60,6 +63,7 @@ import MLF.Elab.TermClosure
     , constructTermWithCertifiedResultSchemeAtPublicationWithRoutes
     , constructTermWithSchemeSubstRefsAtPublicationWithRoutes
     , constructTermWithSchemeSubstRefsByBinderRoutes
+    , publishTermAtExactType
     , substInTermRefs
     )
 import MLF.Types.Elab
@@ -409,6 +413,41 @@ spec = describe "Phase 7 typecheck" $ do
             inner = generatedResolvedLocal 0 "x" "runtime-y" boolTy
             term = ELam outer (ELam inner (EVarNode inner))
         typeCheck term `shouldBe` Left (TCResolvedVarTypeMismatch "x" intTy boolTy)
+
+    it "retains a constructed forall-only occurrence presentation" $ do
+        let sourceRef = typeRef 991832 "a"
+            copiedRef = typeRef 991833 "a"
+            sourceTy =
+                TArrow
+                    (tForallWithRef sourceRef Nothing (TArrow (tVarWithRef sourceRef) (tVarWithRef sourceRef)))
+                    intTy
+            copiedTy =
+                TArrow
+                    (tForallWithRef copiedRef Nothing (TArrow (tVarWithRef copiedRef) (tVarWithRef copiedRef)))
+                    intTy
+            source = generatedResolvedLocal 991834 "x" "runtime-x" sourceTy
+            copiedOccurrence = source {resolvedVarType = copiedTy}
+            env = mkTypeCheckEnvWithResolvedTerms [(source, sourceTy)] Map.empty
+        TypeOps.alphaEqType sourceTy copiedTy `shouldBe` True
+        typeCheckWithEnv env (EVarNode copiedOccurrence) `shouldBe` Right copiedTy
+
+    it "keeps recursive declarations canonical until lexical publication" $ do
+        let sourceRef = typeRef 991835 "r"
+            copiedRef = typeRef 991836 "r"
+            sourceTy = TMuRef sourceRef (TArrow (tVarWithRef sourceRef) intTy)
+            copiedTy = TMuRef copiedRef (TArrow (tVarWithRef copiedRef) intTy)
+            source = generatedResolvedLocal 991837 "x" "runtime-x" sourceTy
+            copiedOccurrence = source {resolvedVarType = copiedTy}
+            env = mkTypeCheckEnvWithResolvedTerms [(source, sourceTy)] Map.empty
+            published =
+                publishTermAtExactType
+                    env
+                    "$recursive-copy-test"
+                    copiedTy
+                    (EVarNode copiedOccurrence)
+        TypeOps.alphaEqType sourceTy copiedTy `shouldBe` True
+        typeCheckWithEnv env (EVarNode copiedOccurrence) `shouldBe` Right sourceTy
+        typeCheckWithEnv env published `shouldBe` Right copiedTy
 
     it "preserves same-spelled resolved identities across typecheck env union" $ do
         let outer = generatedResolvedLocal 0 "x" "runtime-x" intTy
@@ -1052,8 +1091,38 @@ spec = describe "Phase 7 typecheck" $ do
                                 (tyToElab closedBound)
                                 annotationTy
                                 `shouldBe` True
-                            closedBinder `shouldBe` binder
-                            closedApplication `shouldBe` application
+                            resolvedVarDetails closedBinder
+                                `shouldBe` resolvedVarDetails binder
+                            TypeOps.alphaEqType
+                                (resolvedVarType closedBinder)
+                                (resolvedVarType binder)
+                                `shouldBe` True
+                            resolvedVarType closedBinder
+                                `shouldNotBe` resolvedVarType binder
+                            case closedApplication of
+                                EApp
+                                    ( ETyInst
+                                        (EVarNode closedFunction)
+                                        (InstApp instantiatedTy)
+                                      )
+                                    (EVarNode closedArgument) -> do
+                                        resolvedVarDetails closedFunction
+                                            `shouldBe` resolvedVarDetails binder
+                                        resolvedVarDetails closedArgument
+                                            `shouldBe` resolvedVarDetails binder
+                                        resolvedVarType closedFunction
+                                            `shouldBe` resolvedVarType closedBinder
+                                        resolvedVarType closedArgument
+                                            `shouldBe` resolvedVarType closedBinder
+                                        TypeOps.alphaEqType
+                                            instantiatedTy
+                                            annotationTy
+                                            `shouldBe` True
+                                other ->
+                                    expectationFailure
+                                        ( "expected the copied paper g g application, got "
+                                            ++ show other
+                                        )
                     other ->
                         expectationFailure
                             ( "expected the certified paper g g construction, got "
@@ -2860,6 +2929,48 @@ spec = describe "Phase 7 typecheck" $ do
                             ( "expected two lexical copies of the bounded forall, got: "
                                 ++ show other
                             )
+
+    it "freshens only declarations introduced at each publication occurrence" $ do
+        let targetRef = typeRef 991918 "a"
+            declarationRef = typeRef 991919 "b"
+            declaration =
+                tForallWithRef
+                    declarationRef
+                    Nothing
+                    (TArrow (tVarWithRef declarationRef) (tVarWithRef declarationRef))
+            existingDeclaration =
+                tForallWithRef declarationRef Nothing (tVarWithRef declarationRef)
+            source =
+                TArrow
+                    existingDeclaration
+                    (TArrow (tVarWithRef targetRef) (tVarWithRef targetRef))
+            (_, specialized) =
+                substBinderAtOccurrencesWithFreshDeclarationCopiesForTest
+                    initialIdentityGenerator
+                    targetRef
+                    declaration
+                    source
+        case specialized of
+            TArrow
+                (TForallRef existingRef Nothing _)
+                ( TArrow
+                    left@(TForallRef leftRef Nothing _)
+                    right@(TForallRef rightRef Nothing _)
+                  ) -> do
+                    existingRef `shouldBe` declarationRef
+                    left `shouldSatisfy` TypeOps.alphaEqType declaration
+                    right `shouldSatisfy` TypeOps.alphaEqType declaration
+                    typeBinderRefIdentity leftRef
+                        `shouldNotBe` typeBinderRefIdentity declarationRef
+                    typeBinderRefIdentity rightRef
+                        `shouldNotBe` typeBinderRefIdentity declarationRef
+                    typeBinderRefIdentity leftRef
+                        `shouldNotBe` typeBinderRefIdentity rightRef
+            other ->
+                expectationFailure
+                    ( "expected one existing declaration and two fresh publication copies, got: "
+                        ++ show other
+                    )
 
     it "typechecks internal recursive roll/unroll runtime terms" $ do
         typeCheck (ERoll recursiveIntTy recursiveBody) `shouldBe` Right recursiveIntTy

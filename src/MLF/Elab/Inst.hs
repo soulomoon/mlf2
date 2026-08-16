@@ -6,10 +6,12 @@ module MLF.Elab.Inst
     composeInst,
     evalInstantiationWith,
     identityGeneratorAfterTypeAndInstantiation,
+    freshenInstantiationTypeDeclarationScopes,
     instForLeadingTypeArgument,
     instMany,
     renameInstBoundRef,
     schemeToType,
+    substBinderAtOccurrencesWithFreshDeclarationCopies,
     substBinderWithFreshDeclarationCopies,
   )
 where
@@ -21,9 +23,11 @@ import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
 import MLF.Types.Elab (generatedIdentitiesInInstantiation)
 import MLF.Types.Identity
   ( IdentityGenerator,
+    advanceIdentityGeneratorPastMany,
     freshIdentity,
     freshenTypeBinderIdentity,
     identityGeneratorAfter,
+    typeBinderIdentityIsCanonicalStructural,
   )
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
@@ -46,6 +50,79 @@ identityGeneratorAfterTypeAndInstantiation :: ElabType -> Instantiation -> Ident
 identityGeneratorAfterTypeAndInstantiation ty inst =
   identityGeneratorAfter (generatedIdentitiesInType ty ++ generatedIdentitiesInInstantiation inst)
 
+-- | Allocate every lexical declaration carried by an instantiation payload in
+-- the identity domain where that computation will run.  A graph-derived exact
+-- target can mention the same source forall at several independent type
+-- positions.  Embedding that target verbatim in 'InstBot' or 'InstApp' would
+-- make those positions one nominal declaration even though the xMLF
+-- computation constructs separate scopes.
+--
+-- The source declarations and preceding payloads reserve their identities;
+-- later declarations are alpha-copied with the instantiation's own fresh
+-- supply.  Free references are deliberately unchanged, and canonical
+-- structural declarations remain reusable owner presentations.
+freshenInstantiationTypeDeclarationScopes
+  :: ElabType
+  -> Instantiation
+  -> Instantiation
+freshenInstantiationTypeDeclarationScopes source instantiation =
+  fst
+    (go initialState instantiation)
+  where
+    initialState =
+      ( lexicalDeclarationRefs source
+      , identityGeneratorAfterTypeAndInstantiation source instantiation
+      )
+
+    go state inst =
+      case inst of
+        InstId -> (InstId, state)
+        InstApp ty ->
+          let (ty', state') = freshenPayload state ty
+           in (InstApp ty', state')
+        InstBot ty ->
+          let (ty', state') = freshenPayload state ty
+           in (InstBot ty', state')
+        InstIntro -> (InstIntro, state)
+        InstElim -> (InstElim, state)
+        InstAbstrRef ref -> (InstAbstrRef ref, state)
+        InstUnderRef ref inner ->
+          let (inner', state') =
+                go (reserveRef ref state) inner
+           in (InstUnderRef ref inner', state')
+        InstInside inner ->
+          let (inner', state') = go state inner
+           in (InstInside inner', state')
+        InstSeq left right ->
+          let (left', state') = go state left
+              (right', state'') = go state' right
+           in (InstSeq left' right', state'')
+
+    freshenPayload (reserved, generator) ty =
+      let (generator', ty') =
+            freshenDeclarationsWhere
+              ( \ref seen ->
+                  isLexicalDeclaration ref
+                    && refMember ref seen
+              )
+              generator
+              reserved
+              ty
+          reserved' =
+            foldr insertRef reserved (lexicalDeclarationRefs ty')
+       in (ty', (reserved', generator'))
+
+    reserveRef ref (reserved, generator) =
+      (insertRef ref reserved, generator)
+
+    lexicalDeclarationRefs = filter isLexicalDeclaration . declarationRefs
+
+    isLexicalDeclaration ref =
+      not
+        ( typeBinderIdentityIsCanonicalStructural
+            (typeBinderRefIdentity ref)
+        )
+
 -- | Perform a capture-avoiding binder substitution while allocating a fresh
 -- lexical declaration for every repeated copy of a declaration in the
 -- replacement.  Quant-Elim and recursive unfolding share this rule.  The
@@ -67,108 +144,266 @@ substBinderWithFreshDeclarationCopies
 substBinderWithFreshDeclarationCopies generator target replacement body =
   let substituted = substTypeCaptureRef target replacement body
       replacementDeclarations = declarationRefs replacement
-      (substituted', (_, generator')) =
-        freshenRepeatedDeclarations
-          replacementDeclarations
+      (generator', substituted') =
+        freshenDeclarationsWhere
+          ( \ref seen ->
+              refMember ref seen
+                && refMember ref replacementDeclarations
+          )
+          generator
           []
-          ([], generator)
           substituted
    in (generator', substituted')
-  where
-    declarationRefs :: Ty v -> [TypeBinderRef]
-    declarationRefs ty =
-      case ty of
-        TVarRef _ -> []
-        TArrow domain codomain ->
-          declarationRefs domain ++ declarationRefs codomain
-        TConWithIdentity _ _ arguments ->
-          concatMap declarationRefs arguments
-        TVarAppRef _ arguments ->
-          concatMap declarationRefs arguments
-        TBaseWithIdentity _ _ -> []
-        TForallRef ref mbBound forallBody ->
-          ref
-            : maybe [] declarationRefs mbBound
-              ++ declarationRefs forallBody
-        TMuRef ref muBody -> ref : declarationRefs muBody
-        TBottom -> []
 
-    freshenRepeatedDeclarations
-      :: [TypeBinderRef]
-      -> [(TypeBinderRef, TypeBinderRef)]
+-- | Substitute each free occurrence of a binder with its own lexical copy of
+-- the replacement's declarations.  Unlike
+-- 'substBinderWithFreshDeclarationCopies', this marks the occurrences before
+-- substitution and never traverses pre-existing declarations as candidates
+-- for freshening.  It is the construction rule needed when an owner-final
+-- result publishes the same bounded type at several occurrence sites.
+substBinderAtOccurrencesWithFreshDeclarationCopies
+  :: IdentityGenerator
+  -> TypeBinderRef
+  -> ElabType
+  -> ElabType
+  -> (IdentityGenerator, ElabType)
+substBinderAtOccurrencesWithFreshDeclarationCopies generator target replacement body =
+  substituteMarkedOccurrences markerGenerator markedBody markers
+  where
+    occupiedGenerator =
+      advanceIdentityGeneratorPastMany
+        ( generatedIdentitiesInType replacement
+            ++ generatedIdentitiesInType body
+        )
+        generator
+    (markerGenerator, markedBody, markers) =
+      markFreeBinderOccurrences target occupiedGenerator body
+
+    substituteMarkedOccurrences generator' ty [] = (generator', ty)
+    substituteMarkedOccurrences generator' ty (marker : remaining) =
+      let (copyGenerator, replacementCopy) =
+            freshenDeclarationsWhere
+              (\ref seen -> refMember ref seen)
+              generator'
+              (declarationRefs ty)
+              replacement
+          substituted = substTypeCaptureRef marker replacementCopy ty
+          nextGenerator =
+            advanceIdentityGeneratorPastMany
+              (generatedIdentitiesInType substituted)
+              copyGenerator
+       in substituteMarkedOccurrences nextGenerator substituted remaining
+
+declarationRefs :: Ty v -> [TypeBinderRef]
+declarationRefs ty =
+  case ty of
+    TVarRef _ -> []
+    TArrow domain codomain ->
+      declarationRefs domain ++ declarationRefs codomain
+    TConWithIdentity _ _ arguments ->
+      concatMap declarationRefs arguments
+    TVarAppRef _ arguments ->
+      concatMap declarationRefs arguments
+    TBaseWithIdentity _ _ -> []
+    TForallRef ref mbBound forallBody ->
+      ref
+        : maybe [] declarationRefs mbBound
+          ++ declarationRefs forallBody
+    TMuRef ref muBody -> ref : declarationRefs muBody
+    TBottom -> []
+
+markFreeBinderOccurrences
+  :: TypeBinderRef
+  -> IdentityGenerator
+  -> Ty v
+  -> (IdentityGenerator, Ty v, [TypeBinderRef])
+markFreeBinderOccurrences target generator ty =
+  case ty of
+    TVarRef ref
+      | typeBinderRefsSameIdentity ref target ->
+          let (nextGenerator, marker) = freshMarkerRef generator ref
+           in (nextGenerator, TVarRef marker, [marker])
+      | otherwise -> (generator, TVarRef ref, [])
+    TArrow domain codomain ->
+      let (domainGenerator, domain', domainMarkers) =
+            markFreeBinderOccurrences target generator domain
+          (codomainGenerator, codomain', codomainMarkers) =
+            markFreeBinderOccurrences target domainGenerator codomain
+       in ( codomainGenerator
+          , TArrow domain' codomain'
+          , domainMarkers ++ codomainMarkers
+          )
+    TConWithIdentity identity constructor arguments ->
+      let (nextGenerator, arguments', markers) =
+            markFreeBinderOccurrencesNonEmpty target generator arguments
+       in ( nextGenerator
+          , TConWithIdentity identity constructor arguments'
+          , markers
+          )
+    TVarAppRef ref arguments ->
+      let (headGenerator, ref', headMarkers)
+            | typeBinderRefsSameIdentity ref target =
+                let (markerGenerator, marker) = freshMarkerRef generator ref
+                 in (markerGenerator, marker, [marker])
+            | otherwise = (generator, ref, [])
+          (nextGenerator, arguments', argumentMarkers) =
+            markFreeBinderOccurrencesNonEmpty target headGenerator arguments
+       in ( nextGenerator
+          , TVarAppRef ref' arguments'
+          , headMarkers ++ argumentMarkers
+          )
+    TBaseWithIdentity identity base ->
+      (generator, TBaseWithIdentity identity base, [])
+    TForallRef ref mbBound forallBody ->
+      let (boundGenerator, mbBound', boundMarkers) =
+            markFreeBinderOccurrencesMaybe target generator mbBound
+       in if typeBinderRefsSameIdentity ref target
+            then
+              ( boundGenerator
+              , TForallRef ref mbBound' forallBody
+              , boundMarkers
+              )
+            else
+              let (bodyGenerator, forallBody', bodyMarkers) =
+                    markFreeBinderOccurrences target boundGenerator forallBody
+               in ( bodyGenerator
+                  , TForallRef ref mbBound' forallBody'
+                  , boundMarkers ++ bodyMarkers
+                  )
+    TMuRef ref muBody
+      | typeBinderRefsSameIdentity ref target ->
+          (generator, TMuRef ref muBody, [])
+      | otherwise ->
+          let (nextGenerator, muBody', markers) =
+                markFreeBinderOccurrences target generator muBody
+           in (nextGenerator, TMuRef ref muBody', markers)
+    TBottom -> (generator, TBottom, [])
+
+markFreeBinderOccurrencesMaybe
+  :: TypeBinderRef
+  -> IdentityGenerator
+  -> Maybe (Ty v)
+  -> (IdentityGenerator, Maybe (Ty v), [TypeBinderRef])
+markFreeBinderOccurrencesMaybe _ generator Nothing =
+  (generator, Nothing, [])
+markFreeBinderOccurrencesMaybe target generator (Just ty) =
+  let (nextGenerator, ty', markers) =
+        markFreeBinderOccurrences target generator ty
+   in (nextGenerator, Just ty', markers)
+
+markFreeBinderOccurrencesNonEmpty
+  :: TypeBinderRef
+  -> IdentityGenerator
+  -> NonEmpty (Ty v)
+  -> (IdentityGenerator, NonEmpty (Ty v), [TypeBinderRef])
+markFreeBinderOccurrencesNonEmpty target generator (first :| remaining) =
+  let (firstGenerator, first', firstMarkers) =
+        markFreeBinderOccurrences target generator first
+      (nextGenerator, remaining', remainingMarkers) =
+        markFreeBinderOccurrencesList target firstGenerator remaining
+   in (nextGenerator, first' :| remaining', firstMarkers ++ remainingMarkers)
+
+markFreeBinderOccurrencesList
+  :: TypeBinderRef
+  -> IdentityGenerator
+  -> [Ty v]
+  -> (IdentityGenerator, [Ty v], [TypeBinderRef])
+markFreeBinderOccurrencesList _ generator [] = (generator, [], [])
+markFreeBinderOccurrencesList target generator (ty : types) =
+  let (typeGenerator, ty', typeMarkers) =
+        markFreeBinderOccurrences target generator ty
+      (nextGenerator, types', remainingMarkers) =
+        markFreeBinderOccurrencesList target typeGenerator types
+   in (nextGenerator, ty' : types', typeMarkers ++ remainingMarkers)
+
+freshMarkerRef
+  :: IdentityGenerator
+  -> TypeBinderRef
+  -> (IdentityGenerator, TypeBinderRef)
+freshMarkerRef generator ref =
+  let (freshUnique, nextGenerator) = freshIdentity generator
+   in ( nextGenerator
+      , typeBinderRefFromIdentity
+          (freshenTypeBinderIdentity (typeBinderRefIdentity ref) freshUnique)
+          (typeBinderRefName ref)
+      )
+
+freshenDeclarationsWhere
+  :: (TypeBinderRef -> [TypeBinderRef] -> Bool)
+  -> IdentityGenerator
+  -> [TypeBinderRef]
+  -> Ty v
+  -> (IdentityGenerator, Ty v)
+freshenDeclarationsWhere shouldFreshen generator seen ty =
+  let (ty', (_, generator')) = go [] (seen, generator) ty
+   in (generator', ty')
+  where
+    go
+      :: [(TypeBinderRef, TypeBinderRef)]
       -> ([TypeBinderRef], IdentityGenerator)
-      -> Ty v
-      -> (Ty v, ([TypeBinderRef], IdentityGenerator))
-    freshenRepeatedDeclarations eligible active state ty =
-      case ty of
+      -> Ty w
+      -> (Ty w, ([TypeBinderRef], IdentityGenerator))
+    go active state current =
+      case current of
         TVarRef ref -> (TVarRef (activeRef active ref), state)
         TArrow domain codomain ->
-          let (domain', state') =
-                freshenRepeatedDeclarations eligible active state domain
-              (codomain', state'') =
-                freshenRepeatedDeclarations eligible active state' codomain
+          let (domain', state') = go active state domain
+              (codomain', state'') = go active state' codomain
            in (TArrow domain' codomain', state'')
         TConWithIdentity identity constructor arguments ->
-          let (arguments', state') =
-                freshenNonEmpty eligible active state arguments
+          let (arguments', state') = goNonEmpty active state arguments
            in (TConWithIdentity identity constructor arguments', state')
         TVarAppRef ref arguments ->
-          let (arguments', state') =
-                freshenNonEmpty eligible active state arguments
-           in ( TVarAppRef (activeRef active ref) arguments'
-              , state'
-              )
+          let (arguments', state') = goNonEmpty active state arguments
+           in (TVarAppRef (activeRef active ref) arguments', state')
         TBaseWithIdentity identity base ->
           (TBaseWithIdentity identity base, state)
         TForallRef ref mbBound forallBody ->
-          let (mbBound', state') =
-                freshenMaybeBound eligible active state mbBound
-              (ref', state'') =
-                allocateDeclaration eligible ref state'
+          let (mbBound', state') = goMaybe active state mbBound
+              (ref', state'') = allocateDeclaration ref state'
               bodyActive = enterActiveRef ref ref' active
-              (forallBody', state''') =
-                freshenRepeatedDeclarations
-                  eligible
-                  bodyActive
-                  state''
-                  forallBody
+              (forallBody', state''') = go bodyActive state'' forallBody
            in (TForallRef ref' mbBound' forallBody', state''')
         TMuRef ref muBody ->
-          let (ref', state') = allocateDeclaration eligible ref state
+          let (ref', state') = allocateDeclaration ref state
               bodyActive = enterActiveRef ref ref' active
-              (muBody', state'') =
-                freshenRepeatedDeclarations
-                  eligible
-                  bodyActive
-                  state'
-                  muBody
+              (muBody', state'') = go bodyActive state' muBody
            in (TMuRef ref' muBody', state'')
         TBottom -> (TBottom, state)
 
-    freshenMaybeBound _ _ state Nothing = (Nothing, state)
-    freshenMaybeBound eligible active state (Just bound) =
-      let (bound', state') =
-            freshenRepeatedDeclarations eligible active state bound
+    goMaybe
+      :: [(TypeBinderRef, TypeBinderRef)]
+      -> ([TypeBinderRef], IdentityGenerator)
+      -> Maybe (Ty w)
+      -> (Maybe (Ty w), ([TypeBinderRef], IdentityGenerator))
+    goMaybe _ state Nothing = (Nothing, state)
+    goMaybe active state (Just bound) =
+      let (bound', state') = go active state bound
        in (Just bound', state')
 
-    freshenNonEmpty eligible active state (first :| remaining) =
-      let (first', state') =
-            freshenRepeatedDeclarations eligible active state first
-          (remaining', state'') =
-            freshenList eligible active state' remaining
+    goNonEmpty
+      :: [(TypeBinderRef, TypeBinderRef)]
+      -> ([TypeBinderRef], IdentityGenerator)
+      -> NonEmpty (Ty w)
+      -> (NonEmpty (Ty w), ([TypeBinderRef], IdentityGenerator))
+    goNonEmpty active state (first :| remaining) =
+      let (first', state') = go active state first
+          (remaining', state'') = goList active state' remaining
        in (first' :| remaining', state'')
 
-    freshenList _ _ state [] = ([], state)
-    freshenList eligible active state (ty : types) =
-      let (ty', state') =
-            freshenRepeatedDeclarations eligible active state ty
-          (types', state'') =
-            freshenList eligible active state' types
-       in (ty' : types', state'')
+    goList
+      :: [(TypeBinderRef, TypeBinderRef)]
+      -> ([TypeBinderRef], IdentityGenerator)
+      -> [Ty w]
+      -> ([Ty w], ([TypeBinderRef], IdentityGenerator))
+    goList _ state [] = ([], state)
+    goList active state (current : remaining) =
+      let (current', state') = go active state current
+          (remaining', state'') = goList active state' remaining
+       in (current' : remaining', state'')
 
-    allocateDeclaration eligible ref (seen, generator')
-      | refMember ref seen
-      , refMember ref eligible =
+    allocateDeclaration ref (seen', generator')
+      | shouldFreshen ref seen' =
           let (freshUnique, nextGenerator) = freshIdentity generator'
               freshRef =
                 typeBinderRefFromIdentity
@@ -177,25 +412,36 @@ substBinderWithFreshDeclarationCopies generator target replacement body =
                       freshUnique
                   )
                   (typeBinderRefName ref)
-           in (freshRef, (freshRef : seen, nextGenerator))
-      | otherwise = (ref, (insertRef ref seen, generator'))
+           in (freshRef, (freshRef : seen', nextGenerator))
+      | otherwise = (ref, (insertRef ref seen', generator'))
 
-    activeRef [] ref = ref
-    activeRef ((sourceRef, targetRef) : remaining) ref
-      | typeBinderRefsSameIdentity sourceRef ref = targetRef
-      | otherwise = activeRef remaining ref
+activeRef
+  :: [(TypeBinderRef, TypeBinderRef)]
+  -> TypeBinderRef
+  -> TypeBinderRef
+activeRef [] ref = ref
+activeRef ((sourceRef, targetRef) : remaining) ref
+  | typeBinderRefsSameIdentity sourceRef ref = targetRef
+  | otherwise = activeRef remaining ref
 
-    enterActiveRef sourceRef targetRef active =
-      (sourceRef, targetRef)
-        : filter
-          (not . typeBinderRefsSameIdentity sourceRef . fst)
-          active
+enterActiveRef
+  :: TypeBinderRef
+  -> TypeBinderRef
+  -> [(TypeBinderRef, TypeBinderRef)]
+  -> [(TypeBinderRef, TypeBinderRef)]
+enterActiveRef sourceRef targetRef active =
+  (sourceRef, targetRef)
+    : filter
+      (not . typeBinderRefsSameIdentity sourceRef . fst)
+      active
 
-    insertRef ref refs
-      | refMember ref refs = refs
-      | otherwise = ref : refs
+insertRef :: TypeBinderRef -> [TypeBinderRef] -> [TypeBinderRef]
+insertRef ref refs
+  | refMember ref refs = refs
+  | otherwise = ref : refs
 
-    refMember ref = any (typeBinderRefsSameIdentity ref)
+refMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
+refMember ref = any (typeBinderRefsSameIdentity ref)
 
 -- | Construct the computation for applying the leading quantifier to an
 -- argument type.  A flexible quantifier instantiated at its own explicit

@@ -47,6 +47,7 @@ import MLF.Types.Identity
   )
 import MLF.Reify.TypeOps
   ( alphaEqType,
+    alphaEqTypePreservingRecursiveBinders,
     churchAwareEqType,
     churchRepresentationEqType,
     firstNonContractiveRecursiveType,
@@ -320,7 +321,15 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
     case recursiveTy of
       TMuRef ref unfoldedBody -> do
         bodyTy <- typeCheckWithEnvSummary envSummary resolvedEnv env body
-        let expectedBodyTy = substTypeCaptureRef ref recursiveTy unfoldedBody
+        let (_, expectedBodyTy) =
+              substBinderWithFreshDeclarationCopies
+                ( identityGeneratorAfterTypeAndInstantiation
+                    recursiveTy
+                    InstId
+                )
+                ref
+                recursiveTy
+                unfoldedBody
             expectedBodyTyAlias = collapseRecursiveAlias ref recursiveTy expectedBodyTy
             expectedBodyTy' = stripVacuousForallsDeep expectedBodyTy
             expectedBodyTyAlias' = stripVacuousForallsDeep expectedBodyTyAlias
@@ -551,9 +560,19 @@ lookupResolvedTermEnv resolvedEnv resolved =
     name = resolvedVarReferenceName resolved
 
     checkedResolvedType ty
-      | not (resolvedVarIsLocal resolved)
-          || resolvedVarTypeMatches ty (resolvedVarType resolved) =
+      | not (resolvedVarIsLocal resolved) =
           Right ty
+      | ty == resolvedVarType resolved = Right ty
+      | alphaEqTypePreservingRecursiveBinders
+          ty
+          (resolvedVarType resolved) =
+          -- A forall presentation can be alpha-copied inside the carried
+          -- occurrence type.  A recursive owner cannot: it must be produced
+          -- by an explicit roll/unroll or lexical publication constructor.
+          -- Keeping mu identities exact here prevents an occurrence payload
+          -- from overriding its identity-keyed environment binding.
+          Right (resolvedVarType resolved)
+      | resolvedVarTypeMatches ty (resolvedVarType resolved) = Right ty
       | otherwise =
           Left (TCResolvedVarTypeMismatch name ty (resolvedVarType resolved))
 

@@ -1,3 +1,3 @@
 -- xMLF golden output for: church-true
-term: Λ(a1 ⩾ ⊥) Λ(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) λ(t : a1) (Λ(t1 ⩾ ⊥) λ(f : t1) t)[a⊳]
+term: Λ(a1 ⩾ ⊥) Λ(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) λ(t : a1) (Λ(t11 ⩾ ⊥) λ(f : t11) t)[a⊳]
 type: ∀(a1 ⩾ ⊥) ∀(a ⩾ ∀(t1 ⩾ ⊥) t1 -> a1) a1 -> a
